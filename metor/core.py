@@ -2,8 +2,6 @@ import os
 import time
 import socket
 import threading
-import sys
-import platform
 
 import stem.process
 import socks
@@ -75,6 +73,8 @@ def connect_via_tor(onion):
     s.set_proxy(proxy_type=socks.SOCKS5, addr='127.0.0.1', port=socks_port)
     s.settimeout(10)
     s.connect((onion, 80))
+    # Remove timeout after connection is established.
+    s.settimeout(None)
     return s
 
 def start_listener(chat_manager):
@@ -87,7 +87,7 @@ def start_listener(chat_manager):
     while not chat_manager.stop_flag.is_set():
         try:
             listener.settimeout(1.0)
-            conn, addr = listener.accept()
+            conn, _ = listener.accept()
         except socket.timeout:
             continue
         except Exception:
@@ -127,6 +127,8 @@ def handle_incoming(conn, chat_manager):
             remote_identity = "anonymous"
     except:
         remote_identity = "anonymous"
+    # Remove the timeout for established connection.
+    conn.settimeout(None)
     with chat_manager.connection_lock:
         chat_manager.active_remote_identity = remote_identity
     print(f"-- connected with {remote_identity} --")
@@ -165,7 +167,8 @@ class ChatManager:
                     continue
                 else:
                     print(f"{self.active_remote_identity}: {msg}")
-        except:
+        except Exception as e:
+            # Optionally log or print the exception if needed.
             pass
         with self.connection_lock:
             self.active_connection = None

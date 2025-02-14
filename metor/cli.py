@@ -1,10 +1,10 @@
-import sys
 import argparse
 import os
 
 from metor.core import run_chat_mode
 from metor.config import get_hidden_service_dir, is_chat_running, set_chat_lock, clear_chat_lock
 from metor.history import read_history
+from metor.core import start_tor, stop_tor
 
 def show_help():
     help_text = """
@@ -46,7 +46,6 @@ def address_generate():
         import shutil
         shutil.rmtree(hs_dir)
     os.makedirs(hs_dir)
-    from metor.core import start_tor, stop_tor
     tor_proc, own_onion = start_tor()
     stop_tor(tor_proc)
     print(f"New onion address generated: {own_onion}")
