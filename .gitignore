@@ -5,3 +5,4 @@
 # build output
 __pycache__
 metor.egg-info
+build
