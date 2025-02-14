@@ -43,7 +43,7 @@
 1. **Clone the Repository:**
 
    ```bash
-   git clone https://github.com/DerWahreMirakulix/metor
+   git clone https://github.com/DerWahreMirakulix/metor.git
    ```
 
 2. **Download and Install Tor:**
