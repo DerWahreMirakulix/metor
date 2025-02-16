@@ -196,6 +196,8 @@ def connect_via_tor(onion):
     s.set_proxy(proxy_type=socks.SOCKS5, addr='127.0.0.1', port=socks_port)
     s.settimeout(10)
     s.connect((onion, 80))
+    # Remove timeout after connection is established.
+    s.settimeout(None)
     return s
 
 def start_listener(chat_manager):
@@ -248,6 +250,8 @@ def handle_incoming(conn, chat_manager):
             remote_identity = "anonymous"
     except:
         remote_identity = "anonymous"
+    # Remove the timeout for established connection.
+    conn.settimeout(None)
     with chat_manager.connection_lock:
         chat_manager.active_remote_identity = remote_identity
     print_message(f"info> connected with {remote_identity}")
