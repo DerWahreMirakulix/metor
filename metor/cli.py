@@ -1,10 +1,9 @@
 import argparse
 import os
 
-from metor.core import run_chat_mode
+from metor.core import run_chat_mode, start_tor, stop_tor
 from metor.config import get_hidden_service_dir, is_chat_running, set_chat_lock, clear_chat_lock
 from metor.history import read_history
-from metor.core import start_tor, stop_tor
 
 def show_help():
     help_text = """

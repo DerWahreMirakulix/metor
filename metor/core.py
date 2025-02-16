@@ -2,6 +2,8 @@ import os
 import time
 import socket
 import threading
+import sys
+import select
 
 import stem.process
 import socks
@@ -12,6 +14,64 @@ from metor.history import log_event
 # Global ports (set when starting Tor)
 socks_port = None
 incoming_port = None
+current_input = None
+
+def get_char():
+    """Return a single character if available (non-blocking), else None."""
+    if os.name == 'nt':
+        import msvcrt
+        if msvcrt.kbhit():
+            ch = msvcrt.getwch()  # Unicode version (does not echo)
+            return ch
+        return None
+    else:
+        dr, dw, de = select.select([sys.stdin], [], [], 0)
+        if dr:
+            return sys.stdin.read(1)
+        return None
+
+def read_line(prompt="> "):
+    """
+    Read a line from standard input non-blockingly.
+    The prompt is printed, and each character is appended to a buffer.
+    The global 'current_input' is updated with the current buffer.
+    When Enter is pressed, the complete line is returned.
+    """
+    global current_input
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    line = ""
+    current_input = ""
+    while True:
+        ch = get_char()
+        if ch is None:
+            time.sleep(0.05)
+            continue
+        if ch in ("\n", "\r"):  # Handle Enter (13, 10)
+            sys.stdout.write("\r\033[K")
+            sys.stdout.flush()
+            current_input = ""
+            return line
+        elif ch in ("\b", "\x7f"):  # Handle backspace (8, 127)
+            line = line[:-1]
+            current_input = line
+            # Clear current line and reprint prompt and text.
+            sys.stdout.write("\r\033[K" + prompt + line)
+            sys.stdout.flush()
+        else:
+            line += ch
+            current_input = line
+            sys.stdout.write(ch)
+            sys.stdout.flush()
+
+def print_incoming_message(msg):
+    global current_input
+    # Clear current line
+    sys.stdout.write("\r\033[K")
+    sys.stdout.write(msg + "\n")
+    # Reprint the prompt with current partial input
+    sys.stdout.write("> " + current_input)
+    sys.stdout.flush()
 
 def get_free_port():
     """Return a free port number on localhost."""
@@ -73,8 +133,6 @@ def connect_via_tor(onion):
     s.set_proxy(proxy_type=socks.SOCKS5, addr='127.0.0.1', port=socks_port)
     s.settimeout(10)
     s.connect((onion, 80))
-    # Remove timeout after connection is established.
-    s.settimeout(None)
     return s
 
 def start_listener(chat_manager):
@@ -86,7 +144,7 @@ def start_listener(chat_manager):
     listener.listen(5)
     while not chat_manager.stop_flag.is_set():
         try:
-            listener.settimeout(1.0)
+            listener.settimeout(1)
             conn, _ = listener.accept()
         except socket.timeout:
             continue
@@ -103,7 +161,7 @@ def handle_incoming(conn, chat_manager):
     with chat_manager.connection_lock:
         if chat_manager.active_connection is not None:
             try:
-                conn.settimeout(5.0)
+                conn.settimeout(5)
                 try:
                     data = conn.recv(1024)
                     identity = data.decode().strip() if data else "anonymous"
@@ -111,7 +169,7 @@ def handle_incoming(conn, chat_manager):
                     identity = "anonymous"
                 rejection_msg = f"/reject {chat_manager.own_onion}\n".encode()
                 conn.sendall(rejection_msg)
-                print(f"-- {identity} incoming - rejected --")
+                print(f"info> {identity} incoming - rejected")
                 log_event("in", "rejected", identity)
             except:
                 pass
@@ -119,7 +177,7 @@ def handle_incoming(conn, chat_manager):
             return
         chat_manager.active_connection = conn
     try:
-        conn.settimeout(5.0)
+        conn.settimeout(5)
         data = conn.recv(1024)
         if data and data.decode().startswith("/init "):
             remote_identity = data.decode().strip()[6:].strip()
@@ -127,11 +185,9 @@ def handle_incoming(conn, chat_manager):
             remote_identity = "anonymous"
     except:
         remote_identity = "anonymous"
-    # Remove the timeout for established connection.
-    conn.settimeout(None)
     with chat_manager.connection_lock:
         chat_manager.active_remote_identity = remote_identity
-    print(f"-- connected with {remote_identity} --")
+    print(f"info> connected with {remote_identity}")
     log_event("in", "connected", remote_identity)
     chat_manager.start_receiving_thread()
 
@@ -144,6 +200,7 @@ class ChatManager:
         self.connection_lock = threading.Lock()
         self.stop_flag = threading.Event()
         self.receiver_thread = None
+        self.user_initiated_disconnect = False
 
     def start_receiving_thread(self):
         self.receiver_thread = threading.Thread(target=self.receiver_loop, daemon=True)
@@ -160,29 +217,31 @@ class ChatManager:
                     break
                 msg = data.decode().strip()
                 if msg.startswith("/disconnect "):
-                    identity = msg[len("/disconnect "):].strip()
-                    print(f"-- {identity} disconnected --")
                     break
                 elif msg.startswith("/reject "):
                     continue
                 else:
-                    print(f"{self.active_remote_identity}: {msg}")
-        except Exception as e:
-            # Optionally log or print the exception if needed.
+                    print_incoming_message("other> " + msg)
+        except Exception:
             pass
         with self.connection_lock:
             self.active_connection = None
             self.active_remote_identity = None
-        log_event("in", "disconnected", self.own_onion)
-        print("-- disconnected --")
+        if not self.user_initiated_disconnect:
+            print("info> disconnected")
+            log_event("in", "disconnected", self.own_onion)
 
     def disconnect_active(self, initiated_by_self=True):
         with self.connection_lock:
             if self.active_connection:
-                try:
-                    if initiated_by_self:
+                if initiated_by_self:
+                    self.user_initiated_disconnect = True
+                    try:
                         msg = f"/disconnect {self.own_onion}\n".encode()
                         self.active_connection.sendall(msg)
+                    except:
+                        pass
+                try:
                     self.active_connection.close()
                 except:
                     pass
@@ -195,7 +254,7 @@ class ChatManager:
                 try:
                     self.active_connection.sendall((msg + "\n").encode())
                 except Exception:
-                    print("Error sending message.")
+                    print("info> Error sending message.")
 
     def is_connected(self):
         with self.connection_lock:
@@ -203,16 +262,16 @@ class ChatManager:
 
     def outgoing_connect(self, onion, anonymous=False):
         if onion == self.own_onion:
-            print("Error: Cannot connect to yourself.")
+            print("info> Error: Cannot connect to yourself.")
             return
         with self.connection_lock:
             if self.active_connection is not None:
-                print("-- already connected --")
+                print("info> already connected")
                 return
         try:
             conn = connect_via_tor(onion)
         except Exception:
-            print("-- rejected --")
+            print("info> rejected")
             log_event("out", "rejected", onion)
             return
         with self.connection_lock:
@@ -221,14 +280,14 @@ class ChatManager:
         try:
             conn.sendall(f"/init {identity_to_send}\n".encode())
         except Exception:
-            print("-- rejected --")
+            print("info> rejected")
             log_event("out", "rejected", onion)
             with self.connection_lock:
                 self.active_connection = None
             return
         with self.connection_lock:
             self.active_remote_identity = onion  # For outgoing, we assume remote identity is the onion
-        print(f"-- connected with {identity_to_send} --")
+        print(f"info> connected with {identity_to_send}")
         log_event("out", "connected", onion if not anonymous else "anonymous")
         self.start_receiving_thread()
 
@@ -236,18 +295,16 @@ def run_chat_mode():
     """
     Run the interactive chat mode.
 
-    Top-level commands (run at metor> prompt):
+    Top-level commands (entered by the user):
       - /connect [onion] [--anonymous/-a] : Connect to a remote peer.
       - /end                             : Disconnect the current chat.
       - /clear                           : Clear the chat display.
       - /exit                            : Exit chat mode.
       - (Any other text is sent as a chat message.)
 
-    When a connection is established, the connector always sends its identity (or "anonymous"),
-    and the receiver prints: "-- connected with [onion] --" (or "anonymous" as applicable).
-
-    If an incoming connection is received while a chat is active, it is rejected with:
-      "-- [onion or anonymous] incoming - rejected --"
+    A newline is printed before any connected message.
+    Incoming messages are prefixed with "other>".
+    No input prompt is printed.
     """
     tor_proc, own_onion = start_tor()
     print(f"Your onion address: {own_onion}")
@@ -264,50 +321,51 @@ def run_chat_mode():
     print(initial_help)
     try:
         while True:
-            user_input = input("metor> ").strip()
+            user_input = read_line("> ")
             if user_input.startswith("/connect"):
                 parts = user_input.split()
                 if len(parts) < 2:
-                    print("Usage: /connect [onion] [--anonymous/-a]")
+                    print("info> Usage: /connect [onion] [--anonymous/-a]")
                     continue
                 onion = parts[1]
                 anonymous = ("--anonymous" in parts or "-a" in parts)
                 if onion == own_onion:
-                    print("Error: Cannot connect to yourself.")
+                    print("info> Error: Cannot connect to yourself.")
                     continue
                 if chat_manager.is_connected():
-                    print("-- already connected --")
+                    print("info> already connected")
                 else:
                     chat_manager.outgoing_connect(onion, anonymous)
             elif user_input == "/end":
                 if chat_manager.is_connected():
                     chat_manager.disconnect_active(initiated_by_self=True)
-                    print("-- disconnected --")
+                    print("info> disconnected")
                     log_event("out", "disconnected", chat_manager.own_onion)
                 else:
-                    print("No active connection.")
+                    print("info> No active connection.")
             elif user_input == "/clear":
-                # Clear the screen and reprint the initial help text and connection status
                 os.system('cls' if os.name == 'nt' else 'clear')
                 print(initial_help)
                 if chat_manager.is_connected():
-                    print(f"-- connected with {chat_manager.active_remote_identity} --")
+                    print(f"info> connected with {chat_manager.active_remote_identity}")
             elif user_input == "/exit":
                 if chat_manager.is_connected():
                     chat_manager.disconnect_active(initiated_by_self=True)
-                    print("-- disconnected --")
+                    print("info> disconnected")
                     log_event("out", "disconnected", chat_manager.own_onion)
                 chat_manager.stop_flag.set()
                 break
             else:
                 if chat_manager.is_connected():
                     chat_manager.send_message(user_input)
+                    sys.stdout.write("\r\033[Kself> " + user_input + "\n")
+                    sys.stdout.flush()
                 else:
-                    print("No active connection. Use /connect to initiate a connection.")
+                    print("info> No active connection. Use /connect to initiate a connection.")
     except KeyboardInterrupt:
         if chat_manager.is_connected():
             chat_manager.disconnect_active(initiated_by_self=True)
-            print("-- disconnected --")
+            print("info> disconnected")
             log_event("out", "disconnected", chat_manager.own_onion)
         chat_manager.stop_flag.set()
     stop_tor(tor_proc)

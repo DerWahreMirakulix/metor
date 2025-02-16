@@ -1,8 +1,11 @@
 # individual files
-/metor/tor.exe
-/metor/data
+metor/tor.exe
+metor/data
 
 # build output
 __pycache__
 metor.egg-info
 build
+
+# IDE files
+.vscode

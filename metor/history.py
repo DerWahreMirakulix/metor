@@ -1,5 +1,6 @@
 import os
 import datetime
+
 from metor.config import get_history_file
 
 def log_event(direction, status, onion):
