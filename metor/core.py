@@ -11,66 +11,129 @@ import socks
 from metor.config import get_hidden_service_dir
 from metor.history import log_event
 
-# Global ports (set when starting Tor)
+# Global variables
 socks_port = None
 incoming_port = None
-current_input = None
+current_input = ""
+prompt = "> "
+command_history = []
+history_index = -1
 
 def get_char():
-    """Return a single character if available (non-blocking), else None."""
+    """Return a single character or a special marker if an arrow key is pressed."""
     if os.name == 'nt':
         import msvcrt
         if msvcrt.kbhit():
             ch = msvcrt.getwch()  # Unicode version (does not echo)
+            if ch in ("\x00", "\xe0"):
+                ch2 = msvcrt.getwch()
+                if ch2 == "H":
+                    return "SPECIAL:UP"
+                elif ch2 == "P":
+                    return "SPECIAL:DOWN"
+                else:
+                    return ""  # or handle other keys as needed
             return ch
         return None
     else:
-        dr, _, _ = select.select([sys.stdin], [], [], 0)
-        if dr:
-            return sys.stdin.read(1)
-        return None
-
-def read_line(prompt="> "):
+        import termios, sys, tty
+        # Set the terminal to raw mode temporarily
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            # Use select to check if data is available
+            import select
+            dr, _, _ = select.select([sys.stdin], [], [], 0)
+            if dr:
+                ch = sys.stdin.read(1)
+                # For arrow keys: they start with escape sequence "\x1b"
+                if ch == "\x1b":
+                    # Read next two characters (should be "[" and letter)
+                    if select.select([sys.stdin], [], [], 0)[0]:
+                        ch2 = sys.stdin.read(1)
+                        if ch2 == "[":
+                            if select.select([sys.stdin], [], [], 0)[0]:
+                                ch3 = sys.stdin.read(1)
+                                if ch3 == "A":
+                                    return "SPECIAL:UP"
+                                elif ch3 == "B":
+                                    return "SPECIAL:DOWN"
+                                else:
+                                    return ""
+                return ch
+            return None
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+def read_line():
     """
     Read a line from standard input non-blockingly.
     The prompt is printed, and each character is appended to a buffer.
     The global 'current_input' is updated with the current buffer.
     When Enter is pressed, the complete line is returned.
+    Press up/down to cycle through command history.
     """
-    global current_input
+    global current_input, prompt, command_history, history_index
     sys.stdout.write(prompt)
     sys.stdout.flush()
     line = ""
     current_input = ""
+
     while True:
         ch = get_char()
         if ch is None:
             time.sleep(0.05)
             continue
-        if ch in ("\n", "\r"):  # Handle Enter (13, 10)
-            sys.stdout.write("\r\033[K")
-            sys.stdout.flush()
-            current_input = ""
-            return line
-        elif ch in ("\b", "\x7f"):  # Handle backspace (8, 127)
-            line = line[:-1]
+
+        if ch.startswith("SPECIAL:"):
+            key = ch.split(":")[1]
+            if key == "UP":
+                if command_history and history_index < len(command_history) - 1:
+                    history_index += 1
+                    line = command_history[-(history_index + 1)]
+                else:
+                    line = command_history[0] if command_history else ""
+            elif key == "DOWN":
+                if history_index > 0:
+                    history_index -= 1
+                    line = command_history[-(history_index + 1)]
+                else:
+                    history_index = -1
+                    line = ""
             current_input = line
-            # Clear current line and reprint prompt and text.
             sys.stdout.write("\r\033[K" + prompt + line)
             sys.stdout.flush()
+            continue
+
+        if ch in ("\n", "\r"):
+            sys.stdout.write("\r\033[K")
+            sys.stdout.flush()
+            if line.strip():
+                command_history.append(line)
+            history_index = -1
+            current_input = ""
+            return line
+
+        elif ch in ("\b", "\x7f"):
+            line = line[:-1]
+            current_input = line
+            sys.stdout.write("\r\033[K" + prompt + line)
+            sys.stdout.flush()
+
         else:
             line += ch
             current_input = line
             sys.stdout.write(ch)
             sys.stdout.flush()
 
-def print_incoming_message(msg):
-    global current_input
+def print_message(msg, user_input=False):
+    global current_input, prompt
     # Clear current line
     sys.stdout.write("\r\033[K")
     sys.stdout.write(msg + "\n")
     # Reprint the prompt with current partial input
-    sys.stdout.write("> " + current_input)
+    if not user_input:
+        sys.stdout.write(prompt + current_input)
     sys.stdout.flush()
 
 def get_free_port():
@@ -169,7 +232,7 @@ def handle_incoming(conn, chat_manager):
                     identity = "anonymous"
                 rejection_msg = f"/reject {chat_manager.own_onion}\n".encode()
                 conn.sendall(rejection_msg)
-                print(f"info> {identity} incoming - rejected")
+                print_message(f"info> {identity} incoming - rejected")
                 log_event("in", "rejected", identity)
             except:
                 pass
@@ -187,7 +250,7 @@ def handle_incoming(conn, chat_manager):
         remote_identity = "anonymous"
     with chat_manager.connection_lock:
         chat_manager.active_remote_identity = remote_identity
-    print(f"info> connected with {remote_identity}")
+    print_message(f"info> connected with {remote_identity}")
     log_event("in", "connected", remote_identity)
     chat_manager.start_receiving_thread()
 
@@ -221,14 +284,14 @@ class ChatManager:
                 elif msg.startswith("/reject "):
                     continue
                 else:
-                    print_incoming_message("other> " + msg)
+                    print_message("other> " + msg)
         except Exception:
             pass
         with self.connection_lock:
             self.active_connection = None
             self.active_remote_identity = None
         if not self.user_initiated_disconnect:
-            print("info> disconnected")
+            print_message("info> disconnected")
             log_event("in", "disconnected", self.own_onion)
 
     def disconnect_active(self, initiated_by_self=True):
@@ -254,7 +317,7 @@ class ChatManager:
                 try:
                     self.active_connection.sendall((msg + "\n").encode())
                 except Exception:
-                    print("info> Error sending message.")
+                    print_message("info> Error sending message.")
 
     def is_connected(self):
         with self.connection_lock:
@@ -262,16 +325,16 @@ class ChatManager:
 
     def outgoing_connect(self, onion, anonymous=False):
         if onion == self.own_onion:
-            print("info> Error: Cannot connect to yourself.")
+            print_message("info> Error: Cannot connect to yourself.")
             return
         with self.connection_lock:
             if self.active_connection is not None:
-                print("info> already connected")
+                print_message("info> already connected")
                 return
         try:
             conn = connect_via_tor(onion)
         except Exception:
-            print("info> rejected")
+            print_message("info> rejected")
             log_event("out", "rejected", onion)
             return
         with self.connection_lock:
@@ -280,14 +343,14 @@ class ChatManager:
         try:
             conn.sendall(f"/init {identity_to_send}\n".encode())
         except Exception:
-            print("info> rejected")
+            print_message("info> rejected")
             log_event("out", "rejected", onion)
             with self.connection_lock:
                 self.active_connection = None
             return
         with self.connection_lock:
             self.active_remote_identity = onion  # For outgoing, we assume remote identity is the onion
-        print(f"info> connected with {identity_to_send}")
+        print_message(f"info> connected with {identity_to_send}")
         log_event("out", "connected", onion if not anonymous else "anonymous")
         self.start_receiving_thread()
 
@@ -321,51 +384,54 @@ def run_chat_mode():
     print(initial_help)
     try:
         while True:
-            user_input = read_line("> ")
+            user_input = read_line()
             if user_input.startswith("/connect"):
                 parts = user_input.split()
                 if len(parts) < 2:
-                    print("info> Usage: /connect [onion] [--anonymous/-a]")
+                    print_message("info> Usage: /connect [onion] [--anonymous/-a]", True)
                     continue
                 onion = parts[1]
                 anonymous = ("--anonymous" in parts or "-a" in parts)
                 if onion == own_onion:
-                    print("info> Error: Cannot connect to yourself.")
+                    print_message("info> Error: Cannot connect to yourself.", True)
                     continue
                 if chat_manager.is_connected():
-                    print("info> already connected")
+                    print_message("info> already connected", True)
                 else:
                     chat_manager.outgoing_connect(onion, anonymous)
             elif user_input == "/end":
                 if chat_manager.is_connected():
                     chat_manager.disconnect_active(initiated_by_self=True)
-                    print("info> disconnected")
+                    print_message("info> disconnected", True)
                     log_event("out", "disconnected", chat_manager.own_onion)
                 else:
-                    print("info> No active connection.")
+                    print_message("info> No active connection.", True)
             elif user_input == "/clear":
                 os.system('cls' if os.name == 'nt' else 'clear')
                 print(initial_help)
                 if chat_manager.is_connected():
-                    print(f"info> connected with {chat_manager.active_remote_identity}")
+                    print_message(f"info> connected with {chat_manager.active_remote_identity}", True)
             elif user_input == "/exit":
                 if chat_manager.is_connected():
                     chat_manager.disconnect_active(initiated_by_self=True)
-                    print("info> disconnected")
+                    print_message("info> disconnected", True)
                     log_event("out", "disconnected", chat_manager.own_onion)
                 chat_manager.stop_flag.set()
                 break
             else:
                 if chat_manager.is_connected():
                     chat_manager.send_message(user_input)
-                    sys.stdout.write("\r\033[Kself> " + user_input + "\n")
-                    sys.stdout.flush()
+                    print_message("self> " + user_input, True)
                 else:
-                    print("info> No active connection. Use /connect to initiate a connection.")
+                    print_message("info> No active connection. Use /connect to initiate a connection.", True)
     except KeyboardInterrupt:
         if chat_manager.is_connected():
             chat_manager.disconnect_active(initiated_by_self=True)
-            print("info> disconnected")
+            print_message("info> disconnected", True)
             log_event("out", "disconnected", chat_manager.own_onion)
         chat_manager.stop_flag.set()
     stop_tor(tor_proc)
+
+
+if __name__ == "__main__":
+    print_message("info> Starting chat mode. Use /exit to quit.")
