@@ -25,7 +25,7 @@ def get_char():
             return ch
         return None
     else:
-        dr, dw, de = select.select([sys.stdin], [], [], 0)
+        dr, _, _ = select.select([sys.stdin], [], [], 0)
         if dr:
             return sys.stdin.read(1)
         return None

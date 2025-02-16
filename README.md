@@ -34,9 +34,9 @@
   - `metor history clear`
 
 - **Cross-Platform Compatibility:**  
-  Metor supports both **Windows** and **Linux/Mac**:
+  Metor supports both **Windows** and **Linux**:
   - **Windows:** You must manually download the Tor Expert Bundle.
-  - **Linux/Mac:** The system-installed `tor` binary is used.
+  - **Linux:** The system-installed `tor` binary is used.
 
 ## Installation
 
@@ -54,7 +54,7 @@
      2. Extract the bundle.
      3. Copy the `tor.exe` file **into the inner `metor` folder** (i.e. the folder containing the Python files such as `cli.py`, `core.py`, etc.).
 
-   - **Linux/Mac Users:**  
+   - **Linux Users:**  
      Ensure that Tor is installed on your system. You can install it using your package manager. For example:
 
      - **Debian/Ubuntu:**
@@ -68,11 +68,6 @@
 
        ```bash
        sudo dnf install tor
-       ```
-
-     - **macOS (using Homebrew):**
-       ```bash
-       brew install tor
        ```
 
      Once installed, make sure the `tor` binary is in your PATH.

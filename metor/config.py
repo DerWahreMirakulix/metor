@@ -18,7 +18,10 @@ def get_hidden_service_dir():
     config_dir = get_config_dir()
     hs_dir = os.path.join(config_dir, "hidden_service")
     if not os.path.exists(hs_dir):
-        os.makedirs(hs_dir)
+        os.makedirs(hs_dir, mode=0o700)
+    else:
+        # Ensure permissions are strict enough
+        os.chmod(hs_dir, 0o700)
     return hs_dir
 
 def get_history_file():
