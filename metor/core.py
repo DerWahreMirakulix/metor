@@ -73,9 +73,7 @@ def read_line():
     When Enter is pressed, the complete line is returned.
     Press up/down to cycle through command history.
     """
-    global current_input, prompt, command_history, history_index
-    sys.stdout.write(prompt)
-    sys.stdout.flush()
+    global current_input, command_history, history_index
     line = ""
     current_input = ""
 
@@ -126,14 +124,21 @@ def read_line():
             sys.stdout.write(ch)
             sys.stdout.flush()
 
-def print_message(msg, user_input=False):
-    global current_input, prompt
+def print_message(msg):
+    GREEN = "\033[32m"
+    BLUE = "\033[34m"
+    RESET = "\033[0m"
     # Clear current line
     sys.stdout.write("\r\033[K")
+    if msg.startswith("self>"):
+        colored_prefix = GREEN + "self>" + RESET
+        msg = msg.replace("self>", colored_prefix, 1)
+    elif msg.startswith("other>"):
+        colored_prefix = BLUE + "other>" + RESET
+        msg = msg.replace("other>", colored_prefix, 1)
     sys.stdout.write(msg + "\n")
     # Reprint the prompt with current partial input
-    if not user_input:
-        sys.stdout.write(prompt + current_input)
+    sys.stdout.write(prompt + current_input)
     sys.stdout.flush()
 
 def get_free_port():
@@ -386,52 +391,54 @@ def run_chat_mode():
         "  /exit                               Exit chat mode\n"
     )
     print(initial_help)
+    print(prompt, end="")
     try:
         while True:
             user_input = read_line()
             if user_input.startswith("/connect"):
                 parts = user_input.split()
                 if len(parts) < 2:
-                    print_message("info> Usage: /connect [onion] [--anonymous/-a]", True)
+                    print_message("info> Usage: /connect [onion] [--anonymous/-a]")
                     continue
                 onion = parts[1]
                 anonymous = ("--anonymous" in parts or "-a" in parts)
                 if onion == own_onion:
-                    print_message("info> Error: Cannot connect to yourself.", True)
+                    print_message("info> Error: Cannot connect to yourself.")
                     continue
                 if chat_manager.is_connected():
-                    print_message("info> already connected", True)
+                    print_message("info> already connected")
                 else:
                     chat_manager.outgoing_connect(onion, anonymous)
             elif user_input == "/end":
                 if chat_manager.is_connected():
                     chat_manager.disconnect_active(initiated_by_self=True)
-                    print_message("info> disconnected", True)
+                    print_message("info> disconnected")
                     log_event("out", "disconnected", chat_manager.own_onion)
                 else:
-                    print_message("info> No active connection.", True)
+                    print_message("info> No active connection.")
             elif user_input == "/clear":
                 os.system('cls' if os.name == 'nt' else 'clear')
                 print(initial_help)
+                print(prompt, end="")
                 if chat_manager.is_connected():
-                    print_message(f"info> connected with {chat_manager.active_remote_identity}", True)
+                    print_message(f"info> connected with {chat_manager.active_remote_identity}")
             elif user_input == "/exit":
                 if chat_manager.is_connected():
                     chat_manager.disconnect_active(initiated_by_self=True)
-                    print_message("info> disconnected", True)
+                    print_message("info> disconnected")
                     log_event("out", "disconnected", chat_manager.own_onion)
                 chat_manager.stop_flag.set()
                 break
             else:
                 if chat_manager.is_connected():
                     chat_manager.send_message(user_input)
-                    print_message("self> " + user_input, True)
+                    print_message("self> " + user_input)
                 else:
-                    print_message("info> No active connection. Use /connect to initiate a connection.", True)
+                    print_message("info> No active connection. Use /connect to initiate a connection.")
     except KeyboardInterrupt:
         if chat_manager.is_connected():
             chat_manager.disconnect_active(initiated_by_self=True)
-            print_message("info> disconnected", True)
+            print_message("info> disconnected")
             log_event("out", "disconnected", chat_manager.own_onion)
         chat_manager.stop_flag.set()
     stop_tor(tor_proc)
