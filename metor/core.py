@@ -106,7 +106,7 @@ def read_line():
         if ch in ("\n", "\r"):
             sys.stdout.write("\r\033[K")
             sys.stdout.flush()
-            if line.strip():
+            if line.strip().startswith("/"):
                 command_history.append(line)
             history_index = -1
             current_input = ""
