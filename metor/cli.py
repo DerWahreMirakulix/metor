@@ -94,6 +94,3 @@ def main():
             show_history()
     else:
         print("Unknown command. Use 'metor help' to see available commands.")
-
-if __name__ == "__main__":
-    main()
