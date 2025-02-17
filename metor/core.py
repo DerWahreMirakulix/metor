@@ -476,7 +476,7 @@ def run_chat_mode():
             elif user_input == "/exit":
                 if chat_manager.is_connected():
                     remote_identity = chat_manager.disconnect_active(initiated_by_self=True)
-                    print_message("info> disconnected", cli=cli)
+                    print_message("info> disconnected", cli=cli, skip_prompt=True)
                     log_event("out", "disconnected", remote_identity)
                 chat_manager.stop_flag.set()
                 break
@@ -490,8 +490,11 @@ def run_chat_mode():
         if chat_manager:
             if chat_manager.is_connected():
                 remote_identity = chat_manager.disconnect_active(initiated_by_self=True)
-                print_message("info> disconnected", cli=cli)
+                print_message("info> disconnected", cli=cli, skip_prompt=True)
                 log_event("out", "disconnected", remote_identity)
+            else:
+                sys.stdout.write("\r\033[K")
+                sys.stdout.flush()
             chat_manager.stop_flag.set()
     finally:
         if tor_proc:
