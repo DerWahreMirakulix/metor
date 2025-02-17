@@ -364,7 +364,7 @@ class ChatManager:
             return
         with self.connection_lock:
             self.active_remote_identity = onion  # For outgoing, we assume remote identity is the onion
-        print_message(f"info> connected with {identity_to_send}")
+        print_message(f"info> connected with {self.active_remote_identity}")
         log_event("out", "connected", onion if not anonymous else "anonymous")
         self.start_receiving_thread()
 
