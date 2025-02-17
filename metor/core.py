@@ -65,6 +65,7 @@ def get_char():
             return None
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
 def read_line():
     """
     Read a line from standard input non-blockingly.
@@ -127,6 +128,7 @@ def read_line():
 def print_message(msg):
     GREEN = "\033[32m"
     BLUE = "\033[34m"
+    YELLOW = "\033[33m"
     RESET = "\033[0m"
     # Clear current line
     sys.stdout.write("\r\033[K")
@@ -136,6 +138,9 @@ def print_message(msg):
     elif msg.startswith("other>"):
         colored_prefix = BLUE + "other>" + RESET
         msg = msg.replace("other>", colored_prefix, 1)
+    elif msg.startswith("info>"):
+        colored_prefix = YELLOW + "info>" + RESET
+        msg = msg.replace("info>", colored_prefix, 1)
     sys.stdout.write(msg + "\n")
     # Reprint the prompt with current partial input
     sys.stdout.write(prompt + current_input)
