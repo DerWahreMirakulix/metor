@@ -162,7 +162,7 @@ class CommandLineInput:
     """
     def __init__(self, prompt="> "):
         self.prompt = prompt
-        self.command_history = []
+        self.input_history = []
         self.history_index = -1
         self.current_input = ""
 
@@ -241,11 +241,11 @@ class CommandLineInput:
             if ch.startswith("SPECIAL:"):
                 key = ch.split(":")[1]
                 if key == "UP":
-                    if self.command_history and self.history_index < len(self.command_history) - 1:
+                    if self.input_history and self.history_index < len(self.input_history) - 1:
                         self.history_index += 1
-                        new_line = self.command_history[-(self.history_index + 1)]
+                        new_line = self.input_history[-(self.history_index + 1)]
                     else:
-                        new_line = self.command_history[0] if self.command_history else ""
+                        new_line = self.input_history[0] if self.input_history else ""
                     line_chars = list(new_line)
                     cursor_index = len(line_chars)
                     self.current_input = new_line
@@ -254,7 +254,7 @@ class CommandLineInput:
                 elif key == "DOWN":
                     if self.history_index > 0:
                         self.history_index -= 1
-                        new_line = self.command_history[-(self.history_index + 1)]
+                        new_line = self.input_history[-(self.history_index + 1)]
                     else:
                         self.history_index = -1
                         new_line = ""
@@ -280,8 +280,8 @@ class CommandLineInput:
                 sys.stdout.write("\r\033[K")
                 sys.stdout.flush()
                 line = ''.join(line_chars)
-                if line.strip().startswith("/"):
-                    self.command_history.append(line)
+                if line.strip():
+                    self.input_history.append(line)
                 self.history_index = -1
                 self.current_input = ""
                 return line
