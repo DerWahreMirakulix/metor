@@ -264,6 +264,7 @@ class ChatManager:
         self.cli = cli
 
         self.active_connection = None
+        self.requested_connection = None
         self.active_remote_identity = None
         self.connection_lock = threading.Lock()
         self.stop_flag = threading.Event()
@@ -281,15 +282,15 @@ class ChatManager:
         while not self.stop_flag.is_set():
             try:
                 listener.settimeout(1)
-                conn, _ = listener.accept()
+                self.requested_connection, _ = listener.accept()
             except socket.timeout:
                 continue
             except Exception:
                 continue
-            threading.Thread(target=self._handle_incoming_target, args=(conn), daemon=True).start()
+            threading.Thread(target=self._handle_incoming_target, daemon=True).start()
         listener.close()
 
-    def _handle_incoming_target(self, conn):
+    def _handle_incoming_target(self):
         """
         Handle an incoming connection. If a chat is already active, reject the new one.
         Otherwise, process the initial /init message.
@@ -297,33 +298,33 @@ class ChatManager:
         with self.connection_lock:
             if self.active_connection is not None:
                 try:
-                    conn.settimeout(5)
+                    self.requested_connection.settimeout(5)
                     try:
-                        data = conn.recv(1024)
+                        data = self.requested_connection.recv(1024)
                         identity = data.decode().strip() if data else "anonymous"
                     except Exception:
                         identity = "anonymous"
                     rejection_msg = f"/reject {self.own_onion}\n".encode()
-                    conn.sendall(rejection_msg)
+                    self.requested_connection.sendall(rejection_msg)
                     self.cli.print_message(f"info> {identity} incoming - rejected")
                     log_event("in", "rejected", identity)
                 except Exception:
                     pass
-                conn.close()
+                self.requested_connection.close()
                 return
-            self.active_connection = conn
+            self.active_connection = self.requested_connection
             self.user_initiated_disconnect = False
 
         try:
-            conn.settimeout(5)
-            data = conn.recv(1024)
+            self.requested_connection.settimeout(5)
+            data = self.requested_connection.recv(1024)
             if data and data.decode().startswith("/init "):
                 remote_identity = data.decode().strip()[6:].strip()
             else:
                 remote_identity = "anonymous"
         except Exception:
             remote_identity = "anonymous"
-        conn.settimeout(None)
+        self.requested_connection.settimeout(None)
         with self.connection_lock:
             self.active_remote_identity = remote_identity
         self.cli.print_message(f"info> connected with {remote_identity}")
