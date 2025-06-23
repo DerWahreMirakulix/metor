@@ -151,6 +151,7 @@ def print_message(msg, cli=None, skip_prompt=False):
     elif msg.startswith("info>"):
         msg = msg.replace("info>", f"{YELLOW}info>{RESET}", 1)
     sys.stdout.write(msg + "\n")
+    sys.stdout.write("\r")
     if not skip_prompt and cli is not None:
         sys.stdout.write(cli.prompt + cli.current_input)
         sys.stdout.flush()
