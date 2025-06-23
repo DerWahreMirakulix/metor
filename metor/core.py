@@ -76,97 +76,48 @@ def connect_via_tor(socks_port, onion):
     return s
 
 
-def start_listener(chat_manager, incoming_port):
-    """
-    Listen for incoming connections on the designated port.
-    Spawns a new thread for each incoming connection.
-    """
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    listener.bind(('127.0.0.1', incoming_port))
-    listener.listen(5)
-    while not chat_manager.stop_flag.is_set():
-        try:
-            listener.settimeout(1)
-            conn, _ = listener.accept()
-        except socket.timeout:
-            continue
-        except Exception:
-            continue
-        threading.Thread(target=handle_incoming, args=(conn, chat_manager), daemon=True).start()
-    listener.close()
-
-
-def handle_incoming(conn, chat_manager):
-    """
-    Handle an incoming connection. If a chat is already active, reject the new one.
-    Otherwise, process the initial /init message.
-    """
-    with chat_manager.connection_lock:
-        if chat_manager.active_connection is not None:
-            try:
-                conn.settimeout(5)
-                try:
-                    data = conn.recv(1024)
-                    identity = data.decode().strip() if data else "anonymous"
-                except Exception:
-                    identity = "anonymous"
-                rejection_msg = f"/reject {chat_manager.own_onion}\n".encode()
-                conn.sendall(rejection_msg)
-                print_message(f"info> {identity} incoming - rejected", cli=chat_manager.cli)
-                log_event("in", "rejected", identity)
-            except Exception:
-                pass
-            conn.close()
-            return
-        chat_manager.active_connection = conn
-
-    try:
-        conn.settimeout(5)
-        data = conn.recv(1024)
-        if data and data.decode().startswith("/init "):
-            remote_identity = data.decode().strip()[6:].strip()
-        else:
-            remote_identity = "anonymous"
-    except Exception:
-        remote_identity = "anonymous"
-    conn.settimeout(None)
-    with chat_manager.connection_lock:
-        chat_manager.active_remote_identity = remote_identity
-    print_message(f"info> connected with {remote_identity}", cli=chat_manager.cli)
-    log_event("in", "connected", remote_identity)
-    chat_manager.start_receiving_thread()
-
-
-def print_message(msg, cli=None, skip_prompt=False):
-    """
-    Print a message to the console with colored prefixes.
-    If a CommandLineInput instance (cli) is provided, the current prompt and input are reprinted.
-    """
-    GREEN, BLUE, YELLOW, RESET = "\033[32m", "\033[34m", "\033[33m", "\033[0m"
-    sys.stdout.write("\r\033[K")
-    if msg.startswith("self>"):
-        msg = msg.replace("self>", f"{GREEN}self>{RESET}", 1)
-    elif msg.startswith("other>"):
-        msg = msg.replace("other>", f"{BLUE}other>{RESET}", 1)
-    elif msg.startswith("info>"):
-        msg = msg.replace("info>", f"{YELLOW}info>{RESET}", 1)
-    sys.stdout.write(msg + "\n")
-    if not skip_prompt and cli is not None:
-        sys.stdout.write(cli.prompt + cli.current_input)
-        sys.stdout.flush()
-
-
 class CommandLineInput:
     """
     Handles non-blocking input with command history and arrow-key navigation.
     """
     def __init__(self, prompt="> "):
+        self.help = (
+            "Chat mode commands:\n"
+            "  /connect [onion] [--anonymous/-a]   Connect to a remote peer\n"
+            "  /end                                End the current connection\n"
+            "  /clear                              Clear the chat display\n"
+            "  /exit                               Exit chat mode"
+        )
         self.prompt = prompt
         self.input_history = []
         self.history_index = -1
         self.current_input = ""
 
-    def get_char(self):
+    def print_message(self, msg, skip_prompt=False):
+        """
+        Print a message to the console with colored prefixes.
+        If a CommandLineInput instance (cli) is provided, the current prompt and input are reprinted.
+        """
+        GREEN, BLUE, YELLOW, RESET = "\033[32m", "\033[34m", "\033[33m", "\033[0m"
+        sys.stdout.write("\r\033[K")
+        if msg.startswith("self>"):
+            msg = msg.replace("self>", f"{GREEN}self>{RESET}", 1)
+        elif msg.startswith("other>"):
+            msg = msg.replace("other>", f"{BLUE}other>{RESET}", 1)
+        elif msg.startswith("info>"):
+            msg = msg.replace("info>", f"{YELLOW}info>{RESET}", 1)
+        sys.stdout.write(msg + "\n")
+        if not skip_prompt:
+            sys.stdout.write(self.prompt + self.current_input)
+        sys.stdout.flush()
+
+    def print_help(self):
+        self.print_message(self.help, skip_prompt=True)
+
+    def print_prompt(self):
+        self.print_message("")
+
+    def _get_char(self):
         """Return a single character or a special marker if an arrow key is pressed."""
         if os.name == 'nt':
             import msvcrt
@@ -233,7 +184,7 @@ class CommandLineInput:
             sys.stdout.flush()
 
         while True:
-            ch = self.get_char()
+            ch = self._get_char()
             if ch is None:
                 time.sleep(0.05)
                 continue
@@ -319,11 +270,77 @@ class ChatManager:
         self.receiver_thread = None
         self.user_initiated_disconnect = False
 
-    def start_receiving_thread(self):
-        self.receiver_thread = threading.Thread(target=self.receiver_loop, daemon=True)
+    def _start_listener_target(self):
+        """
+        Listen for incoming connections on the designated port.
+        Spawns a new thread for each incoming connection.
+        """
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind(('127.0.0.1', self.incoming_port))
+        listener.listen(5)
+        while not self.stop_flag.is_set():
+            try:
+                listener.settimeout(1)
+                conn, _ = listener.accept()
+            except socket.timeout:
+                continue
+            except Exception:
+                continue
+            threading.Thread(target=self._handle_incoming_target, args=(conn), daemon=True).start()
+        listener.close()
+
+    def _handle_incoming_target(self, conn):
+        """
+        Handle an incoming connection. If a chat is already active, reject the new one.
+        Otherwise, process the initial /init message.
+        """
+        with self.connection_lock:
+            if self.active_connection is not None:
+                try:
+                    conn.settimeout(5)
+                    try:
+                        data = conn.recv(1024)
+                        identity = data.decode().strip() if data else "anonymous"
+                    except Exception:
+                        identity = "anonymous"
+                    rejection_msg = f"/reject {self.own_onion}\n".encode()
+                    conn.sendall(rejection_msg)
+                    self.cli.print_message(f"info> {identity} incoming - rejected")
+                    log_event("in", "rejected", identity)
+                except Exception:
+                    pass
+                conn.close()
+                return
+            self.active_connection = conn
+
+        try:
+            conn.settimeout(5)
+            data = conn.recv(1024)
+            if data and data.decode().startswith("/init "):
+                remote_identity = data.decode().strip()[6:].strip()
+            else:
+                remote_identity = "anonymous"
+        except Exception:
+            remote_identity = "anonymous"
+        conn.settimeout(None)
+        with self.connection_lock:
+            self.active_remote_identity = remote_identity
+        self.cli.print_message(f"info> connected with {remote_identity}")
+        log_event("in", "connected", remote_identity)
+        self._start_receiving_thread()
+
+    def start_listener(self):
+        listener_thread = threading.Thread(target=self._start_listener_target, daemon=True)
+        listener_thread.start()
+
+    def print_onion(self):
+        print(f"Your onion address: {self.own_onion}")
+
+    def _start_receiving_thread(self):
+        self.receiver_thread = threading.Thread(target=self._receiver_target, daemon=True)
         self.receiver_thread.start()
 
-    def receiver_loop(self):
+    def _receiver_target(self):
         conn = self.active_connection
         if not conn:
             return
@@ -338,7 +355,7 @@ class ChatManager:
                 elif msg.startswith("/reject "):
                     continue
                 else:
-                    print_message("other> " + msg, cli=self.cli)
+                    self.cli.print_message("other> " + msg)
         except Exception:
             pass
         with self.connection_lock:
@@ -346,7 +363,7 @@ class ChatManager:
             self.active_connection = None
             self.active_remote_identity = None
         if not self.user_initiated_disconnect:
-            print_message("info> disconnected", cli=self.cli)
+            self.cli.print_message("info> disconnected")
             log_event("in", "disconnected", remote_identity)
 
     def disconnect_active(self, initiated_by_self=True):
@@ -375,7 +392,7 @@ class ChatManager:
                 try:
                     self.active_connection.sendall((msg + "\n").encode())
                 except Exception:
-                    print_message("info> Error sending message.", cli=self.cli)
+                    self.cli.print_message("info> Error sending message.")
 
     def is_connected(self):
         with self.connection_lock:
@@ -383,16 +400,16 @@ class ChatManager:
 
     def outgoing_connect(self, onion, anonymous=False):
         if onion == self.own_onion:
-            print_message("info> Error: Cannot connect to yourself.", cli=self.cli)
+            self.cli.print_message("info> Error: Cannot connect to yourself.")
             return
         with self.connection_lock:
             if self.active_connection is not None:
-                print_message("info> already connected", cli=self.cli)
+                self.cli.print_message("info> already connected")
                 return
         try:
             conn = connect_via_tor(self.socks_port, onion)
         except Exception:
-            print_message("info> rejected", cli=self.cli)
+            self.cli.print_message("info> rejected")
             log_event("out", "rejected", onion)
             return
         with self.connection_lock:
@@ -401,16 +418,16 @@ class ChatManager:
         try:
             conn.sendall(f"/init {identity_to_send}\n".encode())
         except Exception:
-            print_message("info> rejected", cli=self.cli)
+            self.cli.print_message("info> rejected")
             log_event("out", "rejected", onion)
             with self.connection_lock:
                 self.active_connection = None
             return
         with self.connection_lock:
             self.active_remote_identity = onion  # For outgoing, assume remote identity is the onion.
-        print_message(f"info> connected with {onion}", cli=self.cli)
+        self.cli.print_message(f"info> connected with {onion}")
         log_event("out", "connected", onion)
-        self.start_receiving_thread()
+        self._start_receiving_thread()
 
 
 def run_chat_mode():
@@ -429,68 +446,61 @@ def run_chat_mode():
 
     try:
         tor_proc, own_onion, socks_port, incoming_port = start_tor()
-        print(f"Your onion address: {own_onion}")
-        chat_manager = ChatManager(own_onion, tor_proc, socks_port, incoming_port, cli)
-        listener_thread = threading.Thread(target=start_listener, args=(chat_manager, incoming_port), daemon=True)
-        listener_thread.start()
 
-        initial_help = (
-            "Chat mode commands:\n"
-            "  /connect [onion] [--anonymous/-a]   Connect to a remote peer\n"
-            "  /end                                End the current connection\n"
-            "  /clear                              Clear the chat display\n"
-            "  /exit                               Exit chat mode\n"
-        )
-        print(initial_help)
-        print(cli.prompt, end="")
+        chat_manager = ChatManager(own_onion, tor_proc, socks_port, incoming_port, cli)
+        chat_manager.print_onion()
+        chat_manager.start_listener()
+
+        cli.print_help()
+        cli.print_prompt()
         
         while True:
             user_input = cli.read_line()
             if user_input.startswith("/connect"):
                 parts = user_input.split()
                 if len(parts) < 2:
-                    print_message("info> Usage: /connect [onion] [--anonymous/-a]", cli=cli)
+                    cli.print_message("info> Usage: /connect [onion] [--anonymous/-a]")
                     continue
                 onion = parts[1]
                 anonymous = ("--anonymous" in parts or "-a" in parts)
                 if onion == own_onion:
-                    print_message("info> Error: Cannot connect to yourself.", cli=cli)
+                    cli.print_message("info> Error: Cannot connect to yourself.")
                     continue
                 if chat_manager.is_connected():
-                    print_message("info> already connected", cli=cli)
+                    cli.print_message("info> already connected")
                 else:
                     chat_manager.outgoing_connect(onion, anonymous)
             elif user_input == "/end":
                 if chat_manager.is_connected():
                     remote_identity = chat_manager.disconnect_active(initiated_by_self=True)
-                    print_message("info> disconnected", cli=cli)
+                    cli.print_message("info> disconnected")
                     log_event("out", "disconnected", remote_identity)
                 else:
-                    print_message("info> No active connection.", cli=cli)
+                    cli.print_message("info> No active connection.")
             elif user_input == "/clear":
                 os.system('cls' if os.name == 'nt' else 'clear')
-                print(initial_help)
-                print(cli.prompt, end="")
+                cli.print_help()
+                cli.print_prompt()
                 if chat_manager.is_connected():
-                    print_message(f"info> connected with {chat_manager.active_remote_identity}", cli=cli)
+                    cli.print_message(f"info> connected with {chat_manager.active_remote_identity}")
             elif user_input == "/exit":
                 if chat_manager.is_connected():
                     remote_identity = chat_manager.disconnect_active(initiated_by_self=True)
-                    print_message("info> disconnected", cli=cli, skip_prompt=True)
+                    cli.print_message("info> disconnected", skip_prompt=True)
                     log_event("out", "disconnected", remote_identity)
                 chat_manager.stop_flag.set()
                 break
             else:
                 if chat_manager.is_connected():
                     chat_manager.send_message(user_input)
-                    print_message("self> " + user_input, cli=cli)
+                    cli.print_message("self> " + user_input)
                 else:
-                    print_message("info> No active connection. Use /connect to initiate a connection.", cli=cli)
+                    cli.print_message("info> No active connection. Use /connect to initiate a connection.")
     except KeyboardInterrupt:
         if chat_manager:
             if chat_manager.is_connected():
                 remote_identity = chat_manager.disconnect_active(initiated_by_self=True)
-                print_message("info> disconnected", cli=cli, skip_prompt=True)
+                cli.print_message("info> disconnected", skip_prompt=True)
                 log_event("out", "disconnected", remote_identity)
             else:
                 sys.stdout.write("\r\033[K")
