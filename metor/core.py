@@ -119,6 +119,7 @@ def handle_incoming(conn, chat_manager):
             conn.close()
             return
         chat_manager.active_connection = conn
+        chat_manager.user_initiated_disconnect = False
 
     try:
         conn.settimeout(5)
@@ -368,6 +369,11 @@ class ChatManager:
                     pass
                 self.active_connection = None
                 self.active_remote_identity = None
+        if initiated_by_self:
+            if self.receiver_thread:
+                self.receiver_thread.join(timeout=1)
+                self.receiver_thread = None
+            self.user_initiated_disconnect = False
         return remote_identity
 
     def send_message(self, msg):
@@ -398,6 +404,7 @@ class ChatManager:
             return
         with self.connection_lock:
             self.active_connection = conn
+            self.user_initiated_disconnect = False
         identity_to_send = "anonymous" if anonymous else self.own_onion
         try:
             conn.sendall(f"/init {identity_to_send}\n".encode())
