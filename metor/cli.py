@@ -45,7 +45,8 @@ def address_generate():
         import shutil
         shutil.rmtree(hs_dir)
     os.makedirs(hs_dir)
-    tor_proc, own_onion = start_tor()
+    # start_tor() returns four values, but we only need the process and onion
+    tor_proc, own_onion, _, _ = start_tor()
     stop_tor(tor_proc)
     print(f"New onion address generated: {own_onion}")
 

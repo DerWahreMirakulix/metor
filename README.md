@@ -86,7 +86,7 @@
    pip install -e .
    ```
 
-   Make sure you run those commands inside root directory of the repository.
+   Make sure you run those commands inside the root directory of the repository.
 
 ## Usage
 
