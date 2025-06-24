@@ -146,6 +146,13 @@ class CommandLineInput:
                 dr, _, _ = select.select([sys.stdin], [], [], 0)
                 if dr:
                     ch = sys.stdin.read(1)
+                    if ch == "\r":
+                        # Normalize CR/LF sequences to a single newline
+                        if select.select([sys.stdin], [], [], 0)[0]:
+                            next_ch = sys.stdin.read(1)
+                            if next_ch != "\n":
+                                pass  # discard unexpected char
+                        ch = "\n"
                     if ch == "\x1b":
                         if select.select([sys.stdin], [], [], 0)[0]:
                             ch2 = sys.stdin.read(1)
