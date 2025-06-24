@@ -139,6 +139,21 @@ class CommandLineInput:
         sys.stdout.write("\r\033[K")
         sys.stdout.flush()
 
+    def start_loading(self):
+        sys.stdout.write("...")
+        sys.stdout.flush()
+
+    def end_loading(self):
+        self._flush_input()
+
+    def _flush_input(self):
+        """Discard any pending keyboard input."""
+        if os.name == 'nt':
+            while msvcrt.kbhit():
+                msvcrt.getwch()
+        else:
+            termios.tcflush(sys.stdin, termios.TCIFLUSH)
+
     def _get_char(self):
         """Return a single character or a special marker if an arrow key is pressed."""
         if os.name == 'nt':
@@ -483,7 +498,9 @@ def run_chat_mode():
                 if chat_manager.is_connected():
                     cli.print_message("info> already connected")
                 else:
+                    cli.start_loading()
                     chat_manager.outgoing_connect(onion, anonymous)
+                    cli.end_loading()
             elif user_input == "/end":
                 if chat_manager.is_connected():
                     remote_identity = chat_manager.disconnect_active(initiated_by_self=True)
