@@ -3,7 +3,6 @@ import time
 import socket
 import threading
 import sys
-import select
 
 import stem.process
 import socks
@@ -11,6 +10,12 @@ import socks
 from metor.config import get_hidden_service_dir
 from metor.history import log_event
 
+if os.name == 'nt':
+    import msvcrt
+else:
+    import termios
+    import tty
+    import atexit
 
 def get_free_port():
     """Return a free port number on localhost."""
@@ -93,6 +98,19 @@ class CommandLineInput:
         self.history_index = -1
         self.current_input = ""
 
+        self._init_terminal()
+
+    def _init_terminal(self):
+        if os.name != 'nt':
+            fd = sys.stdin.fileno()
+            old_term_settings = termios.tcgetattr(fd)
+
+            def _reset_terminal():
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_term_settings)
+
+            tty.setcbreak(fd)
+            atexit.register(_reset_terminal)
+
     def print_message(self, msg, skip_prompt=False):
         """
         Print a message to the console with colored prefixes.
@@ -117,10 +135,13 @@ class CommandLineInput:
     def print_prompt(self):
         self.print_message("")
 
+    def clear_line(self):
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
+
     def _get_char(self):
         """Return a single character or a special marker if an arrow key is pressed."""
         if os.name == 'nt':
-            import msvcrt
             if msvcrt.kbhit():
                 ch = msvcrt.getwch()  # Unicode version (does not echo)
                 if ch in ("\x00", "\xe0"):
@@ -138,34 +159,19 @@ class CommandLineInput:
                 return ch
             return None
         else:
-            import termios, tty
-            fd = sys.stdin.fileno()
-            old_settings = termios.tcgetattr(fd)
-            try:
-                tty.setraw(fd)
-                dr, _, _ = select.select([sys.stdin], [], [], 0)
-                if dr:
-                    ch = sys.stdin.read(1)
-                    if ch == "\x1b":
-                        if select.select([sys.stdin], [], [], 0)[0]:
-                            ch2 = sys.stdin.read(1)
-                            if ch2 == "[":
-                                if select.select([sys.stdin], [], [], 0)[0]:
-                                    ch3 = sys.stdin.read(1)
-                                    if ch3 == "A":
-                                        return "SPECIAL:UP"
-                                    elif ch3 == "B":
-                                        return "SPECIAL:DOWN"
-                                    elif ch3 == "D":
-                                        return "SPECIAL:LEFT"
-                                    elif ch3 == "C":
-                                        return "SPECIAL:RIGHT"
-                                    else:
-                                        return ""
-                    return ch
-                return None
-            finally:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            ch1 = sys.stdin.read(1)
+            if ch1 == '\x1b':
+                ch2 = sys.stdin.read(1)
+                if ch2 == '[':
+                    ch3 = sys.stdin.read(1)
+                    return {
+                        'A': 'SPECIAL:UP',
+                        'B': 'SPECIAL:DOWN',
+                        'C': 'SPECIAL:RIGHT',
+                        'D': 'SPECIAL:LEFT'
+                    }.get(ch3, 'SPECIAL:UNKNOWN')
+                return 'ESC'
+            return ch1
 
     def read_line(self):
         """
@@ -185,6 +191,7 @@ class CommandLineInput:
 
         while True:
             ch = self._get_char()
+
             if ch is None:
                 time.sleep(0.05)
                 continue
@@ -228,15 +235,14 @@ class CommandLineInput:
                     continue
 
             if ch in ("\n", "\r"):
-                sys.stdout.write("\r\033[K")
-                sys.stdout.flush()
+                self.clear_line()
                 line = ''.join(line_chars)
                 if line.strip():
                     self.input_history.append(line)
                 self.history_index = -1
                 self.current_input = ""
                 return line
-
+            
             elif ch in ("\b", "\x7f"):
                 if cursor_index > 0:
                     del line_chars[cursor_index - 1]
@@ -511,8 +517,7 @@ def run_chat_mode():
                 cli.print_message("info> disconnected", skip_prompt=True)
                 log_event("out", "disconnected", remote_identity)
             else:
-                sys.stdout.write("\r\033[K")
-                sys.stdout.flush()
+                cli.clear_line()
             chat_manager.stop_flag.set()
     finally:
         if tor_proc:
