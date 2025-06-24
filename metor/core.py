@@ -43,7 +43,6 @@ def start_tor():
     }
     pkg_dir = os.path.dirname(os.path.abspath(__file__))
     tor_cmd = os.path.join(pkg_dir, "tor.exe") if os.name == "nt" else "tor"
-    print("Starting Tor process (this may take a few seconds)...")
     tor_proc = stem.process.launch_tor_with_config(
         config=config,
         timeout=90,
@@ -91,7 +90,7 @@ class CommandLineInput:
             "  /connect [onion] [--anonymous/-a]   Connect to a remote peer\n"
             "  /end                                End the current connection\n"
             "  /clear                              Clear the chat display\n"
-            "  /exit                               Exit chat mode"
+            "  /exit                               Exit chat mode\n"
         )
         self.prompt = prompt
         self.input_history = []
@@ -133,14 +132,15 @@ class CommandLineInput:
         self.print_message(self.help, skip_prompt=True)
 
     def print_prompt(self):
-        self.print_message("")
+        sys.stdout.write(self.prompt)
+        sys.stdout.flush()
 
     def clear_line(self):
         sys.stdout.write("\r\033[K")
         sys.stdout.flush()
 
-    def start_loading(self):
-        sys.stdout.write("...")
+    def start_loading(self, msg="..."):
+        sys.stdout.write(msg)
         sys.stdout.flush()
 
     def end_loading(self):
@@ -474,7 +474,9 @@ def run_chat_mode():
     tor_proc = None
 
     try:
+        cli.start_loading("Starting Tor process (this may take a few seconds)...\n")
         tor_proc, own_onion, socks_port, incoming_port = start_tor()
+        cli.end_loading()
 
         chat_manager = ChatManager(own_onion, tor_proc, socks_port, incoming_port, cli)
         chat_manager.print_onion()
@@ -485,7 +487,9 @@ def run_chat_mode():
         
         while True:
             user_input = cli.read_line()
-            if user_input.startswith("/connect"):
+            if user_input == "":
+                cli.print_prompt()
+            elif user_input.startswith("/connect"):
                 parts = user_input.split()
                 if len(parts) < 2:
                     cli.print_message("info> Usage: /connect [onion] [--anonymous/-a]")
