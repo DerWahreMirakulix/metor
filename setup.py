@@ -6,7 +6,8 @@ setup(
     packages=find_packages(),
     install_requires=[
         "stem",
-        "PySocks"
+        "PySocks",
+        "pynacl"
     ],
     include_package_data=True,
     package_data={
@@ -14,7 +15,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "metor = metor.cli:main"
+            "metor = metor.main:main"
         ]
     },
     author="LuRex",

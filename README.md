@@ -1,40 +1,36 @@
 # Metor
 
-**Metor** is a simple Tor-based messenger written in Python. It provides a persistent Tor hidden-service (onion address) along with an interactive chat mode. You can run a listener, connect to remote peers (optionally anonymously), and view connection history — all from the console.
+**Metor** is a simple, secure Tor-based messenger written in Python. It provides a persistent Tor hidden-service (onion address) along with an interactive chat mode. You can run a listener, securely connect to remote peers, and view connection history — all from the console.
 
 ## Features
 
-- **Persistent Onion Address:**  
-  Generate and view your current onion address with:
+- **Cryptographic Authentication:**
+  Connections are secured using an Ed25519 challenge-response handshake. Peers must cryptographically prove ownership of their `.onion` address before a chat is established, making identity spoofing mathematically impossible.
+- **Multi-Profile Support:**
+  Run multiple isolated identities from the same installation. Using the `--profile` flag, you can maintain separate `.onion` addresses, Tor data directories, and chat histories without conflicts.
 
+- **Persistent Onion Address:** Generate and view your current onion address with:
   - `metor address show`
   - `metor address generate` (only when no chat session is active)
 
-- **Chat Mode:**  
-  Start chat mode with:
-
+- **Chat Mode:** Start chat mode with:
   - `metor chat`
 
   While in chat mode you can use the following commands at the `metor>` prompt:
-
-  - `/connect [onion] [--anonymous/-a]` – Connect to a remote peer (self‑connections are disallowed).
+  - `/connect [onion]` – Connect to a remote peer (self‑connections and anonymous connections are disallowed due to strict authentication).
   - `/end` – End the current connection (both peers see a disconnect message).
   - `/clear` – Clear the chat display (the initial help text and connection status remain visible).
   - `/exit` – Exit chat mode (disconnecting first if needed).
 
   If an incoming connection is received while a chat is active, it is automatically rejected with an appropriate message.
 
-- **History Logging:**  
-  All events (incoming/outgoing, connected, rejected, disconnected) are logged with a timestamp. You can view the log with:
-
+- **History Logging:** All events (connected, rejected, disconnected) are logged with a timestamp. You can view the log with:
   - `metor history`
 
   And clear it with:
-
   - `metor history clear`
 
-- **Cross-Platform Compatibility:**  
-  Metor supports both **Windows** and **Linux**:
+- **Cross-Platform Compatibility:** Metor supports both **Windows** and **Linux**
   - **Windows:** You must manually download the Tor Expert Bundle.
   - **Linux:** The system-installed `tor` binary is used.
 
@@ -47,16 +43,13 @@
    ```
 
 2. **Download and Install Tor:**
-
    - **Windows Users:**
-
      1. Download the [Tor Expert Bundle](https://www.torproject.org/download/tor/) from the official Tor Project website.
      2. Extract the bundle.
      3. Copy the `tor.exe` file **into the inner `metor` folder** (i.e. the folder containing the Python files such as `cli.py`, `core.py`, etc.).
 
    - **Linux Users:**  
      Ensure that Tor is installed on your system. You can install it using your package manager. For example:
-
      - **Debian/Ubuntu:**
 
        ```bash
@@ -107,8 +100,7 @@ After installation, the command `metor` will be available in your console.
   ```
 
   Once in chat mode, you will see a prompt (`metor>`). The available in-chat commands are:
-
-  - `/connect [onion] [--anonymous/-a]` – Connect to a remote peer.
+  - `/connect [onion]` – Connect to a remote peer.
   - `/end` – Disconnect the current chat.
   - `/clear` – Clear the chat display.
   - `/exit` – Exit chat mode.
