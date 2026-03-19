@@ -157,6 +157,9 @@ class ChatManager:
         listener.close()
 
     def _sign_challenge(self, challenge_hex):
+        """
+        Sign the challenge using the user's private key and return the signature in hex format.
+        """
         try:
             pynacl_secret_key = get_metor_key()
             
@@ -173,6 +176,9 @@ class ChatManager:
             return None
 
     def _verify_signature(self, remote_onion, challenge_hex, signature_hex):
+        """
+        Verify the signature from the remote peer using their onion address to derive the public key.
+        """
         try:
             # 1. Remove ".onion" if present, and use uppercase letters for Base32.
             onion_str = remote_onion.replace(".onion", "").upper()
@@ -291,18 +297,30 @@ class ChatManager:
         self._start_receiving_thread()
 
     def start_listener(self):
+        """
+        Start the listener thread for incoming connections.
+        """
         listener_thread = threading.Thread(target=self._start_listener_target, daemon=True)
         listener_thread.start()
 
     def print_onion(self):
+        """
+        Print the user's own onion address and the chat help instructions.
+        """
         self.cli.print_message(f"Your onion address: {self.own_onion}\n", skip_prompt=True)
         self.cli.print_message(chat_help(), skip_prompt=True)
 
     def _start_receiving_thread(self):
+        """
+        Start the thread that listens for incoming messages on the active connection.
+        """
         self.receiver_thread = threading.Thread(target=self._receiver_target, daemon=True)
         self.receiver_thread.start()
 
     def _receiver_target(self):
+        """
+        Continuously listen for incoming messages from the active connection and handle them.
+        """
         conn = self.active_connection
         if not conn:
             return
@@ -359,6 +377,9 @@ class ChatManager:
             self._log_disconnect(connection_direction, "remote", remote_identity)
 
     def disconnect_active(self):
+        """
+        Disconnect the active connection, whether initiated by self or remote peer.
+        """
         self.user_initiated_disconnect = True
         remote_identity = None
         connection_direction = None 
@@ -389,6 +410,9 @@ class ChatManager:
         self.user_initiated_disconnect = False
 
     def send_message(self, msg):
+        """
+        Send a message to the active connection.
+        """
         with self.connection_lock:
             if self.active_connection:
                 try:
@@ -404,10 +428,16 @@ class ChatManager:
                     self.cli.print_message("info> Error sending message.")
 
     def is_connected(self):
+        """
+        Check if there is an active connection.
+        """
         with self.connection_lock:
             return self.active_connection is not None
 
     def outgoing_connect(self, onion):
+        """
+        Initiate an outgoing connection to the specified onion address.
+        """
         if onion == self.own_onion:
             self.cli.print_message("info> Cannot connect to yourself.")
             return
