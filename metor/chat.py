@@ -37,7 +37,7 @@ class ChatManager:
             self.cli.end_loading()
 
             if not success:
-                self.cli.print_message("Failed to start Tor.", msg_type="system")
+                self.cli.print_message("Failed to start Tor.", msg_type="raw", skip_prompt=True)
                 return
 
             self.start_listener()
@@ -183,8 +183,10 @@ class ChatManager:
         if clear_screen:
             self.cli.clear_screen()
             
-        self.cli.print_message(f"Your onion address: {self.tor.onion}\n\n", skip_prompt=True)
-        self.cli.print_message(HelpMenu.show_chat_help() + "\n", skip_prompt=True)
+        self.cli.print_message(f"Your onion address: {self.tor.onion}", skip_prompt=True)
+        self.cli.print_empty_line()
+        self.cli.print_message(HelpMenu.show_chat_help(), skip_prompt=True)
+        self.cli.print_empty_line()
         
         if self.is_connected():
             self.print_connections(header_mode=True)

@@ -24,6 +24,7 @@ class CommandLineInput:
         self._line_counter = 0 
         self._all_msgs = []
         self._current_focus = None
+        self._is_redrawing = False
 
         self._init_terminal()
 
@@ -157,23 +158,27 @@ class CommandLineInput:
         sys.stdout.flush()
 
     def clear_screen(self):
-        sys.stdout.write("\033[2J\033[H")
+        sys.stdout.write("\033c\033[3J\033[H")
         sys.stdout.flush()
         self._all_msgs = []
         self._line_counter = 0
 
     def _on_resize(self, _signum, _frame):
-        """Triggered automatically by the OS when the window is resized."""
-        self.full_redraw()
+        """Triggered by the OS when the window is resized."""
+        if self._is_redrawing:
+            return
+            
+        self._is_redrawing = True
+        try:
+            self.full_redraw()
+        finally:
+            self._is_redrawing = False
 
     def full_redraw(self):
         """Clears the chaos and rebuilds the UI mathematics completely."""
-        sys.stdout.write("\033[2J\033[H")
-        sys.stdout.flush()
-
         old_msgs = self._all_msgs.copy()
-        self._all_msgs = []
-        self._line_counter = 0
+
+        self.clear_screen()
 
         for msg_dict in old_msgs:
             # Defensive: If text is None or empty, replace with a single space to avoid rendering issues
