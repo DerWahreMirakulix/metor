@@ -10,3 +10,6 @@ build
 # IDE and env files
 .vscode
 .conda
+
+# Todo
+todo

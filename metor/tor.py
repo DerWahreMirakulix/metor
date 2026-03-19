@@ -1,134 +1,114 @@
 import os
-import shutil
 import socket
 import time
 import socks
 import stem.process
 import sys
 
-from metor.config import get_tor_data_dir, get_hidden_service_dir, generate_metor_keys, is_chat_running, MAX_TOR_RETRIES, ENABLE_TOR_LOGGING
+from metor.config import ProfileManager, KeyManager, Settings
 
-def get_free_port():
-    """
-    Return a free port number on localhost.
-    """
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(('127.0.0.1', 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
-
-def start_tor():
-    """
-    Start a Tor process using a persistent hidden-service directory.
-    Returns (tor_proc, own_onion, socks_port, incoming_port).
-    """
-    hs_dir = get_hidden_service_dir()
-    data_dir = get_tor_data_dir()
+class TorManager:
+    """Manages the Tor process, hidden services, and local proxies."""
     
-    if not os.path.exists(hs_dir):
-        os.makedirs(hs_dir, mode=0o700, exist_ok=True)
-    try: os.chmod(hs_dir, 0o700)
-    except Exception: pass
+    def __init__(self, profile_manager: ProfileManager, key_manager: KeyManager):
+        self.pm = profile_manager
+        self.km = key_manager
+        self.tor_proc = None
+        self.onion = None
+        self.socks_port = None
+        self.incoming_port = None
+        self.control_port = None
 
-    generate_metor_keys(hs_dir)
+    def _get_free_port(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(('127.0.0.1', 0))
+        port = s.getsockname()[1]
+        s.close()
+        return port
 
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir, mode=0o700, exist_ok=True)
-    try: os.chmod(data_dir, 0o700)
-    except Exception: pass
-
-    socks_port = get_free_port()
-    control_port = get_free_port()
-    incoming_port = get_free_port()
-    
-    config = {
-        'SocksPort': str(socks_port),
-        'ControlPort': str(control_port),
-        'CookieAuthentication': '1',
-        'DataDirectory': data_dir,      
-        'HiddenServiceDir': hs_dir,
-        'HiddenServicePort': f'80 127.0.0.1:{incoming_port}'
-    }
-    
-    pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    tor_cmd = os.path.join(pkg_dir, "tor.exe") if os.name == "nt" else "tor"
-    
-    def print_tor_output(line):
-        if ENABLE_TOR_LOGGING:
-            sys.stdout.write(f"\r\033[K\033[36m[TOR-LOG]\033[0m {line}\n")
-            sys.stdout.flush()
-
-    tor_proc = None
-    for attempt in range(MAX_TOR_RETRIES):
-        try:
-            tor_proc = stem.process.launch_tor_with_config(
-                config=config, timeout=45, take_ownership=True,
-                tor_cmd=tor_cmd, init_msg_handler=print_tor_output
-            )
-            break 
-        except OSError as e:
-            if attempt < MAX_TOR_RETRIES - 1:
-                time.sleep(2)
-                continue
-            else:
-                return None, None, None, None
-
-    hostname_file = os.path.join(hs_dir, "hostname")
-    for _ in range(10):
-        if os.path.exists(hostname_file): break
-        time.sleep(1)
+    def start(self):
+        """Start Tor and set up ports/onion address."""
+        hs_dir = self.pm.get_hidden_service_dir()
+        data_dir = self.pm.get_tor_data_dir()
         
-    if os.path.exists(hostname_file):
-        with open(hostname_file, "r") as f:
-            own_onion = f.read().strip()
-    else:
-        own_onion = "unknown"
+        self.km.generate_keys()
+
+        self.socks_port = self._get_free_port()
+        self.control_port = self._get_free_port()
+        self.incoming_port = self._get_free_port()
         
-    return tor_proc, own_onion, socks_port, incoming_port
+        config = {
+            'SocksPort': str(self.socks_port),
+            'ControlPort': str(self.control_port),
+            'CookieAuthentication': '1',
+            'DataDirectory': data_dir,      
+            'HiddenServiceDir': hs_dir,
+            'HiddenServicePort': f'80 127.0.0.1:{self.incoming_port}'
+        }
+        
+        pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        tor_cmd = os.path.join(pkg_dir, "tor.exe") if os.name == "nt" else "tor"
+        
+        def print_tor_output(line):
+            if Settings.ENABLE_TOR_LOGGING:
+                sys.stdout.write(f"\r\033[K\033[36m[TOR-LOG]\033[0m {line}\n")
+                sys.stdout.flush()
 
-def stop_tor(tor_proc):
-    """
-    Stop the given Tor process.
-    """
-    tor_proc.terminate()
+        for attempt in range(Settings.MAX_TOR_RETRIES):
+            try:
+                self.tor_proc = stem.process.launch_tor_with_config(
+                    config=config, timeout=45, take_ownership=True,
+                    tor_cmd=tor_cmd, init_msg_handler=print_tor_output
+                )
+                break 
+            except OSError:
+                if attempt < Settings.MAX_TOR_RETRIES - 1:
+                    time.sleep(2)
+                    continue
+                else:
+                    return False
 
-def connect_via_tor(socks_port, onion):
-    """
-    Connect to a remote peer via Tor.
-    """
-    s = socks.socksocket()
-    s.set_proxy(proxy_type=socks.SOCKS5, addr='127.0.0.1', port=socks_port)
-    s.settimeout(10)
-    s.connect((onion, 80))
-    s.settimeout(None)
-    return s
+        # Wait for hostname file
+        hostname_file = os.path.join(hs_dir, "hostname")
+        for _ in range(10):
+            if os.path.exists(hostname_file): break
+            time.sleep(1)
+            
+        if os.path.exists(hostname_file):
+            with open(hostname_file, "r") as f:
+                self.onion = f.read().strip()
+        else:
+            self.onion = "unknown"
+            
+        return self.tor_proc is not None
 
-def address_show():
-    """
-    Show the current onion address.
-    """
-    hs_dir = get_hidden_service_dir()
-    hostname_file = os.path.join(hs_dir, "hostname")
-    if os.path.exists(hostname_file):
-        with open(hostname_file, "r") as f:
-            onion = f.read().strip()
-        print(f"Current onion address: {onion}")
-    else:
-        print("No onion address generated yet. Start chat mode or generate a new address.")
+    def stop(self):
+        if self.tor_proc:
+            self.tor_proc.terminate()
+            self.tor_proc = None
 
-def address_generate():
-    """
-    Generate a new onion address by resetting the hidden-service directory.
-    """
-    if is_chat_running():
-        print("Changing the address is not possible while a chat is running")
-        return
-    hs_dir = get_hidden_service_dir()
-    if os.path.exists(hs_dir):
-        shutil.rmtree(hs_dir)
-    os.makedirs(hs_dir)
-    # start_tor() returns four values, but we only need the process and onion
-    tor_proc, own_onion, _, _ = start_tor()
-    stop_tor(tor_proc)
-    print(f"New onion address generated: {own_onion}")
+    def connect(self, onion):
+        """Establish SOCKS5 connection to remote peer."""
+        s = socks.socksocket()
+        s.set_proxy(proxy_type=socks.SOCKS5, addr='127.0.0.1', port=self.socks_port)
+        s.settimeout(10)
+        s.connect((onion, 80))
+        s.settimeout(None)
+        return s
+
+    def get_address(self):
+        hs_dir = self.pm.get_hidden_service_dir()
+        hostname_file = os.path.join(hs_dir, "hostname")
+        if os.path.exists(hostname_file):
+            with open(hostname_file, "r") as f:
+                return f.read().strip()
+        return None
+
+    def generate_address(self):
+        """Force generation of a new address (starts/stops Tor)."""
+        if self.pm.is_chat_running():
+            return None
+        self.start()
+        onion = self.onion
+        self.stop()
+        return onion
