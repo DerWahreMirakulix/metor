@@ -1,11 +1,12 @@
 import argparse
 
-from metor.config import ProfileManager, KeyManager, HelpMenu
+from metor.config import ProfileManager, KeyManager, HelpMenu, Settings
 from metor.tor import TorManager
 from metor.history import HistoryManager
 from metor.contacts import ContactsManager
 from metor.cli import CommandLineInput
 from metor.chat import ChatManager
+from metor.utils import clean_onion
 
 class MetorApp:
     """The central application orchestrator."""
@@ -35,7 +36,7 @@ class MetorApp:
         elif cmd == "chat":
             if self.pm.is_chat_running():
                 print(f"A chat session for profile '{self.pm.profile_name}' is already running!")
-                print("Hint: Close the other session first before starting a new one.")
+                print(f"{Settings.CYAN}Hint:{Settings.RESET} Close the other session first before starting a new one.")
                 return
             
             self.pm.set_chat_lock()
@@ -51,7 +52,7 @@ class MetorApp:
             if sub == "show":
                 tor = TorManager(self.pm, self.km)
                 address = tor.get_address()
-                if address: print(f"Current onion address for profile '{self.pm.profile_name}': {address}")
+                if address: print(f"Current onion address for profile '{self.pm.profile_name}': {Settings.RED}{clean_onion(address)}{Settings.RESET}.onion")
                 else: print(f"No onion address generated yet for profile '{self.pm.profile_name}'. Start chat mode or generate a new address.")
             elif sub == "generate":
                 tor = TorManager(self.pm, self.km)
@@ -81,7 +82,7 @@ class MetorApp:
                 if len(ext) < 1: print("Usage: metor contacts rm [alias]")
                 elif self.pm.is_chat_running(): 
                     print(f"Cannot remove contacts while a chat session is running for profile '{self.pm.profile_name}'.")
-                    print("Hint: Use the '/remove' command directly inside the active chat!")
+                    print(f"{Settings.CYAN}Hint:{Settings.RESET} Use the '/remove' command directly inside the active chat!")
                 else:
                     alias = ext[0]
                     if self.contacts.remove_contact(alias): print(f"Contact '{alias}' removed from profile '{self.pm.profile_name}'.")
@@ -91,11 +92,15 @@ class MetorApp:
                 if len(ext) < 2: print("Usage: metor contacts rename [old_alias] [new_alias]")
                 elif self.pm.is_chat_running():
                     print(f"Cannot rename contacts externally while a chat session is running for profile '{self.pm.profile_name}'.")
-                    print("Hint: Use the '/rename' command directly inside the active chat!")
+                    print(f"{Settings.CYAN}Hint:{Settings.RESET} Use the '/rename' command directly inside the active chat!")
                 else:
                     old_alias, new_alias = ext[0], ext[1]
                     if self.contacts.rename_contact(old_alias, new_alias):
+                        history_updated = self.history.update_alias(old_alias, new_alias)
+
                         print(f"Contact renamed from '{old_alias}' to '{new_alias}' in profile '{self.pm.profile_name}'.")
+                        if not history_updated:
+                            print(f"{Settings.RED}Note:{Settings.RESET} The history log did not update.")
                     else:
                         print(f"Failed to rename contact in profile '{self.pm.profile_name}'. Check if old alias exists and new alias is free.")
             else:

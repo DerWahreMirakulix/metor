@@ -54,8 +54,6 @@ class CommandLineInput:
         sys.stdout.flush()
 
     def _format_msg(self, msg_dict):
-        GREEN, BLUE, YELLOW, DARK_GREY, RESET, CYAN = "\033[32m", "\033[34m", "\033[33m", "\033[90m", "\033[0m", "\033[36m"
-        
         msg_type = msg_dict["msg_type"]
         alias = msg_dict["alias"]
         text = msg_dict["text"]
@@ -65,10 +63,10 @@ class CommandLineInput:
             text = text.replace("{alias}", alias)
 
         if msg_type == "info":
-            return f"{YELLOW}info{self._initial_prompt}{RESET}{text}"
+            return f"{Settings.YELLOW}info{self._initial_prompt}{Settings.RESET}{text}"
             
         if msg_type == "system":
-            return f"{CYAN}system{self._initial_prompt}{RESET}{text}"
+            return f"{Settings.CYAN}system{self._initial_prompt}{Settings.RESET}{text}"
             
         if msg_type == "raw":
             return text
@@ -80,18 +78,18 @@ class CommandLineInput:
                 prefix = f"To {alias}{self._initial_prompt}" if alias else f"self{self._initial_prompt}"
             else:
                 prefix = f"From {alias}{self._initial_prompt}" if alias else f"remote{self._initial_prompt}"
-            return f"{DARK_GREY}{prefix}{text}{RESET}"
+            return f"{Settings.DARK_GREY}{prefix}{text}{Settings.RESET}"
 
         if msg_type == "self":
             prefix = f"To {alias}{self._initial_prompt}" if alias else f"self{self._initial_prompt}"
             if is_pending:
                 return f"{prefix}{text}"
             else:
-                return f"{GREEN}{prefix}{RESET}{text}"
+                return f"{Settings.GREEN}{prefix}{Settings.RESET}{text}"
                 
         elif msg_type == "remote":
             prefix = f"From {alias}{self._initial_prompt}" if alias else f"remote{self._initial_prompt}"
-            return f"{BLUE}{prefix}{RESET}{text}"
+            return f"{Settings.BLUE}{prefix}{Settings.RESET}{text}"
 
         return text
 

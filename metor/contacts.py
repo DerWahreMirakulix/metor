@@ -1,6 +1,7 @@
 import os
 import json
-from metor.config import ProfileManager
+from metor.config import ProfileManager, Settings
+from metor.utils import clean_onion
 
 class ContactsManager:
     """Manages the mapping between user-friendly aliases and .onion addresses."""
@@ -26,21 +27,15 @@ class ContactsManager:
     def _save(self):
         with open(self._file_path, "w", encoding="utf-8") as f:
             json.dump(self._contacts, f, indent=4)
-
-    def _clean_onion(self, onion):
-        onion = onion.strip().lower()
-        if onion.endswith(".onion"):
-            onion = onion[:-6]
-        return onion
     
     def ensure_onion_format(self, onion):
-        onion = self._clean_onion(onion)
+        onion = clean_onion(onion)
         return onion + ".onion"
 
     def add_contact(self, alias, onion):
         self._refresh()
         alias = alias.strip().lower()
-        onion = self._clean_onion(onion)
+        onion = clean_onion(onion)
         
         existing_aliases = [k for k, v in self._contacts.items() if v == onion]
         for old_alias in existing_aliases:
@@ -86,7 +81,7 @@ class ContactsManager:
         if not onion:
             return None
 
-        onion = self._clean_onion(onion)
+        onion = clean_onion(onion)
         for alias, saved_onion in self._contacts.items():
             if saved_onion == onion:
                 return alias
@@ -107,8 +102,9 @@ class ContactsManager:
         profile_suffix = "" if chat_mode else f" for profile '{self.pm.profile_name}'"
         if not self._contacts:
             return f"No contacts in address book{profile_suffix}."
+        
         lines = [f"Available contacts{profile_suffix}:"]
         for alias, onion in self._contacts.items():
-            lines.append(f"   {alias} -> {onion}")
+            lines.append(f"   {Settings.CYAN}{alias}{Settings.RESET} -> {onion}")
 
         return "\n".join(lines)

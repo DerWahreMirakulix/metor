@@ -12,6 +12,8 @@ class Settings:
     MAX_TOR_RETRIES = 3
     ENABLE_TOR_LOGGING = False
 
+    GREEN, BLUE, YELLOW, RED, DARK_GREY, CYAN, RESET = "\033[32m", "\033[34m", "\033[33m", "\033[31m", "\033[90m", "\033[36m", "\033[0m"
+
 class ProfileManager:
     """Manages profile directories, configurations, and session locks."""
     
@@ -171,11 +173,15 @@ class ProfileManager:
         if not profiles:
             return "No profiles found."
         
-        return_value = "Available profiles:\n"
-        for index, p in enumerate(profiles):
+        lines = ["Available profiles:"]
+        for p in profiles:
             marker = "*" if p == active else " "
-            return_value += f"  {marker} {p}" + ("\n" if index < len(profiles) - 1 else "")
-        return return_value
+            if p == active:
+                lines.append(f" {Settings.CYAN}{marker} {p}{Settings.RESET}")
+            else:
+                lines.append(f"   {p}")
+        
+        return "\n".join(lines)
 
 class KeyManager:
     """Manages Ed25519 cryptographic keys."""
@@ -223,15 +229,15 @@ class HelpMenu:
     def show_chat_help(): 
         return (
             "Chat mode commands:\n"
-            "  /connect [onion/alias]                           - Connect to a remote peer.\n"
-            "  /accept [alias]                                  - Accept an incoming connection.\n"
-            "  /reject [alias]                                  - Reject an incoming connection.\n"
-            "  /switch [alias]                                  - Switch focus to another chat.\n"
-            "  /contacts [list|add|rm|rename]                   - Manage your address book.\n"
-            "  /connections                                     - Show all active/pending connections.\n"
-            "  /end [alias]                                     - End the current or specified chat.\n"
-            "  /clear                                           - Clear the chat display.\n"
-            "  /exit                                            - Exit chat mode.\n"
+            f"  {Settings.CYAN}/connect [onion/alias]{Settings.RESET}                           - Connect to a remote peer.\n"
+            f"  {Settings.CYAN}/accept [alias]{Settings.RESET}                                  - Accept an incoming connection.\n"
+            f"  {Settings.CYAN}/reject [alias]{Settings.RESET}                                  - Reject an incoming connection.\n"
+            f"  {Settings.CYAN}/switch [alias]{Settings.RESET}                                  - Switch focus to another chat.\n"
+            f"  {Settings.CYAN}/contacts [list|add|rm|rename]{Settings.RESET}                   - Manage your address book.\n"
+            f"  {Settings.CYAN}/connections{Settings.RESET}                                     - Show all active/pending connections.\n"
+            f"  {Settings.CYAN}/end [alias]{Settings.RESET}                                     - End the current or specified chat.\n"
+            f"  {Settings.CYAN}/clear{Settings.RESET}                                           - Clear the chat display.\n"
+            f"  {Settings.CYAN}/exit{Settings.RESET}                                            - Exit chat mode.\n"
         )
         
     @staticmethod
@@ -240,16 +246,16 @@ class HelpMenu:
             "Metor - A simple, secure Tor messenger\n\n"
             "Usage: metor [-p PROFILE] command [subcommand] [args...]\n\n"
             "Global Options:\n"
-            "  -p, --profile <name>         Set the active profile (default: 'default').\n"
+            f"  {Settings.CYAN}-p, --profile <name>{Settings.RESET}         Set the active profile (default: 'default').\n"
             "                               Keeps history, onion addresses, contacts, and locks separated.\n\n"
             "Available commands:\n"
-            "  metor help                                       - Show this help message.\n"
-            "  metor chat                                       - Start chat mode.\n"
-            "  metor address show                               - Show the current onion address.\n"
-            "  metor address generate                           - Generate a new onion address.\n"
-            "  metor history [clear]                            - Show or clear connection history.\n"
-            "  metor contacts [list|add|rm|rename]              - Manage your address book.\n"
-            "  metor profile [list|add|rm|rename|set-default]   - Manage your profiles.\n\n"
+            f"  {Settings.CYAN}metor help{Settings.RESET}                                       - Show this help message.\n"
+            f"  {Settings.CYAN}metor chat{Settings.RESET}                                       - Start chat mode.\n"
+            f"  {Settings.CYAN}metor address show{Settings.RESET}                               - Show the current onion address.\n"
+            f"  {Settings.CYAN}metor address generate{Settings.RESET}                           - Generate a new onion address.\n"
+            f"  {Settings.CYAN}metor history [clear]{Settings.RESET}                            - Show or clear connection history.\n"
+            f"  {Settings.CYAN}metor contacts [list|add|rm|rename]{Settings.RESET}              - Manage your address book.\n"
+            f"  {Settings.CYAN}metor profile [list|add|rm|rename|set-default]{Settings.RESET}   - Manage your profiles.\n\n"
             + HelpMenu.show_chat_help() +
             "\n  -> Any other text is sent as a chat message to the currently focused peer.\n\n"
             "Examples:\n"

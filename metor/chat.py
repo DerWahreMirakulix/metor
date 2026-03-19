@@ -5,11 +5,12 @@ import base64
 import binascii
 import nacl.bindings
 
-from metor.config import HelpMenu, ProfileManager, KeyManager
+from metor.config import HelpMenu, ProfileManager, KeyManager, Settings
 from metor.tor import TorManager
 from metor.history import HistoryManager
 from metor.cli import CommandLineInput
 from metor.contacts import ContactsManager
+from metor.utils import clean_onion
 
 class ChatManager:
     """Core controller for chat connections, user inputs, and IO orchestration."""
@@ -183,7 +184,7 @@ class ChatManager:
         if clear_screen:
             self.cli.clear_screen()
             
-        self.cli.print_message(f"Your onion address: {self.tor.onion}", skip_prompt=True)
+        self.cli.print_message(f"Your onion address: {Settings.RED}{clean_onion(self.tor.onion)}{Settings.RESET}.onion", skip_prompt=True)
         self.cli.print_empty_line()
         self.cli.print_message(HelpMenu.show_chat_help(), skip_prompt=True)
         self.cli.print_empty_line()
@@ -216,13 +217,15 @@ class ChatManager:
             for alias in active_aliases:
                 marker = "*" if alias == current_focus else " "
                 onion = self.contacts.get_onion_by_alias(alias)
-                self.cli.print_message(f" {marker} {alias} ({onion[:10]}...)", msg_type=msg_type, skip_prompt=header_mode) 
+                self.cli.print_message(f" {marker} {Settings.CYAN}{alias}{Settings.RESET} -> {onion}", msg_type=msg_type, skip_prompt=header_mode) 
         
         if pending_aliases:
+            if active_aliases:
+                self.cli.print_empty_line()
             self.cli.print_message("Pending connections:", msg_type=msg_type, skip_prompt=header_mode)
             for alias in pending_aliases:
                 onion = self.contacts.get_onion_by_alias(alias)
-                self.cli.print_message(f"   {alias} ({onion[:10]}...)", msg_type=msg_type, skip_prompt=header_mode)
+                self.cli.print_message(f"   {Settings.CYAN}{alias}{Settings.RESET} -> {onion}", msg_type=msg_type, skip_prompt=header_mode)
 
     def _set_focused_alias(self, alias):
         with self._connection_lock:
@@ -241,7 +244,7 @@ class ChatManager:
 
     def _verify_signature(self, remote_onion, challenge_hex, signature_hex):
         try:
-            onion_str = remote_onion.replace(".onion", "").upper()
+            onion_str = clean_onion(remote_onion).upper()
             if len(onion_str) != 56: return False
             pad_len = 8 - (len(onion_str) % 8)
             if pad_len != 8: onion_str += "=" * pad_len
@@ -539,7 +542,12 @@ class ChatManager:
                     
         if success:
             self.cli.rename_alias_in_history(old_alias, new_alias)
+            history_updated = self.history.update_alias(old_alias, new_alias)
+
             self.cli.print_message(f'Renamed "{old_alias}" to "{new_alias}".', msg_type="system")   
+            if not history_updated:
+                self.cli.print_message(f"{Settings.RED}Note:{Settings.RESET} The history log did not update.", msg_type="system")
+    
             self.cli.set_focus(self._focused_alias)
         else:
             self.cli.print_message("Failed to rename. Check if old alias exists and new alias is free.", msg_type="system")

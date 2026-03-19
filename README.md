@@ -71,15 +71,13 @@ After installation, the command `metor` will be available in your console.
 
 ### CLI Commands
 
-```bash
-metor help                                       # Show all commands
-metor chat                                       # Start the interactive chat mode
-metor address show                               # Show the current onion address
-metor address generate                           # Generate a new onion address (if no chat is running)
-metor history [clear]                            # Show or clear connection history
-metor contacts [list|add|rm|rename]              # Manage your address book externally
-metor profile [list|add|rm|rename|set-default]   # Manage your isolated profiles
-```
+- `metor help` – Show all commands
+- `metor chat` – Start the interactive chat mode
+- `metor address show` – Show the current onion address
+- `metor address generate` – Generate a new onion address (if no chat is running)
+- `metor history [clear]` – Show or clear connection history
+- `metor contacts [list|add|rm|rename]` – Manage your address book externally
+- `metor profile [list|add|rm|rename|set-default]` – Manage your isolated profiles
 
 ### In-Chat Commands
 

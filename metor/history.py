@@ -39,13 +39,43 @@ class HistoryManager:
             return True
         except IOError:
             return False
+        
+    def update_alias(self, old_alias, new_alias):
+        history_file = self.pm.get_history_file()
+        if not os.path.exists(history_file):
+            return False
+
+        try:
+            with open(history_file, "r") as f:
+                lines = f.readlines()
+
+            changed = False
+            new_lines = []
+            
+            search_str = f"| remote alias: {old_alias} |"
+            replace_str = f"| remote alias: {new_alias} |"
+
+            for line in lines:
+                if search_str in line:
+                    line = line.replace(search_str, replace_str)
+                    changed = True
+                new_lines.append(line)
+
+            if changed:
+                with open(history_file, "w") as f:
+                    f.writelines(new_lines)
+            return True
+            
+        except IOError:
+            return False
 
     def show(self):
         history_lines = self.read_history()
         if not history_lines:
             return f"No history available for profile '{self.pm.profile_name}'."
-        
-        return_value = f"History for profile '{self.pm.profile_name}':\n"
+
+        lines = [f"History for profile '{self.pm.profile_name}':\n"]
         for line in history_lines:
-            return_value += line.strip() + "\n"
-        return return_value
+            lines.append(line.strip())
+            
+        return "\n".join(lines)
