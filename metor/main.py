@@ -55,9 +55,8 @@ class MetorApp:
                 else: print(f"No onion address generated yet for profile '{self.pm.profile_name}'. Start chat mode or generate a new address.")
             elif sub == "generate":
                 tor = TorManager(self.pm, self.km)
-                address = tor.generate_address()
-                if address: print(f"New onion address generated for profile '{self.pm.profile_name}': {address}")
-                else: print(f"Changing the address for profile '{self.pm.profile_name}' is not possible while a chat is running")
+                _, msg = tor.generate_address()
+                print(msg)
             else:
                 print("Usage: metor address [show|generate]")
                 

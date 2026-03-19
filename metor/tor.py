@@ -46,8 +46,9 @@ class TorManager:
             'HiddenServicePort': f'80 127.0.0.1:{self.incoming_port}'
         }
         
-        pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        pkg_dir = os.path.dirname(os.path.abspath(__file__))
         tor_cmd = os.path.join(pkg_dir, "tor.exe") if os.name == "nt" else "tor"
+        tor_timeout = None if os.name == "nt" else 45
         
         def print_tor_output(line):
             if Settings.ENABLE_TOR_LOGGING:
@@ -57,11 +58,13 @@ class TorManager:
         for attempt in range(Settings.MAX_TOR_RETRIES):
             try:
                 self.tor_proc = stem.process.launch_tor_with_config(
-                    config=config, timeout=45, take_ownership=True,
+                    config=config, timeout=tor_timeout, take_ownership=True,
                     tor_cmd=tor_cmd, init_msg_handler=print_tor_output
                 )
                 break 
-            except OSError:
+            except OSError as e:
+                if Settings.ENABLE_TOR_LOGGING:
+                    print(f"Error starting Tor: {e}")
                 if attempt < Settings.MAX_TOR_RETRIES - 1:
                     time.sleep(2)
                     continue
@@ -107,8 +110,13 @@ class TorManager:
     def generate_address(self):
         """Force generation of a new address (starts/stops Tor)."""
         if self.pm.is_chat_running():
-            return None
-        self.start()
-        onion = self.onion
+            return None, f"Changing the address for profile '{self.pm.profile_name}' is not possible while a chat is running"
+
+        success = self.start()
+        if not success:
+            return None, f"Failed to start Tor for profile '{self.pm.profile_name}'. Please check your Tor configuration and logs."
         self.stop()
-        return onion
+
+        onion = self.onion
+        
+        return onion, f"New onion address generated for profile '{self.pm.profile_name}': {onion}"
