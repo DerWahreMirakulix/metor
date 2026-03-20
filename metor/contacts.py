@@ -27,10 +27,6 @@ class ContactsManager:
     def _save(self):
         with open(self._file_path, "w", encoding="utf-8") as f:
             json.dump(self._contacts, f, indent=4)
-    
-    def ensure_onion_format(self, onion):
-        onion = clean_onion(onion)
-        return onion + ".onion"
 
     def add_contact(self, alias, onion):
         self._refresh()

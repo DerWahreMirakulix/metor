@@ -10,7 +10,7 @@ from metor.tor import TorManager
 from metor.history import HistoryManager
 from metor.cli import CommandLineInput
 from metor.contacts import ContactsManager
-from metor.utils import clean_onion
+from metor.utils import clean_onion, ensure_onion_format
 
 class ChatManager:
     """Core controller for chat connections, user inputs, and IO orchestration."""
@@ -145,7 +145,7 @@ class ChatManager:
     def _resolve_target(self, target: str | None, default_value: str | None = None):
         onion = self.contacts.get_onion_by_alias(target)
         if not onion:
-            onion = self.contacts.ensure_onion_format(target)
+            onion = ensure_onion_format(target)
         alias = self.contacts.get_alias_by_onion(onion)
         return (alias or default_value, onion or default_value)
 
@@ -164,7 +164,7 @@ class ChatManager:
     def _log_request(self, target: str | None = None, remote: bool = False):
         alias, onion = self._resolve_target(target, default_value="unknown")
         if remote:
-            self.cli.print_message('Incoming connection from "{alias}". Type "/accept {alias}" or "/reject {alias}".', msg_type="info", alias=alias)
+            self.cli.print_message(f'Incoming connection from "{{alias}}". Type "{Settings.GREEN}/accept {{alias}}{Settings.RESET}" or "{Settings.RED}/reject {{alias}}{Settings.RESET}".', msg_type="info", alias=alias)
         else:
             self.cli.print_message('Request sent to "{alias}". Waiting for them to accept...', msg_type="info", alias=alias)
         self.history.log_event("requested by remote peer" if remote else "requested", alias, onion)

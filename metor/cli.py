@@ -91,7 +91,7 @@ class CommandLineInput:
                 
         elif msg_type == "remote":
             prefix = f"From {alias}{self._initial_prompt}" if alias else f"remote{self._initial_prompt}"
-            return f"{Settings.BLUE}{prefix}{Settings.RESET}{text}"
+            return f"{Settings.PURPLE}{prefix}{Settings.RESET}{text}"
 
         return text
 

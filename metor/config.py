@@ -12,7 +12,7 @@ class Settings:
     MAX_TOR_RETRIES = 3
     ENABLE_TOR_LOGGING = False
 
-    GREEN, BLUE, YELLOW, RED, DARK_GREY, CYAN, RESET = "\033[32m", "\033[34m", "\033[33m", "\033[31m", "\033[90m", "\033[36m", "\033[0m"
+    GREEN, PURPLE, YELLOW, RED, DARK_GREY, CYAN, RESET = "\033[32m", "\033[35m", "\033[33m", "\033[31m", "\033[90m", "\033[36m", "\033[0m"
 
 class ProfileManager:
     """Manages profile directories, configurations, and session locks."""
