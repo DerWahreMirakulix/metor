@@ -1,3 +1,4 @@
+import shutil
 import signal
 import sys
 import os
@@ -25,6 +26,7 @@ class CommandLineInput:
         self._all_msgs = []
         self._current_focus = None
         self._is_redrawing = False
+        self._last_cols = shutil.get_terminal_size().columns
 
         self._init_terminal()
 
@@ -132,15 +134,26 @@ class CommandLineInput:
         self.repaint()
 
     def repaint(self):
+        term_height = shutil.get_terminal_size().lines
+
         for msg_dict in self._all_msgs:
             lines_up = self._line_counter - msg_dict["line"]
-            if lines_up <= 0:
+            
+            # IMPORTANT PROTECTION: If the message is higher than
+            # the terminal is tall, it has scrolled out of view.
+            # A terminal cursor CANNOT jump up into the scrollback buffer!
+            if lines_up <= 0 or lines_up >= term_height:
                 continue
                 
             formatted_msg = self._format_msg(msg_dict)
-            sys.stdout.write(f"\033[{lines_up}A\r\033[K{formatted_msg}\r\033[{lines_up}B")
             
-        sys.stdout.write(f"\r{self._prompt}{self._current_input}\033[K")
+            # THE MAGIC:
+            # \033[s saves the current cursor position (at the bottom by the prompt)
+            # \033[{lines_up}A moves up
+            # \r\033[K clears the line and writes the text
+            # \033[u jumps back exactly to where \033[s saved!
+            sys.stdout.write(f"\033[s\033[{lines_up}A\r\033[K{formatted_msg}\033[u")
+            
         sys.stdout.flush()
 
     def print_prompt(self):
@@ -156,7 +169,7 @@ class CommandLineInput:
         sys.stdout.flush()
 
     def clear_screen(self):
-        sys.stdout.write("\033c\033[3J\033[H")
+        sys.stdout.write("\033[2J\033[H")
         sys.stdout.flush()
         self._all_msgs = []
         self._line_counter = 0
@@ -165,6 +178,11 @@ class CommandLineInput:
         """Triggered by the OS when the window is resized."""
         if self._is_redrawing:
             return
+        
+        current_cols = shutil.get_terminal_size().columns
+        if current_cols == self._last_cols:
+            return
+        self._last_cols = current_cols
             
         self._is_redrawing = True
         try:

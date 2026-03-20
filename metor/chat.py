@@ -183,7 +183,8 @@ class ChatManager:
     def print_header(self, clear_screen=False):
         if clear_screen:
             self.cli.clear_screen()
-            
+        
+        self.cli.print_empty_line()
         self.cli.print_message(f"Your onion address: {Settings.RED}{clean_onion(self.tor.onion)}{Settings.RESET}.onion", skip_prompt=True)
         self.cli.print_empty_line()
         self.cli.print_message(HelpMenu.show_chat_help(), skip_prompt=True)
