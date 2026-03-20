@@ -16,7 +16,7 @@ from metor.settings import Settings
 from metor.tor import TorManager
 from metor.history import HistoryManager
 from metor.contact import ContactManager
-from metor.utils import clean_onion, ensure_onion_format
+from metor.utils import clean_onion
 
 class Daemon:
     """The background engine. Handles Tor, crypto, and local IPC API."""

@@ -12,7 +12,7 @@ from metor.history import HistoryManager
 from metor.contact import ContactManager
 from metor.cli import CommandLineInput
 from metor.chat import Chat
-from metor.deamon import Daemon
+from metor.daemon import Daemon
 
 class MetorApp:
     def __init__(self):

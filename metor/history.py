@@ -2,7 +2,6 @@ import os
 import datetime
 
 from metor.profile import ProfileManager
-from metor.settings import Settings
 
 class HistoryManager:
     """Manages chat and connection history logging."""
