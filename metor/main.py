@@ -125,7 +125,7 @@ class MetorApp:
                             self.hm.update_alias(old_alias, new_alias)
                         print(msg)
             else:
-                print("Usage: metor contacts [list|add|rm|rename]")
+                print("Usage: metor contacts [list|add|rm|rename] ..options")
 
         elif cmd == "profiles":
             if sub == "list" or not sub:
@@ -151,7 +151,7 @@ class MetorApp:
                     _, msg = ProfileManager.set_default_profile(ext[0])
                     print(msg)
             else:
-                print("Usage: metor profiles [list|add|rm|rename|set-default]")
+                print("Usage: metor profiles [list|add|rm|rename|set-default] ..options")
 
         elif cmd == "cleanup":
             print(f"Cleaning up Metor processes and locks...")

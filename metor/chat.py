@@ -156,7 +156,7 @@ class Chat:
             else:
                 self._send_cmd({"action": "rename_contact", "old_alias": parts[2].lower(), "new_alias": parts[3].lower()})
         else:
-            self.cli.print_message("Usage: \"/contacts [list|add|rm|rename]\".", msg_type="system")
+            self.cli.print_message("Usage: \"/contacts [list|add|rm|rename] ..options\".", msg_type="system")
 
     def _send_chat_message(self, msg_text):
         """Sends a regular text message to the focused peer."""
