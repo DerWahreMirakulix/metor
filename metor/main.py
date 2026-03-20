@@ -206,8 +206,14 @@ class MetorApp:
         elif cmd == "cleanup":
             print(f"Cleaning up Metor processes and locks...")
             killed = 0
-            for proc in psutil.process_iter(['pid', 'name']):
+            
+            # We load the 'status' attribute to detect zombies.
+            for proc in psutil.process_iter(['pid', 'name', 'status']):
                 try:
+                    # Skip processes that are already dead (zombies).
+                    if proc.info.get('status') == psutil.STATUS_ZOMBIE:
+                        continue
+                        
                     proc_name = proc.info['name'].lower() if proc.info['name'] else ""
                     if proc_name in ('tor', 'tor.exe'):
                         proc.kill()
@@ -220,9 +226,9 @@ class MetorApp:
                 temp_pm.clear_daemon_port()
 
             if killed > 0:
-                print(f"{Settings.GREEN}Success:{Settings.RESET} Killed {killed} zombie Tor process(es) and cleared locks.")
+                print(f"{Settings.GREEN}Success:{Settings.RESET} Killed {killed} active Tor process(es) and cleared locks.")
             else:
-                print(f"{Settings.YELLOW}Info:{Settings.RESET} No zombie Tor processes found. Locks cleared.")
+                print(f"{Settings.YELLOW}Info:{Settings.RESET} No active Tor processes found. Locks cleared.")
                 
         else:
             print("Unknown command. Use 'metor help' to see available commands.")
