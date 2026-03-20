@@ -127,31 +127,31 @@ class MetorApp:
             else:
                 print("Usage: metor contacts [list|add|rm|rename]")
 
-        elif cmd == "profile":
+        elif cmd == "profiles":
             if sub == "list" or not sub:
                 print(ProfileManager.show(self.pm.profile_name))
             elif sub == "add":
-                if len(ext) < 1: print("Usage: metor profile add [name]")
+                if len(ext) < 1: print("Usage: metor profiles add [name]")
                 else:
                     _, msg = ProfileManager.add_profile_folder(ext[0])
                     print(msg)
             elif sub in ("rm", "remove"):
-                if len(ext) < 1: print("Usage: metor profile rm [name]")
+                if len(ext) < 1: print("Usage: metor profiles rm [name]")
                 else:
                     _, msg = ProfileManager.remove_profile_folder(ext[0])
                     print(msg)
             elif sub == "rename":
-                if len(ext) < 2: print("Usage: metor profile rename [old_name] [new_name]")
+                if len(ext) < 2: print("Usage: metor profiles rename [old_name] [new_name]")
                 else:
                     _, msg = ProfileManager.rename_profile_folder(ext[0], ext[1])
                     print(msg)
             elif sub == "set-default":
-                if len(ext) < 1: print("Usage: metor profile set-default [name]")
+                if len(ext) < 1: print("Usage: metor profiles set-default [name]")
                 else:
                     _, msg = ProfileManager.set_default_profile(ext[0])
                     print(msg)
             else:
-                print("Usage: metor profile [list|add|rm|rename|set-default]")
+                print("Usage: metor profiles [list|add|rm|rename|set-default]")
 
         elif cmd == "cleanup":
             print(f"Cleaning up Metor processes and locks...")

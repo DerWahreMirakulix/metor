@@ -90,8 +90,8 @@ Open a second terminal window to interact with your running daemon:
 - `metor address show` – Show the current onion address.
 - `metor address generate` – Generate a new onion address (if no daemon is running).
 - `metor history [clear]` – Show or clear connection history.
-- `metor contacts [list|add|rm|rename]` – Manage your address book externally.
-- `metor profile [list|add|rm|rename|set-default]` – Manage your isolated profiles.
+- `metor contacts [list|add|rm|rename] [..options]` – Manage your address book externally.
+- `metor profiles [list|add|rm|rename|set-default] [..options]` – Manage your isolated profiles.
 - `metor cleanup` – Emergency tool: Kill zombie Tor processes and clear broken locks.
 
 ### 4. In-Chat Commands
@@ -102,7 +102,7 @@ Once inside the `metor chat` interface, you can manage your active sessions dire
 - `/accept [alias]` – Accept an incoming connection request.
 - `/reject [alias]` – Reject an incoming connection request.
 - `/switch [..|alias]` – Switch your input focus to another active chat (use `..` to remove focus).
-- `/contacts [list|add|rm|rename]` – Manage your address book directly inside the active chat.
+- `/contacts [list|add|rm|rename] [..options]` – Manage your address book directly inside the active chat.
 - `/connections` – Show all active and pending connections.
 - `/end [alias]` – Disconnect the currently focused chat, or specify an alias to end a background chat.
 - `/clear` – Clear the terminal display.
