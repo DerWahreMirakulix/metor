@@ -55,7 +55,7 @@ class TorManager:
         
         def print_tor_output(line):
             if Settings.ENABLE_TOR_LOGGING:
-                sys.stdout.write(f"\r\033[K\033[36m[TOR-LOG]\033[0m {line}\n")
+                sys.stdout.write(f"\r\033[K{Settings.CYAN}[TOR-LOG]{Settings.RESET} {line}\n")
                 sys.stdout.flush()
 
         for attempt in range(Settings.MAX_TOR_RETRIES):
@@ -89,9 +89,18 @@ class TorManager:
         return self.tm_proc is not None
 
     def stop(self):
+        """Safely shuts down the Tor process, using force if necessary."""
         if self.tm_proc:
-            self.tm_proc.terminate()
-            self.tm_proc = None
+            try:
+                self.tm_proc.terminate()
+                self.tm_proc.wait(timeout=2.0) # politely ask Tor to stop
+            except Exception:
+                try:
+                    self.tm_proc.kill() # force kill if it doesn't stop
+                except Exception:
+                    pass
+            finally:
+                self.tm_proc = None
 
     def connect(self, onion):
         """Establish SOCKS5 connection to remote peer."""

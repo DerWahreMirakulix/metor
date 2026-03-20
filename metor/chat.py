@@ -2,6 +2,7 @@ import socket
 import threading
 import secrets
 import json
+import os
 
 from metor.help import Help
 from metor.profile import ProfileManager
@@ -75,9 +76,16 @@ class Chat:
                     self._send_chat_message(user_input)
                         
         except KeyboardInterrupt:
-            self.cli.clear_line() 
+            self.cli.clear_input_area() 
         finally:
-            self.ipc_socket.close()
+            self._shutdown()
+
+    def _shutdown(self):
+        """Helper to safely kill all threads, close sockets and exit the UI."""
+        self.stop_flag.set()
+        try: self.ipc_socket.close()
+        except Exception: pass
+        os._exit(0)
 
     def _handle_network_command(self, parts):
         """Dispatches all /connect, /accept, /reject, /switch, /end commands."""
@@ -93,12 +101,14 @@ class Chat:
                 
         elif cmd == "/connect":
             if arg: 
-                self._pending_focus = arg
+                alias, _ = self.cm.resolve_target(arg)
+                self._pending_focus = alias
                 self._send_cmd({"action": "connect", "target": arg})
             else: self.cli.print_message("Usage: \"/connect [onion/alias]\".", msg_type="system")
                 
         elif cmd == "/accept":
             if arg:
+                # arg is always the alias
                 if self._focused_alias is None:
                     self._pending_focus = arg
                 self._send_cmd({"action": "accept", "target": arg})
@@ -167,7 +177,11 @@ class Chat:
         try:
             while not self.stop_flag.is_set():
                 data = self.ipc_socket.recv(4096)
-                if not data: break
+                if not data:
+                    self.cli.print_divider()
+                    self.cli.print_message(f"{Settings.RED}Alert:{Settings.RESET} Connection to Daemon lost! Exiting...")
+                    self.cli.clear_input_area() 
+                    self._shutdown()
                 
                 buffer += data.decode()
                 

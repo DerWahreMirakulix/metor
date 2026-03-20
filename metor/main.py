@@ -1,6 +1,7 @@
 import argparse
 import json
 import socket
+import psutil
 
 from metor.help import Help
 from metor.profile import ProfileManager
@@ -151,6 +152,29 @@ class MetorApp:
                     print(msg)
             else:
                 print("Usage: metor profile [list|add|rm|rename|set-default]")
+
+        elif cmd == "cleanup":
+            print(f"Cleaning up Metor processes and locks...")
+            killed = 0
+            # 1. Kill Tor processes (Exact match to prevent the 'metor' script from committing suicide!)
+            for proc in psutil.process_iter(['pid', 'name']):
+                try:
+                    proc_name = proc.info['name'].lower() if proc.info['name'] else ""
+                    if proc_name in ('tor', 'tor.exe'):
+                        proc.kill()
+                        killed += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+            
+            # 2. Clear Daemon Ports from ALL profiles
+            for profile_name in ProfileManager.get_all_profiles():
+                temp_pm = ProfileManager(profile_name)
+                temp_pm.clear_daemon_port()
+
+            if killed > 0:
+                print(f"{Settings.GREEN}Success:{Settings.RESET} Killed {killed} zombie Tor process(es) and cleared locks.")
+            else:
+                print(f"{Settings.YELLOW}Info:{Settings.RESET} No zombie Tor processes found. Locks cleared.")
                 
         else:
             print("Unknown command. Use 'metor help' to see available commands.")

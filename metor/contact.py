@@ -3,7 +3,7 @@ import json
 
 from metor.profile import ProfileManager
 from metor.settings import Settings
-from metor.utils import clean_onion
+from metor.utils import clean_onion, ensure_onion_format
 
 class ContactManager:
     """Manages the mapping between user-friendly aliases and .onion addresses."""
@@ -68,6 +68,12 @@ class ContactManager:
             self._save()
             return True, f"Contact '{alias}' removed from profile '{self.pm.profile_name}'."
         return False, f"{Settings.RED}Error:{Settings.RESET} Contact '{alias}' not found in profile '{self.pm.profile_name}'."
+    
+    def resolve_target(self, target: str | None, default_value: str | None = None):
+        onion = self.get_onion_by_alias(target)
+        if not onion: onion = ensure_onion_format(target)
+        alias = self.get_alias_by_onion(onion)
+        return (alias or default_value, onion or default_value)
 
     def get_onion_by_alias(self, alias: str | None) -> str | None:    
         self._refresh()
@@ -87,13 +93,16 @@ class ContactManager:
         base_alias = onion[:6]
         alias = base_alias
         counter = 1
-        
-        while alias in self._contacts and self._contacts[alias] != onion:
-            counter += 1
-            alias = f"{base_alias}{counter}"
+
+        if len(onion) == 56:
+            while alias in self._contacts and self._contacts[alias] != onion:
+                counter += 1
+                alias = f"{base_alias}{counter}"
+                
+            self.add_contact(alias, onion)
+            return alias
             
-        self.add_contact(alias, onion)
-        return alias
+        return None
 
     def show(self, chat_mode=False):
         self._refresh()

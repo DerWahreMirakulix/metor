@@ -1,4 +1,8 @@
+import atexit
+import os
+import signal
 import socket
+import sys
 import threading
 import secrets
 import base64
@@ -30,7 +34,19 @@ class Daemon:
         
         self._lock = threading.Lock()
         self.stop_flag = threading.Event()
+        
         self.ipc_port = None
+
+        atexit.register(self.stop)
+        
+        if os.name != 'nt':
+            signal.signal(signal.SIGTERM, self._sig_handler)
+            signal.signal(signal.SIGHUP, self._sig_handler)
+
+    def _sig_handler(self, signum, frame):
+        """Called when the OS wants to kill the process."""
+        self.stop()
+        sys.exit(0)
 
     def run(self):
         success = self.tm.start()
@@ -142,8 +158,8 @@ class Daemon:
                 })
                 
         elif action == "connect":
-            alias, onion = self._resolve_target(target) or target
-            self._broadcast_ipc({"type": "system", "alias": alias, "text": f"Connecting to {alias if alias else onion} ..."})
+            alias, onion = self.cm.resolve_target(target)
+            self._broadcast_ipc({"type": "system", "alias": alias, "text": f"Connecting to {"\"{alias}\"" if alias else onion} ..."})
             threading.Thread(target=self._establish_connection, args=(target,), daemon=True).start()
             
         elif action == "disconnect":
@@ -177,12 +193,6 @@ class Daemon:
                 self._send_to_client(conn, {"type": "system", "text": "Failed to rename. Check if old alias exists and new alias is free."})
 
     # --- CRYPTO & TOR UTILS ---
-    def _resolve_target(self, target: str | None, default_value: str | None = None):
-        onion = self.cm.get_onion_by_alias(target)
-        if not onion: onion = ensure_onion_format(target)
-        alias = self.cm.get_alias_by_onion(onion)
-        return (alias or default_value, onion or default_value)
-
     def _sign_challenge(self, challenge_hex):
         try:
             pynacl_secret_key = self.km.get_metor_key()
@@ -254,7 +264,7 @@ class Daemon:
         })
 
     def _establish_connection(self, target):
-        alias, onion = self._resolve_target(target)
+        alias, onion = self.cm.resolve_target(target)
         if onion == self.tm.onion:
             self._broadcast_ipc({"type": "system", "text": "Cannot connect to yourself."})
             return
@@ -341,7 +351,8 @@ class Daemon:
             if alias not in self._connections: return
             conn = self._connections[alias]
         try:
-            conn.sendall(f"/msg {msg_id} {msg}\n".encode())
+            b64_msg = base64.b64encode(msg.encode('utf-8')).decode('utf-8')
+            conn.sendall(f"/msg {msg_id} {b64_msg}\n".encode())
         except Exception: pass
 
     def _start_receiving_thread(self, alias, conn):
@@ -370,6 +381,7 @@ class Daemon:
                             if current_alias in self._pending_connections:
                                 self._pending_connections.pop(current_alias)
                             self._connections[current_alias] = conn
+                        self.hm.log_event("connected", current_alias, self.cm.get_onion_by_alias(current_alias))
                         self._broadcast_ipc({"type": "connected", "alias": current_alias, "text": "Connection established with {alias}."})
                         
                     elif msg.startswith("/disconnect "):
@@ -386,10 +398,13 @@ class Daemon:
                                 
                     elif msg.startswith("/msg "):
                         parts = msg.split(" ", 2)
-                        msg_id, content = parts[1], parts[2]
-                        try: conn.sendall(f"/ack {msg_id}\n".encode())
-                        except Exception: pass    
-                        self._broadcast_ipc({"type": "remote_msg", "alias": current_alias, "text": content})
+                        if len(parts) == 3:
+                            msg_id, b64_content = parts[1], parts[2]
+                            try: conn.sendall(f"/ack {msg_id}\n".encode())
+                            except Exception: pass    
+                            try: content = base64.b64decode(b64_content).decode('utf-8')
+                            except Exception: content = b64_content
+                            self._broadcast_ipc({"type": "remote_msg", "alias": current_alias, "text": content})
                         
         except Exception:
             pass

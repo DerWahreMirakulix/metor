@@ -7,7 +7,8 @@ setup(
     install_requires=[
         "stem",
         "PySocks",
-        "pynacl"
+        "pynacl",
+        "psutil"
     ],
     include_package_data=True,
     package_data={
