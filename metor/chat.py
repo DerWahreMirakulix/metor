@@ -300,13 +300,15 @@ class Chat:
             if active:     
                 self.cli.print_message("Active connections:")
                 for alias in active:
-                    marker = "*" if alias == self._focused_alias else " "
-                    self.cli.print_message(f" {marker} {Settings.CYAN}{alias}{Settings.RESET}")
+                    if alias == self._focused_alias:
+                        self.cli.print_message(f" {Settings.GREEN}* {alias}{Settings.RESET}")
+                    else:
+                        self.cli.print_message(f"   {alias}")
                 if pending: self.cli.print_empty_line()
             if pending:
                 self.cli.print_message("Pending connections:")
                 for p in pending: 
-                    self.cli.print_message(f"   {Settings.PURPLE}{p}{Settings.RESET}")
+                    self.cli.print_message(f"   {Settings.DARK_GREY}{p}{Settings.RESET}")
         if not header_mode: self.cli.print_divider()
 
     def print_header(self, clear_screen=False):

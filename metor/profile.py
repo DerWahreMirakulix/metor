@@ -168,7 +168,7 @@ class ProfileManager:
         for p in profiles:
             marker = "*" if p == active else " "
             if p == active:
-                lines.append(f" {Settings.CYAN}{marker} {p}{Settings.RESET}")
+                lines.append(f" {Settings.GREEN}{marker} {p}{Settings.RESET}")
             else:
                 lines.append(f"   {p}")
         

@@ -163,13 +163,13 @@ class ContactManager:
         if self._contacts:
             lines.append(f"Available contacts{profile_suffix}:")
             for alias, onion in self._contacts.items():
-                lines.append(f"   {Settings.CYAN}{alias}{Settings.RESET} -> {onion}")
+                lines.append(f"   {Settings.GREEN}{alias}{Settings.RESET} -> {onion}")
         else:
             lines.append(f"No contacts in address book{profile_suffix}.")
 
         if self._session_aliases:
             lines.append(f"\nActive session aliases (RAM only):")
             for alias, onion in self._session_aliases.items():
-                lines.append(f"   {Settings.PURPLE}{alias}{Settings.RESET} -> {onion}")
+                lines.append(f"   {Settings.DARK_GREY}{alias}{Settings.RESET} -> {onion}")
 
         return "\n".join(lines)
