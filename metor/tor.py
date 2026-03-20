@@ -118,16 +118,16 @@ class TorManager:
             with open(hostname_file, "r") as f:
                 onion = f.read().strip()
                 return True, f"Current onion address for profile '{self.pm.profile_name}': {Settings.YELLOW}{clean_onion(onion)}{Settings.RESET}.onion"
-        return False, f"No onion address generated yet for profile '{self.pm.profile_name}'.\n{Settings.CYAN}Hint:{Settings.RESET} Start daemon or generate a new address."
+        return False, f"No onion address generated for profile '{self.pm.profile_name}' yet. Simply start the daemon or use 'metor address generate'."
 
     def generate_address(self):
         """Force generation of a new address (starts/stops Tor)."""
         if self.pm.is_daemon_running():
-            return False, f"{Settings.RED}Error:{Settings.RESET} Changing the address for profile '{self.pm.profile_name}' is not possible while a daemon is running"
+            return False, f"Changing the address for profile '{self.pm.profile_name}' is not possible while a daemon is running"
 
         success = self.start()
         if not success:
-            return False, f"{Settings.RED}Error:{Settings.RESET} Failed to start Tor for profile '{self.pm.profile_name}'. Please check your Tor configuration and logs."
+            return False, f"Failed to start Tor for profile '{self.pm.profile_name}'. Please check your Tor configuration and logs."
         self.stop()
         
-        return True, f"New onion address generated for profile '{self.pm.profile_name}': {self.onion}"
+        return True, f"New onion address generated for profile '{self.pm.profile_name}': {Settings.YELLOW}{clean_onion(self.onion)}{Settings.RESET}.onion"

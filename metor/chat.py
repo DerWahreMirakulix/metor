@@ -73,7 +73,7 @@ class Chat:
                     else:
                         command_found = self._handle_network_command(user_input.split())
                         if not command_found:
-                            self.cli.print_message(f"Unknown command: {user_input}", msg_type="system")
+                            self.cli.print_message(f"Unknown command: '{user_input}'", msg_type="system")
                 else:
                     self._send_chat_message(user_input)
                         
@@ -237,7 +237,7 @@ class Chat:
 
                             self.cli.print_message(event["text"], msg_type="info", alias=alias)
                             # we can't use resolve target since the daemon is another process
-                            if self._pending_focus_target and (self._pending_focus_target == alias or self._pending_focus_target == onion):
+                            if self._pending_focus_target and (self._pending_focus_target == alias or self._pending_focus_target == onion or self._pending_focus_target == clean_onion(onion)):
                                 self.switch_focus(alias)
                                 self._pending_focus_target = None
 
@@ -288,9 +288,9 @@ class Chat:
         self.cli.set_focus(alias)
         if not hide_message:
             if alias:
-                self.cli.print_message("Switched focus to \"{alias}\"", alias=alias, msg_type="info")
+                self.cli.print_message("Switched focus to '{alias}'", alias=alias, msg_type="info")
             else:
-                self.cli.print_message("Removed focus from \"{alias}\".", alias=old_alias, msg_type="info")
+                self.cli.print_message("Removed focus from '{alias}'.", alias=old_alias, msg_type="info")
 
     def _render_connections(self, active, pending, header_mode=False):
         if not header_mode: self.cli.print_divider()

@@ -38,18 +38,22 @@ class ContactManager:
         """Adds a completely new contact to the disk."""
         self._refresh()
         alias = alias.strip().lower()
+
+        if self._contacts.get(alias):
+            return False, f"Alias '{alias}' is already in use."
+        
         onion = clean_onion(onion)
         
         existing_aliases = [k for k, v in self._contacts.items() if v == onion]
-        for old_alias in existing_aliases:
-            if old_alias != alias:
-                del self._contacts[old_alias]
+        if existing_aliases:
+            return False, f"The onion is already associated with an alias '{existing_aliases[0]}'."
                 
         if alias in self._session_aliases:
             del self._session_aliases[alias]
                 
         self._contacts[alias] = onion
         self._save()
+        
         return True, f"Contact '{alias}' added successfully to profile '{self.pm.profile_name}'."
 
     def promote_session_alias(self, alias):
@@ -58,10 +62,10 @@ class ContactManager:
         alias = alias.strip().lower()
 
         if alias not in self._session_aliases:
-            return False, f"{Settings.RED}Error:{Settings.RESET} RAM alias '{alias}' not found."
+            return False, f"RAM alias '{alias}' not found."
 
         if alias in self._contacts:
-             return False, f"{Settings.RED}Error:{Settings.RESET} Alias '{alias}' is already saved."
+             return False, f"Alias '{alias}' is already saved."
 
         onion = self._session_aliases.pop(alias)
         self._contacts[alias] = onion
@@ -75,11 +79,11 @@ class ContactManager:
         new_alias = new_alias.strip().lower()
 
         if old_alias == new_alias:
-            return False, f"{Settings.RED}Error:{Settings.RESET} The new alias must be different from the old one."
+            return False, f"The new alias must be different from the old one."
             
         if new_alias in self._contacts or new_alias in self._session_aliases:
             if new_alias != old_alias:
-                return False, f"{Settings.RED}Error:{Settings.RESET} Alias '{new_alias}' is already in use."
+                return False, f"Alias '{new_alias}' is already in use."
             
         if old_alias in self._contacts:
             onion = self._contacts.pop(old_alias)
@@ -91,7 +95,7 @@ class ContactManager:
             self._session_aliases[new_alias] = onion
             return True, f"RAM alias renamed from '{old_alias}' to '{new_alias}'."
         else:
-            return False, f"{Settings.RED}Error:{Settings.RESET} Contact '{old_alias}' not found."
+            return False, f"Contact '{old_alias}' not found."
 
     def remove_contact(self, alias):       
         """Removes a saved contact. Refuses to delete pure RAM aliases."""
@@ -99,14 +103,14 @@ class ContactManager:
         alias = alias.strip().lower()
         
         if alias in self._session_aliases and alias not in self._contacts:
-            return False, f"{Settings.RED}Error:{Settings.RESET} RAM aliases cannot be deleted. They expire automatically."
+            return False, f"RAM aliases cannot be deleted. They expire automatically."
             
         if alias in self._contacts:
             del self._contacts[alias]
             self._save()
             return True, f"Contact '{alias}' removed from profile '{self.pm.profile_name}'."
             
-        return False, f"{Settings.RED}Error:{Settings.RESET} Contact '{alias}' not found."
+        return False, f"Contact '{alias}' not found."
     
     def resolve_target(self, target: str | None, default_value: str | None = None):
         onion = self.get_onion_by_alias(target)

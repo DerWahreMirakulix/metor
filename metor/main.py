@@ -84,7 +84,6 @@ class MetorApp:
         elif cmd == "chat":
             if not self.pm.is_daemon_running():
                 print(f"The background daemon is not running.")
-                print(f"{Settings.CYAN}Hint:{Settings.RESET} Start it first in another terminal: {Settings.CYAN}metor daemon{Settings.RESET}")
                 return
             
             cli = CommandLineInput()
@@ -117,7 +116,7 @@ class MetorApp:
                     if resp and "text" in resp:
                         print(resp["text"])
                     else:
-                        print(f"{Settings.RED}Error:{Settings.RESET} Failed to fetch contacts from daemon.")
+                        print(f"Failed to fetch contacts from daemon.")
                 else:
                     # if no deamon there is no ram contacts, so we show the normal list which only contains saved contacts
                     print(self.cm.show(chat_mode=False))
@@ -129,14 +128,14 @@ class MetorApp:
                     if self.pm.is_daemon_running():
                         success = self._send_to_daemon({"action": "add_contact", "alias": ext[0]})
                         if success: print("Command sent to running daemon.")
-                        else: print(f"{Settings.RED}Error:{Settings.RESET} Failed to communicate with daemon.")
+                        else: print(f"Failed to communicate with daemon.")
                     else:
-                        print(f"{Settings.RED}Error:{Settings.RESET} Daemon not running. Cannot save a RAM alias without an active session.")
+                        print(f"Daemon not running. Cannot save a RAM alias without an active session.")
                 else:
                     if self.pm.is_daemon_running():
                         success = self._send_to_daemon({"action": "add_contact", "alias": ext[0], "onion": ext[1]})
                         if success: print("Command sent to running daemon.")
-                        else: print(f"{Settings.RED}Error:{Settings.RESET} Failed to communicate with daemon.")
+                        else: print(f"Failed to communicate with daemon.")
                     else:
                         _, msg = self.cm.add_contact(ext[0], ext[1])
                         print(msg)
@@ -148,7 +147,7 @@ class MetorApp:
                     if self.pm.is_daemon_running():
                         success = self._send_to_daemon({"action": "remove_contact", "alias": ext[0]})
                         if success: print("Command sent to running daemon. Active sessions will be downgraded.")
-                        else: print(f"{Settings.RED}Error:{Settings.RESET} Failed to communicate with daemon.")
+                        else: print(f"Failed to communicate with daemon.")
                     else:
                         _, msg = self.cm.remove_contact(ext[0])
                         print(msg)
@@ -168,7 +167,7 @@ class MetorApp:
                         if success:
                             print(f"Command sent to running daemon. Check active chat windows to verify.")
                         else:
-                            print(f"{Settings.RED}Error:{Settings.RESET} Failed to communicate with daemon.")
+                            print(f"Failed to communicate with daemon.")
                     else:
                         success, msg = self.cm.rename_contact(old_alias, new_alias)
                         if success:
@@ -188,7 +187,7 @@ class MetorApp:
             elif sub in ("rm", "remove"):
                 if len(ext) < 1: print("Usage: metor profiles rm [name]")
                 else:
-                    _, msg = ProfileManager.remove_profile_folder(ext[0])
+                    _, msg = ProfileManager.remove_profile_folder(ext[0], self.pm.profile_name)
                     print(msg)
             elif sub == "rename":
                 if len(ext) < 2: print("Usage: metor profiles rename [old_name] [new_name]")

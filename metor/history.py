@@ -40,7 +40,7 @@ class HistoryManager:
                     f.write("")
             return True, f"History from profile '{self.pm.profile_name}' cleared."
         except IOError:
-            return False, f"{Settings.RED}Error:{Settings.RESET} Failed to clear history for profile '{self.pm.profile_name}'."
+            return False, f"Failed to clear history for profile '{self.pm.profile_name}'."
         
     def update_alias(self, old_alias, new_alias):
         history_file = self.pm.get_history_file()

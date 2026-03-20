@@ -245,7 +245,7 @@ class Daemon:
                 if target in self._connections or target in self._pending_connections:
                     self._send_to_client(conn, {"type": "switch_success", "alias": target})
                 else:
-                    self._send_to_client(conn, {"type": "system", "text": f"Cannot switch: No active or pending connection with \"{target}\"."})
+                    self._send_to_client(conn, {"type": "system", "text": f"Cannot switch: No active or pending connection with '{target}'."})
 
     # --- CRYPTO & TOR UTILS ---
     def _sign_challenge(self, challenge_hex):
@@ -346,7 +346,7 @@ class Daemon:
             return
             
         self.hm.log_event("requested", alias, onion)
-        self._broadcast_ipc({"type": "info", "alias": alias, "text": "Request sent to \"{alias}\". Waiting for them to accept..."})
+        self._broadcast_ipc({"type": "info", "alias": alias, "text": "Request sent to '{alias}'. Waiting for them to accept..."})
         self._start_receiving_thread(alias, conn)
 
     def accept_connection(self, alias):
@@ -359,7 +359,7 @@ class Daemon:
         except Exception: pass
         onion = self.cm.get_onion_by_alias(alias)
         self.hm.log_event("connected", alias, onion)
-        self._broadcast_ipc({"type": "connected", "alias": alias, "onion": onion, "text": "Connection established with \"{alias}\"."})
+        self._broadcast_ipc({"type": "connected", "alias": alias, "onion": onion, "text": "Connection established with '{alias}'."})
         self._start_receiving_thread(alias, conn)
 
     def reject_connection(self, alias, initiated_by_self=True):
@@ -377,7 +377,7 @@ class Daemon:
         status = "rejected" if initiated_by_self else "rejected by remote peer"
         self.hm.log_event(status, alias, self.cm.get_onion_by_alias(alias))
         
-        msg = "Connection with \"{alias}\" rejected." if initiated_by_self else "Connection with \"{alias}\" rejected by peer."
+        msg = "Connection with '{alias}' rejected." if initiated_by_self else "Connection with '{alias}' rejected by peer."
         self._broadcast_ipc({"type": "info", "alias": alias, "text": msg})
 
     def disconnect(self, alias, initiated_by_self=True, is_fallback=False):
@@ -405,7 +405,7 @@ class Daemon:
             
             self.hm.log_event(status, alias, self.cm.get_onion_by_alias(alias))
             
-            msg = "Peer \"{alias}\" disconnected." if not is_fallback else "Connection to \"{alias}\" cancelled / lost."
+            msg = "Peer '{alias}' disconnected." if not is_fallback else "Connection to '{alias}' cancelled / lost."
             self._broadcast_ipc({"type": "disconnected", "alias": alias, "text": msg})
 
     def send_message(self, alias, msg, msg_id):
@@ -446,7 +446,7 @@ class Daemon:
     
                         onion = self.cm.get_onion_by_alias(current_alias)
                         self.hm.log_event("connected", current_alias, onion)
-                        self._broadcast_ipc({"type": "connected", "alias": current_alias, "onion": onion, "text": "Connection established with \"{alias}\"."})
+                        self._broadcast_ipc({"type": "connected", "alias": current_alias, "onion": onion, "text": "Connection established with '{alias}'."})
                         
                     elif msg.startswith("/disconnect "):
                         remote_disconnected = True

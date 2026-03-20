@@ -26,7 +26,7 @@ class ProfileManager:
     def set_default_profile(cls, profile_name):
         safe_name = "".join(c for c in profile_name if c.isalnum() or c in ("-", "_"))
         if not safe_name:
-            return False, f"{Settings.RED}Error:{Settings.RESET} Invalid profile name."
+            return False, f"Invalid profile name."
             
         settings_path = Settings.get_global_settings_path()
         settings = {}
@@ -106,12 +106,12 @@ class ProfileManager:
     def add_profile_folder(name):
         safe_name = "".join(c for c in name if c.isalnum() or c in ("-", "_"))
         if not safe_name:
-            return False, f"{Settings.RED}Error:{Settings.RESET} Invalid profile name."
+            return False, f"Invalid profile name."
         
         pkg_dir = os.path.dirname(os.path.abspath(__file__))
         target_dir = os.path.join(pkg_dir, "data", safe_name)
         if os.path.exists(target_dir):
-            return False, f"{Settings.RED}Error:{Settings.RESET} Profile '{safe_name}' already exists."
+            return False, f"Profile '{safe_name}' already exists."
             
         os.makedirs(target_dir)
         return True, f"Profile '{safe_name}' successfully created."
@@ -129,30 +129,38 @@ class ProfileManager:
         new_dir = os.path.join(pkg_dir, "data", safe_new)
         
         if not os.path.exists(old_dir):
-            return False, f"{Settings.RED}Error:{Settings.RESET}  Profile '{safe_old}' does not exist."
+            return False, f" Profile '{safe_old}' does not exist."
         if os.path.exists(new_dir):
-            return False, f"{Settings.RED}Error:{Settings.RESET} Profile '{safe_new}' already exists."
+            return False, f"Profile '{safe_new}' already exists."
             
         if cls(safe_old).is_daemon_running():
-            return False, f"{Settings.RED}Error:{Settings.RESET} Cannot rename profile '{safe_old}' while its daemon is running!"
+            return False, f"Cannot rename profile '{safe_old}' while its daemon is running!"
             
         os.rename(old_dir, new_dir)
         return True, f"Profile '{safe_old}' successfully renamed to '{safe_new}'."
 
     @classmethod
-    def remove_profile_folder(cls, name):
+    def remove_profile_folder(cls, name, active_profile=None):
+        default = cls.load_default_profile()
+        active = active_profile if active_profile else default
         safe_name = "".join(c for c in name if c.isalnum() or c in ("-", "_"))
         if not safe_name:
-            return False, f"{Settings.RED}Error:{Settings.RESET} Invalid profile name."
+            return False, f"Invalid profile name."
             
         pkg_dir = os.path.dirname(os.path.abspath(__file__))
         target_dir = os.path.join(pkg_dir, "data", safe_name)
+
+        if active == safe_name:
+            return False, f"Cannot remove active profile!"
+        
+        if default == safe_name:
+            return False, f"Cannot remove default profile!"
         
         if not os.path.exists(target_dir):
-            return False, f"{Settings.RED}Error:{Settings.RESET} Profile '{safe_name}' does not exist."
+            return False, f"Profile '{safe_name}' does not exist."
             
         if cls(safe_name).is_daemon_running():
-            return False, f"{Settings.RED}Error:{Settings.RESET} Cannot remove profile '{safe_name}' while its daemon is running!"
+            return False, f"Cannot remove profile '{safe_name}' while its daemon is running!"
             
         shutil.rmtree(target_dir)
         return True, f"Profile '{safe_name}' successfully removed."
