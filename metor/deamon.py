@@ -1,14 +1,14 @@
-import atexit
-import os
-import signal
 import socket
-import sys
 import threading
 import secrets
 import base64
 import json
 import nacl.bindings
 import time
+import atexit
+import sys
+import os
+import signal
 
 from metor.profile import ProfileManager
 from metor.key import KeyManager
@@ -34,7 +34,6 @@ class Daemon:
         
         self._lock = threading.Lock()
         self.stop_flag = threading.Event()
-        
         self.ipc_port = None
 
         atexit.register(self.stop)
@@ -44,7 +43,6 @@ class Daemon:
             signal.signal(signal.SIGHUP, self._sig_handler)
 
     def _sig_handler(self, signum, frame):
-        """Called when the OS wants to kill the process."""
         self.stop()
         sys.exit(0)
 
@@ -68,7 +66,6 @@ class Daemon:
             self.stop()
 
     def stop(self):
-        """Cleanly shuts down the daemon, informing all peers."""
         self.stop_flag.set()
         
         aliases_to_disconnect = list(self._connections.keys()) + list(self._pending_connections.keys())
@@ -100,7 +97,6 @@ class Daemon:
             except Exception: break
 
     def _broadcast_ipc(self, data_dict):
-        """Send JSON events to all connected UI clients."""
         msg = json.dumps(data_dict) + "\n"
         dead_clients = []
         with self._lock:
@@ -111,14 +107,12 @@ class Daemon:
                 self._ipc_clients.remove(dc)
 
     def _send_to_client(self, conn, data_dict):
-        """Sends a response specifically to the client that made the request."""
         try:
             msg = json.dumps(data_dict) + "\n"
             conn.sendall(msg.encode())
         except Exception: pass
 
     def _ipc_handler(self, conn):
-        """Reads commands from the local chat UI with a safe TCP buffer."""
         buffer = ""
         try:
             while True:
@@ -156,25 +150,78 @@ class Daemon:
                     "pending": list(self._pending_connections.keys()),
                     "is_header": cmd.get("is_header", False)
                 })
-                
+
+        elif action == "get_contacts_list":
+            text = self.cm.show(chat_mode=cmd.get("chat_mode", False))
+            self._send_to_client(conn, {"type": "contact_list", "text": text})
+
         elif action == "connect":
             alias, onion = self.cm.resolve_target(target)
-            self._broadcast_ipc({"type": "system", "alias": alias, "text": f"Connecting to {"\"{alias}\"" if alias else onion} ..."})
+            target_name = f'"{alias}"' if alias else onion
+            self._broadcast_ipc({"type": "info", "alias": alias, "text": f"Connecting to {target_name} ..."})
             threading.Thread(target=self._establish_connection, args=(target,), daemon=True).start()
-            
+
         elif action == "disconnect":
             self.disconnect(target, initiated_by_self=True)
+
         elif action == "accept":
             self.accept_connection(target)
+
         elif action == "reject":
             self.reject_connection(target, initiated_by_self=True)
+
         elif action == "msg":
             self.send_message(target, cmd.get("text"), cmd.get("msg_id"))
+            
+        elif action == "add_contact":
+            alias = cmd.get("alias")
+            onion = cmd.get("onion")
+            
+            with self._lock:
+                if onion:
+                    success, msg = self.cm.add_contact(alias, onion)
+                else:
+                    success, msg = self.cm.promote_session_alias(alias)
+            self._send_to_client(conn, {"type": "system", "text": msg})
+
+        elif action == "remove_contact":
+            alias = cmd.get("alias")
+            
+            trigger_demotion = False
+            new_alias = None
+            history_updated = False
+            
+            with self._lock:
+                onion = self.cm.get_onion_by_alias(alias)
+                success, msg = self.cm.remove_contact(alias)
+                
+                if success:
+                    if alias in self._connections or alias in self._pending_connections:
+                        new_alias = self.cm.get_alias_by_onion(onion) 
+                        
+                        if alias in self._connections:
+                            self._connections[new_alias] = self._connections.pop(alias)
+                        if alias in self._pending_connections:
+                            self._pending_connections[new_alias] = self._pending_connections.pop(alias)
+                            
+                        history_updated = self.hm.update_alias(alias, new_alias)
+                        trigger_demotion = True
+                        
+            if trigger_demotion:
+                self._broadcast_ipc({
+                    "type": "rename_success", 
+                    "old_alias": alias, 
+                    "new_alias": new_alias,
+                    "history_updated": history_updated,
+                    "is_demotion": True
+                })
+            else:
+                self._send_to_client(conn, {"type": "system", "text": msg})
             
         elif action == "rename_contact":
             old_alias, new_alias = cmd.get("old_alias"), cmd.get("new_alias")
             with self._lock:
-                success, _ = self.cm.rename_contact(old_alias, new_alias)
+                success, msg = self.cm.rename_contact(old_alias, new_alias)
                 if success:
                     if old_alias in self._connections:
                         self._connections[new_alias] = self._connections.pop(old_alias)
@@ -187,10 +234,18 @@ class Daemon:
                     "type": "rename_success", 
                     "old_alias": old_alias, 
                     "new_alias": new_alias,
-                    "history_updated": history_updated
+                    "history_updated": history_updated,
+                    "is_demotion": False
                 })
             else:
-                self._send_to_client(conn, {"type": "system", "text": "Failed to rename. Check if old alias exists and new alias is free."})
+                self._send_to_client(conn, {"type": "system", "text": msg})
+
+        elif action == "switch":
+            with self._lock:
+                if target in self._connections or target in self._pending_connections:
+                    self._send_to_client(conn, {"type": "switch_success", "alias": target})
+                else:
+                    self._send_to_client(conn, {"type": "system", "text": f"Cannot switch: No active or pending connection with \"{target}\"."})
 
     # --- CRYPTO & TOR UTILS ---
     def _sign_challenge(self, challenge_hex):
@@ -291,7 +346,7 @@ class Daemon:
             return
             
         self.hm.log_event("requested", alias, onion)
-        self._broadcast_ipc({"type": "info", "alias": alias, "text": 'Request sent to "{alias}". Waiting for them to accept...'})
+        self._broadcast_ipc({"type": "info", "alias": alias, "text": "Request sent to \"{alias}\". Waiting for them to accept..."})
         self._start_receiving_thread(alias, conn)
 
     def accept_connection(self, alias):
@@ -302,8 +357,9 @@ class Daemon:
 
         try: conn.sendall(b"/accepted\n")
         except Exception: pass
-        self.hm.log_event("connected", alias, self.cm.get_onion_by_alias(alias))
-        self._broadcast_ipc({"type": "connected", "alias": alias, "text": "Connection established with {alias}."})
+        onion = self.cm.get_onion_by_alias(alias)
+        self.hm.log_event("connected", alias, onion)
+        self._broadcast_ipc({"type": "connected", "alias": alias, "onion": onion, "text": "Connection established with \"{alias}\"."})
         self._start_receiving_thread(alias, conn)
 
     def reject_connection(self, alias, initiated_by_self=True):
@@ -321,7 +377,7 @@ class Daemon:
         status = "rejected" if initiated_by_self else "rejected by remote peer"
         self.hm.log_event(status, alias, self.cm.get_onion_by_alias(alias))
         
-        msg = "Connection with {alias} rejected." if initiated_by_self else "Connection with {alias} rejected by peer."
+        msg = "Connection with \"{alias}\" rejected." if initiated_by_self else "Connection with \"{alias}\" rejected by peer."
         self._broadcast_ipc({"type": "info", "alias": alias, "text": msg})
 
     def disconnect(self, alias, initiated_by_self=True, is_fallback=False):
@@ -332,9 +388,15 @@ class Daemon:
         
         if conn:
             if initiated_by_self:
-                try: conn.sendall(f"/disconnect {self.tm.onion}\n".encode())
+                try: 
+                    conn.sendall(f"/disconnect {self.tm.onion}\n".encode())
+                    # timeout to let disconnect message be sent
+                    time.sleep(0.2)
+                    conn.shutdown(socket.SHUT_RDWR)
                 except Exception: pass
-            conn.close()
+                
+            try: conn.close()
+            except Exception: pass
             
             if is_fallback:
                 status = "connection cancelled / lost"
@@ -343,7 +405,7 @@ class Daemon:
             
             self.hm.log_event(status, alias, self.cm.get_onion_by_alias(alias))
             
-            msg = "Peer {alias} disconnected." if not is_fallback else "Connection to {alias} cancelled / lost."
+            msg = "Peer \"{alias}\" disconnected." if not is_fallback else "Connection to \"{alias}\" cancelled / lost."
             self._broadcast_ipc({"type": "disconnected", "alias": alias, "text": msg})
 
     def send_message(self, alias, msg, msg_id):
@@ -381,8 +443,10 @@ class Daemon:
                             if current_alias in self._pending_connections:
                                 self._pending_connections.pop(current_alias)
                             self._connections[current_alias] = conn
-                        self.hm.log_event("connected", current_alias, self.cm.get_onion_by_alias(current_alias))
-                        self._broadcast_ipc({"type": "connected", "alias": current_alias, "text": "Connection established with {alias}."})
+    
+                        onion = self.cm.get_onion_by_alias(current_alias)
+                        self.hm.log_event("connected", current_alias, onion)
+                        self._broadcast_ipc({"type": "connected", "alias": current_alias, "onion": onion, "text": "Connection established with \"{alias}\"."})
                         
                     elif msg.startswith("/disconnect "):
                         remote_disconnected = True

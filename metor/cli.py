@@ -128,7 +128,6 @@ class CommandLineInput:
         lines = self._current_input.split('\n')
         count = 0
         for l in lines:
-            # BUGFIX: Jede Eingabezeile ist visuell um die Länge des Prompts eingerückt!
             offset = len(self._prompt) 
             count += max(1, (offset + len(l) + cols - 1) // cols)
         return count
@@ -313,19 +312,20 @@ class CommandLineInput:
                     elif ch2 == "K": return "SPECIAL:LEFT"
                     elif ch2 == "M": return "SPECIAL:RIGHT"
                     else: return ""
-                if ch == "\x0e": return "SPECIAL:NEWLINE" # Ctrl + N
+                if ch == "\x0e": return "SPECIAL:NEWLINE" 
                 return ch
             return None
         else:
+            # Blocks correctly to ensure escape sequences are kept whole
             ch1 = sys.stdin.read(1)
             if ch1 == '\x1b':
                 ch2 = sys.stdin.read(1)
                 if ch2 == '[':
                     ch3 = sys.stdin.read(1)
                     return {'A': 'SPECIAL:UP', 'B': 'SPECIAL:DOWN', 'C': 'SPECIAL:RIGHT', 'D': 'SPECIAL:LEFT'}.get(ch3, 'SPECIAL:UNKNOWN')
-                if ch2 in ('\n', '\r'): return "SPECIAL:NEWLINE" # Alt + Enter
+                if ch2 in ('\n', '\r'): return "SPECIAL:NEWLINE" 
                 return 'ESC'
-            if ch1 == '\x0e': return "SPECIAL:NEWLINE" # Ctrl + N
+            if ch1 == '\x0e': return "SPECIAL:NEWLINE" 
             return ch1
 
     def read_line(self):
@@ -338,7 +338,7 @@ class CommandLineInput:
         while True:
             ch = self._get_char()
             if ch is None:
-                time.sleep(0.05)
+                time.sleep(0.02)
                 continue
 
             with self._print_lock:

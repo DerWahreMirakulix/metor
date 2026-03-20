@@ -2,7 +2,9 @@ import socket
 import threading
 import secrets
 import json
+import sys
 import os
+import signal
 
 from metor.help import Help
 from metor.profile import ProfileManager
@@ -24,7 +26,7 @@ class Chat:
         self.ipc_socket = None
         self.my_onion = "unknown"
         self._focused_alias = None 
-        self._pending_focus = None
+        self._pending_focus_target = None
 
         self.stop_flag = threading.Event()
         self.init_event = threading.Event()
@@ -81,11 +83,18 @@ class Chat:
             self._shutdown()
 
     def _shutdown(self):
-        """Helper to safely kill all threads, close sockets and exit the UI."""
+        """Helper to safely kill all threads, close sockets and exit the UI without breaking the terminal."""
         self.stop_flag.set()
         try: self.ipc_socket.close()
         except Exception: pass
-        os._exit(0)
+        
+        # SAFELY EXIT: Never use os._exit() directly, as it skips atexit (destroying the terminal).
+        # If we are in the main thread (e.g. exit typed), sys.exit triggers terminal restore.
+        # If we are in the background thread (Daemon dropped), send a KeyboardInterrupt signal to main thread.
+        if threading.current_thread() is threading.main_thread():
+            sys.exit(0)
+        else:
+            os.kill(os.getpid(), signal.SIGINT)
 
     def _handle_network_command(self, parts):
         """Dispatches all /connect, /accept, /reject, /switch, /end commands."""
@@ -101,16 +110,15 @@ class Chat:
                 
         elif cmd == "/connect":
             if arg: 
-                alias, _ = self.cm.resolve_target(arg)
-                self._pending_focus = alias
+                # we can't use resolve target since the daemon is another process
+                self._pending_focus_target = arg
                 self._send_cmd({"action": "connect", "target": arg})
-            else: self.cli.print_message("Usage: \"/connect [onion/alias]\".", msg_type="system")
+            else: self.cli.print_message("Usage: \"/connect <onion|alias>\".", msg_type="system")
                 
         elif cmd == "/accept":
             if arg:
-                # arg is always the alias
                 if self._focused_alias is None:
-                    self._pending_focus = arg
+                    self._pending_focus_target = arg
                 self._send_cmd({"action": "accept", "target": arg})
             else: self.cli.print_message("Usage: \"/accept [alias]\".", msg_type="system")
                 
@@ -120,8 +128,12 @@ class Chat:
                 
         elif cmd == "/switch":
             if arg:
-                self.switch_focus(None if arg == ".." else arg)
+                if arg == "..":
+                    self.switch_focus(None)
+                else:
+                    self._send_cmd({"action": "switch", "target": arg})
             else: self.cli.print_message("Usage: \"/switch [..|alias]\".", msg_type="system")
+    
         else:
             return False
             
@@ -132,29 +144,37 @@ class Chat:
         subcmd = parts[1] if len(parts) > 1 else "list"
 
         if subcmd == "list":
-            self.cli.print_divider()
-            self.cli.print_message(self.cm.show(chat_mode=True))
-            self.cli.print_divider()
+            self._send_cmd({"action": "get_contacts_list", "chat_mode": True})
             
         elif subcmd == "add":
-            if len(parts) < 4:
-                self.cli.print_message("Usage: \"/contacts add [alias] [onion]\".", msg_type="system")
+            if len(parts) == 2 and self._focused_alias:
+                self._send_cmd({"action": "add_contact", "alias": self._focused_alias})
+            elif len(parts) == 3:
+                self._send_cmd({"action": "add_contact", "alias": parts[2].lower()})
+            elif len(parts) == 4:
+                self._send_cmd({"action": "add_contact", "alias": parts[2].lower(), "onion": parts[3]})
             else:
-                _, msg = self.cm.add_contact(parts[2], parts[3])
-                self.cli.print_message(msg, msg_type="system")
+                self.cli.print_message("Usage: \"/contacts add [<alias>] [<onion>]\"", msg_type="system")
                 
         elif subcmd in ("rm", "remove"):
-            if len(parts) < 3:
-                self.cli.print_message("Usage: \"/contacts rm [alias]\".", msg_type="system")
+            if len(parts) == 2 and self._focused_alias:
+                self._send_cmd({"action": "remove_contact", "alias": self._focused_alias})
+            elif len(parts) == 3:
+                self._send_cmd({"action": "remove_contact", "alias": parts[2].lower()})
             else:
-                _, msg = self.cm.remove_contact(parts[2])
-                self.cli.print_message(msg, msg_type="system")
+                self.cli.print_message("Usage: \"/contacts rm [<alias>]\"", msg_type="system")
                 
         elif subcmd == "rename":
-            if len(parts) < 4:
-                self.cli.print_message("Usage: \"/contacts rename [old_alias] [new_alias]\".", msg_type="system")
+            if len(parts) == 3 and self._focused_alias:
+                old_alias = self._focused_alias
+                new_alias = parts[2].lower()
+            elif len(parts) == 4:
+                old_alias = parts[2].lower()
+                new_alias = parts[3].lower()
             else:
-                self._send_cmd({"action": "rename_contact", "old_alias": parts[2].lower(), "new_alias": parts[3].lower()})
+                self.cli.print_message("Usage: \"/contacts rename [<old>] <new>\"", msg_type="system")
+                return
+            self._send_cmd({"action": "rename_contact", "old_alias": old_alias, "new_alias": new_alias})
         else:
             self.cli.print_message("Usage: \"/contacts [list|add|rm|rename] ..options\".", msg_type="system")
 
@@ -178,7 +198,7 @@ class Chat:
             while not self.stop_flag.is_set():
                 data = self.ipc_socket.recv(4096)
                 if not data:
-                    self.cli.print_divider()
+                    self.cli.print_empty_line()
                     self.cli.print_message(f"{Settings.RED}Alert:{Settings.RESET} Connection to Daemon lost! Exiting...")
                     self.cli.clear_input_area() 
                     self._shutdown()
@@ -197,30 +217,51 @@ class Chat:
                         if evt_type == "init": 
                             self.my_onion = event.get("onion")
                             self.init_event.set()
-                        elif evt_type == "info": self.cli.print_message(event["text"], msg_type="info", alias=event.get("alias"))
-                        elif evt_type == "system": self.cli.print_message(event["text"], msg_type="system", alias=event.get("alias"))
-                        elif evt_type == "remote_msg": self.cli.print_message(event["text"], msg_type="remote", alias=event["alias"])
-                        elif evt_type == "ack": self.cli.mark_acked(event["msg_id"])
+
+                        elif evt_type == "info":
+                            self.cli.print_message(event["text"], msg_type="info", alias=event.get("alias"))
+
+                        elif evt_type == "system": 
+                            # system ignores alias, it is static info
+                            self.cli.print_message(event["text"], msg_type="system") 
+
+                        elif evt_type == "remote_msg": 
+                            self.cli.print_message(event["text"], msg_type="remote", alias=event["alias"])
+
+                        elif evt_type == "ack": 
+                            self.cli.mark_acked(event["msg_id"])
+
                         elif evt_type == "connected":
                             alias = event["alias"]
+                            onion = event["onion"]
+
                             self.cli.print_message(event["text"], msg_type="info", alias=alias)
-                            if self._pending_focus == alias:
+                            # we can't use resolve target since the daemon is another process
+                            if self._pending_focus_target and (self._pending_focus_target == alias or self._pending_focus_target == onion):
                                 self.switch_focus(alias)
-                                self._pending_focus = None
+                                self._pending_focus_target = None
+
                         elif evt_type == "disconnected":
                             alias = event["alias"]
                             self.cli.print_message(event["text"], msg_type="info", alias=alias)
                             if self._focused_alias == alias:
                                 self.switch_focus(None)
+
                         elif evt_type == "rename_success":
                             old_alias = event["old_alias"]
                             new_alias = event["new_alias"]
+                            is_demotion = event.get("is_demotion", False)
                             self.cli.rename_alias_in_history(old_alias, new_alias)
                             if self._focused_alias == old_alias:
                                 self.switch_focus(new_alias, hide_message=True)
-                            self.cli.print_message(f'Renamed "{old_alias}" to "{new_alias}".', msg_type="system")
-                            if not event.get("history_updated"):
-                                self.cli.print_message(f"{Settings.RED}Note:{Settings.RESET} The history log did not update.", msg_type="system")
+                            if is_demotion:
+                                if is_demotion:
+                                    self.cli.print_message(f"Contact '{old_alias}' removed from profile '{self.pm.profile_name}'. Active session downgraded to volatile alias '{new_alias}'.", msg_type="system")
+                            else:
+                                self.cli.print_message(f'Renamed "{old_alias}" to "{new_alias}".', msg_type="system")
+                                if event.get("history_updated") is False:
+                                    self.cli.print_message(f"{Settings.RED}Note:{Settings.RESET} The history log did not update.", msg_type="system")
+
                         elif evt_type == "connections_state":
                             if event.get("is_header"):
                                 self.header_active = event.get("active", [])
@@ -228,35 +269,44 @@ class Chat:
                                 self.conn_event.set()
                             else:
                                 self._render_connections(event.get("active", []), event.get("pending", []))
+
+                        elif evt_type == "switch_success":
+                            self.switch_focus(event["alias"])
+
+                        elif evt_type == "contact_list":
+                            self.cli.print_divider()
+                            self.cli.print_message(event["text"])
+                            self.cli.print_divider()
+                    
                     except Exception: pass
+        
         except Exception: pass
 
     def switch_focus(self, alias, hide_message=False):
+        old_alias = self._focused_alias
         self._focused_alias = alias
         self.cli.set_focus(alias)
         if not hide_message:
             if alias:
-                self.cli.print_message("Switched focus to {alias}", alias=alias, msg_type="system")
+                self.cli.print_message("Switched focus to \"{alias}\"", alias=alias, msg_type="info")
             else:
-                self.cli.print_message("Removed focus.", msg_type="system")
+                self.cli.print_message("Removed focus from \"{alias}\".", alias=old_alias, msg_type="info")
 
     def _render_connections(self, active, pending, header_mode=False):
         if not header_mode: self.cli.print_divider()
         if not active and not pending and not header_mode:
             self.cli.print_message("No active or pending connections.")
-            return
-        if active:     
-            self.cli.print_message("Active connections:")
-            for alias in active:
-                if alias == self._focused_alias:
-                    self.cli.print_message(f" * {Settings.CYAN}{alias}{Settings.RESET}")
-                else:
-                    self.cli.print_message(f"   {alias}")
-            if pending: self.cli.print_empty_line()
-        if pending:
-            self.cli.print_message("Pending connections:")
-            for p in pending: 
-                self.cli.print_message(f"   {p}")
+        else:
+            if active:     
+                self.cli.print_message("Active connections:")
+                for alias in active:
+                    marker = "*" if alias == self._focused_alias else " "
+                    self.cli.print_message(f" {marker} {Settings.CYAN}{alias}{Settings.RESET}")
+                if pending: self.cli.print_empty_line()
+            if pending:
+                self.cli.print_message("Pending connections:")
+                for p in pending: 
+                    self.cli.print_message(f"   {Settings.PURPLE}{p}{Settings.RESET}")
         if not header_mode: self.cli.print_divider()
 
     def print_header(self, clear_screen=False):
@@ -265,7 +315,6 @@ class Chat:
         self.cli.print_message(f"Your onion address: {Settings.YELLOW}{clean_onion(self.my_onion)}{Settings.RESET}.onion", skip_prompt=True)
         self.cli.print_empty_line()
         self.cli.print_message(Help.show_chat_help(), skip_prompt=True)
-        self.cli.print_empty_line()
 
         self.conn_event.clear()
         self._send_cmd({"action": "get_connections", "is_header": True})
@@ -275,4 +324,5 @@ class Chat:
             self._render_connections(self.header_active, self.header_pending, header_mode=True)
             self.cli.print_empty_line()
             
+        self.cli.print_empty_line()
         self.cli.print_prompt()

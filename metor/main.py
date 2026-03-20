@@ -41,6 +41,31 @@ class MetorApp:
             return True
         except Exception:
             return False
+        
+    def _request_from_daemon(self, action_dict):
+        """Sends a command and waits for a single JSON response line."""
+        port = self.pm.get_daemon_port()
+        if not port: return None
+        
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(2.0)
+                s.connect(('127.0.0.1', port))
+                s.sendall((json.dumps(action_dict) + "\n").encode())
+                
+                buffer = ""
+                while True:
+                    chunk = s.recv(4096)
+                    if not chunk: break
+                    buffer += chunk.decode()
+                    if "\n" in buffer:
+                        break
+                        
+                if buffer:
+                    return json.loads(buffer.split("\n")[0])
+        except Exception:
+            pass
+        return None
 
     def execute(self):
         cmd, sub, ext = self.args.command, self.args.subcommand, self.args.extra
@@ -87,25 +112,50 @@ class MetorApp:
                 
         elif cmd == "contacts":
             if sub == "list" or not sub:
-                print(self.cm.show())
+                if self.pm.is_daemon_running():
+                    resp = self._request_from_daemon({"action": "get_contacts_list", "chat_mode": False})
+                    if resp and "text" in resp:
+                        print(resp["text"])
+                    else:
+                        print(f"{Settings.RED}Error:{Settings.RESET} Failed to fetch contacts from daemon.")
+                else:
+                    # if no deamon there is no ram contacts, so we show the normal list which only contains saved contacts
+                    print(self.cm.show(chat_mode=False))
                         
             elif sub == "add":
-                if len(ext) < 2: 
-                    print("Usage: metor contacts add [alias] [onion]")
+                if len(ext) < 1: 
+                    print("Usage: metor contacts add <alias> [onion]")
+                elif len(ext) == 1:
+                    if self.pm.is_daemon_running():
+                        success = self._send_to_daemon({"action": "add_contact", "alias": ext[0]})
+                        if success: print("Command sent to running daemon.")
+                        else: print(f"{Settings.RED}Error:{Settings.RESET} Failed to communicate with daemon.")
+                    else:
+                        print(f"{Settings.RED}Error:{Settings.RESET} Daemon not running. Cannot save a RAM alias without an active session.")
                 else:
-                    _, msg = self.cm.add_contact(ext[0], ext[1])
-                    print(msg)
+                    if self.pm.is_daemon_running():
+                        success = self._send_to_daemon({"action": "add_contact", "alias": ext[0], "onion": ext[1]})
+                        if success: print("Command sent to running daemon.")
+                        else: print(f"{Settings.RED}Error:{Settings.RESET} Failed to communicate with daemon.")
+                    else:
+                        _, msg = self.cm.add_contact(ext[0], ext[1])
+                        print(msg)
                     
             elif sub in ("rm", "remove"):
                 if len(ext) < 1: 
-                    print("Usage: metor contacts rm [alias]")
+                    print("Usage: metor contacts rm <alias>")
                 else:
-                    _, msg = self.cm.remove_contact(ext[0])
-                    print(msg)
+                    if self.pm.is_daemon_running():
+                        success = self._send_to_daemon({"action": "remove_contact", "alias": ext[0]})
+                        if success: print("Command sent to running daemon. Active sessions will be downgraded.")
+                        else: print(f"{Settings.RED}Error:{Settings.RESET} Failed to communicate with daemon.")
+                    else:
+                        _, msg = self.cm.remove_contact(ext[0])
+                        print(msg)
                         
             elif sub == "rename":
                 if len(ext) < 2: 
-                    print("Usage: metor contacts rename [old_alias] [new_alias]")
+                    print("Usage: metor contacts rename <old_alias> <new_alias>")
                 else:
                     old_alias, new_alias = ext[0], ext[1]
                     
@@ -118,7 +168,7 @@ class MetorApp:
                         if success:
                             print(f"Command sent to running daemon. Check active chat windows to verify.")
                         else:
-                            print(f"{Settings.RED}Error:{Settings.RESET} Failed to communicate with the daemon.")
+                            print(f"{Settings.RED}Error:{Settings.RESET} Failed to communicate with daemon.")
                     else:
                         success, msg = self.cm.rename_contact(old_alias, new_alias)
                         if success:
@@ -156,7 +206,6 @@ class MetorApp:
         elif cmd == "cleanup":
             print(f"Cleaning up Metor processes and locks...")
             killed = 0
-            # 1. Kill Tor processes (Exact match to prevent the 'metor' script from committing suicide!)
             for proc in psutil.process_iter(['pid', 'name']):
                 try:
                     proc_name = proc.info['name'].lower() if proc.info['name'] else ""
@@ -166,7 +215,6 @@ class MetorApp:
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     pass
             
-            # 2. Clear Daemon Ports from ALL profiles
             for profile_name in ProfileManager.get_all_profiles():
                 temp_pm = ProfileManager(profile_name)
                 temp_pm.clear_daemon_port()
