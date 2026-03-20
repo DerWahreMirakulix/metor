@@ -55,7 +55,6 @@ class Daemon:
         """Cleanly shuts down the daemon, informing all peers."""
         self.stop_flag.set()
         
-        # Nutzen der existierenden Disconnect-Logik für alle aktiven & ausstehenden Sockets
         aliases_to_disconnect = list(self._connections.keys()) + list(self._pending_connections.keys())
         for alias in aliases_to_disconnect:
             self.disconnect(alias, initiated_by_self=True)
@@ -144,7 +143,7 @@ class Daemon:
                 
         elif action == "connect":
             alias, onion = self._resolve_target(target) or target
-            self._broadcast_ipc({"type": "system", "alias": alias, "text": f"Connecting to {"\"{alias}\"" if alias else onion} ..."})
+            self._broadcast_ipc({"type": "system", "alias": alias, "text": f"Connecting to {alias if alias else onion} ..."})
             threading.Thread(target=self._establish_connection, args=(target,), daemon=True).start()
             
         elif action == "disconnect":
@@ -152,7 +151,7 @@ class Daemon:
         elif action == "accept":
             self.accept_connection(target)
         elif action == "reject":
-            self.reject_connection(target)
+            self.reject_connection(target, initiated_by_self=True)
         elif action == "msg":
             self.send_message(target, cmd.get("text"), cmd.get("msg_id"))
             
@@ -297,19 +296,25 @@ class Daemon:
         self._broadcast_ipc({"type": "connected", "alias": alias, "text": "Connection established with {alias}."})
         self._start_receiving_thread(alias, conn)
 
-    def reject_connection(self, alias):
+    def reject_connection(self, alias, initiated_by_self=True):
+        conn = None
         with self._lock:
-            if alias not in self._pending_connections: return
-            conn = self._pending_connections.pop(alias)
+            if alias in self._connections: conn = self._connections.pop(alias)
+            elif alias in self._pending_connections: conn = self._pending_connections.pop(alias)
             
-        try: conn.sendall(f"/reject {self.tm.onion}\n".encode())
-        except Exception: pass
-        finally: conn.close()
+        if conn:
+            if initiated_by_self:
+                try: conn.sendall(f"/reject {self.tm.onion}\n".encode())
+                except Exception: pass
+            conn.close()
         
-        self.hm.log_event("rejected", alias, self.cm.get_onion_by_alias(alias))
-        self._broadcast_ipc({"type": "info", "alias": alias, "text": "Connection with {alias} rejected."})
+        status = "rejected" if initiated_by_self else "rejected by remote peer"
+        self.hm.log_event(status, alias, self.cm.get_onion_by_alias(alias))
+        
+        msg = "Connection with {alias} rejected." if initiated_by_self else "Connection with {alias} rejected by peer."
+        self._broadcast_ipc({"type": "info", "alias": alias, "text": msg})
 
-    def disconnect(self, alias, initiated_by_self=True):
+    def disconnect(self, alias, initiated_by_self=True, is_fallback=False):
         conn = None
         with self._lock:
             if alias in self._connections: conn = self._connections.pop(alias)
@@ -321,10 +326,15 @@ class Daemon:
                 except Exception: pass
             conn.close()
             
-            status = "disconnected" if initiated_by_self else "disconnected by remote peer"
+            if is_fallback:
+                status = "connection cancelled / lost"
+            else:
+                status = "disconnected" if initiated_by_self else "disconnected by remote peer"
             
             self.hm.log_event(status, alias, self.cm.get_onion_by_alias(alias))
-            self._broadcast_ipc({"type": "disconnected", "alias": alias, "text": "Peer {alias} disconnected."})
+            
+            msg = "Peer {alias} disconnected." if not is_fallback else "Connection to {alias} cancelled / lost."
+            self._broadcast_ipc({"type": "disconnected", "alias": alias, "text": msg})
 
     def send_message(self, alias, msg, msg_id):
         with self._lock:
@@ -339,6 +349,9 @@ class Daemon:
 
     def _receiver_target(self, initial_alias, conn):
         current_alias = initial_alias
+        remote_rejected = False
+        remote_disconnected = False
+        
         try:
             while True:
                 data = conn.recv(1024)
@@ -360,18 +373,12 @@ class Daemon:
                         self._broadcast_ipc({"type": "connected", "alias": current_alias, "text": "Connection established with {alias}."})
                         
                     elif msg.startswith("/disconnect "):
-                        self.disconnect(current_alias, initiated_by_self=False)
-                        return
+                        remote_disconnected = True
+                        break 
                         
                     elif msg.startswith("/reject "):
-                        self.hm.log_event("rejected by remote peer", current_alias, self.cm.get_onion_by_alias(current_alias))
-                        self._broadcast_ipc({"type": "info", "alias": current_alias, "text": "Connection with {alias} rejected by peer."})
-                        
-                        with self._lock:
-                            if current_alias in self._pending_connections:
-                                self._pending_connections.pop(current_alias)
-                        conn.close()
-                        return
+                        remote_rejected = True
+                        break 
                         
                     elif msg.startswith("/ack "):
                         msg_id = msg.split(" ")[1]
@@ -386,7 +393,10 @@ class Daemon:
                         
         except Exception:
             pass
-            
-        # Fallback
-        self.disconnect(current_alias, initiated_by_self=False)
-    
+        finally:
+            if remote_rejected:
+                self.reject_connection(current_alias, initiated_by_self=False)
+            elif remote_disconnected:
+                self.disconnect(current_alias, initiated_by_self=False)
+            else:
+                self.disconnect(current_alias, initiated_by_self=False, is_fallback=True)
