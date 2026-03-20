@@ -1,13 +1,15 @@
 import os
 import json
-from metor.config import ProfileManager, Settings
+
+from metor.profile import ProfileManager
+from metor.settings import Settings
 from metor.utils import clean_onion
 
-class ContactsManager:
+class ContactManager:
     """Manages the mapping between user-friendly aliases and .onion addresses."""
     
-    def __init__(self, profile_manager: ProfileManager):
-        self.pm = profile_manager
+    def __init__(self, pm: ProfileManager):
+        self.pm = pm
         
         self._file_path = os.path.join(self.pm.get_config_dir(), "contacts.json")
         self._contacts = self._load()
@@ -40,7 +42,7 @@ class ContactsManager:
                 
         self._contacts[alias] = onion
         self._save()
-        return alias
+        return True, f"Contact '{alias}' added successfully to profile '{self.pm.profile_name}'."
 
     def rename_contact(self, old_alias, new_alias):
         self._refresh()
@@ -48,15 +50,15 @@ class ContactsManager:
         new_alias = new_alias.strip().lower()
         
         if old_alias not in self._contacts:
-            return False
+            return False, f"{Settings.RED}Error:{Settings.RESET} Contact '{old_alias}' not found in profile '{self.pm.profile_name}'."
             
         if new_alias in self._contacts and new_alias != old_alias:
-            return False
+            return False, f"{Settings.RED}Error:{Settings.RESET} Alias '{new_alias}' is already in use."
             
         onion = self._contacts.pop(old_alias)
         self._contacts[new_alias] = onion
         self._save()
-        return True
+        return True, f"Contact renamed from '{old_alias}' to '{new_alias}' in profile '{self.pm.profile_name}'."
 
     def remove_contact(self, alias):       
         self._refresh()
@@ -64,8 +66,8 @@ class ContactsManager:
         if alias in self._contacts:
             del self._contacts[alias]
             self._save()
-            return True
-        return False
+            return True, f"Contact '{alias}' removed from profile '{self.pm.profile_name}'."
+        return False, f"{Settings.RED}Error:{Settings.RESET} Contact '{alias}' not found in profile '{self.pm.profile_name}'."
 
     def get_onion_by_alias(self, alias: str | None) -> str | None:    
         self._refresh()

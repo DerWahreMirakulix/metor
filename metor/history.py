@@ -1,12 +1,14 @@
 import os
 import datetime
-from metor.config import ProfileManager
+
+from metor.profile import ProfileManager
+from metor.settings import Settings
 
 class HistoryManager:
     """Manages chat and connection history logging."""
     
-    def __init__(self, profile_manager: ProfileManager):
-        self.pm = profile_manager
+    def __init__(self, pm: ProfileManager):
+        self.pm = pm
 
     def log_event(self, status, alias, onion, reason=""):
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -36,9 +38,9 @@ class HistoryManager:
             if os.path.exists(history_file):
                 with open(history_file, "w") as f:
                     f.write("")
-            return True
+            return True, f"History from profile '{self.pm.profile_name}' cleared."
         except IOError:
-            return False
+            return False, f"{Settings.RED}Error:{Settings.RESET} Failed to clear history for profile '{self.pm.profile_name}'."
         
     def update_alias(self, old_alias, new_alias):
         history_file = self.pm.get_history_file()

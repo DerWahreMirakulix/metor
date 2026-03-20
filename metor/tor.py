@@ -5,15 +5,18 @@ import socks
 import stem.process
 import sys
 
-from metor.config import ProfileManager, KeyManager, Settings
+from metor.profile import ProfileManager
+from metor.key import KeyManager
+from metor.settings import Settings
+from metor.utils import clean_onion
 
 class TorManager:
     """Manages the Tor process, hidden services, and local proxies."""
     
-    def __init__(self, profile_manager: ProfileManager, key_manager: KeyManager):
-        self.pm = profile_manager
-        self.km = key_manager
-        self.tor_proc = None
+    def __init__(self, pm: ProfileManager, km: KeyManager):
+        self.pm = pm
+        self.km = km
+        self.tm_proc = None
         self.onion = None
         self.socks_port = None
         self.incoming_port = None
@@ -57,7 +60,7 @@ class TorManager:
 
         for attempt in range(Settings.MAX_TOR_RETRIES):
             try:
-                self.tor_proc = stem.process.launch_tor_with_config(
+                self.tm_proc = stem.process.launch_tor_with_config(
                     config=config, timeout=tor_timeout, take_ownership=True,
                     tor_cmd=tor_cmd, init_msg_handler=print_tor_output
                 )
@@ -83,12 +86,12 @@ class TorManager:
         else:
             self.onion = "unknown"
             
-        return self.tor_proc is not None
+        return self.tm_proc is not None
 
     def stop(self):
-        if self.tor_proc:
-            self.tor_proc.terminate()
-            self.tor_proc = None
+        if self.tm_proc:
+            self.tm_proc.terminate()
+            self.tm_proc = None
 
     def connect(self, onion):
         """Establish SOCKS5 connection to remote peer."""
@@ -104,19 +107,18 @@ class TorManager:
         hostname_file = os.path.join(hs_dir, "hostname")
         if os.path.exists(hostname_file):
             with open(hostname_file, "r") as f:
-                return f.read().strip()
-        return None
+                onion = f.read().strip()
+                return True, f"Current onion address for profile '{self.pm.profile_name}': {Settings.YELLOW}{clean_onion(onion)}{Settings.RESET}.onion"
+        return False, f"No onion address generated yet for profile '{self.pm.profile_name}'.\n{Settings.CYAN}Hint:{Settings.RESET} Start daemon or generate a new address."
 
     def generate_address(self):
         """Force generation of a new address (starts/stops Tor)."""
-        if self.pm.is_chat_running():
-            return None, f"Changing the address for profile '{self.pm.profile_name}' is not possible while a chat is running"
+        if self.pm.is_daemon_running():
+            return False, f"{Settings.RED}Error:{Settings.RESET} Changing the address for profile '{self.pm.profile_name}' is not possible while a daemon is running"
 
         success = self.start()
         if not success:
-            return None, f"Failed to start Tor for profile '{self.pm.profile_name}'. Please check your Tor configuration and logs."
+            return False, f"{Settings.RED}Error:{Settings.RESET} Failed to start Tor for profile '{self.pm.profile_name}'. Please check your Tor configuration and logs."
         self.stop()
-
-        onion = self.onion
         
-        return onion, f"New onion address generated for profile '{self.pm.profile_name}': {onion}"
+        return True, f"New onion address generated for profile '{self.pm.profile_name}': {self.onion}"

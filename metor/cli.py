@@ -11,7 +11,7 @@ else:
     import tty
     import atexit
 
-from metor.config import Settings
+from metor.settings import Settings
 
 class CommandLineInput:
     """Handles non-blocking input with command history and a reactive UI renderer."""
@@ -95,7 +95,7 @@ class CommandLineInput:
 
         return text
 
-    def print_message(self, msg, msg_type="raw", alias=None, skip_prompt=False, msg_id=None):
+    def print_message(self, msg, msg_type=None, alias=None, skip_prompt=False, msg_id=None):
         sys.stdout.write("\r\033[K")
         
         lines = str(msg).splitlines()
@@ -104,7 +104,7 @@ class CommandLineInput:
             msg_dict = {
                 "line": self._line_counter,
                 "text": line,
-                "msg_type": msg_type,
+                "msg_type": msg_type or "raw",
                 "alias": alias,
                 "is_pending": bool(msg_id),
                 "msg_id": msg_id
@@ -163,6 +163,9 @@ class CommandLineInput:
     def print_empty_line(self):
         # Defensive: Print a single space instead of an empty line to avoid rendering issues
         self.print_message(" ", msg_type="raw", skip_prompt=True)
+    
+    def print_divider(self, msg_type=None):
+        self.print_message("---------------------------------", msg_type=msg_type)
 
     def clear_line(self):
         sys.stdout.write("\r\033[K")
