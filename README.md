@@ -137,4 +137,7 @@ _Note: The `[alias]` or `[old]` parameter can be safely omitted for the commands
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNU General Public License v3.0 (GPLv3).
+See the [LICENSE](LICENSE) file for details.
+
+Metor is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. This ensures that Metor and any derivative works remain open, transparent, and free from proprietary surveillance.
