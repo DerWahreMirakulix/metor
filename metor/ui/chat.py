@@ -450,7 +450,7 @@ class Chat:
                 # Determine focus indicator
                 marker: str = '*' if alias == self._focused_alias else ' '
 
-                lines.append(f' {marker} {color}{alias}{Theme.RESET}')
+                lines.append(f' {color}{marker} {alias}{Theme.RESET}')
 
             if pending:
                 lines.append('')
