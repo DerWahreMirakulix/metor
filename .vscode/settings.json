@@ -1,0 +1,41 @@
+{
+  "python-envs.defaultEnvManager": "ms-python.python:conda",
+  "python-envs.defaultPackageManager": "ms-python.python:conda",
+  "cSpell.words": [
+    "acked",
+    "CREAT",
+    "getpid",
+    "getwch",
+    "kbhit",
+    "keypair",
+    "metor",
+    "nacl",
+    "pycache",
+    "RDWR",
+    "signum",
+    "SIGWINCH",
+    "socksocket",
+    "subcmd",
+    "tcflush",
+    "tcgetattr",
+    "TCIFLUSH",
+    "TCSADRAIN",
+    "tcsetattr",
+    "urandom",
+    "venv",
+    "WRONLY"
+  ],
+  "editor.defaultFormatter": "charliermarsh.ruff",
+  "editor.formatOnSave": true,
+
+  "[markdown]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true,
+    "editor.wordWrap": "on"
+  },
+  
+  "[json]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true
+  }
+}

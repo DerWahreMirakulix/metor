@@ -1,0 +1,1 @@
+Please strictly follow the architectural and coding guidelines defined in the `AI_RULES.md` file located in the root directory of this repository.
