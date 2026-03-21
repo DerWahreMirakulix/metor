@@ -20,7 +20,7 @@ from metor.core.key import KeyManager
 from metor.ui.theme import Theme
 from metor.utils.constants import Constants
 from metor.core.tor import TorManager
-from metor.data.history import HistoryManager
+from metor.data.history import HistoryManager, HistoryEvent
 from metor.data.contact import ContactManager
 from metor.utils.helper import clean_onion
 from metor.core.api import IpcCommand, IpcEvent, Action, EventType
@@ -426,7 +426,7 @@ class Daemon:
                 return
             self._pending_connections[alias] = conn
 
-        self._hm.log_event('requested by remote peer', alias, remote_identity)
+        self._hm.log_event(HistoryEvent.REQUESTED_BY_REMOTE, alias, remote_identity)
         self._broadcast_ipc(
             IpcEvent(
                 type=EventType.INFO,
@@ -473,7 +473,7 @@ class Daemon:
             conn.close()
             return
 
-        self._hm.log_event('requested', alias, onion)
+        self._hm.log_event(HistoryEvent.REQUESTED, alias, onion)
         self._broadcast_ipc(
             IpcEvent(
                 type=EventType.INFO,
@@ -496,7 +496,7 @@ class Daemon:
         except Exception:
             pass
         onion: Optional[str] = self._cm.get_onion_by_alias(alias)
-        self._hm.log_event('connected', alias, onion)
+        self._hm.log_event(HistoryEvent.CONNECTED, alias, onion)
         self._broadcast_ipc(
             IpcEvent(
                 type=EventType.CONNECTED,
@@ -524,7 +524,11 @@ class Daemon:
                     pass
             conn.close()
 
-        status: str = 'rejected' if initiated_by_self else 'rejected by remote peer'
+        status: HistoryEvent = (
+            HistoryEvent.REJECTED
+            if initiated_by_self
+            else HistoryEvent.REJECTED_BY_REMOTE
+        )
         self._hm.log_event(status, alias, self._cm.get_onion_by_alias(alias))
 
         msg: str = (
@@ -560,12 +564,12 @@ class Daemon:
                 pass
 
             if is_fallback:
-                status: str = 'connection cancelled / lost'
+                status: HistoryEvent = HistoryEvent.CONNECTION_LOST
             else:
                 status = (
-                    'disconnected'
+                    HistoryEvent.DISCONNECTED
                     if initiated_by_self
-                    else 'disconnected by remote peer'
+                    else HistoryEvent.DISCONNECTED_BY_REMOTE
                 )
 
             self._hm.log_event(status, alias, self._cm.get_onion_by_alias(alias))
@@ -630,7 +634,7 @@ class Daemon:
                         onion: Optional[str] = self._cm.get_onion_by_alias(
                             current_alias
                         )
-                        self._hm.log_event('connected', current_alias, onion)
+                        self._hm.log_event(HistoryEvent.CONNECTED, current_alias, onion)
                         self._broadcast_ipc(
                             IpcEvent(
                                 type=EventType.CONNECTED,

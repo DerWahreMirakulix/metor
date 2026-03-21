@@ -3,11 +3,32 @@ Module for managing chat and connection history logs via SQLite.
 """
 
 import os
+from enum import Enum
 from typing import List, Tuple, Optional
 
 from metor.data.profile import ProfileManager
 from metor.data.sql import SqlManager
 from metor.utils.constants import Constants
+
+
+class HistoryEvent(str, Enum):
+    """Predefined event types for the history log."""
+
+    # Async / Offline Messaging Events
+    ASYNC_QUEUED = 'ASYNC_QUEUED'
+    ASYNC_SENT = 'ASYNC_SENT'
+    ASYNC_RECEIVED = 'ASYNC_RECEIVED'
+    ASYNC_FAILED = 'ASYNC_FAILED'
+
+    # Live Chat Connection Events
+    REQUESTED = 'REQUESTED'
+    REQUESTED_BY_REMOTE = 'REQUESTED_BY_REMOTE'
+    CONNECTED = 'CONNECTED'
+    REJECTED = 'REJECTED'
+    REJECTED_BY_REMOTE = 'REJECTED_BY_REMOTE'
+    DISCONNECTED = 'DISCONNECTED'
+    DISCONNECTED_BY_REMOTE = 'DISCONNECTED_BY_REMOTE'
+    CONNECTION_LOST = 'CONNECTION_LOST'
 
 
 class HistoryManager:
@@ -25,41 +46,39 @@ class HistoryManager:
         self._sql: SqlManager = SqlManager(self._db_path)
 
     def log_event(
-        self, status: str, alias: Optional[str], onion: Optional[str], reason: str = ''
+        self,
+        status: HistoryEvent,
+        alias: Optional[str],
+        onion: Optional[str],
+        reason: str = '',
     ) -> None:
         """
         Logs a connection or chat event into the database.
 
         Args:
-            status (str): The status or type of event.
+            status (HistoryEvent): The strictly typed status or type of event.
             alias (Optional[str]): The associated remote alias.
             onion (Optional[str]): The associated remote onion identity.
             reason (str): Optional context or reason for the event.
+
+        Returns:
+            None
         """
         query: str = (
             'INSERT INTO history (status, alias, onion, reason) VALUES (?, ?, ?, ?)'
         )
-        self._sql.execute(query, (status, alias, onion, reason))
+        self._sql.execute(query, (status.value, alias, onion, reason))
 
-    def read_history(self) -> List[str]:
+    def get_history(self) -> List[Tuple[str, str, Optional[str], Optional[str], str]]:
         """
-        Reads all history events from the database and formats them for display.
+        Retrieves all raw history events from the database without formatting.
 
         Returns:
-            List[str]: A list of formatted history string lines ordered by newest first.
+            List[Tuple[str, str, Optional[str], Optional[str], str]]:
+                A list of raw rows containing (timestamp, status, alias, onion, reason).
         """
-        # We order by timestamp DESC to get the newest entries first, matching the old logic.
         query: str = 'SELECT timestamp, status, alias, onion, reason FROM history ORDER BY timestamp DESC'
-        rows: List[Tuple] = self._sql.fetchall(query)
-
-        lines: List[str] = []
-        for row in rows:
-            timestamp, status, alias, onion, reason = row
-            line: str = f'[{timestamp}] {status} | remote alias: {alias} | remote identity: {onion}'
-            if reason:
-                line += f' | reason: {reason}'
-            lines.append(line)
-        return lines
+        return self._sql.fetchall(query)
 
     def clear_history(self) -> Tuple[bool, str]:
         """
@@ -98,17 +117,25 @@ class HistoryManager:
 
     def show(self) -> str:
         """
-        Fetches and constructs the complete history view as a single string.
+        Fetches raw history and constructs a human-readable string for terminal display.
 
         Returns:
             str: The multi-line formatted history output.
         """
-        history_lines: List[str] = self.read_history()
-        if not history_lines:
+        rows: List[Tuple[str, str, Optional[str], Optional[str], str]] = (
+            self.get_history()
+        )
+
+        if not rows:
             return f"No history available for profile '{self._pm.profile_name}'."
 
         lines: List[str] = [f"History for profile '{self._pm.profile_name}':\n"]
-        for line in history_lines:
+
+        for row in rows:
+            timestamp, status, alias, onion, reason = row
+            line: str = f'[{timestamp}] {status} | remote alias: {alias} | remote identity: {onion}'
+            if reason:
+                line += f' | reason: {reason}'
             lines.append(line)
 
         return '\n'.join(lines)
