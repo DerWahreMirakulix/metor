@@ -1,15 +1,34 @@
-# individual files
-metor/tor.exe
-metor/data
+# ---------------------------------------------------
+# Metor Data, Secrets & Binaries
+# ---------------------------------------------------
+.metor/
 
-# build output
-__pycache__
-metor.egg-info
-build
+# ---------------------------------------------------
+# Python Build Output & Caches
+# ---------------------------------------------------
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.egg-info/
 
-# IDE and env files
-.vscode
-.conda
+# ---------------------------------------------------
+# Virtual Environments
+# ---------------------------------------------------
+.conda/
+venv/
+.venv/
+env/
 
-# Todo
+# ---------------------------------------------------
+# OS Generated Files
+# ---------------------------------------------------
+.DS_Store
+Thumbs.db
+
+# ---------------------------------------------------
+# Local Tasks
+# ---------------------------------------------------
 todo
+todo.txt
+todo.md
