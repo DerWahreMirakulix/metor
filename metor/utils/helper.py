@@ -31,3 +31,29 @@ def ensure_onion_format(onion: str) -> str:
     """
     clean: str = clean_onion(onion)
     return f'{clean}.onion'
+
+
+def get_header_string(text: str) -> str:
+    """
+    Creates a simple header string with the given text.
+
+    Args:
+        text (str): The header text to display.
+
+    Returns:
+        str: The formatted header string.
+    """
+    return f'--- {text} ---'
+
+
+def get_divider_string(length: int = 30) -> str:
+    """
+    Generates a divider string consisting of dashes.
+
+    Args:
+        length (int): The number of dashes in the divider.
+
+    Returns:
+        str: The divider string.
+    """
+    return '-' * length

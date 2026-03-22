@@ -1,5 +1,6 @@
 """
 Module for managing SQLite database connections and dynamic table setups.
+Ensures single-source-of-truth normalization for contacts and logs.
 """
 
 import sqlite3
@@ -32,17 +33,31 @@ class SqlManager:
         """
         Creates necessary tables if they do not exist yet.
         """
-        query = """
+        # The contacts table acts as the normalized source of truth for aliases
+        contacts_query: str = """
+        CREATE TABLE IF NOT EXISTS contacts (
+            onion TEXT PRIMARY KEY,
+            alias TEXT UNIQUE NOT NULL,
+            is_saved BOOLEAN NOT NULL DEFAULT 0
+        );
+        """
+
+        # History relies on the onion string to JOIN with the contacts table
+        history_query: str = """
         CREATE TABLE IF NOT EXISTS history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
             status TEXT NOT NULL,
-            alias TEXT,
             onion TEXT,
             reason TEXT
         );
         """
-        self.execute(query)
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(contacts_query)
+            cursor.execute(history_query)
+            conn.commit()
 
     def execute(self, query: str, params: Tuple = ()) -> None:
         """
@@ -51,6 +66,9 @@ class SqlManager:
         Args:
             query (str): The SQL query string.
             params (Tuple): Parameters to inject into the SQL query safely.
+
+        Returns:
+            None
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()

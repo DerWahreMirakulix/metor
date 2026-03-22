@@ -6,10 +6,8 @@ from metor.ui.theme import Theme
 
 
 class Help:
-    """Static help texts with professional CLI notation."""
+    """Static help texts with professional CLI formatting."""
 
-    # The absolute column index where the description starts.
-    # Adjust this single value to move all descriptions left or right.
     DESC_COLUMN: int = 46
 
     @staticmethod
@@ -17,8 +15,7 @@ class Help:
         indent_spaces: str, cmd: str, desc: str, target_column: int
     ) -> str:
         """
-        Pads the command string so that the description always starts at the target column,
-        compensating for the dynamic indentation length.
+        Pads the command string so the description starts at the target column.
 
         Args:
             indent_spaces (str): The leading whitespace for indentation.
@@ -31,7 +28,6 @@ class Help:
         """
         pad_length: int = target_column - len(indent_spaces)
         pad_length = max(pad_length, len(cmd) + 2)
-
         padded_cmd: str = f'{cmd:<{pad_length}}'
         return f'{indent_spaces}{Theme.CYAN}{padded_cmd}{Theme.RESET} - {desc}\n'
 
@@ -51,7 +47,7 @@ class Help:
         sub_ind: str = ' ' * intend * (start + 1)
         sub_sub_ind: str = ' ' * intend * (start + 2)
 
-        out: str = (
+        return (
             f'{ind}{Theme.PURPLE}Chat Mode:{Theme.RESET}\n\n'
             + f'{ind}* The [alias] can be omitted if you are currently focused on a peer.\n'
             + f'{ind}* Any other text entered is sent to the focused peer.\n\n'
@@ -76,7 +72,7 @@ class Help:
             )
             + Help._format_line(
                 sub_sub_ind,
-                '/switch [..|alias]',
+                '/switch [..|<onion|alias>]',
                 "Switch focus (use '..' to remove focus).",
                 Help.DESC_COLUMN,
             )
@@ -88,7 +84,7 @@ class Help:
             )
             + Help._format_line(
                 sub_sub_ind,
-                '/connections',
+                '/sessions',
                 'List all active and pending sessions.',
                 Help.DESC_COLUMN,
             )
@@ -131,8 +127,6 @@ class Help:
             )
         )
 
-        return out
-
     @staticmethod
     def show_main_help(start: int = 0, intend: int = 2) -> str:
         """
@@ -147,7 +141,6 @@ class Help:
         """
         ind: str = ' ' * intend * start
         sub_ind: str = ' ' * intend * (start + 1)
-        sub_sub_ind: str = ' ' * intend * (start + 2)
 
         return (
             '\n'
@@ -179,7 +172,44 @@ class Help:
             + Help._format_line(
                 sub_ind,
                 'metor cleanup',
-                'Kill zombie Tor processes and clear locks.\n',
+                'Kill zombie Tor processes and clear locks.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
+                'metor purge',
+                'Wipe ALL profiles, keys, and databases.\n',
+                Help.DESC_COLUMN,
+            )
+            + f'{ind}{Theme.YELLOW}Asynchronous Messaging (Headless):{Theme.RESET}\n'
+            + Help._format_line(
+                sub_ind,
+                'metor send <alias> "msg"',
+                'Drop an offline message to a contact.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
+                'metor inbox',
+                'Check for unread offline messages.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
+                'metor read <alias>',
+                'Read and clear unread messages from an alias.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
+                'metor messages [show] <alias> [limit]',
+                'View past chat history with a contact.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
+                'metor messages clear [alias]',
+                'Delete message history.\n',
                 Help.DESC_COLUMN,
             )
             + f'{ind}{Theme.YELLOW}Profile & Identity:{Theme.RESET}\n'
@@ -191,39 +221,51 @@ class Help:
             )
             + Help._format_line(
                 sub_ind,
-                'metor profiles [list|add|rm|rename]',
+                'metor profiles [list|add|rm|rename] <args>',
                 'Manage isolated profile environments.',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
                 sub_ind,
-                'metor history [clear]',
+                'metor profiles clear <name>',
+                'Clear the entire SQLite database for a profile.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
+                'metor history [show|clear] [alias]',
                 'View or wipe the connection event log.\n',
                 Help.DESC_COLUMN,
             )
             + f'{ind}{Theme.YELLOW}External Contact Management:{Theme.RESET}\n'
             + Help._format_line(
-                sub_sub_ind,
-                'metor contacts list',
+                sub_ind,
+                'metor contacts [list]',
                 'List all contacts in your address book.',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
-                sub_sub_ind,
+                sub_ind,
                 'metor contacts add <alias> [onion]',
                 'Add a manual contact or save a running RAM alias.',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
-                sub_sub_ind,
+                sub_ind,
                 'metor contacts rm <alias>',
                 'Delete contact (active sessions revert to RAM).',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
-                sub_sub_ind,
+                sub_ind,
                 'metor contacts rename <old> <new>',
-                'Rename a saved contact or active session.\n',
+                'Rename a saved contact or active session.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
+                'metor contacts clear',
+                'Wipe the address book completely.\n',
                 Help.DESC_COLUMN,
             )
             + f'{ind}- - -\n\n'

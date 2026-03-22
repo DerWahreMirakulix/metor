@@ -10,7 +10,7 @@ from typing import Optional, List, Dict, Any
 
 
 class Action(str, Enum):
-    """Commands sent from the UI/CLI to the Daemon."""
+    """Enumeration of commands sent from the UI/CLI to the Daemon."""
 
     INIT = 'init'
     GET_CONNECTIONS = 'get_connections'
@@ -25,9 +25,14 @@ class Action(str, Enum):
     RENAME_CONTACT = 'rename_contact'
     SWITCH = 'switch'
 
+    # Async / Offline Actions
+    SEND_DROP = 'send_drop'
+    GET_INBOX = 'get_inbox'
+    MARK_READ = 'mark_read'
+
 
 class EventType(str, Enum):
-    """Events emitted by the Daemon to the connected UIs."""
+    """Enumeration of events broadcasted by the Daemon to the connected UIs."""
 
     INIT = 'init'
     INFO = 'info'
@@ -41,13 +46,26 @@ class EventType(str, Enum):
     SWITCH_SUCCESS = 'switch_success'
     CONTACT_LIST = 'contact_list'
 
+    # Async / Offline Events
+    INBOX_NOTIFICATION = 'inbox_notification'
+    INBOX_DATA = 'inbox_data'
+    MSG_FALLBACK_TO_DROP = 'msg_fallback_to_drop'
+
 
 @dataclass
 class IpcMessage:
     """Base class providing JSON serialization for all IPC messages."""
 
     def to_json(self) -> str:
-        # Exclude None values to keep the payload efficient over the local socket
+        """
+        Serializes the current DTO into a JSON string, excluding any None values.
+
+        Args:
+            None
+
+        Returns:
+            str: The serialized JSON string representing the object.
+        """
         data: Dict[str, Any] = {k: v for k, v in asdict(self).items() if v is not None}
         return json.dumps(data)
 
@@ -69,7 +87,15 @@ class IpcCommand(IpcMessage):
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'IpcCommand':
-        """Safely parses a raw dictionary into an IpcCommand DTO."""
+        """
+        Safely parses a raw dictionary into an IpcCommand DTO.
+
+        Args:
+            data (Dict[str, Any]): The raw dictionary received over the socket.
+
+        Returns:
+            IpcCommand: The strongly-typed command object.
+        """
         return cls(
             action=Action(data['action']),
             target=data.get('target'),
@@ -86,7 +112,7 @@ class IpcCommand(IpcMessage):
 
 @dataclass
 class IpcEvent(IpcMessage):
-    """Data Transfer Object for events broadcasted by the Daemon."""
+    """Data Transfer Object for events broadcasted by the Daemon to the UI."""
 
     type: EventType
     text: Optional[str] = None
@@ -98,13 +124,24 @@ class IpcEvent(IpcMessage):
     active: List[str] = field(default_factory=list)
     pending: List[str] = field(default_factory=list)
     contacts: List[str] = field(default_factory=list)
+    msg_ids: List[str] = field(default_factory=list)
+    inbox_counts: Dict[str, int] = field(default_factory=dict)
+    messages: List[Dict[str, Any]] = field(default_factory=list)
     is_header: bool = False
     is_demotion: bool = False
     history_updated: bool = False
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'IpcEvent':
-        """Safely parses a raw dictionary into an IpcEvent DTO."""
+        """
+        Safely parses a raw dictionary into an IpcEvent DTO.
+
+        Args:
+            data (Dict[str, Any]): The raw dictionary received over the socket.
+
+        Returns:
+            IpcEvent: The strongly-typed event object.
+        """
         return cls(
             type=EventType(data['type']),
             text=data.get('text'),
@@ -116,6 +153,9 @@ class IpcEvent(IpcMessage):
             active=data.get('active', []),
             pending=data.get('pending', []),
             contacts=data.get('contacts', []),
+            msg_ids=data.get('msg_ids', []),
+            inbox_counts=data.get('inbox_counts', {}),
+            messages=data.get('messages', []),
             is_header=data.get('is_header', False),
             is_demotion=data.get('is_demotion', False),
             history_updated=data.get('history_updated', False),

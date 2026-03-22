@@ -3,6 +3,7 @@
     "charliermarsh.ruff",
     "ms-python.python",
     "ms-python.vscode-pylance",
-    "esbenp.prettier-vscode"
+    "esbenp.prettier-vscode",
+    "yy0931.vscode-sqlite3-editor"
   ]
 }

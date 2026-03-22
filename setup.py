@@ -4,7 +4,7 @@ setup(
     name='metor',
     version='0.2',
     packages=find_packages(),
-    install_requires=['stem', 'PySocks', 'pynacl', 'psutil'],
+    install_requires=['stem', 'PySocks', 'pynacl', 'psutil', 'python-dotenv'],
     include_package_data=True,
     entry_points={'console_scripts': ['metor = metor.main:main']},
     author='LuRex',

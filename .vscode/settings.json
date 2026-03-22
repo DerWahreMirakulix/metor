@@ -1,13 +1,24 @@
 {
   "python-envs.defaultEnvManager": "ms-python.python:conda",
   "python-envs.defaultPackageManager": "ms-python.python:conda",
+  
+  "python.terminal.activateEnvironment": true,
+
+  // This block only runs on Linux and WSL. Windows completely ignores it!
+  "terminal.integrated.env.linux": {
+    "CONDA_ENV_WORKSPACE": "${workspaceFolder}/.conda"
+  },
+
   "cSpell.words": [
     "acked",
     "CREAT",
+    "docstrings",
+    "dotenv",
     "getpid",
     "getwch",
     "kbhit",
     "keypair",
+    "lifecycles",
     "metor",
     "nacl",
     "pycache",

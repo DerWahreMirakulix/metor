@@ -2,6 +2,7 @@
 # Metor Data, Secrets & Binaries
 # ---------------------------------------------------
 .metor/
+.env
 
 # ---------------------------------------------------
 # Python Build Output & Caches

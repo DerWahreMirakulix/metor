@@ -6,7 +6,8 @@ import os
 import shutil
 from typing import List, Tuple, Optional
 
-from metor.data.settings import Settings
+from metor.data.settings import SettingKey, Settings
+from metor.data.sql import SqlManager
 from metor.ui.theme import Theme
 from metor.utils.constants import Constants
 
@@ -33,7 +34,7 @@ class ProfileManager:
         Returns:
             str: The name of the default profile.
         """
-        return Settings.get('default_profile')
+        return Settings.get(SettingKey.DEFAULT_PROFILE)
 
     @classmethod
     def set_default_profile(cls, profile_name: str) -> Tuple[bool, str]:
@@ -52,7 +53,7 @@ class ProfileManager:
         if not safe_name:
             return False, 'Invalid profile name.'
 
-        Settings.set('default_profile', safe_name)
+        Settings.set(SettingKey.DEFAULT_PROFILE, safe_name)
         return True, f"Default profile permanently set to '{safe_name}'."
 
     def get_config_dir(self) -> str:
@@ -209,9 +210,12 @@ class ProfileManager:
         target_dir: str = os.path.join(Constants.DATA, safe_name)
 
         if active == safe_name:
-            return False, 'Cannot remove active profile!'
+            return (
+                False,
+                'Cannot remove active profile! Switch to another profile first.',
+            )
         if default == safe_name:
-            return False, 'Cannot remove default profile!'
+            return False, 'Cannot remove default profile! Change default first.'
         if not os.path.exists(target_dir):
             return False, f"Profile '{safe_name}' does not exist."
         if cls(safe_name).is_daemon_running():
@@ -222,6 +226,40 @@ class ProfileManager:
 
         shutil.rmtree(target_dir)
         return True, f"Profile '{safe_name}' successfully removed."
+
+    @classmethod
+    def clear_profile_db(cls, name: str) -> Tuple[bool, str]:
+        """
+        Clears the entire SQLite database (history, messages, contacts) for a profile.
+
+        Args:
+            name (str): The name of the profile.
+
+        Returns:
+            Tuple[bool, str]: Success flag and status message.
+        """
+        safe_name: str = ''.join(c for c in name if c.isalnum() or c in ('-', '_'))
+        if not safe_name:
+            return False, 'Invalid profile name.'
+
+        if cls(safe_name).is_daemon_running():
+            return (
+                False,
+                f"Cannot clear database for '{safe_name}' while daemon is running.",
+            )
+
+        db_path: str = os.path.join(Constants.DATA, safe_name, Constants.DB_FILE)
+        if not os.path.exists(db_path):
+            return False, f"No database found for profile '{safe_name}'."
+
+        try:
+            sql = SqlManager(db_path)
+            sql.execute('DELETE FROM history')
+            sql.execute('DELETE FROM messages')
+            sql.execute('DELETE FROM contacts')
+            return True, f"Database for profile '{safe_name}' successfully cleared."
+        except Exception as e:
+            return False, f'Error clearing database: {e}'
 
     @classmethod
     def show(cls, active_profile: Optional[str] = None) -> str:

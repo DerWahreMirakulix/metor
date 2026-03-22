@@ -1,0 +1,444 @@
+"""
+Module managing Tor network connections, socket lifecycles, and message routing.
+Handles the transition between live TCP streams and fallback Drop & Go messages.
+"""
+
+import socket
+import threading
+import time
+import base64
+import secrets
+from typing import Dict, List, Optional, Callable
+
+from metor.core.tor import TorManager
+from metor.data.history import HistoryManager, HistoryEvent
+from metor.data.contact import ContactManager
+from metor.data.messages import (
+    MessageManager,
+    MessageDirection,
+    MessageType,
+    MessageStatus,
+)
+from metor.data.settings import Settings, SettingKey
+from metor.core.api import IpcEvent, EventType
+from metor.ui.theme import Theme
+from metor.utils.constants import Constants
+
+from metor.core.daemon.models import TorCommand
+from metor.core.daemon.crypto import Crypto
+
+
+class NetworkManager:
+    """Handles raw sockets, Tor connections, and message buffering."""
+
+    def __init__(
+        self,
+        tm: TorManager,
+        cm: ContactManager,
+        hm: HistoryManager,
+        mm: MessageManager,
+        crypto: Crypto,
+        broadcast_callback: Callable[[IpcEvent], None],
+        stop_flag: threading.Event,
+    ) -> None:
+        self._tm: TorManager = tm
+        self._cm: ContactManager = cm
+        self._hm: HistoryManager = hm
+        self._mm: MessageManager = mm
+        self._crypto: Crypto = crypto
+        self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
+        self._stop_flag: threading.Event = stop_flag
+
+        self._lock: threading.Lock = threading.Lock()
+        self._connections: Dict[str, socket.socket] = {}
+        self._pending_connections: Dict[str, socket.socket] = {}
+        self._unacked_messages: Dict[str, Dict[str, str]] = {}
+
+    def start_listener(self) -> None:
+        """Starts the local Tor listener in a background thread."""
+        threading.Thread(target=self._listener_target, daemon=True).start()
+
+    def get_active_aliases(self) -> List[str]:
+        """Returns a list of currently connected aliases."""
+        with self._lock:
+            return list(self._connections.keys())
+
+    def get_pending_aliases(self) -> List[str]:
+        """Returns a list of aliases waiting for acceptance."""
+        with self._lock:
+            return list(self._pending_connections.keys())
+
+    def _listener_target(self) -> None:
+        """Background loop accepting raw incoming Tor sockets."""
+        listener: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind((Constants.LOCALHOST, self._tm.incoming_port or 0))
+        listener.listen(5)
+        while not self._stop_flag.is_set():
+            try:
+                listener.settimeout(1)
+                conn, _ = listener.accept()
+                threading.Thread(
+                    target=self._handle_incoming, args=(conn,), daemon=True
+                ).start()
+            except Exception:
+                continue
+
+    def _handle_incoming(self, conn: socket.socket) -> None:
+        """Authenticates inbound requests and routes them to Live-Chat or Drop-Box."""
+        auth_successful: bool = False
+        remote_identity: Optional[str] = None
+        is_async: bool = False
+
+        try:
+            conn.settimeout(10)
+            challenge: str = secrets.token_hex(32)
+            conn.sendall(f'{TorCommand.CHALLENGE.value} {challenge}\n'.encode())
+            data: bytes = conn.recv(2048)
+
+            if data and data.decode().strip().startswith(f'{TorCommand.AUTH.value} '):
+                parts: List[str] = data.decode().strip().split(' ')
+                if len(parts) >= 3 and self._crypto.verify_signature(
+                    parts[1], challenge, parts[2]
+                ):
+                    remote_identity = parts[1]
+                    auth_successful = True
+                    if len(parts) >= 4 and parts[3] == 'ASYNC':
+                        is_async = True
+        except Exception:
+            pass
+
+        if not auth_successful or not remote_identity:
+            conn.close()
+            return
+
+        # Handle Async Drop (Offline Message)
+        if is_async:
+            try:
+                data = conn.recv(4096)
+                for msg in data.decode().strip().split('\n'):
+                    if msg.startswith(f'{TorCommand.DROP.value} '):
+                        parts = msg.split(' ', 2)
+                        if len(parts) == 3:
+                            msg_id, content = (
+                                parts[1],
+                                base64.b64decode(parts[2]).decode('utf-8'),
+                            )
+                            self._mm.queue_message(
+                                remote_identity,
+                                MessageDirection.IN,
+                                MessageType.TEXT,
+                                content,
+                                MessageStatus.UNREAD,
+                            )
+                            self._hm.log_event(
+                                HistoryEvent.ASYNC_RECEIVED,
+                                remote_identity,
+                                'Received offline message',
+                            )
+
+                            conn.sendall(f'{TorCommand.ACK.value} {msg_id}\n'.encode())
+                            alias: Optional[str] = self._cm.get_alias_by_onion(
+                                remote_identity
+                            )
+                            self._broadcast(
+                                IpcEvent(
+                                    type=EventType.INBOX_NOTIFICATION,
+                                    alias=alias,
+                                    text=f"📬 1 new offline message from '{alias}'.",
+                                )
+                            )
+            except Exception:
+                pass
+            finally:
+                conn.close()
+            return
+
+        # Handle Live Connection Request
+        conn.settimeout(None)
+        alias: Optional[str] = self._cm.get_alias_by_onion(remote_identity)
+        if not alias:
+            conn.close()
+            return
+
+        with self._lock:
+            if alias in self._connections or alias in self._pending_connections:
+                conn.sendall(f'{TorCommand.REJECT.value} {self._tm.onion}\n'.encode())
+                conn.close()
+                return
+
+            if (alias in self._cm.get_all_contacts()) and Settings.get(
+                SettingKey.AUTO_ACCEPT_CONTACTS
+            ):
+                self._connections[alias] = conn
+                try:
+                    conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode())
+                except Exception:
+                    pass
+                self._hm.log_event(HistoryEvent.CONNECTED, remote_identity)
+                self._broadcast(
+                    IpcEvent(
+                        type=EventType.CONNECTED, alias=alias, onion=remote_identity
+                    )
+                )
+                self._start_receiving(alias, conn)
+                return
+
+            self._pending_connections[alias] = conn
+
+        self._hm.log_event(HistoryEvent.REQUESTED_BY_REMOTE, remote_identity)
+        self._broadcast(
+            IpcEvent(
+                type=EventType.INFO,
+                alias=alias,
+                text=f"Incoming connection from '{{alias}}'. Type '{Theme.GREEN}/accept {{alias}}{Theme.RESET}' or '{Theme.RED}/reject {{alias}}{Theme.RESET}'.",
+            )
+        )
+
+    def connect_to(self, target: str) -> None:
+        """Initiates an outbound Tor connection."""
+        alias, onion = self._cm.resolve_target(target)
+        if not onion or onion == self._tm.onion:
+            return
+
+        with self._lock:
+            if alias in self._connections:
+                return
+
+        try:
+            conn: socket.socket = self._tm.connect(onion)
+            conn.settimeout(10)
+            challenge: str = conn.recv(1024).decode().strip().split(' ')[1]
+            signature: Optional[str] = self._crypto.sign_challenge(challenge)
+            conn.sendall(
+                f'{TorCommand.AUTH.value} {self._tm.onion} {signature}\n'.encode()
+            )
+            conn.settimeout(None)
+
+            self._hm.log_event(HistoryEvent.REQUESTED, onion)
+            self._broadcast(
+                IpcEvent(
+                    type=EventType.INFO,
+                    alias=alias,
+                    text="Request sent to '{alias}'. Waiting for acceptance...",
+                )
+            )
+            self._start_receiving(alias or onion, conn)
+        except Exception:
+            self._broadcast(
+                IpcEvent(
+                    type=EventType.INFO,
+                    text="Failed to connect to '{alias}'.",
+                )
+            )
+
+    def accept(self, alias: str) -> None:
+        """Approves a pending incoming connection."""
+        with self._lock:
+            if alias not in self._pending_connections:
+                return
+            conn: socket.socket = self._pending_connections.pop(alias)
+            self._connections[alias] = conn
+
+        try:
+            conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode())
+        except Exception:
+            pass
+        onion: Optional[str] = self._cm.get_onion_by_alias(alias)
+        self._hm.log_event(HistoryEvent.CONNECTED, onion)
+        self._broadcast(IpcEvent(type=EventType.CONNECTED, alias=alias, onion=onion))
+        self._start_receiving(alias, conn)
+
+    def reject(self, alias: str, initiated_by_self: bool = True) -> None:
+        """Rejects a pending connection request."""
+        with self._lock:
+            conn = self._connections.pop(alias, None) or self._pending_connections.pop(
+                alias, None
+            )
+
+        if conn:
+            if initiated_by_self:
+                try:
+                    conn.sendall(
+                        f'{TorCommand.REJECT.value} {self._tm.onion}\n'.encode()
+                    )
+                except Exception:
+                    pass
+            conn.close()
+
+        status: HistoryEvent = (
+            HistoryEvent.REJECTED
+            if initiated_by_self
+            else HistoryEvent.REJECTED_BY_REMOTE
+        )
+        self._hm.log_event(status, self._cm.get_onion_by_alias(alias))
+        self._broadcast(
+            IpcEvent(
+                type=EventType.INFO,
+                alias=alias,
+                text="Connection with '{alias}' rejected.",
+            )
+        )
+
+    def disconnect(
+        self, alias: str, initiated_by_self: bool = True, is_fallback: bool = False
+    ) -> None:
+        """Terminates a connection and converts un-ACKed messages to drops."""
+        with self._lock:
+            conn = self._connections.pop(alias, None) or self._pending_connections.pop(
+                alias, None
+            )
+            unacked: Dict[str, str] = self._unacked_messages.pop(alias, {})
+
+        if unacked:
+            onion: Optional[str] = self._cm.get_onion_by_alias(alias)
+            if onion:
+                for content in unacked.values():
+                    self._mm.queue_message(
+                        onion,
+                        MessageDirection.OUT,
+                        MessageType.TEXT,
+                        content,
+                        MessageStatus.PENDING,
+                    )
+                self._hm.log_event(
+                    HistoryEvent.ASYNC_QUEUED, onion, 'Unacked msgs converted to drop'
+                )
+            self._broadcast(
+                IpcEvent(
+                    type=EventType.MSG_FALLBACK_TO_DROP, msg_ids=list(unacked.keys())
+                )
+            )
+
+        if conn:
+            if initiated_by_self:
+                try:
+                    conn.sendall(
+                        f'{TorCommand.DISCONNECT.value} {self._tm.onion}\n'.encode()
+                    )
+                    time.sleep(0.2)
+                    conn.shutdown(socket.SHUT_RDWR)
+                except Exception:
+                    pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+        status: HistoryEvent = (
+            HistoryEvent.CONNECTION_LOST
+            if is_fallback
+            else (
+                HistoryEvent.DISCONNECTED
+                if initiated_by_self
+                else HistoryEvent.DISCONNECTED_BY_REMOTE
+            )
+        )
+        self._hm.log_event(status, self._cm.get_onion_by_alias(alias))
+        self._broadcast(
+            IpcEvent(
+                type=EventType.DISCONNECTED,
+                alias=alias,
+                text=f"Disconnected from '{alias}'.",
+            )
+        )
+
+    def disconnect_all(self) -> None:
+        """Forcefully disconnects all active and pending peers."""
+        aliases: List[str] = self.get_active_aliases() + self.get_pending_aliases()
+        for alias in aliases:
+            self.disconnect(alias, initiated_by_self=True)
+
+    def send_message(self, alias: str, msg: str, msg_id: str) -> None:
+        """Sends a chat message and buffers it for ACK verification."""
+        with self._lock:
+            if alias not in self._connections:
+                return
+            conn: socket.socket = self._connections[alias]
+            self._unacked_messages.setdefault(alias, {})[msg_id] = msg
+
+        try:
+            b64_msg: str = base64.b64encode(msg.encode('utf-8')).decode('utf-8')
+            conn.sendall(f'{TorCommand.MSG.value} {msg_id} {b64_msg}\n'.encode())
+        except Exception:
+            pass
+
+    def _start_receiving(self, alias: str, conn: socket.socket) -> None:
+        """Starts a background thread to listen for data on a specific live socket."""
+        threading.Thread(
+            target=self._receiver_target, args=(alias, conn), daemon=True
+        ).start()
+
+    def _receiver_target(self, current_alias: str, conn: socket.socket) -> None:
+        """Target processing incoming messages, ACKs, and disconnects."""
+        remote_rejected, remote_disconnected = False, False
+
+        try:
+            while True:
+                data: bytes = conn.recv(1024)
+                if not data:
+                    break
+
+                for msg in data.decode().strip().split('\n'):
+                    msg = msg.strip()
+                    if not msg:
+                        continue
+
+                    if msg == TorCommand.ACCEPTED.value:
+                        with self._lock:
+                            if current_alias in self._pending_connections:
+                                self._pending_connections.pop(current_alias)
+                            self._connections[current_alias] = conn
+                        onion: Optional[str] = self._cm.get_onion_by_alias(
+                            current_alias
+                        )
+                        self._hm.log_event(HistoryEvent.CONNECTED, onion)
+                        self._broadcast(
+                            IpcEvent(
+                                type=EventType.CONNECTED,
+                                alias=current_alias,
+                                onion=onion,
+                            )
+                        )
+
+                    elif msg.startswith(f'{TorCommand.DISCONNECT.value} '):
+                        remote_disconnected = True
+                        break
+                    elif msg.startswith(f'{TorCommand.REJECT.value} '):
+                        remote_rejected = True
+                        break
+
+                    elif msg.startswith(f'{TorCommand.ACK.value} '):
+                        msg_id: str = msg.split(' ')[1]
+                        with self._lock:
+                            if current_alias in self._unacked_messages:
+                                self._unacked_messages[current_alias].pop(msg_id, None)
+                        self._broadcast(IpcEvent(type=EventType.ACK, msg_id=msg_id))
+
+                    elif msg.startswith(f'{TorCommand.MSG.value} '):
+                        parts: List[str] = msg.split(' ', 2)
+                        if len(parts) == 3:
+                            try:
+                                conn.sendall(
+                                    f'{TorCommand.ACK.value} {parts[1]}\n'.encode()
+                                )
+                                content = base64.b64decode(parts[2]).decode('utf-8')
+                                self._broadcast(
+                                    IpcEvent(
+                                        type=EventType.REMOTE_MSG,
+                                        alias=current_alias,
+                                        text=content,
+                                    )
+                                )
+                            except Exception:
+                                pass
+        except Exception:
+            pass
+        finally:
+            if remote_rejected:
+                self.reject(current_alias, initiated_by_self=False)
+            elif remote_disconnected:
+                self.disconnect(current_alias, initiated_by_self=False)
+            else:
+                self.disconnect(
+                    current_alias, initiated_by_self=False, is_fallback=True
+                )

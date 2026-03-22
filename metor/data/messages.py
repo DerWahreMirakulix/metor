@@ -1,26 +1,29 @@
 """
-Module for managing asynchronous offline messages (SMS/Voice) via SQLite.
+Module for managing asynchronous offline messages via SQLite.
 Uses strict Enums to represent message states and types.
 """
 
 import os
 from enum import Enum
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Any, Optional
 
 from metor.data.profile import ProfileManager
 from metor.data.sql import SqlManager
+from metor.data.contact import ContactManager
+from metor.ui.theme import Theme
 from metor.utils.constants import Constants
+from metor.utils.helper import get_divider_string, get_header_string
 
 
 class MessageStatus(str, Enum):
-    """Represents the delivery and read status of an async message."""
+    """
+    Represents the exact delivery and read status of an async message.
+    """
 
     PENDING = 'pending'
-    SENT = 'sent'
     DELIVERED = 'delivered'
     UNREAD = 'unread'
     READ = 'read'
-    FAILED = 'failed'
 
 
 class MessageDirection(str, Enum):
@@ -34,7 +37,6 @@ class MessageType(str, Enum):
     """Represents the payload type of a message."""
 
     TEXT = 'text'
-    VOICE = 'voice'
 
 
 class MessageManager:
@@ -55,6 +57,9 @@ class MessageManager:
     def _initialize_table(self) -> None:
         """
         Creates the 'messages' table if it does not already exist.
+
+        Args:
+            None
 
         Returns:
             None
@@ -110,6 +115,9 @@ class MessageManager:
         """
         Retrieves all outbound messages that are waiting to be delivered.
 
+        Args:
+            None
+
         Returns:
             List[Tuple]: A list of database rows representing pending messages.
         """
@@ -135,6 +143,9 @@ class MessageManager:
     def get_unread_counts(self) -> Dict[str, int]:
         """
         Retrieves a count of unread messages grouped by contact onion.
+
+        Args:
+            None
 
         Returns:
             Dict[str, int]: A dictionary mapping onion addresses to their unread message count.
@@ -179,3 +190,160 @@ class MessageManager:
             )
 
         return messages
+
+    def get_chat_history(
+        self, contact_onion: str, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieves the past message history for a specific contact, ordered chronologically.
+
+        Args:
+            contact_onion (str): The target onion address.
+            limit (int): The maximum number of past messages to fetch. Defaults to 50.
+
+        Returns:
+            List[Dict[str, Any]]: A list of dictionaries containing formatted message data.
+        """
+        query: str = """
+            SELECT direction, status, payload, timestamp 
+            FROM messages 
+            WHERE contact_onion = ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+        """
+        rows: List[Tuple] = self._sql.fetchall(query, (contact_onion, limit))
+        rows.reverse()
+
+        result: List[Dict[str, Any]] = []
+        for row in rows:
+            direction, status, payload, timestamp = row
+            result.append(
+                {
+                    'direction': direction,
+                    'status': status,
+                    'payload': payload,
+                    'timestamp': timestamp,
+                }
+            )
+        return result
+
+    def clear_messages(self, onion: Optional[str] = None) -> Tuple[bool, str]:
+        """
+        Wipes the message table completely or just for a specific contact,
+        and removes orphaned discovered peers.
+
+        Args:
+            onion (Optional[str]): The target onion identity. If None, deletes all.
+
+        Returns:
+            Tuple[bool, str]: A success flag and a status message.
+        """
+        try:
+            if onion:
+                self._sql.execute(
+                    'DELETE FROM messages WHERE contact_onion = ?', (onion,)
+                )
+                msg = f"All messages for '{onion}' cleared."
+            else:
+                self._sql.execute('DELETE FROM messages')
+                msg = f"All messages in profile '{self._pm.profile_name}' cleared."
+
+            # Cleanup orphaned discovered peers that have no history and no messages left
+            cleanup_query: str = """
+                DELETE FROM contacts 
+                WHERE is_saved = 0 
+                AND onion NOT IN (SELECT onion FROM history WHERE onion IS NOT NULL)
+                AND onion NOT IN (SELECT contact_onion FROM messages)
+            """
+            self._sql.execute(cleanup_query)
+
+            return True, msg
+        except Exception as e:
+            return False, f'Failed to clear messages: {e}'
+
+    def show_inbox(self, cm: ContactManager) -> str:
+        """Fetches and formats the current unread inbox counts into a CLI string."""
+        counts: Dict[str, int] = self.get_unread_counts()
+        if not counts:
+            return f'{Theme.DARK_GREY}Inbox is empty.{Theme.RESET}'
+
+        out: str = f'{Theme.YELLOW}Unread Offline Messages:{Theme.RESET}\n'
+        for onion, count in counts.items():
+            resolved_alias: str = cm.get_alias_by_onion(onion) or onion
+            out += f' - {Theme.CYAN}{resolved_alias}{Theme.RESET}: {count} new message(s)\n'
+
+        return out.strip()
+
+    def show_read(self, target: str, cm: ContactManager) -> str:
+        """
+        Fetches, formats, and marks as read all pending inbox messages for an alias.
+
+        Args:
+            target (str): The target string from the CLI (alias or onion).
+            cm (ContactManager): Contact manager to resolve the target.
+
+        Returns:
+            str: The colorized terminal output displaying the unread messages.
+        """
+        alias, onion = cm.resolve_target(target)
+        if not onion:
+            return f"Contact '{target}' not found in address book."
+
+        disp_name: str = alias or target
+        raw_messages: List[Tuple] = self.get_and_read_inbox(onion)
+
+        if not raw_messages:
+            return f"No unread messages from '{disp_name}'."
+
+        out: str = f'{get_header_string(f"Messages from {Theme.CYAN}{disp_name}{Theme.RESET}")}\n'
+        for msg in raw_messages:
+            timestamp: str = msg[3]
+            payload: str = msg[2]
+
+            prefix: str = f'{Theme.PURPLE}From {disp_name}{Theme.RESET}'
+            out += f'[{timestamp}] {prefix}: {payload}\n'
+
+        out += get_divider_string()
+        return out
+
+    def show_history(self, target: str, cm: ContactManager, limit: int = 50) -> str:
+        """
+        Fetches and formats the historical message record mimicking the Chat UI colors.
+
+        Args:
+            target (str): The target string from the CLI (alias or onion).
+            cm (ContactManager): Contact manager to resolve the target.
+            limit (int): The number of recent messages to retrieve.
+
+        Returns:
+            str: The formatted terminal output of the chat history.
+        """
+        alias, onion = cm.resolve_target(target)
+        if not onion:
+            return f"Contact '{target}' not found in address book."
+
+        disp_name: str = alias or target
+        messages: List[Dict[str, Any]] = self.get_chat_history(onion, limit)
+
+        if not messages:
+            return f"No chat history found for '{disp_name}'."
+
+        out: str = f'{get_header_string(f"Chat History with {Theme.CYAN}{disp_name}{Theme.RESET} (Last {len(messages)})")}\n'
+        for msg in messages:
+            time_str: str = msg.get('timestamp', '')
+            direction: str = msg.get('direction', '')
+            status: str = msg.get('status', '')
+            payload: str = msg.get('payload', '')
+
+            if direction == MessageDirection.OUT.value:
+                if status == MessageStatus.DELIVERED.value:
+                    prefix = f'{Theme.GREEN}To {disp_name}{Theme.RESET}'
+                else:
+                    prefix = f'To {disp_name}'
+            else:
+                prefix = f'{Theme.PURPLE}From {disp_name}{Theme.RESET}'
+
+            out += f'[{time_str}] {prefix}: {payload}\n'
+
+        out += get_divider_string()
+        return out

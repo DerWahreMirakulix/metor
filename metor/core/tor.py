@@ -12,7 +12,7 @@ from typing import Tuple, Optional, Any
 
 from metor.data.profile import ProfileManager
 from metor.core.key import KeyManager
-from metor.data.settings import Settings
+from metor.data.settings import SettingKey, Settings
 from metor.ui.theme import Theme
 from metor.utils.constants import Constants
 from metor.utils.helper import clean_onion
@@ -85,11 +85,11 @@ class TorManager:
 
         def print_tor_output(line: str) -> None:
             """Handles and formats Tor console output if logging is enabled."""
-            if Settings.get('enable_tor_logging'):
+            if Settings.get(SettingKey.ENABLE_TOR_LOGGING):
                 sys.stdout.write(f'\r\033[K{Theme.CYAN}[TOR-LOG]{Theme.RESET} {line}\n')
                 sys.stdout.flush()
 
-        max_retries: int = Settings.get('max_tor_retries')
+        max_retries: int = Settings.get(SettingKey.MAX_TOR_RETRIES)
         for attempt in range(max_retries):
             try:
                 self._tm_proc = stem.process.launch_tor_with_config(
@@ -101,7 +101,7 @@ class TorManager:
                 )
                 break
             except OSError as e:
-                if Settings.get('enable_tor_logging'):
+                if Settings.get(SettingKey.ENABLE_TOR_LOGGING):
                     print(f'Error starting Tor: {e}')
                 if attempt < max_retries - 1:
                     time.sleep(2)

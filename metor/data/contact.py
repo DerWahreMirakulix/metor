@@ -3,57 +3,28 @@ Module for managing mappings between user-friendly aliases and .onion addresses.
 """
 
 import os
-import json
-from typing import Dict, Tuple, Optional, List
+from typing import Tuple, Optional, List
 
 from metor.data.profile import ProfileManager
+from metor.data.sql import SqlManager
 from metor.ui.theme import Theme
 from metor.utils.constants import Constants
 from metor.utils.helper import clean_onion, ensure_onion_format
-from metor.utils.lock import FileLock
 
 
 class ContactManager:
-    """Manages the mapping between user-friendly aliases and .onion addresses."""
+    """Manages the database mapping between aliases and .onion addresses."""
 
     def __init__(self, pm: ProfileManager) -> None:
         """
-        Initializes the ContactManager for a specific profile.
+        Initializes the ContactManager connected to the SQLite database.
 
         Args:
             pm (ProfileManager): The profile manager instance.
         """
         self._pm: ProfileManager = pm
-        self._file_path: str = os.path.join(
-            self._pm.get_config_dir(), Constants.CONTACTS_FILE
-        )
-        self._contacts: Dict[str, str] = self._load()
-        self._session_aliases: Dict[str, str] = {}
-
-    def _load(self) -> Dict[str, str]:
-        """
-        Loads contacts from the JSON file on disk.
-
-        Returns:
-            Dict[str, str]: A dictionary of saved contacts.
-        """
-        if not os.path.exists(self._file_path):
-            return {}
-        try:
-            with open(self._file_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            return {}
-
-    def _refresh(self) -> None:
-        """Reloads the contacts dictionary from disk."""
-        self._contacts = self._load()
-
-    def _save(self) -> None:
-        """Saves the current contacts dictionary to disk using an exclusive file lock."""
-        with FileLock(self._file_path):
-            with open(self._file_path, 'w', encoding='utf-8') as f:
-                json.dump(self._contacts, f, indent=4)
+        self._db_path: str = os.path.join(self._pm.get_config_dir(), Constants.DB_FILE)
+        self._sql: SqlManager = SqlManager(self._db_path)
 
     def get_all_contacts(self) -> List[str]:
         """
@@ -62,16 +33,30 @@ class ContactManager:
         Returns:
             List[str]: A list of saved alias names.
         """
-        self._refresh()
-        return list(self._contacts.keys())
+        query: str = 'SELECT alias FROM contacts WHERE is_saved = 1'
+        rows: List[Tuple] = self._sql.fetchall(query)
+        return [row[0] for row in rows]
 
     def is_session_alias(self, alias: str) -> bool:
-        """Checks if an alias is only temporarily stored in RAM."""
-        return alias.strip().lower() in self._session_aliases
+        """
+        Checks if an alias belongs to an auto-generated discovered peer.
+
+        Args:
+            alias (str): The alias to check.
+
+        Returns:
+            bool: True if it is an unsaved discovered peer.
+        """
+        alias = alias.strip().lower()
+        query: str = 'SELECT is_saved FROM contacts WHERE alias = ?'
+        res: List[Tuple] = self._sql.fetchall(query, (alias,))
+        if res and res[0][0] == 0:
+            return True
+        return False
 
     def add_contact(self, alias: str, onion: str) -> Tuple[bool, str]:
         """
-        Adds a completely new contact to the disk.
+        Adds a new contact to the address book.
 
         Args:
             alias (str): The chosen name for the contact.
@@ -80,61 +65,63 @@ class ContactManager:
         Returns:
             Tuple[bool, str]: A success flag and a status message.
         """
-        self._refresh()
         alias = alias.strip().lower()
-
-        if self._contacts.get(alias):
-            return False, f"Alias '{alias}' is already in use."
-
         onion = clean_onion(onion)
 
-        existing_aliases: List[str] = [
-            k for k, v in self._contacts.items() if v == onion
-        ]
-        if existing_aliases:
+        if self._sql.fetchall('SELECT onion FROM contacts WHERE alias = ?', (alias,)):
+            return False, f"Alias '{alias}' is already in use."
+
+        res: List[Tuple] = self._sql.fetchall(
+            'SELECT alias FROM contacts WHERE onion = ? AND is_saved = 1', (onion,)
+        )
+        if res:
             return (
                 False,
-                f"The onion is already associated with an alias '{existing_aliases[0]}'.",
+                f"The onion is already associated with saved contact '{res[0][0]}'.",
             )
 
-        if alias in self._session_aliases:
-            del self._session_aliases[alias]
-
-        self._contacts[alias] = onion
-        self._save()
+        if self._sql.fetchall('SELECT alias FROM contacts WHERE onion = ?', (onion,)):
+            self._sql.execute(
+                'UPDATE contacts SET alias = ?, is_saved = 1 WHERE onion = ?',
+                (alias, onion),
+            )
+        else:
+            self._sql.execute(
+                'INSERT INTO contacts (onion, alias, is_saved) VALUES (?, ?, 1)',
+                (onion, alias),
+            )
 
         return (
             True,
             f"Contact '{alias}' added successfully to profile '{self._pm.profile_name}'.",
         )
 
-    def promote_session_alias(self, alias: str) -> Tuple[bool, str]:
+    def promote_discovered_peer(self, alias: str) -> Tuple[bool, str]:
         """
-        Promotes a volatile RAM alias to a permanent disk contact with the exact same name.
+        Promotes a discovered peer to a permanent address book contact.
 
         Args:
-            alias (str): The RAM alias to promote.
+            alias (str): The discovered alias to promote.
 
         Returns:
             Tuple[bool, str]: A success flag and a status message.
         """
-        self._refresh()
         alias = alias.strip().lower()
+        res: List[Tuple] = self._sql.fetchall(
+            'SELECT is_saved FROM contacts WHERE alias = ?', (alias,)
+        )
 
-        if alias not in self._session_aliases:
-            return False, f"RAM alias '{alias}' not found."
-
-        if alias in self._contacts:
+        if not res:
+            return False, f"Peer alias '{alias}' not found."
+        if res[0][0] == 1:
             return False, f"Alias '{alias}' is already saved."
 
-        onion: str = self._session_aliases.pop(alias)
-        self._contacts[alias] = onion
-        self._save()
-        return True, f"RAM alias '{alias}' saved permanently to address book."
+        self._sql.execute('UPDATE contacts SET is_saved = 1 WHERE alias = ?', (alias,))
+        return True, f"Discovered peer '{alias}' saved permanently to address book."
 
     def rename_contact(self, old_alias: str, new_alias: str) -> Tuple[bool, str]:
         """
-        Renames a contact dynamically (RAM stays RAM, Disk stays Disk).
+        Renames a contact or discovered peer dynamically.
 
         Args:
             old_alias (str): The current alias.
@@ -143,32 +130,30 @@ class ContactManager:
         Returns:
             Tuple[bool, str]: A success flag and a status message.
         """
-        self._refresh()
         old_alias = old_alias.strip().lower()
         new_alias = new_alias.strip().lower()
 
         if old_alias == new_alias:
             return False, 'The new alias must be different from the old one.'
 
-        if new_alias in self._contacts or new_alias in self._session_aliases:
-            if new_alias != old_alias:
-                return False, f"Alias '{new_alias}' is already in use."
+        if self._sql.fetchall(
+            'SELECT onion FROM contacts WHERE alias = ?', (new_alias,)
+        ):
+            return False, f"Alias '{new_alias}' is already in use."
 
-        if old_alias in self._contacts:
-            onion: str = self._contacts.pop(old_alias)
-            self._contacts[new_alias] = onion
-            self._save()
-            return True, f"Contact renamed from '{old_alias}' to '{new_alias}'."
-        elif old_alias in self._session_aliases:
-            onion = self._session_aliases.pop(old_alias)
-            self._session_aliases[new_alias] = onion
-            return True, f"RAM alias renamed from '{old_alias}' to '{new_alias}'."
-        else:
-            return False, f"Contact '{old_alias}' not found."
+        if not self._sql.fetchall(
+            'SELECT onion FROM contacts WHERE alias = ?', (old_alias,)
+        ):
+            return False, f"Alias '{old_alias}' not found."
+
+        self._sql.execute(
+            'UPDATE contacts SET alias = ? WHERE alias = ?', (new_alias, old_alias)
+        )
+        return True, f"Alias renamed from '{old_alias}' to '{new_alias}'."
 
     def remove_contact(self, alias: str) -> Tuple[bool, str]:
         """
-        Removes a saved contact. Refuses to delete pure RAM aliases.
+        Removes a saved contact. Refuses to delete discovered peers.
 
         Args:
             alias (str): The contact to remove.
@@ -176,21 +161,61 @@ class ContactManager:
         Returns:
             Tuple[bool, str]: A success flag and a status message.
         """
-        self._refresh()
         alias = alias.strip().lower()
+        res: List[Tuple] = self._sql.fetchall(
+            'SELECT is_saved FROM contacts WHERE alias = ?', (alias,)
+        )
 
-        if alias in self._session_aliases and alias not in self._contacts:
-            return False, 'RAM aliases cannot be deleted. They expire automatically.'
+        if not res:
+            return False, f"Contact '{alias}' not found."
 
-        if alias in self._contacts:
-            del self._contacts[alias]
-            self._save()
+        if res[0][0] == 0:
             return (
-                True,
-                f"Contact '{alias}' removed from profile '{self._pm.profile_name}'.",
+                False,
+                'Discovered peers cannot be deleted manually as they are tied to message history.',
             )
 
-        return False, f"Contact '{alias}' not found."
+        self._sql.execute(
+            'DELETE FROM contacts WHERE alias = ? AND is_saved = 1', (alias,)
+        )
+        return (
+            True,
+            f"Contact '{alias}' removed from profile '{self._pm.profile_name}'.",
+        )
+
+    def clear_contacts(self) -> Tuple[bool, str]:
+        """
+        Wipes the address book, resets saved contacts to discovered peers,
+        and anonymizes aliases for active onions in history/messages.
+
+        Args:
+            None
+
+        Returns:
+            Tuple[bool, str]: A success flag and a status message.
+        """
+        try:
+            query: str = """
+                SELECT DISTINCT onion FROM (
+                    SELECT onion FROM history WHERE onion IS NOT NULL
+                    UNION
+                    SELECT contact_onion AS onion FROM messages
+                )
+            """
+            rows: List[Tuple] = self._sql.fetchall(query)
+            active_onions: List[str] = [r[0] for r in rows]
+
+            self._sql.execute('DELETE FROM contacts')
+
+            for onion in active_onions:
+                self.get_alias_by_onion(onion)
+
+            return (
+                True,
+                f"All contacts cleared and active peers anonymized for profile '{self._pm.profile_name}'.",
+            )
+        except Exception as e:
+            return False, f'Failed to clear contacts: {e}'
 
     def resolve_target(
         self, target: Optional[str], default_value: Optional[str] = None
@@ -213,20 +238,20 @@ class ContactManager:
 
     def get_onion_by_alias(self, alias: Optional[str]) -> Optional[str]:
         """Returns the onion address associated with an alias."""
-        self._refresh()
         if not alias:
             return None
         alias = alias.strip().lower()
 
-        onion: Optional[str] = self._contacts.get(alias)
-        if not onion:
-            onion = self._session_aliases.get(alias)
-
-        return f'{onion}.onion' if onion else None
+        res: List[Tuple] = self._sql.fetchall(
+            'SELECT onion FROM contacts WHERE alias = ?', (alias,)
+        )
+        if res:
+            return f'{res[0][0]}.onion'
+        return None
 
     def get_alias_by_onion(self, onion: Optional[str]) -> Optional[str]:
         """
-        Returns the alias for an onion, or auto-generates a RAM alias if completely unknown.
+        Returns the alias for an onion, or auto-generates a discovered peer if unknown.
 
         Args:
             onion (Optional[str]): The onion address.
@@ -234,37 +259,38 @@ class ContactManager:
         Returns:
             Optional[str]: The mapped or generated alias.
         """
-        self._refresh()
         if not onion:
             return None
-
         onion = clean_onion(onion)
 
-        for alias, saved_onion in self._contacts.items():
-            if saved_onion == onion:
-                return alias
-
-        for alias, saved_onion in self._session_aliases.items():
-            if saved_onion == onion:
-                return alias
+        res: List[Tuple] = self._sql.fetchall(
+            'SELECT alias FROM contacts WHERE onion = ?', (onion,)
+        )
+        if res:
+            return res[0][0]
 
         if len(onion) == 56:
             base_alias: str = onion[:6]
-            alias = base_alias
+            alias: str = base_alias
             counter: int = 1
 
-            while alias in self._contacts or alias in self._session_aliases:
+            while self._sql.fetchall(
+                'SELECT onion FROM contacts WHERE alias = ?', (alias,)
+            ):
                 counter += 1
                 alias = f'{base_alias}{counter}'
 
-            self._session_aliases[alias] = onion
+            self._sql.execute(
+                'INSERT INTO contacts (onion, alias, is_saved) VALUES (?, ?, 0)',
+                (onion, alias),
+            )
             return alias
 
         return None
 
     def show(self, chat_mode: bool = False) -> str:
         """
-        Returns a formatted string of all disk contacts and RAM aliases.
+        Returns a formatted string of all address book contacts and discovered peers.
 
         Args:
             chat_mode (bool): Whether to format strictly for the chat UI.
@@ -272,22 +298,27 @@ class ContactManager:
         Returns:
             str: The formatted contacts list.
         """
-        self._refresh()
         profile_suffix: str = (
             '' if chat_mode else f" for profile '{self._pm.profile_name}'"
         )
-
         lines: List[str] = []
-        if self._contacts:
+
+        saved: List[Tuple] = self._sql.fetchall(
+            'SELECT alias, onion FROM contacts WHERE is_saved = 1 ORDER BY alias ASC'
+        )
+        if saved:
             lines.append(f'Available contacts{profile_suffix}:')
-            for alias, onion in self._contacts.items():
-                lines.append(f'   {Theme.GREEN}{alias}{Theme.RESET} -> {onion}')
+            for row in saved:
+                lines.append(f'   {Theme.GREEN}{row[0]}{Theme.RESET} -> {row[1]}')
         else:
             lines.append(f'No contacts in address book{profile_suffix}.')
 
-        if self._session_aliases:
-            lines.append('\nActive session aliases (RAM only):')
-            for alias, onion in self._session_aliases.items():
-                lines.append(f'   {Theme.DARK_GREY}{alias}{Theme.RESET} -> {onion}')
+        discovered: List[Tuple] = self._sql.fetchall(
+            'SELECT alias, onion FROM contacts WHERE is_saved = 0 ORDER BY alias ASC'
+        )
+        if discovered:
+            lines.append('\nDiscovered peers:')
+            for row in discovered:
+                lines.append(f'   {Theme.DARK_GREY}{row[0]}{Theme.RESET} -> {row[1]}')
 
         return '\n'.join(lines)

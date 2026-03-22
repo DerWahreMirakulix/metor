@@ -7,32 +7,33 @@ from enum import Enum
 from typing import List, Tuple, Optional
 
 from metor.data.profile import ProfileManager
+from metor.data.contact import ContactManager
 from metor.data.sql import SqlManager
+from metor.ui.theme import Theme
 from metor.utils.constants import Constants
+from metor.utils.helper import get_divider_string, get_header_string
 
 
 class HistoryEvent(str, Enum):
     """Predefined event types for the history log."""
 
-    # Async / Offline Messaging Events
-    ASYNC_QUEUED = 'ASYNC_QUEUED'
-    ASYNC_SENT = 'ASYNC_SENT'
-    ASYNC_RECEIVED = 'ASYNC_RECEIVED'
-    ASYNC_FAILED = 'ASYNC_FAILED'
+    ASYNC_QUEUED = 'async_queued'
+    ASYNC_SENT = 'async_sent'
+    ASYNC_RECEIVED = 'async_received'
+    ASYNC_FAILED = 'async_failed'
 
-    # Live Chat Connection Events
-    REQUESTED = 'REQUESTED'
-    REQUESTED_BY_REMOTE = 'REQUESTED_BY_REMOTE'
-    CONNECTED = 'CONNECTED'
-    REJECTED = 'REJECTED'
-    REJECTED_BY_REMOTE = 'REJECTED_BY_REMOTE'
-    DISCONNECTED = 'DISCONNECTED'
-    DISCONNECTED_BY_REMOTE = 'DISCONNECTED_BY_REMOTE'
-    CONNECTION_LOST = 'CONNECTION_LOST'
+    REQUESTED = 'requested'
+    REQUESTED_BY_REMOTE = 'requested_by_remote'
+    CONNECTED = 'connected'
+    REJECTED = 'rejected'
+    REJECTED_BY_REMOTE = 'rejected_by_remote'
+    DISCONNECTED = 'disconnected'
+    DISCONNECTED_BY_REMOTE = 'disconnected_by_remote'
+    CONNECTION_LOST = 'connection_lost'
 
 
 class HistoryManager:
-    """Manages chat and connection history logging using an SQLite database."""
+    """Manages connection history logging using an SQLite database."""
 
     def __init__(self, pm: ProfileManager) -> None:
         """
@@ -46,96 +47,77 @@ class HistoryManager:
         self._sql: SqlManager = SqlManager(self._db_path)
 
     def log_event(
-        self,
-        status: HistoryEvent,
-        alias: Optional[str],
-        onion: Optional[str],
-        reason: str = '',
+        self, status: HistoryEvent, onion: Optional[str], reason: str = ''
     ) -> None:
-        """
-        Logs a connection or chat event into the database.
+        """Logs a connection event into the database."""
+        query: str = 'INSERT INTO history (status, onion, reason) VALUES (?, ?, ?)'
+        self._sql.execute(query, (status.value, onion, reason))
 
-        Args:
-            status (HistoryEvent): The strictly typed status or type of event.
-            alias (Optional[str]): The associated remote alias.
-            onion (Optional[str]): The associated remote onion identity.
-            reason (str): Optional context or reason for the event.
+    def get_history(
+        self, filter_onion: Optional[str] = None
+    ) -> List[Tuple[str, str, Optional[str], str]]:
+        """Retrieves raw history events from the database."""
+        if filter_onion:
+            query: str = 'SELECT timestamp, status, onion, reason FROM history WHERE onion = ? ORDER BY timestamp DESC'
+            return self._sql.fetchall(query, (filter_onion,))
+        else:
+            query: str = 'SELECT timestamp, status, onion, reason FROM history ORDER BY timestamp DESC'
+            return self._sql.fetchall(query)
 
-        Returns:
-            None
-        """
-        query: str = (
-            'INSERT INTO history (status, alias, onion, reason) VALUES (?, ?, ?, ?)'
-        )
-        self._sql.execute(query, (status.value, alias, onion, reason))
-
-    def get_history(self) -> List[Tuple[str, str, Optional[str], Optional[str], str]]:
-        """
-        Retrieves all raw history events from the database without formatting.
-
-        Returns:
-            List[Tuple[str, str, Optional[str], Optional[str], str]]:
-                A list of raw rows containing (timestamp, status, alias, onion, reason).
-        """
-        query: str = 'SELECT timestamp, status, alias, onion, reason FROM history ORDER BY timestamp DESC'
-        return self._sql.fetchall(query)
-
-    def clear_history(self) -> Tuple[bool, str]:
-        """
-        Wipes all event logs from the history table.
-
-        Returns:
-            Tuple[bool, str]: A success flag and a status message.
-        """
+    def clear_history(self, filter_onion: Optional[str] = None) -> Tuple[bool, str]:
+        """Wipes event logs from the history table and removes orphaned discovered peers."""
         try:
-            query: str = 'DELETE FROM history'
-            self._sql.execute(query)
-            return True, f"History from profile '{self._pm.profile_name}' cleared."
+            if filter_onion:
+                self._sql.execute(
+                    'DELETE FROM history WHERE onion = ?', (filter_onion,)
+                )
+                msg = f"History for '{filter_onion}' cleared."
+            else:
+                self._sql.execute('DELETE FROM history')
+                msg = f"History for profile '{self._pm.profile_name}' cleared."
+
+            # Cleanup orphaned discovered peers that have no history and no messages left
+            cleanup_query: str = """
+                DELETE FROM contacts 
+                WHERE is_saved = 0 
+                AND onion NOT IN (SELECT onion FROM history WHERE onion IS NOT NULL)
+                AND onion NOT IN (SELECT contact_onion FROM messages)
+            """
+            self._sql.execute(cleanup_query)
+
+            return True, msg
         except Exception as e:
-            return (
-                False,
-                f"Failed to clear history for profile '{self._pm.profile_name}': {str(e)}",
-            )
+            return False, f'Failed to clear history: {str(e)}'
 
-    def update_alias(self, old_alias: str, new_alias: str) -> bool:
-        """
-        Updates the alias name for past records in the history logs.
+    def show(self, cm: ContactManager, target: Optional[str] = None) -> str:
+        """Fetches history and constructs a human-readable string for terminal display."""
+        onion = None
+        disp_name = f'profile {Theme.CYAN}{self._pm.profile_name}{Theme.RESET}'
 
-        Args:
-            old_alias (str): The current alias to search for.
-            new_alias (str): The new alias to replace the old one.
+        if target:
+            alias, onion = cm.resolve_target(target)
+            if not onion:
+                return f"Contact '{target}' not found."
+            disp_name = f'contact {Theme.CYAN}{alias or target}{Theme.RESET}'
 
-        Returns:
-            bool: True if the update query executed successfully, False otherwise.
-        """
-        try:
-            query: str = 'UPDATE history SET alias = ? WHERE alias = ?'
-            self._sql.execute(query, (new_alias, old_alias))
-            return True
-        except Exception:
-            return False
-
-    def show(self) -> str:
-        """
-        Fetches raw history and constructs a human-readable string for terminal display.
-
-        Returns:
-            str: The multi-line formatted history output.
-        """
-        rows: List[Tuple[str, str, Optional[str], Optional[str], str]] = (
-            self.get_history()
-        )
+        rows: List[Tuple[str, str, Optional[str], str]] = self.get_history(onion)
 
         if not rows:
-            return f"No history available for profile '{self._pm.profile_name}'."
+            return f'No event history available for {disp_name}.'
 
-        lines: List[str] = [f"History for profile '{self._pm.profile_name}':\n"]
+        out: str = f'{get_header_string(f"Event history for {disp_name}")}\n'
 
         for row in rows:
-            timestamp, status, alias, onion, reason = row
-            line: str = f'[{timestamp}] {status} | remote alias: {alias} | remote identity: {onion}'
-            if reason:
-                line += f' | reason: {reason}'
-            lines.append(line)
+            timestamp, status, row_onion, reason = row
+            display_alias: str = (
+                cm.get_alias_by_onion(row_onion) if row_onion else 'Unknown'
+            )
 
-        return '\n'.join(lines)
+            line: str = f'[{timestamp}] {status} | remote alias: {Theme.CYAN}{display_alias}{Theme.RESET} | remote identity: {Theme.YELLOW}{row_onion}{Theme.RESET}'
+            if reason:
+                line += f' | reason: {Theme.CYAN}{reason}{Theme.RESET}'
+
+            out += f'{line}\n'
+
+        out += get_divider_string()
+        return out
