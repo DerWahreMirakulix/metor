@@ -285,11 +285,11 @@ class MessageManager:
         Returns:
             str: The colorized terminal output displaying the unread messages.
         """
-        alias, onion = cm.resolve_target(target)
-        if not onion:
+        alias, onion, exists = cm.resolve_target(target)
+        if not exists:
             return f"Contact '{target}' not found in address book."
 
-        disp_name: str = alias or target
+        disp_name: str = alias
         raw_messages: List[Tuple] = self.get_and_read_inbox(onion)
 
         if not raw_messages:
@@ -318,11 +318,11 @@ class MessageManager:
         Returns:
             str: The formatted terminal output of the chat history.
         """
-        alias, onion = cm.resolve_target(target)
-        if not onion:
+        alias, onion, exists = cm.resolve_target(target)
+        if not exists:
             return f"Contact '{target}' not found in address book."
 
-        disp_name: str = alias or target
+        disp_name: str = alias
         messages: List[Dict[str, Any]] = self.get_chat_history(onion, limit)
 
         if not messages:

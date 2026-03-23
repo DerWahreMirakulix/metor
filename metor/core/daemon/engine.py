@@ -186,12 +186,22 @@ class DaemonEngine:
                     )
                     return
 
-                alias, onion = self._cm.resolve_target(cmd.target)
+                alias, _, exists = self._cm.resolve_target(cmd.target)
+
+                if not exists:
+                    self._ipc.send_to(
+                        conn,
+                        IpcEvent(
+                            type=EventType.SYSTEM,
+                            text=f"Invalid target: '{cmd.target}' is neither a known contact nor a valid onion address.",
+                        ),
+                    )
+                    return
 
                 self._ipc.broadcast(
                     IpcEvent(
                         type=EventType.INFO,
-                        alias=alias or cmd.target,
+                        alias=alias,
                         text="Connecting to '{alias}'...",
                     )
                 )
@@ -227,9 +237,9 @@ class DaemonEngine:
                     )
                     return
 
-                _, onion = self._cm.resolve_target(cmd.target)
+                _, onion, exists = self._cm.resolve_target(cmd.target)
 
-                if onion:
+                if exists:
                     self._mm.queue_message(
                         onion,
                         MessageDirection.OUT,
@@ -251,8 +261,8 @@ class DaemonEngine:
 
         elif cmd.action == Action.MARK_READ:
             if cmd.target:
-                alias, onion = self._cm.resolve_target(cmd.target)
-                if onion:
+                alias, onion, exists = self._cm.resolve_target(cmd.target)
+                if exists:
                     raw_messages = self._mm.get_and_read_inbox(onion)
                     messages = [
                         {'id': r[0], 'type': r[1], 'payload': r[2], 'timestamp': r[3]}
@@ -281,7 +291,18 @@ class DaemonEngine:
                     )
                     return
 
-                alias, _ = self._cm.resolve_target(cmd.target)
+                alias, _, exists = self._cm.resolve_target(cmd.target)
+
+                if not exists:
+                    self._ipc.send_to(
+                        conn,
+                        IpcEvent(
+                            type=EventType.SYSTEM,
+                            text=f"Invalid target: '{cmd.target}' not found.",
+                        ),
+                    )
+                    return
+
                 self._ipc.send_to(
                     conn, IpcEvent(type=EventType.SWITCH_SUCCESS, alias=alias)
                 )
@@ -292,8 +313,8 @@ class DaemonEngine:
 
         elif cmd.action == Action.CLEAR_HISTORY:
             if cmd.target:
-                _, onion = self._cm.resolve_target(cmd.target)
-                if onion:
+                _, onion, exists = self._cm.resolve_target(cmd.target)
+                if exists:
                     success, msg = self._hm.clear_history(onion)
                 else:
                     success, msg = False, 'Contact not found.'
@@ -312,8 +333,8 @@ class DaemonEngine:
 
         elif cmd.action == Action.CLEAR_MESSAGES:
             if cmd.target:
-                _, onion = self._cm.resolve_target(cmd.target)
-                if onion:
+                _, onion, exists = self._cm.resolve_target(cmd.target)
+                if exists:
                     success, msg = self._mm.clear_messages(onion)
                 else:
                     success, msg = False, 'Contact not found.'

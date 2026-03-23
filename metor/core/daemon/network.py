@@ -226,8 +226,8 @@ class NetworkManager:
         Args:
             target (str): The alias or onion address to connect to.
         """
-        alias, onion = self._cm.resolve_target(target)
-        if not onion or onion == self._tm.onion:
+        alias, onion, exists = self._cm.resolve_target(target)
+        if not exists or onion == self._tm.onion:
             return
 
         with self._lock:

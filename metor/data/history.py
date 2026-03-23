@@ -95,10 +95,10 @@ class HistoryManager:
         disp_name = f'profile {Theme.CYAN}{self._pm.profile_name}{Theme.RESET}'
 
         if target:
-            alias, onion = cm.resolve_target(target)
-            if not onion:
+            alias, onion, exists = cm.resolve_target(target)
+            if not exists:
                 return f"Contact '{target}' not found."
-            disp_name = f'contact {Theme.CYAN}{alias or target}{Theme.RESET}'
+            disp_name = f'contact {Theme.CYAN}{alias}{Theme.RESET}'
 
         rows: List[Tuple[str, str, Optional[str], str]] = self.get_history(onion)
 

@@ -181,6 +181,21 @@ class EventHandler:
             hide_message (bool): Flag to skip printing the focus message.
         """
         old_alias: Optional[str] = self._session.focused_alias
+
+        if old_alias == alias:
+            if alias:
+                self._renderer.print_message(
+                    "Already focused on '{alias}'.",
+                    alias=alias,
+                    msg_type=UIMessageType.INFO,
+                )
+            else:
+                self._renderer.print_message(
+                    'No active focus.',
+                    msg_type=UIMessageType.SYSTEM,
+                )
+            return
+
         self._session.focused_alias = alias
         is_live: bool = alias in self._session.active_connections if alias else False
 
@@ -196,7 +211,7 @@ class EventHandler:
                 self._ipc.send_command(
                     IpcCommand(action=Action.MARK_READ, target=alias)
                 )
-            else:
+            elif old_alias:
                 self._renderer.print_message(
                     "Removed focus from '{alias}'.",
                     alias=old_alias,

@@ -219,7 +219,7 @@ class ContactManager:
 
     def resolve_target(
         self, target: Optional[str], default_value: Optional[str] = None
-    ) -> Tuple[Optional[str], Optional[str]]:
+    ) -> Tuple[Optional[str], Optional[str], bool]:
         """
         Resolves a generic target string into an (alias, onion) tuple.
 
@@ -228,13 +228,17 @@ class ContactManager:
             default_value (Optional[str]): The fallback value if resolution fails.
 
         Returns:
-            Tuple[Optional[str], Optional[str]]: A tuple containing the resolved alias and onion.
+            Tuple[Optional[str], Optional[str], bool]: A tuple containing the resolved alias, onion, and existence flag.
         """
         onion: Optional[str] = self.get_onion_by_alias(target)
         if not onion and target:
             onion = ensure_onion_format(target)
         alias: Optional[str] = self.get_alias_by_onion(onion)
-        return (alias or default_value, onion or default_value)
+        return (
+            (alias, onion, True)
+            if alias and onion
+            else (default_value, default_value, False)
+        )
 
     def get_onion_by_alias(self, alias: Optional[str]) -> Optional[str]:
         """Returns the onion address associated with an alias."""
