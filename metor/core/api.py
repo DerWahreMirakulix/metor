@@ -23,12 +23,21 @@ class Action(str, Enum):
     ADD_CONTACT = 'add_contact'
     REMOVE_CONTACT = 'remove_contact'
     RENAME_CONTACT = 'rename_contact'
+    CLEAR_CONTACTS = 'clear_contacts'
     SWITCH = 'switch'
 
     # Async / Offline Actions
     SEND_DROP = 'send_drop'
     GET_INBOX = 'get_inbox'
     MARK_READ = 'mark_read'
+
+    # CLI Proxy Actions (Remote Mode)
+    GET_HISTORY = 'get_history'
+    CLEAR_HISTORY = 'clear_history'
+    GET_MESSAGES = 'get_messages'
+    CLEAR_MESSAGES = 'clear_messages'
+    GET_ADDRESS = 'get_address'
+    GENERATE_ADDRESS = 'generate_address'
 
 
 class EventType(str, Enum):
@@ -50,6 +59,9 @@ class EventType(str, Enum):
     INBOX_NOTIFICATION = 'inbox_notification'
     INBOX_DATA = 'inbox_data'
     MSG_FALLBACK_TO_DROP = 'msg_fallback_to_drop'
+
+    # CLI Proxy Events
+    CLI_RESPONSE = 'cli_response'
 
 
 @dataclass
@@ -84,6 +96,7 @@ class IpcCommand(IpcMessage):
     new_alias: Optional[str] = None
     is_header: bool = False
     chat_mode: bool = False
+    limit: int = 50
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'IpcCommand':
@@ -107,6 +120,7 @@ class IpcCommand(IpcMessage):
             new_alias=data.get('new_alias'),
             is_header=data.get('is_header', False),
             chat_mode=data.get('chat_mode', False),
+            limit=data.get('limit', 50),
         )
 
 
@@ -130,6 +144,7 @@ class IpcEvent(IpcMessage):
     is_header: bool = False
     is_demotion: bool = False
     history_updated: bool = False
+    success: bool = True
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'IpcEvent':
@@ -159,4 +174,5 @@ class IpcEvent(IpcMessage):
             is_header=data.get('is_header', False),
             is_demotion=data.get('is_demotion', False),
             history_updated=data.get('history_updated', False),
+            success=data.get('success', True),
         )

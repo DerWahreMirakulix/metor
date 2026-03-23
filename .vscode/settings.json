@@ -25,6 +25,7 @@
     "TCIFLUSH",
     "TCSADRAIN",
     "tcsetattr",
+    "unacked",
     "urandom",
     "venv",
     "WRONLY"

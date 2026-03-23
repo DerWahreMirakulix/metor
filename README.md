@@ -6,6 +6,8 @@
 
 - **Client-Daemon Architecture:**
   The heavy lifting (Tor process, cryptography, connections, and outbox routing) runs seamlessly in a background daemon. This allows you to run the chat UI, send quick asynchronous messages, or manage contacts from different terminal windows simultaneously without interrupting your Tor connection.
+- **Stateless UI (Remote Support):**
+  Because the daemon processes are decoupled from the UI, you can run the daemon 24/7 on a remote VPS and securely connect your local laptop UI to it via an SSH tunnel.
 - **Asynchronous Offline Messaging (Drops):**
   Send messages even when your contact is offline. The Daemon queues your messages in a local SQLite Outbox and automatically negotiates delivery in the background as soon as the peer comes online. Unread messages are safely stored in your Inbox.
 - **Strongly-Typed IPC API:**
@@ -92,7 +94,35 @@ Keep different identities completely separated by using profiles.
 
 - `-p, --profile <name>`: Set the active profile (default: 'default'). Keeps history, onion addresses, contacts, and locks isolated.
 
-### 3. Core Commands & Maintenance
+### 3. Advanced Setup: Remote Daemon (24/7 Node)
+
+You can run your Metor daemon 24/7 on a secure server (VPS) and connect to it from your local laptop. The connection is secured natively using an SSH tunnel.
+
+**Step 1: On your Server (VPS)**
+Create a profile and assign a static port for the local IPC server:
+
+```bash
+metor profiles add my_server --port 50051
+metor -p my_server daemon
+```
+
+**Step 2: On your Laptop**
+Create a corresponding remote profile pointing to that same port:
+
+```bash
+metor profiles add remote_node --remote --port 50051
+```
+
+**Step 3: Connect via SSH Tunnel**
+Before using Metor on your laptop, establish a secure SSH tunnel forwarding the local port to your server:
+
+```bash
+ssh -N -L 50051:127.0.0.1:50051 user@your_server_ip
+```
+
+Now, simply run `metor -p remote_node chat` (or any other command) on your laptop. The UI will seamlessly and securely communicate with your remote daemon.
+
+### 4. Core Commands & Maintenance
 
 Open a second terminal window to interact with your running daemon:
 
@@ -101,34 +131,35 @@ Open a second terminal window to interact with your running daemon:
 - `metor cleanup` – Kill zombie Tor processes and clear broken locks.
 - `metor purge` – **WARNING:** Permanently wipe ALL profiles, keys, databases, and message history.
 
-### 4. Asynchronous Messaging (Headless)
+### 5. Asynchronous Messaging (Headless)
 
 Send and receive messages directly from the command line without entering the chat UI:
 
-- `metor send <alias> "msg"` – Queue an offline message (Drop) to a contact.
-- `metor inbox` – Check your inbox for unread offline messages.
-- `metor read <alias>` – Read and clear unread messages from a specific contact.
+- `metor send <alias> "msg"` – Drop an offline message to a contact.
+- `metor inbox` – Check for unread offline messages.
+- `metor read <alias>` – Read and clear unread messages from an alias.
 - `metor messages [show] <alias> [limit]` – View past chat history with a contact.
-- `metor messages clear [alias]` – Delete message history for a contact (or all if omitted).
+- `metor messages clear [alias]` – Delete message history.
 
-### 5. Identity & Profile Management
+### 6. Profile & Identity Management
 
 - `metor address [show|generate]` – View or cycle your hidden service address.
-- `metor profiles [list|add|rm|rename|set-default] <args>` – Manage isolated profile environments.
-- `metor profiles clear <name>` – Clear the entire SQLite database for a specific profile.
-- `metor history [show|clear] [alias]` – View or wipe the SQLite connection event log.
+- `metor profiles [list|add|rm]` – List, create, or remove isolated profiles.
+- `metor profiles [rename|set-default|clear]` – Manage existing profile configurations.
+- `metor profiles add <name> [--remote] [--port <int>]` – Create a new profile (local or remote via SSH).
+- `metor history [show|clear] [alias]` – View or wipe the connection event log.
 
-### 6. External Contact Management
+### 7. External Contact Management
 
 You can manage your address book from outside the chat using these CLI commands:
 
-- `metor contacts [list]` – List all saved contacts and discovered peers.
-- `metor contacts add <alias> [onion]` – Add a manual contact or save a running RAM alias to disk.
-- `metor contacts rm <alias>` – Delete a contact (active sessions safely downgrade to discovered peers).
+- `metor contacts [list]` – List all contacts in your address book.
+- `metor contacts add <alias> [onion]` – Add a manual contact or save a running RAM alias.
+- `metor contacts rm <alias>` – Delete contact (active sessions revert to RAM).
 - `metor contacts rename <old> <new>` – Rename a saved contact or active session.
-- `metor contacts clear` – Wipe the address book and safely anonymize active peers.
+- `metor contacts clear` – Wipe the address book completely.
 
-### 7. In-Chat Commands
+### 8. In-Chat Commands
 
 Once inside the `metor chat` interface, you can manage your active sessions directly.
 _Note: The `[alias]` or `[old]` parameter can be safely omitted for the commands below if you are currently focused on a peer._
@@ -146,10 +177,14 @@ _Note: The `[alias]` or `[old]` parameter can be safely omitted for the commands
 
 **In-Chat Address Book Management:**
 
-- `/contacts list` – Show saved contacts and temporary aliases.
-- `/contacts add [alias] [onion]` – Save an alias or add a new manual contact.
-- `/contacts rm [alias]` – Remove from disk (active chat reverts to a temporary alias).
-- `/contacts rename [old] <new>` – Change the name of any alias.
+- `/contacts list` – Show saved contacts and temporary RAM aliases.
+- `/contacts add [alias] [onion]` – Save a RAM alias or add a new manual contact.
+- `/contacts rm [alias]` – Remove from disk (active chat reverts to RAM).
+- `/contacts rename [old] <new>` – Change the name of any RAM or Disk alias.
+
+## Security Disclaimer
+
+While Metor utilizes the Tor network for anonymity and encryption, this software is provided as-is, without any guarantees. Do not use this software for highly sensitive communication where your life or liberty depends on absolute operational security. The codebase has not undergone a formal third-party security audit.
 
 ## License
 

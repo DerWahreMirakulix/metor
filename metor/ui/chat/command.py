@@ -8,23 +8,19 @@ from metor.ui.chat.renderer import Renderer
 from metor.ui.chat.ipc import IpcClient
 from metor.ui.chat.session import Session
 from metor.ui.chat.models import UIMessageType
-from metor.data.contact import ContactManager
 from metor.core.api import IpcCommand, Action
 
 
 class CommandDispatcher:
     """Parses raw text input and dispatches corresponding IpcCommands."""
 
-    def __init__(
-        self, ipc: IpcClient, session: Session, cm: ContactManager, renderer: Renderer
-    ) -> None:
+    def __init__(self, ipc: IpcClient, session: Session, renderer: Renderer) -> None:
         """
         Initializes the dispatcher with required dependencies.
 
         Args:
             ipc (IpcClient): The active IPC client connection.
             session (Session): The current UI state manager.
-            cm (ContactManager): The database manager for resolving aliases.
             renderer (Renderer): The UI renderer for printing errors/usages.
 
         Returns:
@@ -32,7 +28,6 @@ class CommandDispatcher:
         """
         self._ipc: IpcClient = ipc
         self._session: Session = session
-        self._cm: ContactManager = cm
         self._renderer: Renderer = renderer
 
     def dispatch(self, input_str: str) -> bool:

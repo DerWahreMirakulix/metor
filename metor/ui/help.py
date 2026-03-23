@@ -8,7 +8,7 @@ from metor.ui.theme import Theme
 class Help:
     """Static help texts with professional CLI formatting."""
 
-    DESC_COLUMN: int = 46
+    DESC_COLUMN: int = 55
 
     @staticmethod
     def _format_line(
@@ -221,14 +221,20 @@ class Help:
             )
             + Help._format_line(
                 sub_ind,
-                'metor profiles [list|add|rm|rename] <args>',
-                'Manage isolated profile environments.',
+                'metor profiles [list|add|rm]',
+                'List, create, or remove isolated profiles.',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
                 sub_ind,
-                'metor profiles clear <name>',
-                'Clear the entire SQLite database for a profile.',
+                'metor profiles [rename|set-default|clear]',
+                'Manage existing profile configurations.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
+                'metor profiles add <name> [--remote] [--port <int>]',
+                'Create a new profile (local or remote via SSH).',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(

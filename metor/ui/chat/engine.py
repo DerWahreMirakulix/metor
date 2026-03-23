@@ -12,7 +12,6 @@ from typing import Optional
 
 from metor.ui.help import Help
 from metor.data.profile import ProfileManager
-from metor.data.contact import ContactManager
 from metor.ui.theme import Theme
 from metor.utils.helper import clean_onion
 from metor.core.api import IpcCommand, Action, IpcEvent
@@ -29,16 +28,14 @@ from metor.ui.chat.event import EventHandler
 class ChatEngine:
     """The UI Engine. Orchestrates input handling and Daemon IPC communication."""
 
-    def __init__(self, pm: ProfileManager, cm: ContactManager) -> None:
+    def __init__(self, pm: ProfileManager) -> None:
         """
         Initializes the Chat UI orchestrator.
 
         Args:
             pm (ProfileManager): The manager handling the profile's daemon connection state.
-            cm (ContactManager): The manager for resolving address book aliases.
         """
         self._pm: ProfileManager = pm
-        self._cm: ContactManager = cm
         self._renderer: Renderer = Renderer()
         self._session: Session = Session()
         self._ipc: Optional[IpcClient] = None
@@ -77,9 +74,7 @@ class ChatEngine:
         self._handler = EventHandler(
             self._ipc, self._session, self._renderer, self._init_event, self._conn_event
         )
-        self._dispatcher = CommandDispatcher(
-            self._ipc, self._session, self._cm, self._renderer
-        )
+        self._dispatcher = CommandDispatcher(self._ipc, self._session, self._renderer)
 
         self._ipc.send_command(IpcCommand(action=Action.INIT))
         self._init_event.wait(timeout=2.0)

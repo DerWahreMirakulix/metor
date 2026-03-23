@@ -4,12 +4,22 @@ Module for managing user profiles, their directories, and daemon lock states.
 
 import os
 import shutil
-from typing import List, Tuple, Optional
+import json
+from enum import Enum
+from typing import List, Tuple, Optional, Dict, Any
 
 from metor.data.settings import SettingKey, Settings
 from metor.data.sql import SqlManager
 from metor.ui.theme import Theme
 from metor.utils.constants import Constants
+from metor.utils.lock import FileLock
+
+
+class ProfileConfigKey(str, Enum):
+    """Keys for the profile-specific config.json."""
+
+    IS_REMOTE = 'is_remote'
+    DAEMON_PORT = 'daemon_port'
 
 
 class ProfileManager:
@@ -68,6 +78,78 @@ class ProfileManager:
             os.makedirs(config_dir)
         return config_dir
 
+    def get_config_file(self) -> str:
+        """
+        Returns the path to the profile's config.json file.
+
+        Returns:
+            str: The absolute path to the config file.
+        """
+        return os.path.join(self.get_config_dir(), 'config.json')
+
+    def _load_config(self) -> Dict[str, Any]:
+        """
+        Loads the profile configuration.
+
+        Returns:
+            Dict[str, Any]: The loaded configuration dictionary.
+        """
+        path: str = self.get_config_file()
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                pass
+        return {}
+
+    def get_config(self, key: ProfileConfigKey, default: Any = None) -> Any:
+        """
+        Retrieves a specific configuration value from the profile.
+
+        Args:
+            key (ProfileConfigKey): The setting key to retrieve.
+            default (Any): The default value to return if not found.
+
+        Returns:
+            Any: The value of the configuration key.
+        """
+        data: Dict[str, Any] = self._load_config()
+        return data.get(key.value, default)
+
+    def set_config(self, key: ProfileConfigKey, value: Any) -> None:
+        """
+        Safely writes a configuration value to the profile using FileLock.
+
+        Args:
+            key (ProfileConfigKey): The setting key to set.
+            value (Any): The value to store.
+        """
+        path: str = self.get_config_file()
+        with FileLock(path):
+            data: Dict[str, Any] = self._load_config()
+            data[key.value] = value
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4)
+
+    def is_remote(self) -> bool:
+        """
+        Checks if this profile is configured to act as a remote client.
+
+        Returns:
+            bool: True if the profile is remote, False otherwise.
+        """
+        return bool(self.get_config(ProfileConfigKey.IS_REMOTE, False))
+
+    def get_static_port(self) -> Optional[int]:
+        """
+        Returns the static daemon port if configured.
+
+        Returns:
+            Optional[int]: The static port, or None.
+        """
+        return self.get_config(ProfileConfigKey.DAEMON_PORT)
+
     def get_daemon_port_file(self) -> str:
         """
         Returns the path to the file storing the daemon IPC port.
@@ -89,11 +171,14 @@ class ProfileManager:
 
     def get_daemon_port(self) -> Optional[int]:
         """
-        Reads the active daemon port from disk, if it exists.
+        Reads the active daemon port. Uses static port if remote.
 
         Returns:
             Optional[int]: The active daemon port, or None if not found.
         """
+        if self.is_remote():
+            return self.get_static_port()
+
         port_file: str = self.get_daemon_port_file()
         if os.path.exists(port_file):
             try:
@@ -113,7 +198,17 @@ class ProfileManager:
                 pass
 
     def is_daemon_running(self) -> bool:
-        """Checks whether the daemon is currently running for this profile."""
+        """
+        Checks if the daemon is running.
+        If remote, we assume True (actual network connectivity is handled by the IPC Client/Proxy).
+        If local, checks for the presence of the lock file.
+
+        Returns:
+            bool: True if the daemon is considered active, False otherwise.
+        """
+        if self.is_remote():
+            return True
+
         return os.path.exists(self.get_daemon_port_file())
 
     def get_hidden_service_dir(self) -> str:
@@ -156,17 +251,46 @@ class ProfileManager:
         ]
 
     @staticmethod
-    def add_profile_folder(name: str) -> Tuple[bool, str]:
-        """Creates a new profile directory safely."""
+    def add_profile_folder(
+        name: str, is_remote: bool = False, port: Optional[int] = None
+    ) -> Tuple[bool, str]:
+        """
+        Creates a new profile directory safely and initializes its config if remote/static.
+
+        Args:
+            name (str): The profile name to create.
+            is_remote (bool): True if the profile should be configured as a remote client.
+            port (Optional[int]): The static daemon port to assign.
+
+        Returns:
+            Tuple[bool, str]: A success flag and a status message.
+        """
         safe_name: str = ''.join(c for c in name if c.isalnum() or c in ('-', '_'))
         if not safe_name:
             return False, 'Invalid profile name.'
+
+        if is_remote and not port:
+            return False, 'A remote profile requires a static port (--port <int>).'
 
         target_dir: str = os.path.join(Constants.DATA, safe_name)
         if os.path.exists(target_dir):
             return False, f"Profile '{safe_name}' already exists."
 
         os.makedirs(target_dir)
+
+        if is_remote or port:
+            pm = ProfileManager(safe_name)
+            if is_remote:
+                pm.set_config(ProfileConfigKey.IS_REMOTE, True)
+            if port:
+                pm.set_config(ProfileConfigKey.DAEMON_PORT, port)
+
+            remote_tag: str = 'Remote ' if is_remote else 'Static '
+            return (
+                True,
+                f"{remote_tag}profile '{safe_name}' successfully created (Port {port}).",
+            )
+
         return True, f"Profile '{safe_name}' successfully created."
 
     @classmethod
@@ -186,7 +310,7 @@ class ProfileManager:
         if os.path.exists(new_dir):
             return False, f"Profile '{safe_new}' already exists."
 
-        if cls(safe_old).is_daemon_running():
+        if cls(safe_old).is_daemon_running() and not cls(safe_old).is_remote():
             return (
                 False,
                 f"Cannot rename profile '{safe_old}' while its daemon is running!",
@@ -218,7 +342,8 @@ class ProfileManager:
             return False, 'Cannot remove default profile! Change default first.'
         if not os.path.exists(target_dir):
             return False, f"Profile '{safe_name}' does not exist."
-        if cls(safe_name).is_daemon_running():
+
+        if cls(safe_name).is_daemon_running() and not cls(safe_name).is_remote():
             return (
                 False,
                 f"Cannot remove profile '{safe_name}' while its daemon is running!",
@@ -242,7 +367,7 @@ class ProfileManager:
         if not safe_name:
             return False, 'Invalid profile name.'
 
-        if cls(safe_name).is_daemon_running():
+        if cls(safe_name).is_daemon_running() and not cls(safe_name).is_remote():
             return (
                 False,
                 f"Cannot clear database for '{safe_name}' while daemon is running.",
@@ -279,10 +404,22 @@ class ProfileManager:
 
         lines: List[str] = ['Available profiles:']
         for p in profiles:
+            pm = ProfileManager(p)
             marker: str = '*' if p == active else ' '
+            tags: List[str] = []
+
+            if pm.is_remote():
+                tags.append('REMOTE')
+            elif pm.get_static_port():
+                tags.append(f'PORT:{pm.get_static_port()}')
+
+            tag_str: str = (
+                f' [{Theme.YELLOW}{"|".join(tags)}{Theme.RESET}]' if tags else ''
+            )
+
             if p == active:
-                lines.append(f' {Theme.GREEN}{marker} {p}{Theme.RESET}')
+                lines.append(f' {Theme.GREEN}{marker} {p}{Theme.RESET}{tag_str}')
             else:
-                lines.append(f'   {p}')
+                lines.append(f'   {p}{tag_str}')
 
         return '\n'.join(lines)

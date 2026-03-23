@@ -10,7 +10,7 @@ import atexit
 import sys
 import os
 import signal
-from typing import Any
+from typing import Any, Optional
 
 from metor.data.profile import ProfileManager
 from metor.core.key import KeyManager
@@ -28,7 +28,6 @@ from metor.core.api import IpcCommand, IpcEvent, Action, EventType
 from metor.ui.theme import Theme
 from metor.utils.helper import clean_onion
 
-# Local Daemon Package Imports
 from metor.core.daemon.crypto import Crypto
 from metor.core.daemon.ipc import IpcServer
 from metor.core.daemon.outbox import OutboxWorker
@@ -47,6 +46,17 @@ class DaemonEngine:
         hm: HistoryManager,
         mm: MessageManager,
     ) -> None:
+        """
+        Initializes the DaemonEngine.
+
+        Args:
+            pm (ProfileManager): Profile configurations.
+            km (KeyManager): Handles cryptographic keys.
+            tm (TorManager): Manages the Tor process.
+            cm (ContactManager): Address book and alias resolver.
+            hm (HistoryManager): Event logging.
+            mm (MessageManager): Offline messages storage.
+        """
         self._pm: ProfileManager = pm
         self._tm: TorManager = tm
         self._cm: ContactManager = cm
@@ -55,7 +65,6 @@ class DaemonEngine:
 
         self._stop_flag: threading.Event = threading.Event()
 
-        # Sub-Services Initialization
         self._crypto: Crypto = Crypto(km)
         self._ipc: IpcServer = IpcServer(pm, self._process_ui_command)
         self._outbox: OutboxWorker = OutboxWorker(
@@ -71,7 +80,13 @@ class DaemonEngine:
             signal.signal(signal.SIGHUP, self._sig_handler)
 
     def _sig_handler(self, signum: int, frame: Any) -> None:
-        """Handles termination signals gracefully."""
+        """
+        Handles termination signals gracefully.
+
+        Args:
+            signum (int): The signal number.
+            frame (Any): The current stack frame.
+        """
         self.stop()
         sys.exit(0)
 
@@ -92,7 +107,7 @@ class DaemonEngine:
 
         try:
             while not self._stop_flag.is_set():
-                time.sleep(1)
+                time.sleep(1.0)
         except KeyboardInterrupt:
             pass
         finally:
@@ -108,25 +123,34 @@ class DaemonEngine:
 
     def _is_self_target(self, target: str) -> bool:
         """
-        Safely checks if a target (alias or onion) points to our own identity,
-        WITHOUT triggering any auto-save side-effects in the database.
+        Safely checks if a target (alias or onion) points to our own identity.
+
+        Args:
+            target (str): The alias or onion to check.
+
+        Returns:
+            bool: True if it matches our own onion, False otherwise.
         """
         if not target or not self._tm.onion:
             return False
 
-        # 1. Check raw onion string match
         if clean_onion(target) == clean_onion(self._tm.onion):
             return True
 
-        # 2. Safe Alias lookup (no inserts, just SELECT)
-        onion_by_alias = self._cm.get_onion_by_alias(target)
+        onion_by_alias: Optional[str] = self._cm.get_onion_by_alias(target)
         if onion_by_alias and onion_by_alias == self._tm.onion:
             return True
 
         return False
 
     def _process_ui_command(self, cmd: IpcCommand, conn: socket.socket) -> None:
-        """Routes IPC commands from the Chat UI to the respective internal managers."""
+        """
+        Routes IPC commands from the Chat UI or CLI Proxy to the internal managers.
+
+        Args:
+            cmd (IpcCommand): The parsed command object.
+            conn (socket.socket): The connection to respond to.
+        """
         if cmd.action == Action.INIT:
             self._ipc.send_to(conn, IpcEvent(type=EventType.INIT, onion=self._tm.onion))
 
@@ -167,7 +191,7 @@ class DaemonEngine:
                 self._ipc.broadcast(
                     IpcEvent(
                         type=EventType.INFO,
-                        alias=alias,
+                        alias=alias or cmd.target,
                         text="Connecting to '{alias}'...",
                     )
                 )
@@ -258,7 +282,57 @@ class DaemonEngine:
                     return
 
                 alias, _ = self._cm.resolve_target(cmd.target)
-
                 self._ipc.send_to(
                     conn, IpcEvent(type=EventType.SWITCH_SUCCESS, alias=alias)
                 )
+
+        elif cmd.action == Action.GET_HISTORY:
+            text: str = self._hm.show(self._cm, cmd.target)
+            self._ipc.send_to(conn, IpcEvent(type=EventType.CLI_RESPONSE, text=text))
+
+        elif cmd.action == Action.CLEAR_HISTORY:
+            if cmd.target:
+                _, onion = self._cm.resolve_target(cmd.target)
+                if onion:
+                    success, msg = self._hm.clear_history(onion)
+                else:
+                    success, msg = False, 'Contact not found.'
+            else:
+                success, msg = self._hm.clear_history()
+            self._ipc.send_to(
+                conn, IpcEvent(type=EventType.CLI_RESPONSE, text=msg, success=success)
+            )
+
+        elif cmd.action == Action.GET_MESSAGES:
+            if cmd.target:
+                text = self._mm.show_history(cmd.target, self._cm, cmd.limit)
+            else:
+                text = 'No target specified.'
+            self._ipc.send_to(conn, IpcEvent(type=EventType.CLI_RESPONSE, text=text))
+
+        elif cmd.action == Action.CLEAR_MESSAGES:
+            if cmd.target:
+                _, onion = self._cm.resolve_target(cmd.target)
+                if onion:
+                    success, msg = self._mm.clear_messages(onion)
+                else:
+                    success, msg = False, 'Contact not found.'
+            else:
+                success, msg = self._mm.clear_messages()
+            self._ipc.send_to(
+                conn, IpcEvent(type=EventType.CLI_RESPONSE, text=msg, success=success)
+            )
+
+        elif cmd.action == Action.CLEAR_CONTACTS:
+            success, msg = self._cm.clear_contacts()
+            self._ipc.send_to(
+                conn, IpcEvent(type=EventType.CLI_RESPONSE, text=msg, success=success)
+            )
+
+        elif cmd.action == Action.GET_ADDRESS:
+            _, msg = self._tm.get_address()
+            self._ipc.send_to(conn, IpcEvent(type=EventType.CLI_RESPONSE, text=msg))
+
+        elif cmd.action == Action.GENERATE_ADDRESS:
+            _, msg = self._tm.generate_address()
+            self._ipc.send_to(conn, IpcEvent(type=EventType.CLI_RESPONSE, text=msg))

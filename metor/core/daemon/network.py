@@ -41,6 +41,18 @@ class NetworkManager:
         broadcast_callback: Callable[[IpcEvent], None],
         stop_flag: threading.Event,
     ) -> None:
+        """
+        Initializes the NetworkManager.
+
+        Args:
+            tm (TorManager): Tor process manager.
+            cm (ContactManager): Address book manager.
+            hm (HistoryManager): Event history manager.
+            mm (MessageManager): Offline messages manager.
+            crypto (Crypto): Cryptographic challenge/response engine.
+            broadcast_callback (Callable): Callback to broadcast IPC events.
+            stop_flag (threading.Event): Global daemon termination flag.
+        """
         self._tm: TorManager = tm
         self._cm: ContactManager = cm
         self._hm: HistoryManager = hm
@@ -59,12 +71,22 @@ class NetworkManager:
         threading.Thread(target=self._listener_target, daemon=True).start()
 
     def get_active_aliases(self) -> List[str]:
-        """Returns a list of currently connected aliases."""
+        """
+        Returns a list of currently connected aliases.
+
+        Returns:
+            List[str]: Active connection aliases.
+        """
         with self._lock:
             return list(self._connections.keys())
 
     def get_pending_aliases(self) -> List[str]:
-        """Returns a list of aliases waiting for acceptance."""
+        """
+        Returns a list of aliases waiting for acceptance.
+
+        Returns:
+            List[str]: Pending connection aliases.
+        """
         with self._lock:
             return list(self._pending_connections.keys())
 
@@ -75,7 +97,7 @@ class NetworkManager:
         listener.listen(5)
         while not self._stop_flag.is_set():
             try:
-                listener.settimeout(1)
+                listener.settimeout(1.0)
                 conn, _ = listener.accept()
                 threading.Thread(
                     target=self._handle_incoming, args=(conn,), daemon=True
@@ -84,13 +106,18 @@ class NetworkManager:
                 continue
 
     def _handle_incoming(self, conn: socket.socket) -> None:
-        """Authenticates inbound requests and routes them to Live-Chat or Drop-Box."""
+        """
+        Authenticates inbound requests and routes them to Live-Chat or Drop-Box.
+
+        Args:
+            conn (socket.socket): The incoming socket connection.
+        """
         auth_successful: bool = False
         remote_identity: Optional[str] = None
         is_async: bool = False
 
         try:
-            conn.settimeout(10)
+            conn.settimeout(10.0)
             challenge: str = secrets.token_hex(32)
             conn.sendall(f'{TorCommand.CHALLENGE.value} {challenge}\n'.encode())
             data: bytes = conn.recv(2048)
@@ -111,7 +138,6 @@ class NetworkManager:
             conn.close()
             return
 
-        # Handle Async Drop (Offline Message)
         if is_async:
             try:
                 data = conn.recv(4096)
@@ -144,7 +170,7 @@ class NetworkManager:
                                 IpcEvent(
                                     type=EventType.INBOX_NOTIFICATION,
                                     alias=alias,
-                                    text=f"📬 1 new offline message from '{alias}'.",
+                                    text="📬 1 new offline message from '{alias}'.",
                                 )
                             )
             except Exception:
@@ -153,9 +179,8 @@ class NetworkManager:
                 conn.close()
             return
 
-        # Handle Live Connection Request
         conn.settimeout(None)
-        alias: Optional[str] = self._cm.get_alias_by_onion(remote_identity)
+        alias = self._cm.get_alias_by_onion(remote_identity)
         if not alias:
             conn.close()
             return
@@ -195,7 +220,12 @@ class NetworkManager:
         )
 
     def connect_to(self, target: str) -> None:
-        """Initiates an outbound Tor connection."""
+        """
+        Initiates an outbound Tor connection.
+
+        Args:
+            target (str): The alias or onion address to connect to.
+        """
         alias, onion = self._cm.resolve_target(target)
         if not onion or onion == self._tm.onion:
             return
@@ -206,7 +236,7 @@ class NetworkManager:
 
         try:
             conn: socket.socket = self._tm.connect(onion)
-            conn.settimeout(10)
+            conn.settimeout(10.0)
             challenge: str = conn.recv(1024).decode().strip().split(' ')[1]
             signature: Optional[str] = self._crypto.sign_challenge(challenge)
             conn.sendall(
@@ -227,12 +257,18 @@ class NetworkManager:
             self._broadcast(
                 IpcEvent(
                     type=EventType.INFO,
+                    alias=alias,
                     text="Failed to connect to '{alias}'.",
                 )
             )
 
     def accept(self, alias: str) -> None:
-        """Approves a pending incoming connection."""
+        """
+        Approves a pending incoming connection.
+
+        Args:
+            alias (str): The alias to accept.
+        """
         with self._lock:
             if alias not in self._pending_connections:
                 return
@@ -249,7 +285,13 @@ class NetworkManager:
         self._start_receiving(alias, conn)
 
     def reject(self, alias: str, initiated_by_self: bool = True) -> None:
-        """Rejects a pending connection request."""
+        """
+        Rejects a pending connection request.
+
+        Args:
+            alias (str): The alias to reject.
+            initiated_by_self (bool): Whether the local user initiated the rejection.
+        """
         with self._lock:
             conn = self._connections.pop(alias, None) or self._pending_connections.pop(
                 alias, None
@@ -282,7 +324,14 @@ class NetworkManager:
     def disconnect(
         self, alias: str, initiated_by_self: bool = True, is_fallback: bool = False
     ) -> None:
-        """Terminates a connection and converts un-ACKed messages to drops."""
+        """
+        Terminates a connection and converts un-ACKed messages to drops.
+
+        Args:
+            alias (str): The alias to disconnect.
+            initiated_by_self (bool): Whether the local user initiated the disconnect.
+            is_fallback (bool): Whether this is a fallback network drop.
+        """
         with self._lock:
             conn = self._connections.pop(alias, None) or self._pending_connections.pop(
                 alias, None
@@ -338,7 +387,7 @@ class NetworkManager:
             IpcEvent(
                 type=EventType.DISCONNECTED,
                 alias=alias,
-                text=f"Disconnected from '{alias}'.",
+                text="Disconnected from '{alias}'.",
             )
         )
 
@@ -349,7 +398,14 @@ class NetworkManager:
             self.disconnect(alias, initiated_by_self=True)
 
     def send_message(self, alias: str, msg: str, msg_id: str) -> None:
-        """Sends a chat message and buffers it for ACK verification."""
+        """
+        Sends a chat message and buffers it for ACK verification.
+
+        Args:
+            alias (str): The target alias.
+            msg (str): The message content.
+            msg_id (str): The unique message identifier.
+        """
         with self._lock:
             if alias not in self._connections:
                 return
@@ -363,13 +419,25 @@ class NetworkManager:
             pass
 
     def _start_receiving(self, alias: str, conn: socket.socket) -> None:
-        """Starts a background thread to listen for data on a specific live socket."""
+        """
+        Starts a background thread to listen for data on a specific live socket.
+
+        Args:
+            alias (str): The connected alias.
+            conn (socket.socket): The active socket connection.
+        """
         threading.Thread(
             target=self._receiver_target, args=(alias, conn), daemon=True
         ).start()
 
     def _receiver_target(self, current_alias: str, conn: socket.socket) -> None:
-        """Target processing incoming messages, ACKs, and disconnects."""
+        """
+        Target processing incoming messages, ACKs, and disconnects.
+
+        Args:
+            current_alias (str): The alias associated with the connection.
+            conn (socket.socket): The active socket connection.
+        """
         remote_rejected, remote_disconnected = False, False
 
         try:

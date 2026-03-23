@@ -11,7 +11,6 @@ from metor.ui.chat.ipc import IpcClient
 from metor.ui.chat.session import Session
 from metor.ui.chat.models import UIMessageType
 from metor.core.api import IpcEvent, EventType, IpcCommand, Action
-from metor.ui.theme import Theme
 from metor.utils.helper import clean_onion
 
 
@@ -26,7 +25,16 @@ class EventHandler:
         init_event: threading.Event,
         conn_event: threading.Event,
     ) -> None:
-        """Initializes the EventHandler with dependencies."""
+        """
+        Initializes the EventHandler with dependencies.
+
+        Args:
+            ipc (IpcClient): The IPC client.
+            session (Session): The current chat session state.
+            renderer (Renderer): The terminal UI renderer.
+            init_event (threading.Event): Event to signal successful initialization.
+            conn_event (threading.Event): Event to signal connection state updates.
+        """
         self._ipc: IpcClient = ipc
         self._session: Session = session
         self._renderer: Renderer = renderer
@@ -102,8 +110,9 @@ class EventHandler:
 
             elif event.type == EventType.INBOX_NOTIFICATION:
                 self._renderer.print_message(
-                    f'{Theme.CYAN}{event.text}{Theme.RESET}',
-                    msg_type=UIMessageType.SYSTEM,
+                    event.text,
+                    msg_type=UIMessageType.INFO,
+                    alias=event.alias,
                 )
 
             elif event.type == EventType.INBOX_DATA:
@@ -164,7 +173,13 @@ class EventHandler:
             pass
 
     def _switch_focus(self, alias: Optional[str], hide_message: bool = False) -> None:
-        """Helper to safely change the active UI focus and fetch missing drops."""
+        """
+        Helper to safely change the active UI focus and fetch missing drops.
+
+        Args:
+            alias (Optional[str]): The target alias.
+            hide_message (bool): Flag to skip printing the focus message.
+        """
         old_alias: Optional[str] = self._session.focused_alias
         self._session.focused_alias = alias
         is_live: bool = alias in self._session.active_connections if alias else False
@@ -174,7 +189,7 @@ class EventHandler:
         if not hide_message:
             if alias:
                 self._renderer.print_message(
-                    f"Switched focus to '{alias}'.",
+                    "Switched focus to '{alias}'.",
                     alias=alias,
                     msg_type=UIMessageType.INFO,
                 )
@@ -183,7 +198,7 @@ class EventHandler:
                 )
             else:
                 self._renderer.print_message(
-                    f"Removed focus from '{old_alias}'.",
+                    "Removed focus from '{alias}'.",
                     alias=old_alias,
                     msg_type=UIMessageType.INFO,
                 )

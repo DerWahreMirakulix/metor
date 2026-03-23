@@ -41,8 +41,14 @@ class IpcServer:
     def start(self) -> None:
         """Starts the local IPC server in a background thread."""
         server: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.bind((Constants.LOCALHOST, 0))
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        static_port: Optional[int] = self._pm.get_static_port()
+        bind_port: int = static_port if static_port else 0
+
+        server.bind((Constants.LOCALHOST, bind_port))
         server.listen(5)
+
         self.port = server.getsockname()[1]
         self._pm.set_daemon_port(self.port)
 
@@ -96,7 +102,7 @@ class IpcServer:
         """Target loop for accepting new incoming UI connections."""
         while not self._stop_flag.is_set():
             try:
-                server.settimeout(1)
+                server.settimeout(1.0)
                 conn, _ = server.accept()
                 with self._lock:
                     self._clients.append(conn)
