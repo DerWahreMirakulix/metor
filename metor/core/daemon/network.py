@@ -216,6 +216,7 @@ class NetworkManager:
                                     IpcEvent(
                                         type=EventType.INBOX_NOTIFICATION,
                                         alias=alias,
+                                        # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                                         text="📬 1 new offline message from '{alias}'.",
                                     )
                                 )
@@ -271,6 +272,7 @@ class NetworkManager:
             IpcEvent(
                 type=EventType.INFO,
                 alias=alias,
+                # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                 text=f"Incoming connection from '{{alias}}'. Type '{Theme.GREEN}/accept {{alias}}{Theme.RESET}' or '{Theme.RED}/reject {{alias}}{Theme.RESET}'.",
             )
         )
@@ -321,6 +323,7 @@ class NetworkManager:
                     IpcEvent(
                         type=EventType.INFO,
                         alias=alias,
+                        # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                         text="Request sent to '{alias}'. Waiting for acceptance...",
                     )
                 )
@@ -332,6 +335,7 @@ class NetworkManager:
                 IpcEvent(
                     type=EventType.INFO,
                     alias=alias,
+                    # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                     text="Failed to connect to '{alias}'.",
                 )
             )
@@ -399,6 +403,7 @@ class NetworkManager:
             IpcEvent(
                 type=EventType.INFO,
                 alias=alias,
+                # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                 text="Connection with '{alias}' rejected.",
             )
         )
