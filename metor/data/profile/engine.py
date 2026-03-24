@@ -4,7 +4,7 @@ Module for managing user profiles, their directories, and daemon lock states.
 
 import shutil
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Set
 
 from metor.data.settings import SettingKey, Settings
 from metor.data.sql import SqlManager
@@ -207,7 +207,10 @@ class ProfileManager:
         if not data_dir.exists():
             return []
 
-        ignored_folders = {Constants.HIDDEN_SERVICE_DIR, Constants.TOR_DATA_DIR}
+        ignored_folders: Set[str] = {
+            Constants.HIDDEN_SERVICE_DIR,
+            Constants.TOR_DATA_DIR,
+        }
         return [
             d.name
             for d in data_dir.iterdir()
@@ -243,7 +246,7 @@ class ProfileManager:
         target_dir.mkdir(parents=True)
 
         if is_remote or port:
-            pm = ProfileManager(safe_name)
+            pm: 'ProfileManager' = ProfileManager(safe_name)
             if is_remote:
                 pm.config.set(ProfileConfigKey.IS_REMOTE, True)
             if port:
@@ -290,7 +293,7 @@ class ProfileManager:
         if not target_dir.exists():
             return False, f"Profile '{safe_name}' does not exist."
 
-        pm = cls(safe_name)
+        pm: 'ProfileManager' = cls(safe_name)
         if pm.is_daemon_running() and not pm.is_remote():
             return (
                 False,
@@ -323,7 +326,7 @@ class ProfileManager:
         if new_dir.exists():
             return False, f"Profile '{safe_new}' already exists."
 
-        pm = cls(safe_old)
+        pm: 'ProfileManager' = cls(safe_old)
         if pm.is_daemon_running() and not pm.is_remote():
             return (
                 False,
@@ -348,7 +351,7 @@ class ProfileManager:
         if not safe_name:
             return False, 'Invalid profile name.'
 
-        pm = cls(safe_name)
+        pm: 'ProfileManager' = cls(safe_name)
         if pm.is_daemon_running() and not pm.is_remote():
             return (
                 False,
@@ -360,7 +363,7 @@ class ProfileManager:
             return False, f"No database found for profile '{safe_name}'."
 
         try:
-            sql = SqlManager(db_path)  # Accepts Path now
+            sql: SqlManager = SqlManager(db_path)
             sql.execute('DELETE FROM history')
             sql.execute('DELETE FROM messages')
             sql.execute('DELETE FROM contacts')
@@ -386,7 +389,7 @@ class ProfileManager:
 
         lines: List[str] = ['Available profiles:']
         for p in profiles:
-            pm = ProfileManager(p)
+            pm: 'ProfileManager' = ProfileManager(p)
             marker: str = '*' if p == active else ' '
             tags: List[str] = []
 

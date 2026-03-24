@@ -286,6 +286,7 @@ class NetworkManager:
             None
         """
         alias, onion, exists = self._cm.resolve_target(target)
+        # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
         if not exists or onion == self._tm.onion:
             return
 

@@ -64,7 +64,7 @@ class Settings:
         if path.exists():
             try:
                 with path.open('r', encoding='utf-8') as f:
-                    data = json.load(f)
+                    data: Dict[str, Dict[str, Any]] = json.load(f)
                     if 'chat' not in data or 'daemon' not in data:
                         return {
                             'daemon': data.get('daemon', {}),
