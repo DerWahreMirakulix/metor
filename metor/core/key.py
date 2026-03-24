@@ -52,6 +52,7 @@ class KeyManager:
             salt: bytes = nacl.utils.random(nacl.pwhash.argon2i.SALTBYTES)
             with self._salt_file.open('wb') as f:
                 f.write(salt)
+            self._salt_file.chmod(0o600)
         else:
             with self._salt_file.open('rb') as f:
                 salt = f.read()
@@ -104,12 +105,15 @@ class KeyManager:
 
         with metor_key_path.open('wb') as f:
             f.write(pynacl_secret_key)
+        metor_key_path.chmod(0o600)
 
         with tor_sec_path.open('wb') as f:
             f.write(raw_tor_sec)
+        tor_sec_path.chmod(0o600)
 
         with tor_pub_path.open('wb') as f:
             f.write(raw_tor_pub)
+        tor_pub_path.chmod(0o600)
 
     def get_metor_key(self) -> bytes:
         """

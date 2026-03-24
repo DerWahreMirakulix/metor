@@ -38,14 +38,11 @@ class SqlManager:
         Returns:
             sqlite3.Connection: The active database connection.
         """
-        # Ensure parent directories exist
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path))
 
         if self._password:
-            # Fix SQL Injection Vector: Escape single quotes in password for PRAGMA
-            escaped_password: str = self._password.replace("'", "''")
-            conn.execute(f"PRAGMA key = '{escaped_password}';")
+            conn.execute('PRAGMA key = ?', (self._password,))
 
         return conn
 
