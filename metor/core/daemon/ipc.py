@@ -27,6 +27,9 @@ class IpcServer:
         Args:
             pm (ProfileManager): To store and retrieve the active daemon port.
             command_callback (Callable): The function to call when a valid command arrives.
+
+        Returns:
+            None
         """
         self._pm: ProfileManager = pm
         self._command_callback: Callable[[IpcCommand, socket.socket], None] = (
@@ -39,7 +42,15 @@ class IpcServer:
         self.port: Optional[int] = None
 
     def start(self) -> None:
-        """Starts the local IPC server in a background thread."""
+        """
+        Starts the local IPC server in a background thread.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         server: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
@@ -55,7 +66,15 @@ class IpcServer:
         threading.Thread(target=self._acceptor, args=(server,), daemon=True).start()
 
     def stop(self) -> None:
-        """Stops the IPC server and gracefully disconnects all active UIs."""
+        """
+        Stops the IPC server and gracefully disconnects all active UIs.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         self._stop_flag.set()
         with self._lock:
             for c in self._clients:
@@ -71,6 +90,9 @@ class IpcServer:
 
         Args:
             event (IpcEvent): The DTO event to broadcast.
+
+        Returns:
+            None
         """
         msg: bytes = (event.to_json() + '\n').encode('utf-8')
         dead_clients: List[socket.socket] = []
@@ -91,6 +113,9 @@ class IpcServer:
         Args:
             conn (socket.socket): The target socket connection.
             event (IpcEvent): The DTO event to send.
+
+        Returns:
+            None
         """
         try:
             msg: bytes = (event.to_json() + '\n').encode('utf-8')
@@ -99,7 +124,15 @@ class IpcServer:
             pass
 
     def _acceptor(self, server: socket.socket) -> None:
-        """Target loop for accepting new incoming UI connections."""
+        """
+        Target loop for accepting new incoming UI connections.
+
+        Args:
+            server (socket.socket): The main server socket listening for incoming connections.
+
+        Returns:
+            None
+        """
         while not self._stop_flag.is_set():
             try:
                 server.settimeout(1.0)
@@ -115,7 +148,15 @@ class IpcServer:
                 break
 
     def _handler(self, conn: socket.socket) -> None:
-        """Target loop for receiving and parsing commands from a specific UI."""
+        """
+        Target loop for receiving and parsing commands from a specific UI.
+
+        Args:
+            conn (socket.socket): The established client socket connection.
+
+        Returns:
+            None
+        """
         buffer: str = ''
         try:
             while not self._stop_flag.is_set():

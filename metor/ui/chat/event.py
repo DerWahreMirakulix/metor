@@ -36,6 +36,9 @@ class EventHandler:
             renderer (Renderer): The terminal UI renderer.
             init_event (threading.Event): Event to signal successful initialization.
             conn_event (threading.Event): Event to signal connection state updates.
+
+        Returns:
+            None
         """
         self._ipc: IpcClient = ipc
         self._session: Session = session
@@ -49,6 +52,9 @@ class EventHandler:
 
         Args:
             event (IpcEvent): The DTO payload received from the Daemon.
+
+        Returns:
+            None
         """
         try:
             if event.type == EventType.INIT:
@@ -181,6 +187,9 @@ class EventHandler:
         Args:
             alias (Optional[str]): The target alias.
             hide_message (bool): Flag to skip printing the focus message.
+
+        Returns:
+            None
         """
         old_alias: Optional[str] = self._session.focused_alias
 
@@ -207,7 +216,6 @@ class EventHandler:
         if not hide_message:
             if alias:
                 self._renderer.print_message(
-                    # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                     "Switched focus to '{alias}'.",
                     alias=alias,
                     msg_type=UIMessageType.INFO,
@@ -217,7 +225,6 @@ class EventHandler:
                 )
             elif old_alias:
                 self._renderer.print_message(
-                    # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                     "Removed focus from '{alias}'.",
                     alias=old_alias,
                     msg_type=UIMessageType.INFO,
