@@ -20,7 +20,7 @@ When contributing to this repository, you MUST strictly adhere to the following 
 - **Google Style:** Use Google-style docstrings for every class and method.
 - **Meaningful Descriptions:** Explain _what_ the function does and _why_.
 - **Input/Output (STRICT):** Every method docstring MUST have an `Args:` and `Returns:` block. If a function takes no arguments, write `Args:\n    None`. If it returns nothing, write `Returns:\n    None`.
-- **Comments:** Keep comments strictly objective. No conversational filler, no changelog notes. Write comments for a production codebase.
+- **Comments:** Keep comments strictly objective. No conversational filler, no changelog notes. Write comments for a production codebase. Don't remove comments which fulfill a purpose (e.g. guiding auto completion models or agents)
 
 ## 4. Architecture & Design Principles
 
