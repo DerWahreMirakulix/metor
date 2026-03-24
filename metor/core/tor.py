@@ -11,11 +11,13 @@ import sys
 from typing import Tuple, Optional, Any
 
 from metor.data.profile import ProfileManager
-from metor.core.key import KeyManager
 from metor.data.settings import SettingKey, Settings
 from metor.ui.theme import Theme
 from metor.utils.constants import Constants
 from metor.utils.helper import clean_onion
+
+# Local Package Imports
+from metor.core.key import KeyManager
 
 
 class TorManager:
@@ -77,7 +79,7 @@ class TorManager:
         }
 
         tor_cmd: str = (
-            os.path.join(Constants.DATA, Constants.TOR_WIN)
+            str(Constants.DATA / Constants.TOR_WIN)
             if os.name == 'nt'
             else Constants.TOR_UNIX
         )

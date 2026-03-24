@@ -13,33 +13,31 @@ When writing or modifying code for this repository, you MUST strictly adhere to 
 
 ## 2. Typing & Signatures
 
-- **Strict Typing:** Every function, method, and variable MUST have strict Python type hints (using the `typing` module where necessary, e.g., `List`, `Dict`, `Optional`, `Tuple`).
+- **Strict & Explicit Typing:** Every function, method, and variable MUST have strict Python type hints. Never use bare types like `List` or `Tuple` -> always define their generic payload (e.g., `List[Tuple[str, int, bool]]`).
 - **Return Types:** Every function MUST declare a return type (use `-> None` if it returns nothing).
 
 ## 3. Documentation (Docstrings)
 
 - **Google Style:** Use Google-style docstrings for every class and method.
 - **Meaningful Descriptions:** Do not just repeat the function name. Explain _what_ it does and _why_.
-- **Input/Output:** Every docstring MUST include an `Args:` block (with types and descriptions) and a `Returns:` block (with types and descriptions). Exceptions must be documented under `Raises:`.
-- **Comments:** Keep comments strictly objective and architecturally useful. Do not include conversational filler, changelog notes, or self-referential remarks in the code (e.g., absolutely no "NEW:", "As requested:", or "I changed this part"). Write comments for a production codebase, not a tutorial.
+- **Input/Output (STRICT):** Every method docstring MUST have an `Args:` and `Returns:` block. If a function takes no arguments, write `Args:\n    None`. If it returns nothing, write `Returns:\n    None`.
+- **Comments:** Keep comments strictly objective. No conversational filler, no changelog notes (e.g., absolutely no "NEW:", "As requested:"). Write comments for a production codebase.
 
-## 4. Architecture & Design Principles
+## 4. Architecture, Network & Design Principles
 
-- **DRY (Don't Repeat Yourself):** Extract repeated logic into helper functions, base classes, or context managers (e.g., use `metor.utils.lock.FileLock` instead of writing custom OS locking logic).
-- **Domain-Driven Design:** Respect the folder structure:
-  - `metor/core/`: Heavy lifting, Tor daemon, IPC API (DTOs).
-  - `metor/data/`: State management, SQLite, JSON storage, Profiles.
-  - `metor/ui/`: Frontend, Chat interface, CLI rendering.
-  - `metor/utils/`: Generic helpers and constants.
-- **Context Managers:** Always use `with` statements for file operations, sockets, and locks to ensure proper resource cleanup.
+- **DRY & DDD:** Respect the domain boundaries (`core`, `data`, `ui`, `utils`). Extract repeated logic into helper functions or base classes.
+- **Context Managers:** Always use `with` statements for file operations, databases, sockets, and locks to ensure proper resource cleanup.
+- **Modern Path Handling:** Use Python's `pathlib.Path` strictly over the legacy `os.path` module for all filesystem operations.
+- **TCP Stream Framing (CRITICAL):** Never assume `socket.recv()` returns a complete protocol frame or message. Always implement line-buffering or length-prefixing to safely reconstruct stream fragments.
+- **Cryptography & Security:** - Never use string formatting (f-strings) to inject variables directly into SQL queries or PRAGMAs. Always use parameterized queries.
+  - Use `secrets` instead of `os` or `random` for cryptographic token/seed generation.
 
 ## 5. Code Formatting (Ruff)
 
-- **Imports First:** All `import` statements MUST be located at the very top of the file, immediately following the module-level docstring (if present) and before any code or constants.
-- **Single Quotes:** Always use single quotes (`'`) for strings unless the string itself contains a single quote. (Double quotes are only for docstrings `"""`).
-- **Clean Code:** Keep functions small and focused on a single responsibility.
+- **Imports First:** All `import` statements MUST be located at the very top of the file, immediately following the module-level docstring.
+- **Single Quotes:** Always use single quotes (`'`) for strings unless the string itself contains a single quote. Double quotes are strictly for docstrings (`"""`).
 
 ## 6. Proactive Refactoring (The Boy Scout Rule)
 
-- **Auto-Correction:** Whenever you analyze, modify, or rewrite a file, you MUST automatically fix any existing code in that file that violates the rules defined in this document (e.g., missing type hints, wrong quote styles, missing docstrings, or DRY violations).
-- **Exceptions:** Do this proactively and silently alongside your requested task, UNLESS the user explicitly instructs you with "do not refactor" or "only modify the specified lines".
+- **Auto-Correction:** Whenever you analyze or modify a file, proactively and silently fix existing code in that file that violates these rules (e.g., replacing `os.path` with `pathlib`, fixing generic type hints, or wrapping raw sockets in buffers).
+- **Exceptions:** Do this alongside your requested task UNLESS the user explicitly instructs you to "do not refactor".

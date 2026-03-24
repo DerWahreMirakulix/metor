@@ -9,14 +9,16 @@ import time
 from typing import Optional, Any
 
 from metor.data.settings import SettingKey, Settings
-from metor.utils.helper import get_divider_string
 from metor.ui.chat.models import UIMessageType, UIChatLine
+from metor.utils.helper import get_divider_string
+
+# Local Package Imports
 from metor.ui.chat.renderer.display import Display
 from metor.ui.chat.renderer.input import InputHandler
 from metor.ui.chat.renderer.formatter import Formatter
 
 
-class RendererEngine:
+class Renderer:
     """Facade for the UI rendering layer. Manages threading locks and sub-components."""
 
     def __init__(self) -> None:

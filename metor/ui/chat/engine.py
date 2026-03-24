@@ -10,11 +10,11 @@ import threading
 import secrets
 from typing import Optional
 
-from metor.ui.help import Help
+from metor.core.api import IpcCommand, Action, IpcEvent
 from metor.data.profile import ProfileManager
+from metor.ui.help import Help
 from metor.ui.theme import Theme
 from metor.utils.helper import clean_onion
-from metor.core.api import IpcCommand, Action, IpcEvent
 
 # Local Package Imports
 from metor.ui.chat.models import UIMessageType
@@ -25,7 +25,7 @@ from metor.ui.chat.command import CommandDispatcher
 from metor.ui.chat.event import EventHandler
 
 
-class ChatEngine:
+class Chat:
     """The UI Engine. Orchestrates input handling and Daemon IPC communication."""
 
     def __init__(self, pm: ProfileManager) -> None:
@@ -167,7 +167,7 @@ class ChatEngine:
         """Callback fired when the IPC Client detects a broken pipe."""
         self._renderer.print_divider()
         self._renderer.print_message(
-            f'{Theme.RED}Alert:{Theme.RESET} Connection to Daemon lost! Exiting...',
+            f'{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}',
             msg_type=UIMessageType.RAW,
         )
         self._renderer.clear_input_area()

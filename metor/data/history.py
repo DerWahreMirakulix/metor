@@ -6,12 +6,14 @@ import os
 from enum import Enum
 from typing import List, Tuple, Optional
 
-from metor.data.profile import ProfileManager
-from metor.data.contact import ContactManager
-from metor.data.sql import SqlManager
 from metor.ui.theme import Theme
 from metor.utils.constants import Constants
 from metor.utils.helper import get_divider_string, get_header_string
+
+# Local Package Imports
+from metor.data.profile import ProfileManager
+from metor.data.contact import ContactManager
+from metor.data.sql import SqlManager
 
 
 class HistoryEvent(str, Enum):
@@ -86,8 +88,8 @@ class HistoryManager:
             self._sql.execute(cleanup_query)
 
             return True, msg
-        except Exception as e:
-            return False, f'Failed to clear history: {str(e)}'
+        except Exception:
+            return False, 'Failed to clear history.'
 
     def show(self, cm: ContactManager, target: Optional[str] = None) -> str:
         """Fetches history and constructs a human-readable string for terminal display."""
@@ -113,7 +115,7 @@ class HistoryManager:
                 cm.get_alias_by_onion(row_onion) if row_onion else 'Unknown'
             )
 
-            line: str = f'[{timestamp}] {status} | remote alias: {Theme.CYAN}{display_alias}{Theme.RESET} | remote identity: {Theme.YELLOW}{row_onion}{Theme.RESET}'
+            line: str = f'[{timestamp}] {Theme.CYAN}{status}{Theme.RESET} | remote alias: {Theme.CYAN}{display_alias}{Theme.RESET} | remote identity: {Theme.YELLOW}{row_onion}{Theme.RESET}'
             if reason:
                 line += f' | reason: {Theme.CYAN}{reason}{Theme.RESET}'
 

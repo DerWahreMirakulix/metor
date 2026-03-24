@@ -4,11 +4,13 @@ Module defining the command parser and dispatcher for UI slash commands.
 
 from typing import List, Optional
 
+from metor.core.api import IpcCommand, Action
+
+# Local Package Imports
 from metor.ui.chat.renderer import Renderer
 from metor.ui.chat.ipc import IpcClient
 from metor.ui.chat.session import Session
 from metor.ui.chat.models import UIMessageType
-from metor.core.api import IpcCommand, Action
 
 
 class CommandDispatcher:

@@ -13,30 +13,30 @@ import os
 import signal
 from typing import Any, Optional
 
-from metor.data.profile import ProfileManager
 from metor.core.key import KeyManager
 from metor.core.tor import TorManager
+from metor.core.api import IpcCommand, IpcEvent, Action, EventType
+from metor.data.profile import ProfileManager
 from metor.data.history import HistoryManager, HistoryEvent
 from metor.data.contact import ContactManager
-from metor.data.messages import (
+from metor.data.message import (
     MessageManager,
     MessageDirection,
     MessageType,
     MessageStatus,
 )
-
-from metor.core.api import IpcCommand, IpcEvent, Action, EventType
 from metor.ui.theme import Theme
 from metor.utils.constants import Constants
 from metor.utils.helper import clean_onion
 
+# Local Package Imports
 from metor.core.daemon.crypto import Crypto
 from metor.core.daemon.ipc import IpcServer
 from metor.core.daemon.outbox import OutboxWorker
 from metor.core.daemon.network import NetworkManager
 
 
-class DaemonEngine:
+class Daemon:
     """The main orchestrator binding network, cryptography, and logic together."""
 
     def __init__(
@@ -92,6 +92,9 @@ class DaemonEngine:
         Args:
             signum (int): The signal number.
             frame (Any): The current stack frame.
+
+        Returns:
+            None
         """
         self.stop()
         sys.exit(0)
@@ -146,6 +149,7 @@ class DaemonEngine:
     def _nuke_data(self) -> None:
         """
         Securely erases local SQLite DB and Tor keys, and initiates shutdown.
+        Warning: Data shredding may be ineffective on modern SSDs due to wear-leveling.
         """
         import stat
 
@@ -175,7 +179,7 @@ class DaemonEngine:
         self._ipc.broadcast(
             IpcEvent(
                 type=EventType.SYSTEM,
-                text=f'{Theme.RED}CRITICAL: DAEMON SELF DESTRUCT INITIATED. Shutting down immediately.{Theme.RESET}',
+                text='Daemon self-destruction initiated. Shutting down immediately...',
             )
         )
 
@@ -216,7 +220,7 @@ class DaemonEngine:
                 conn,
                 IpcEvent(
                     type=EventType.CLI_RESPONSE,
-                    text=f'{Theme.GREEN}Self-destruct command accepted. Nuking daemon...{Theme.RESET}',
+                    text='Self-destruct command accepted. Nuking daemon...',
                 ),
             )
             threading.Thread(target=self._nuke_data, daemon=True).start()
@@ -260,7 +264,7 @@ class DaemonEngine:
                 conn,
                 IpcEvent(
                     type=EventType.CLI_RESPONSE,
-                    text=f'{Theme.GREEN}Daemon unlocked successfully.{Theme.RESET}',
+                    text='Daemon unlocked successfully.',
                 ),
             )
             return
@@ -274,15 +278,16 @@ class DaemonEngine:
                     self._ipc.send_to(
                         conn,
                         IpcEvent(
-                            type=EventType.CLI_RESPONSE, text='Daemon setting updated.'
+                            type=EventType.CLI_RESPONSE,
+                            text='Daemon setting updated.',
                         ),
                     )
-                except Exception as e:
+                except Exception:
                     self._ipc.send_to(
                         conn,
                         IpcEvent(
                             type=EventType.CLI_RESPONSE,
-                            text=f'Failed to update setting: {e}',
+                            text='Failed to update setting.',
                         ),
                     )
             return
@@ -292,7 +297,7 @@ class DaemonEngine:
                 conn,
                 IpcEvent(
                     type=EventType.CLI_RESPONSE,
-                    text=f'{Theme.RED}Daemon is locked. Please unlock first.{Theme.RESET}',
+                    text='Daemon is locked. Please unlock first.',
                 ),
             )
             return
@@ -394,7 +399,9 @@ class DaemonEngine:
                         MessageStatus.PENDING,
                     )
                     self._hm.log_event(
-                        HistoryEvent.ASYNC_QUEUED, onion, 'Queued offline message'
+                        HistoryEvent.ASYNC_QUEUED,
+                        onion,
+                        'Queued offline message',
                     )
 
         elif cmd.action == Action.GET_INBOX:
@@ -463,7 +470,10 @@ class DaemonEngine:
                 if exists:
                     success, msg = self._hm.clear_history(onion)
                 else:
-                    success, msg = False, 'Contact not found.'
+                    success, msg = (
+                        False,
+                        'Contact not found.',
+                    )
             else:
                 success, msg = self._hm.clear_history()
             self._ipc.send_to(
@@ -483,7 +493,10 @@ class DaemonEngine:
                 if exists:
                     success, msg = self._mm.clear_messages(onion)
                 else:
-                    success, msg = False, 'Contact not found.'
+                    success, msg = (
+                        False,
+                        'Contact not found.',
+                    )
             else:
                 success, msg = self._mm.clear_messages()
             self._ipc.send_to(

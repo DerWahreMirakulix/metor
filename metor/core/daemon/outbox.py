@@ -10,8 +10,10 @@ import base64
 from typing import List, Optional
 
 from metor.core.tor import TorManager
-from metor.data.messages import MessageManager, MessageStatus
+from metor.data.message import MessageManager, MessageStatus
 from metor.data.history import HistoryManager, HistoryEvent
+
+# Local Package Imports
 from metor.core.daemon.crypto import Crypto
 from metor.core.daemon.models import TorCommand
 

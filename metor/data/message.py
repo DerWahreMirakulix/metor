@@ -3,16 +3,18 @@ Module for managing asynchronous offline messages via SQLite.
 Uses strict Enums to represent message states and types.
 """
 
-import os
 from enum import Enum
+from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
 
-from metor.data.profile import ProfileManager
-from metor.data.sql import SqlManager
-from metor.data.contact import ContactManager
 from metor.ui.theme import Theme
 from metor.utils.constants import Constants
 from metor.utils.helper import get_divider_string, get_header_string
+
+# Local Package Imports
+from metor.data.profile import ProfileManager
+from metor.data.sql import SqlManager
+from metor.data.contact import ContactManager
 
 
 class MessageStatus(str, Enum):
@@ -48,9 +50,12 @@ class MessageManager:
 
         Args:
             pm (ProfileManager): The profile manager instance for context.
+
+        Returns:
+            None
         """
         self._pm: ProfileManager = pm
-        self._db_path: str = os.path.join(self._pm.get_config_dir(), Constants.DB_FILE)
+        self._db_path: Path = Path(self._pm.get_config_dir()) / Constants.DB_FILE
         self._sql: SqlManager = SqlManager(self._db_path)
         self._initialize_table()
 
@@ -108,10 +113,10 @@ class MessageManager:
         )
 
         id_query: str = 'SELECT MAX(id) FROM messages'
-        result: List[Tuple] = self._sql.fetchall(id_query)
+        result: List[Tuple[int]] = self._sql.fetchall(id_query)
         return int(result[0][0]) if result and result[0][0] else 0
 
-    def get_pending_outbox(self) -> List[Tuple]:
+    def get_pending_outbox(self) -> List[Tuple[int, str, str, str]]:
         """
         Retrieves all outbound messages that are waiting to be delivered.
 
@@ -119,7 +124,7 @@ class MessageManager:
             None
 
         Returns:
-            List[Tuple]: A list of database rows representing pending messages.
+            List[Tuple[int, str, str, str]]: A list of database rows representing pending messages.
         """
         query: str = (
             'SELECT id, contact_onion, msg_type, payload FROM messages WHERE status = ?'
@@ -151,7 +156,9 @@ class MessageManager:
             Dict[str, int]: A dictionary mapping onion addresses to their unread message count.
         """
         query: str = 'SELECT contact_onion, COUNT(*) FROM messages WHERE status = ? GROUP BY contact_onion'
-        rows: List[Tuple] = self._sql.fetchall(query, (MessageStatus.UNREAD.value,))
+        rows: List[Tuple[str, int]] = self._sql.fetchall(
+            query, (MessageStatus.UNREAD.value,)
+        )
 
         counts: Dict[str, int] = {}
         for row in rows:
@@ -160,7 +167,7 @@ class MessageManager:
 
         return counts
 
-    def get_and_read_inbox(self, contact_onion: str) -> List[Tuple]:
+    def get_and_read_inbox(self, contact_onion: str) -> List[Tuple[int, str, str, str]]:
         """
         Retrieves all unread messages for a specific contact and marks them as read.
 
@@ -168,7 +175,7 @@ class MessageManager:
             contact_onion (str): The target onion address.
 
         Returns:
-            List[Tuple]: A list of message rows (id, msg_type, payload, timestamp).
+            List[Tuple[int, str, str, str]]: A list of message rows (id, msg_type, payload, timestamp).
         """
         query: str = """
             SELECT id, msg_type, payload, timestamp 
@@ -176,7 +183,7 @@ class MessageManager:
             WHERE contact_onion = ? AND status = ?
             ORDER BY timestamp ASC
         """
-        messages: List[Tuple] = self._sql.fetchall(
+        messages: List[Tuple[int, str, str, str]] = self._sql.fetchall(
             query, (contact_onion, MessageStatus.UNREAD.value)
         )
 
@@ -211,7 +218,9 @@ class MessageManager:
             ORDER BY timestamp DESC
             LIMIT ?
         """
-        rows: List[Tuple] = self._sql.fetchall(query, (contact_onion, limit))
+        rows: List[Tuple[str, str, str, str]] = self._sql.fetchall(
+            query, (contact_onion, limit)
+        )
         rows.reverse()
 
         result: List[Dict[str, Any]] = []
@@ -258,19 +267,27 @@ class MessageManager:
             self._sql.execute(cleanup_query)
 
             return True, msg
-        except Exception as e:
-            return False, f'Failed to clear messages: {e}'
+        except Exception:
+            return False, 'Failed to clear messages.'
 
     def show_inbox(self, cm: ContactManager) -> str:
-        """Fetches and formats the current unread inbox counts into a CLI string."""
+        """
+        Fetches and formats the current unread inbox counts into a CLI string.
+
+        Args:
+            cm (ContactManager): Contact manager instance.
+
+        Returns:
+            str: Formatting string output.
+        """
         counts: Dict[str, int] = self.get_unread_counts()
         if not counts:
-            return f'{Theme.DARK_GREY}Inbox is empty.{Theme.RESET}'
+            return 'Inbox is empty.'
 
-        out: str = f'{Theme.YELLOW}Unread Offline Messages:{Theme.RESET}\n'
+        out: str = 'Unread Offline Messages:\n'
         for onion, count in counts.items():
             resolved_alias: str = cm.get_alias_by_onion(onion) or onion
-            out += f' - {Theme.CYAN}{resolved_alias}{Theme.RESET}: {count} new message(s)\n'
+            out += f' - {Theme.CYAN}{resolved_alias}{Theme.RESET}: {Theme.YELLOW}{count}{Theme.RESET} new message(s)\n'
 
         return out.strip()
 
@@ -289,8 +306,10 @@ class MessageManager:
         if not exists:
             return f"Contact '{target}' not found in address book."
 
-        disp_name: str = alias
-        raw_messages: List[Tuple] = self.get_and_read_inbox(onion)
+        disp_name: str = alias or str(onion)
+        raw_messages: List[Tuple[int, str, str, str]] = self.get_and_read_inbox(
+            str(onion)
+        )
 
         if not raw_messages:
             return f"No unread messages from '{disp_name}'."
@@ -322,8 +341,8 @@ class MessageManager:
         if not exists:
             return f"Contact '{target}' not found in address book."
 
-        disp_name: str = alias
-        messages: List[Dict[str, Any]] = self.get_chat_history(onion, limit)
+        disp_name: str = alias or str(onion)
+        messages: List[Dict[str, Any]] = self.get_chat_history(str(onion), limit)
 
         if not messages:
             return f"No chat history found for '{disp_name}'."

@@ -3,6 +3,7 @@ Module defining application-wide constants to adhere to the DRY (Don't Repeat Yo
 """
 
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables from a local .env file if present
@@ -34,7 +35,5 @@ class Constants:
     TOR_UNIX: str = 'tor'
 
     # Application Metadata
-    # Uses METOR_DATA_DIR_PARENT from environment if set, otherwise falls back to the user's home directory
-    DATA: str = os.path.join(
-        os.getenv('METOR_DATA_DIR_PARENT', os.path.expanduser('~')), DATA_DIR
-    )
+    # Uses METOR_DATA_DIR_PARENT from environment if set, otherwise falls back to the user's home directory natively via pathlib
+    DATA: Path = Path(os.getenv('METOR_DATA_DIR_PARENT', Path.home())) / DATA_DIR

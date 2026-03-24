@@ -11,19 +11,20 @@ import secrets
 from typing import Dict, List, Optional, Callable
 
 from metor.core.tor import TorManager
+from metor.core.api import IpcEvent, EventType
 from metor.data.history import HistoryManager, HistoryEvent
 from metor.data.contact import ContactManager
-from metor.data.messages import (
+from metor.data.message import (
     MessageManager,
     MessageDirection,
     MessageType,
     MessageStatus,
 )
 from metor.data.settings import Settings, SettingKey
-from metor.core.api import IpcEvent, EventType
 from metor.ui.theme import Theme
 from metor.utils.constants import Constants
 
+# Local Package Imports
 from metor.core.daemon.models import TorCommand
 from metor.core.daemon.crypto import Crypto
 
@@ -111,6 +112,9 @@ class NetworkManager:
 
         Args:
             conn (socket.socket): The incoming socket connection.
+
+        Returns:
+            None
         """
         auth_successful: bool = False
         remote_identity: Optional[str] = None
@@ -119,18 +123,25 @@ class NetworkManager:
         try:
             conn.settimeout(10.0)
             challenge: str = secrets.token_hex(32)
-            conn.sendall(f'{TorCommand.CHALLENGE.value} {challenge}\n'.encode())
-            data: bytes = conn.recv(2048)
+            conn.sendall(f'{TorCommand.CHALLENGE.value} {challenge}\n'.encode('utf-8'))
 
-            if data and data.decode().strip().startswith(f'{TorCommand.AUTH.value} '):
-                parts: List[str] = data.decode().strip().split(' ')
-                if len(parts) >= 3 and self._crypto.verify_signature(
-                    parts[1], challenge, parts[2]
-                ):
-                    remote_identity = parts[1]
-                    auth_successful = True
-                    if len(parts) >= 4 and parts[3] == 'ASYNC':
-                        is_async = True
+            # TCP Frame Buffering for Handshake
+            buffer: str = ''
+            data: bytes = conn.recv(2048)
+            if data:
+                buffer += data.decode('utf-8')
+
+            if '\n' in buffer:
+                line: str = buffer.split('\n')[0].strip()
+                if line.startswith(f'{TorCommand.AUTH.value} '):
+                    parts: List[str] = line.split(' ')
+                    if len(parts) >= 3 and self._crypto.verify_signature(
+                        parts[1], challenge, parts[2]
+                    ):
+                        remote_identity = parts[1]
+                        auth_successful = True
+                        if len(parts) >= 4 and parts[3] == 'ASYNC':
+                            is_async = True
         except Exception:
             pass
 
@@ -392,9 +403,23 @@ class NetworkManager:
         )
 
     def disconnect_all(self) -> None:
-        """Forcefully disconnects all active and pending peers."""
-        aliases: List[str] = self.get_active_aliases() + self.get_pending_aliases()
-        for alias in aliases:
+        """
+        Forcefully disconnects all active and pending peers safely.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        # Get a static copy of the keys to prevent dictionary changed size during iteration RuntimeError
+        with self._lock:
+            active_aliases: List[str] = list(self._connections.keys())
+            pending_aliases: List[str] = list(self._pending_connections.keys())
+
+        aliases_to_disconnect: List[str] = active_aliases + pending_aliases
+
+        for alias in aliases_to_disconnect:
             self.disconnect(alias, initiated_by_self=True)
 
     def send_message(self, alias: str, msg: str, msg_id: str) -> None:
@@ -437,16 +462,24 @@ class NetworkManager:
         Args:
             current_alias (str): The alias associated with the connection.
             conn (socket.socket): The active socket connection.
+
+        Returns:
+            None
         """
-        remote_rejected, remote_disconnected = False, False
+        remote_rejected: bool = False
+        remote_disconnected: bool = False
+        buffer: str = ''
 
         try:
             while True:
-                data: bytes = conn.recv(1024)
+                data: bytes = conn.recv(4096)
                 if not data:
                     break
 
-                for msg in data.decode().strip().split('\n'):
+                buffer += data.decode('utf-8')
+
+                while '\n' in buffer:
+                    msg, buffer = buffer.split('\n', 1)
                     msg = msg.strip()
                     if not msg:
                         continue
@@ -487,9 +520,13 @@ class NetworkManager:
                         if len(parts) == 3:
                             try:
                                 conn.sendall(
-                                    f'{TorCommand.ACK.value} {parts[1]}\n'.encode()
+                                    f'{TorCommand.ACK.value} {parts[1]}\n'.encode(
+                                        'utf-8'
+                                    )
                                 )
-                                content = base64.b64decode(parts[2]).decode('utf-8')
+                                content: str = base64.b64decode(parts[2]).decode(
+                                    'utf-8'
+                                )
                                 self._broadcast(
                                     IpcEvent(
                                         type=EventType.REMOTE_MSG,
@@ -499,6 +536,8 @@ class NetworkManager:
                                 )
                             except Exception:
                                 pass
+                if remote_disconnected or remote_rejected:
+                    break
         except Exception:
             pass
         finally:

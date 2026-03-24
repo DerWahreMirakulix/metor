@@ -8,16 +8,17 @@ import json
 from typing import Optional, Dict, Any
 
 from metor.data.profile import ProfileManager
-from metor.core.api import IpcCommand, Action, IpcEvent
-from metor.utils.constants import Constants
-from metor.ui.theme import Theme
 from metor.data.settings import Settings, SettingKey
-
-from metor.core.key import KeyManager
-from metor.core.tor import TorManager
 from metor.data.history import HistoryManager
 from metor.data.contact import ContactManager
-from metor.data.messages import MessageManager
+from metor.data.message import MessageManager
+from metor.ui.theme import Theme
+from metor.utils.constants import Constants
+
+# Local Package Imports
+from metor.core.api import IpcCommand, Action, IpcEvent
+from metor.core.key import KeyManager
+from metor.core.tor import TorManager
 
 
 class CliProxy:
@@ -70,10 +71,9 @@ class CliProxy:
         if not port:
             if self.is_remote:
                 return self._prefix_remote(
-                    f'{Theme.RED}Error:{Theme.RESET} Cannot reach remote Daemon on port {self._pm.get_static_port()}.\n'
-                    f'Did you forget the SSH tunnel?'
+                    f'Cannot reach remote Daemon on port {self._pm.get_static_port()}. Did you forget the SSH tunnel?'
                 )
-            return f'{Theme.RED}Error:{Theme.RESET} Local daemon is not running.'
+            return 'Local daemon is not running.'
 
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -82,9 +82,7 @@ class CliProxy:
                 s.sendall((cmd.to_json() + '\n').encode('utf-8'))
 
                 if not wait_for_response:
-                    return self._prefix_remote(
-                        f'{Theme.GREEN}Command successfully sent to daemon.{Theme.RESET}'
-                    )
+                    return self._prefix_remote('Command successfully sent to daemon.')
 
                 buffer: str = ''
                 while True:
@@ -98,12 +96,12 @@ class CliProxy:
                 if buffer:
                     resp_dict: Dict[str, Any] = json.loads(buffer.split('\n')[0])
                     event = IpcEvent.from_dict(resp_dict)
-                    return self._prefix_remote(event.text if event.text else 'Success.')
+                    return self._prefix_remote(
+                        event.text if event.text else 'Command executed successfully.'
+                    )
         except Exception:
             pass
-        return self._prefix_remote(
-            f'{Theme.RED}Failed to communicate with the daemon.{Theme.RESET}'
-        )
+        return self._prefix_remote('Failed to communicate with the daemon.')
 
     def unlock_daemon(self, password: str) -> str:
         """
@@ -142,11 +140,11 @@ class CliProxy:
         try:
             setting_enum = SettingKey(key)
         except ValueError:
-            return f"{Theme.RED}Error:{Theme.RESET} Unknown setting key '{key}'."
+            return f"Unknown setting key '{key}'."
 
         if setting_enum.value.startswith('chat.'):
             Settings.set(setting_enum, value)
-            return f"{Theme.GREEN}Local chat setting '{key}' updated.{Theme.RESET}"
+            return f"Local chat setting '{key}' updated."
 
         return self._request_ipc(
             IpcCommand(action=Action.SET_SETTING, setting_key=key, setting_value=value)
@@ -167,7 +165,7 @@ class CliProxy:
     def send_drop(self, target_alias: str, text: str) -> str:
         """Queues an asynchronous offline message."""
         if not self.is_remote and not self._pm.is_daemon_running():
-            return f'{Theme.RED}Error:{Theme.RESET} The daemon must be running to send drops.'
+            return 'The daemon must be running to send drops.'
 
         cmd = IpcCommand(action=Action.SEND_DROP, target=target_alias, text=text)
         return self._request_ipc(cmd, wait_for_response=False)

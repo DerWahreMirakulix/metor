@@ -6,12 +6,14 @@ Updates Session state and triggers Renderer UI updates.
 import threading
 from typing import Optional
 
+from metor.core.api import IpcEvent, EventType, IpcCommand, Action
+from metor.utils.helper import clean_onion
+
+# Local Package Imports
 from metor.ui.chat.renderer import Renderer
 from metor.ui.chat.ipc import IpcClient
 from metor.ui.chat.session import Session
 from metor.ui.chat.models import UIMessageType
-from metor.core.api import IpcEvent, EventType, IpcCommand, Action
-from metor.utils.helper import clean_onion
 
 
 class EventHandler:

@@ -5,6 +5,7 @@ Implements strong password-based encryption for keys at rest (Argon2i + SecretBo
 
 import hashlib
 import os
+import secrets
 import nacl.bindings
 import nacl.pwhash
 import nacl.secret
@@ -61,7 +62,13 @@ class KeyManager:
     def generate_keys(self) -> None:
         """
         Generates Metor application keys and Tor hidden service keys if they do not exist.
-        Encrypts the keys on disk if a master password is set.
+        Encrypts the keys on disk if a master password is set. Uses cryptographically secure PRNG.
+
+        Args:
+            None
+
+        Returns:
+            None
         """
         metor_key_path: str = os.path.join(self._hs_dir, Constants.METOR_SECRET_KEY)
         tor_sec_path: str = os.path.join(self._hs_dir, Constants.TOR_SECRET_KEY)
@@ -70,7 +77,8 @@ class KeyManager:
         if os.path.exists(metor_key_path) and os.path.exists(tor_sec_path):
             return
 
-        seed: bytes = os.urandom(32)
+        # Use secrets module instead of os.urandom
+        seed: bytes = secrets.token_bytes(32)
         public_key, pynacl_secret_key = nacl.bindings.crypto_sign_seed_keypair(seed)
 
         h: bytes = hashlib.sha512(seed).digest()

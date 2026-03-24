@@ -2,14 +2,16 @@
 Module for managing mappings between user-friendly aliases and .onion addresses.
 """
 
-import os
+from pathlib import Path
 from typing import Tuple, Optional, List
 
-from metor.data.profile import ProfileManager
-from metor.data.sql import SqlManager
 from metor.ui.theme import Theme
 from metor.utils.constants import Constants
 from metor.utils.helper import clean_onion, ensure_onion_format
+
+# Local Package Imports
+from metor.data.profile import ProfileManager
+from metor.data.sql import SqlManager
 
 
 class ContactManager:
@@ -21,20 +23,26 @@ class ContactManager:
 
         Args:
             pm (ProfileManager): The profile manager instance.
+
+        Returns:
+            None
         """
         self._pm: ProfileManager = pm
-        self._db_path: str = os.path.join(self._pm.get_config_dir(), Constants.DB_FILE)
+        self._db_path: Path = Path(self._pm.get_config_dir()) / Constants.DB_FILE
         self._sql: SqlManager = SqlManager(self._db_path)
 
     def get_all_contacts(self) -> List[str]:
         """
         Retrieves a list of all permanently saved contact aliases.
 
+        Args:
+            None
+
         Returns:
             List[str]: A list of saved alias names.
         """
         query: str = 'SELECT alias FROM contacts WHERE is_saved = 1'
-        rows: List[Tuple] = self._sql.fetchall(query)
+        rows: List[Tuple[str]] = self._sql.fetchall(query)
         return [row[0] for row in rows]
 
     def is_session_alias(self, alias: str) -> bool:
@@ -49,7 +57,7 @@ class ContactManager:
         """
         alias = alias.strip().lower()
         query: str = 'SELECT is_saved FROM contacts WHERE alias = ?'
-        res: List[Tuple] = self._sql.fetchall(query, (alias,))
+        res: List[Tuple[int]] = self._sql.fetchall(query, (alias,))
         if res and res[0][0] == 0:
             return True
         return False
@@ -71,7 +79,7 @@ class ContactManager:
         if self._sql.fetchall('SELECT onion FROM contacts WHERE alias = ?', (alias,)):
             return False, f"Alias '{alias}' is already in use."
 
-        res: List[Tuple] = self._sql.fetchall(
+        res: List[Tuple[str]] = self._sql.fetchall(
             'SELECT alias FROM contacts WHERE onion = ? AND is_saved = 1', (onion,)
         )
         if res:
@@ -107,7 +115,7 @@ class ContactManager:
             Tuple[bool, str]: A success flag and a status message.
         """
         alias = alias.strip().lower()
-        res: List[Tuple] = self._sql.fetchall(
+        res: List[Tuple[int]] = self._sql.fetchall(
             'SELECT is_saved FROM contacts WHERE alias = ?', (alias,)
         )
 
@@ -162,7 +170,7 @@ class ContactManager:
             Tuple[bool, str]: A success flag and a status message.
         """
         alias = alias.strip().lower()
-        res: List[Tuple] = self._sql.fetchall(
+        res: List[Tuple[int]] = self._sql.fetchall(
             'SELECT is_saved FROM contacts WHERE alias = ?', (alias,)
         )
 
@@ -202,7 +210,7 @@ class ContactManager:
                     SELECT contact_onion AS onion FROM messages
                 )
             """
-            rows: List[Tuple] = self._sql.fetchall(query)
+            rows: List[Tuple[str]] = self._sql.fetchall(query)
             active_onions: List[str] = [r[0] for r in rows]
 
             self._sql.execute('DELETE FROM contacts')
@@ -214,8 +222,8 @@ class ContactManager:
                 True,
                 f"All contacts cleared and active peers anonymized for profile '{self._pm.profile_name}'.",
             )
-        except Exception as e:
-            return False, f'Failed to clear contacts: {e}'
+        except Exception:
+            return False, 'Failed to clear contacts.'
 
     def resolve_target(
         self, target: Optional[str], default_value: Optional[str] = None
@@ -241,12 +249,20 @@ class ContactManager:
         )
 
     def get_onion_by_alias(self, alias: Optional[str]) -> Optional[str]:
-        """Returns the onion address associated with an alias."""
+        """
+        Returns the onion address associated with an alias.
+
+        Args:
+            alias (Optional[str]): The alias to resolve.
+
+        Returns:
+            Optional[str]: The mapped .onion string.
+        """
         if not alias:
             return None
         alias = alias.strip().lower()
 
-        res: List[Tuple] = self._sql.fetchall(
+        res: List[Tuple[str]] = self._sql.fetchall(
             'SELECT onion FROM contacts WHERE alias = ?', (alias,)
         )
         if res:
@@ -267,7 +283,7 @@ class ContactManager:
             return None
         onion = clean_onion(onion)
 
-        res: List[Tuple] = self._sql.fetchall(
+        res: List[Tuple[str]] = self._sql.fetchall(
             'SELECT alias FROM contacts WHERE onion = ?', (onion,)
         )
         if res:
@@ -307,7 +323,7 @@ class ContactManager:
         )
         lines: List[str] = []
 
-        saved: List[Tuple] = self._sql.fetchall(
+        saved: List[Tuple[str, str]] = self._sql.fetchall(
             'SELECT alias, onion FROM contacts WHERE is_saved = 1 ORDER BY alias ASC'
         )
         if saved:
@@ -317,7 +333,7 @@ class ContactManager:
         else:
             lines.append(f'No contacts in address book{profile_suffix}.')
 
-        discovered: List[Tuple] = self._sql.fetchall(
+        discovered: List[Tuple[str, str]] = self._sql.fetchall(
             'SELECT alias, onion FROM contacts WHERE is_saved = 0 ORDER BY alias ASC'
         )
         if discovered:

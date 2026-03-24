@@ -4,9 +4,9 @@ Utilizes a centralized cross-platform file locking mechanism to prevent race con
 Enforces strict typing using Enums for configuration keys.
 """
 
-import os
 import json
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict
 
 from metor.utils.constants import Constants
@@ -35,30 +35,35 @@ class Settings:
     }
 
     @staticmethod
-    def get_global_settings_path() -> str:
+    def get_global_settings_path() -> Path:
         """
         Retrieves the path to the global settings JSON file.
 
+        Args:
+            None
+
         Returns:
-            str: Absolute path to settings.json.
+            Path: Absolute path object to settings.json.
         """
-        data_dir: str = Constants.DATA
-        if not os.path.exists(data_dir):
-            os.makedirs(data_dir)
-        return os.path.join(data_dir, Constants.SETTINGS_FILE)
+        data_dir: Path = Constants.DATA
+        data_dir.mkdir(parents=True, exist_ok=True)
+        return data_dir / Constants.SETTINGS_FILE
 
     @classmethod
     def _load_settings(cls) -> Dict[str, Dict[str, Any]]:
         """
         Loads the settings from the JSON file into a nested structure.
 
+        Args:
+            None
+
         Returns:
             Dict[str, Dict[str, Any]]: The loaded settings dictionary partitioned by domain.
         """
-        path: str = cls.get_global_settings_path()
-        if os.path.exists(path):
+        path: Path = cls.get_global_settings_path()
+        if path.exists():
             try:
-                with open(path, 'r', encoding='utf-8') as f:
+                with path.open('r', encoding='utf-8') as f:
                     data = json.load(f)
                     if 'chat' not in data or 'daemon' not in data:
                         return {
@@ -97,8 +102,11 @@ class Settings:
         Args:
             key (SettingKey): The setting key enum to update.
             value (Any): The new value for the setting.
+
+        Returns:
+            None
         """
-        path: str = cls.get_global_settings_path()
+        path: Path = cls.get_global_settings_path()
 
         with FileLock(path):
             data: Dict[str, Dict[str, Any]] = cls._load_settings()
@@ -109,5 +117,5 @@ class Settings:
 
             data[category][sub_key] = value
 
-            with open(path, 'w', encoding='utf-8') as f:
+            with path.open('w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4)

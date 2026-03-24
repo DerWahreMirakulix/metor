@@ -7,28 +7,42 @@ import os
 import time
 from typing import Optional, Type
 from types import TracebackType
+from pathlib import Path
 
 
 class FileLock:
     """
     A context manager for providing cross-process file locking.
-    Uses an atomic OS-level file creation flag (O_CREAT | O_EXCL).
+    Uses an atomic OS-level file creation flag. Cleans up stale ghost locks.
     """
 
-    def __init__(self, target_file_path: str, timeout: float = 5.0) -> None:
+    def __init__(
+        self,
+        target_file_path: str | Path,
+        timeout: float = 5.0,
+        stale_age: float = 10.0,
+    ) -> None:
         """
         Initializes the FileLock instance.
 
         Args:
-            target_file_path (str): The absolute path to the file that needs locking.
+            target_file_path (str | Path): The absolute path to the file that needs locking.
             timeout (float): Maximum time in seconds to wait for the lock to become available.
+            stale_age (float): Seconds before a lock is considered a 'ghost lock' from a crashed process.
+
+        Returns:
+            None
         """
-        self.lock_path: str = f'{target_file_path}.lock'
+        self.lock_path: Path = Path(f'{target_file_path}.lock')
         self.timeout: float = timeout
+        self.stale_age: float = stale_age
 
     def __enter__(self) -> 'FileLock':
         """
-        Acquires an exclusive file lock.
+        Acquires an exclusive file lock. Removes stale locks if necessary.
+
+        Args:
+            None
 
         Raises:
             TimeoutError: If the lock cannot be acquired within the timeout period.
@@ -41,10 +55,18 @@ class FileLock:
         while (time.time() - start_time) < self.timeout:
             try:
                 # O_CREAT | O_EXCL ensures atomic creation. Fails if the file already exists.
-                fd = os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                fd = os.open(str(self.lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 os.close(fd)
                 return self
             except FileExistsError:
+                # Check if the lock file is old (crashed process)
+                try:
+                    if time.time() - self.lock_path.stat().st_mtime > self.stale_age:
+                        self.lock_path.unlink(missing_ok=True)
+                        continue  # Try acquiring again immediately
+                except OSError:
+                    pass
+
                 time.sleep(0.05)
 
         raise TimeoutError(
@@ -60,9 +82,16 @@ class FileLock:
         """
         Releases the file lock by removing the lock file.
         Guaranteed to run even if exceptions occur inside the 'with' block.
+
+        Args:
+            exc_type (Optional[Type[BaseException]]): Exception type if raised.
+            exc_val (Optional[BaseException]): Exception value if raised.
+            exc_tb (Optional[TracebackType]): Traceback if raised.
+
+        Returns:
+            None
         """
         try:
-            if os.path.exists(self.lock_path):
-                os.remove(self.lock_path)
+            self.lock_path.unlink(missing_ok=True)
         except OSError:
             pass

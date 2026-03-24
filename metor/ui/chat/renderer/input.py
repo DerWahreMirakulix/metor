@@ -6,9 +6,12 @@ import sys
 import os
 from typing import Optional, List
 
-if os.name == 'nt':
+try:
     import msvcrt
-else:
+except ImportError:
+    msvcrt = None
+
+if os.name != 'nt':
     import termios
     import tty
     import atexit
@@ -23,6 +26,9 @@ class InputHandler:
 
         Args:
             None
+
+        Returns:
+            None
         """
         self.history: List[str] = []
         self.history_index: int = -1
@@ -34,12 +40,29 @@ class InputHandler:
         self._init_terminal()
 
     def _init_terminal(self) -> None:
-        """Configures the terminal for raw, non-blocking input (POSIX only)."""
+        """
+        Configures the terminal for raw, non-blocking input (POSIX only).
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         if os.name != 'nt':
             fd: int = sys.stdin.fileno()
             old_term_settings = termios.tcgetattr(fd)
 
             def _reset_terminal() -> None:
+                """
+                Restores the original terminal settings upon application exit.
+
+                Args:
+                    None
+
+                Returns:
+                    None
+                """
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_term_settings)
 
             tty.setcbreak(fd)
@@ -49,10 +72,13 @@ class InputHandler:
         """
         Pulls a single character or escape sequence from the standard input buffer.
 
+        Args:
+            None
+
         Returns:
             Optional[str]: The raw character, a parsed SPECIAL tag, or None if empty.
         """
-        if os.name == 'nt':
+        if os.name == 'nt' and msvcrt:
             if msvcrt.kbhit():
                 ch = msvcrt.getwch()
                 if ch in ('\x00', '\xe0'):
