@@ -31,6 +31,9 @@ class MetorApp:
 
         Args:
             None
+
+        Returns:
+            None
         """
         self.parser: argparse.ArgumentParser = argparse.ArgumentParser(
             prog='metor', add_help=False
@@ -74,7 +77,7 @@ class MetorApp:
                 pass
 
         for profile_name in ProfileManager.get_all_profiles():
-            temp_pm = ProfileManager(profile_name)
+            temp_pm: ProfileManager = ProfileManager(profile_name)
             temp_pm.clear_daemon_port()
         return killed
 
@@ -95,14 +98,14 @@ class MetorApp:
         )
         failed_remotes: List[str] = []
         for r in profile_names:
-            pm = ProfileManager(r)
+            pm: ProfileManager = ProfileManager(r)
             if not pm.is_remote():
                 print(
                     f"Profile '{r}' is a local profile. {Theme.YELLOW}Ignoring --nuke-remote.{Theme.RESET}"
                 )
                 continue
 
-            proxy = CliProxy(pm)
+            proxy: CliProxy = CliProxy(pm)
             res: str = proxy.nuke_daemon()
             if 'Error' in res or 'Failed' in res:
                 failed_remotes.append(r)
@@ -159,13 +162,13 @@ class MetorApp:
                 print('Master password cannot be empty.')
                 return
 
-            km = KeyManager(self._pm, password)
-            tm = TorManager(self._pm, km)
-            cm = ContactManager(self._pm, password)
-            hm = HistoryManager(self._pm, password)
-            mm = MessageManager(self._pm, password)
+            km: KeyManager = KeyManager(self._pm, password)
+            tm: TorManager = TorManager(self._pm, km)
+            cm: ContactManager = ContactManager(self._pm, password)
+            hm: HistoryManager = HistoryManager(self._pm, password)
+            mm: MessageManager = MessageManager(self._pm, password)
 
-            daemon = Daemon(self._pm, km, tm, cm, hm, mm)
+            daemon: Daemon = Daemon(self._pm, km, tm, cm, hm, mm)
             daemon.run()
 
         elif cmd == 'unlock':
@@ -185,8 +188,7 @@ class MetorApp:
                 print('The background daemon is not running or unreachable.')
                 return
 
-            # The UI is completely stateless and handles no SQLite connections.
-            chat = Chat(self._pm)
+            chat: Chat = Chat(self._pm)
             chat.run()
 
         elif cmd == 'cleanup':
@@ -197,7 +199,7 @@ class MetorApp:
         elif cmd == 'purge':
             is_nuke_remote: bool = '--nuke-remote' in ext or sub == '--nuke-remote'
 
-            message = f'{Theme.RED}You are about to PERMANENTLY wipe the entire Metor directory!{Theme.RESET}'
+            message: str = f'{Theme.RED}You are about to PERMANENTLY wipe the entire Metor directory!{Theme.RESET}'
             if is_nuke_remote:
                 message += f' {Theme.RED}This includes all remote profiles and their data!{Theme.RESET}'
 
@@ -296,7 +298,7 @@ class MetorApp:
                     print('Usage: metor profiles rm <name> [--nuke-remote]')
                 else:
                     target_profile: str = ext[0]
-                    is_nuke_remote: bool = '--nuke-remote' in ext
+                    is_nuke_remote = '--nuke-remote' in ext
 
                     if is_nuke_remote:
                         if not self._nuke_remote_profiles([target_profile]):
@@ -323,7 +325,7 @@ class MetorApp:
                 if len(ext) < 1:
                     print('Usage: metor profiles clear <name>')
                 else:
-                    target_pm = ProfileManager(ext[0])
+                    target_pm: ProfileManager = ProfileManager(ext[0])
                     if target_pm.is_remote():
                         print(
                             f"'{ext[0]}' is a remote profile. Please SSH into the remote server and run 'metor profiles clear {ext[0]}' locally."
@@ -348,7 +350,7 @@ def main() -> None:
     Returns:
         None
     """
-    app = MetorApp()
+    app: MetorApp = MetorApp()
     app.execute()
 
 

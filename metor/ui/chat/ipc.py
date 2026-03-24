@@ -6,7 +6,7 @@ Isolates all raw TCP byte parsing from the Chat Engine logic.
 import socket
 import threading
 import json
-from typing import Callable, Dict, Any, Optional
+from typing import Callable, Dict, Any, Optional, List
 
 from metor.core.api import IpcCommand, IpcEvent
 from metor.utils.constants import Constants
@@ -28,6 +28,9 @@ class IpcClient:
             port (int): The local localhost port the Daemon is listening on.
             on_event (Callable[[IpcEvent], None]): Callback fired when a valid event arrives.
             on_disconnect (Callable[[], None]): Callback fired if the connection drops.
+
+        Returns:
+            None
         """
         self._port: int = port
         self._on_event: Callable[[IpcEvent], None] = on_event
@@ -39,6 +42,9 @@ class IpcClient:
     def connect(self) -> bool:
         """
         Attempts to establish a connection to the Daemon.
+
+        Args:
+            None
 
         Returns:
             bool: True if connection is successful, False otherwise.
@@ -52,7 +58,15 @@ class IpcClient:
             return False
 
     def stop(self) -> None:
-        """Safely shuts down the background listener and closes the socket."""
+        """
+        Safely shuts down the background listener and closes the socket.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         self._stop_flag.set()
         if self._socket:
             try:
@@ -66,6 +80,9 @@ class IpcClient:
 
         Args:
             cmd (IpcCommand): The DTO payload to send.
+
+        Returns:
+            None
         """
         if not self._socket:
             return
@@ -77,7 +94,15 @@ class IpcClient:
             pass
 
     def _listener_thread(self) -> None:
-        """Background worker that continuously pulls bytes from the IPC stream."""
+        """
+        Background worker that continuously pulls bytes from the IPC stream.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         buffer: str = ''
         try:
             while not self._stop_flag.is_set():
@@ -92,8 +117,10 @@ class IpcClient:
                 buffer += data.decode('utf-8')
 
                 while '\n' in buffer:
-                    line, buffer = buffer.split('\n', 1)
-                    line = line.strip()
+                    parts: List[str] = buffer.split('\n', 1)
+                    line: str = parts[0].strip()
+                    buffer = parts[1]
+
                     if not line:
                         continue
 
