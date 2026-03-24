@@ -385,3 +385,19 @@ class CliProxy:
             _, msg = self._cm.clear_contacts()
             return msg
         return 'Initialization error.'
+
+    def clear_profile_db(self) -> str:
+        """
+        Clears the SQLite database for the profile (routes via IPC if remote or running).
+
+        Args:
+            None
+
+        Returns:
+            str: Status message.
+        """
+        if self.is_remote or self._pm.is_daemon_running():
+            return self._request_ipc(IpcCommand(action=Action.CLEAR_PROFILE_DB))
+
+        _, msg = ProfileManager.clear_profile_db(self._pm.profile_name)
+        return msg

@@ -326,13 +326,8 @@ class MetorApp:
                     print('Usage: metor profiles clear <name>')
                 else:
                     target_pm: ProfileManager = ProfileManager(ext[0])
-                    if target_pm.is_remote():
-                        print(
-                            f"'{ext[0]}' is a remote profile. Please SSH into the remote server and run 'metor profiles clear {ext[0]}' locally."
-                        )
-                    else:
-                        _, msg = ProfileManager.clear_profile_db(ext[0])
-                        print(msg)
+                    target_proxy: CliProxy = CliProxy(target_pm)
+                    print(target_proxy.clear_profile_db())
             else:
                 print(ProfileManager.show(self._pm.profile_name))
 

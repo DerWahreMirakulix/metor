@@ -38,6 +38,7 @@ class Action(str, Enum):
     CLEAR_MESSAGES = 'clear_messages'
     GET_ADDRESS = 'get_address'
     GENERATE_ADDRESS = 'generate_address'
+    CLEAR_PROFILE_DB = 'clear_profile_db'
 
     # Settings & Security Actions
     SET_SETTING = 'set_setting'

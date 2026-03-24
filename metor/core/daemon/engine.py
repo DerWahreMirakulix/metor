@@ -546,6 +546,23 @@ class Daemon:
                 conn, IpcEvent(type=EventType.CLI_RESPONSE, text=msg, success=success)
             )
 
+        elif cmd.action == Action.CLEAR_PROFILE_DB:
+            success_c, _ = self._cm.clear_contacts()
+            success_h, _ = self._hm.clear_history()
+            success_m, _ = self._mm.clear_messages()
+
+            success: bool = success_c and success_h and success_m
+            msg: str = (
+                f"Database for profile '{self._pm.profile_name}' successfully cleared."
+                if success
+                else 'Error clearing database.'
+            )
+
+            self._ipc.send_to(
+                conn,
+                IpcEvent(type=EventType.CLI_RESPONSE, text=msg, success=success),
+            )
+
         elif cmd.action == Action.GET_ADDRESS:
             _, msg = self._tm.get_address()
             self._ipc.send_to(conn, IpcEvent(type=EventType.CLI_RESPONSE, text=msg))
