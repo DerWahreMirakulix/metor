@@ -4,12 +4,12 @@ Implements strong password-based encryption for keys at rest (Argon2i + SecretBo
 """
 
 import hashlib
-import os
 import secrets
 import nacl.bindings
 import nacl.pwhash
 import nacl.secret
 import nacl.utils
+from pathlib import Path
 from typing import Optional
 
 from metor.data.profile import ProfileManager
@@ -26,15 +26,21 @@ class KeyManager:
         Args:
             pm (ProfileManager): The profile manager instance to determine directory paths.
             password (Optional[str]): Master password for key encryption/decryption.
+
+        Returns:
+            None
         """
         self._pm: ProfileManager = pm
-        self._hs_dir: str = self._pm.get_hidden_service_dir()
+        self._hs_dir: Path = Path(self._pm.get_hidden_service_dir())
         self._password: Optional[str] = password
-        self._salt_file: str = os.path.join(self._hs_dir, 'crypto.salt')
+        self._salt_file: Path = self._hs_dir / 'crypto.salt'
 
     def _get_encryption_box(self) -> Optional[nacl.secret.SecretBox]:
         """
         Derives an encryption key from the master password and returns a SecretBox.
+
+        Args:
+            None
 
         Returns:
             Optional[nacl.secret.SecretBox]: The encryption box, or None if no password exists.
@@ -42,12 +48,12 @@ class KeyManager:
         if not self._password:
             return None
 
-        if not os.path.exists(self._salt_file):
+        if not self._salt_file.exists():
             salt: bytes = nacl.utils.random(nacl.pwhash.argon2i.SALTBYTES)
-            with open(self._salt_file, 'wb') as f:
+            with self._salt_file.open('wb') as f:
                 f.write(salt)
         else:
-            with open(self._salt_file, 'rb') as f:
+            with self._salt_file.open('rb') as f:
                 salt = f.read()
 
         key: bytes = nacl.pwhash.argon2i.kdf(
@@ -70,14 +76,13 @@ class KeyManager:
         Returns:
             None
         """
-        metor_key_path: str = os.path.join(self._hs_dir, Constants.METOR_SECRET_KEY)
-        tor_sec_path: str = os.path.join(self._hs_dir, Constants.TOR_SECRET_KEY)
-        tor_pub_path: str = os.path.join(self._hs_dir, Constants.TOR_PUBLIC_KEY)
+        metor_key_path: Path = self._hs_dir / Constants.METOR_SECRET_KEY
+        tor_sec_path: Path = self._hs_dir / Constants.TOR_SECRET_KEY
+        tor_pub_path: Path = self._hs_dir / Constants.TOR_PUBLIC_KEY
 
-        if os.path.exists(metor_key_path) and os.path.exists(tor_sec_path):
+        if metor_key_path.exists() and tor_sec_path.exists():
             return
 
-        # Use secrets module instead of os.urandom
         seed: bytes = secrets.token_bytes(32)
         public_key, pynacl_secret_key = nacl.bindings.crypto_sign_seed_keypair(seed)
 
@@ -97,24 +102,27 @@ class KeyManager:
             pynacl_secret_key = box.encrypt(pynacl_secret_key)
             raw_tor_sec = box.encrypt(raw_tor_sec)
 
-        with open(metor_key_path, 'wb') as f:
+        with metor_key_path.open('wb') as f:
             f.write(pynacl_secret_key)
 
-        with open(tor_sec_path, 'wb') as f:
+        with tor_sec_path.open('wb') as f:
             f.write(raw_tor_sec)
 
-        with open(tor_pub_path, 'wb') as f:
+        with tor_pub_path.open('wb') as f:
             f.write(raw_tor_pub)
 
     def get_metor_key(self) -> bytes:
         """
         Retrieves and decrypts the Metor secret key from disk.
 
+        Args:
+            None
+
         Returns:
             bytes: The decrypted PyNaCl secret key.
         """
-        key_path: str = os.path.join(self._hs_dir, Constants.METOR_SECRET_KEY)
-        with open(key_path, 'rb') as f:
+        key_path: Path = self._hs_dir / Constants.METOR_SECRET_KEY
+        with key_path.open('rb') as f:
             data: bytes = f.read()
 
         box: Optional[nacl.secret.SecretBox] = self._get_encryption_box()
@@ -127,11 +135,14 @@ class KeyManager:
         Retrieves and decrypts the Tor secret key.
         This is used for memory-injecting the key securely to the Tor process.
 
+        Args:
+            None
+
         Returns:
             bytes: The decrypted raw Tor secret key format.
         """
-        key_path: str = os.path.join(self._hs_dir, Constants.TOR_SECRET_KEY)
-        with open(key_path, 'rb') as f:
+        key_path: Path = self._hs_dir / Constants.TOR_SECRET_KEY
+        with key_path.open('rb') as f:
             data: bytes = f.read()
 
         box: Optional[nacl.secret.SecretBox] = self._get_encryption_box()

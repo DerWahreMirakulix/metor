@@ -3,7 +3,6 @@ Main entry point for the Metor application. Handles command-line arguments and d
 """
 
 import argparse
-import os
 import shutil
 import psutil
 import getpass
@@ -55,6 +54,9 @@ class MetorApp:
     def _cleanup_processes(self) -> int:
         """
         Kills all active Tor processes and removes ghost Daemon locks.
+
+        Args:
+            None
 
         Returns:
             int: The number of processes killed.
@@ -122,7 +124,15 @@ class MetorApp:
         return True
 
     def execute(self) -> None:
-        """Parses the CLI arguments and executes the corresponding application logic."""
+        """
+        Parses the CLI arguments and executes the corresponding application logic.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         cmd: str = self.args.command
         sub: Optional[str] = self.args.subcommand
         ext: List[str] = self.args.extra
@@ -208,7 +218,7 @@ class MetorApp:
 
                 self._cleanup_processes()
                 if Constants.DATA.exists():
-                    shutil.rmtree(Constants.DATA)
+                    shutil.rmtree(str(Constants.DATA))
                     print('Purge complete. All data destroyed.')
             else:
                 print('Purge aborted.')
@@ -329,7 +339,15 @@ class MetorApp:
 
 
 def main() -> None:
-    """Invokes the Metor application."""
+    """
+    Invokes the Metor application.
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
     app = MetorApp()
     app.execute()
 

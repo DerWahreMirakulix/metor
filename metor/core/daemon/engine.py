@@ -100,7 +100,15 @@ class Daemon:
         sys.exit(0)
 
     def run(self) -> None:
-        """Starts the Engine infrastructure."""
+        """
+        Starts the Engine infrastructure.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
 
         # If running locked (e.g. remote daemon started without password prompt),
         # we only start the IPC listener and wait for UNLOCK.
@@ -120,7 +128,15 @@ class Daemon:
             self.stop()
 
     def _start_subsystems(self) -> None:
-        """Initializes the actual Tor and Network components once unlocked."""
+        """
+        Initializes the actual Tor and Network components once unlocked.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         if not self._tm.start():
             print('Daemon: Failed to start Tor.')
             return
@@ -150,31 +166,39 @@ class Daemon:
         """
         Securely erases local SQLite DB and Tor keys, and initiates shutdown.
         Warning: Data shredding may be ineffective on modern SSDs due to wear-leveling.
+
+        Args:
+            None
+
+        Returns:
+            None
         """
         import stat
+        import secrets
+        from pathlib import Path
 
-        db_path: str = os.path.join(self._pm.get_config_dir(), Constants.DB_FILE)
-        if os.path.exists(db_path):
-            with open(db_path, 'ba+') as f:
+        db_path: Path = Path(self._pm.get_config_dir()) / Constants.DB_FILE
+        if db_path.exists():
+            with db_path.open('ba+') as f:
                 length: int = f.tell()
                 f.seek(0)
-                f.write(os.urandom(length))
-            os.remove(db_path)
+                f.write(secrets.token_bytes(length))
+            db_path.unlink()
 
-        hs_dir: str = self._pm.get_hidden_service_dir()
+        hs_dir: Path = Path(self._pm.get_hidden_service_dir())
         for key_file in [
             Constants.METOR_SECRET_KEY,
             Constants.TOR_SECRET_KEY,
             Constants.TOR_PUBLIC_KEY,
         ]:
-            key_path = os.path.join(hs_dir, key_file)
-            if os.path.exists(key_path):
-                os.chmod(key_path, stat.S_IWRITE)
-                with open(key_path, 'ba+') as f:
+            key_path: Path = hs_dir / key_file
+            if key_path.exists():
+                key_path.chmod(stat.S_IWRITE)
+                with key_path.open('ba+') as f:
                     length = f.tell()
                     f.seek(0)
-                    f.write(os.urandom(length))
-                os.remove(key_path)
+                    f.write(secrets.token_bytes(length))
+                key_path.unlink()
 
         self._ipc.broadcast(
             IpcEvent(
@@ -214,6 +238,9 @@ class Daemon:
         Args:
             cmd (IpcCommand): The parsed command object.
             conn (socket.socket): The connection to respond to.
+
+        Returns:
+            None
         """
         if cmd.action == Action.SELF_DESTRUCT:
             self._ipc.send_to(

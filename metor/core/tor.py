@@ -8,7 +8,8 @@ import time
 import socks
 import stem.process
 import sys
-from typing import Tuple, Optional, Any
+from pathlib import Path
+from typing import Tuple, Optional, Any, Dict
 
 from metor.data.profile import ProfileManager
 from metor.data.settings import SettingKey, Settings
@@ -30,6 +31,9 @@ class TorManager:
         Args:
             pm (ProfileManager): The profile manager instance.
             km (KeyManager): The key manager instance for cryptographic operations.
+
+        Returns:
+            None
         """
         self._pm: ProfileManager = pm
         self._km: KeyManager = km
@@ -44,6 +48,9 @@ class TorManager:
         """
         Finds and returns an available local network port.
 
+        Args:
+            None
+
         Returns:
             int: An available port number.
         """
@@ -57,11 +64,14 @@ class TorManager:
         """
         Starts the Tor process and sets up ports and the onion address.
 
+        Args:
+            None
+
         Returns:
             bool: True if the Tor process started successfully, False otherwise.
         """
-        hs_dir: str = self._pm.get_hidden_service_dir()
-        data_dir: str = self._pm.get_tor_data_dir()
+        hs_dir: Path = Path(self._pm.get_hidden_service_dir())
+        data_dir: Path = Path(self._pm.get_tor_data_dir())
 
         self._km.generate_keys()
 
@@ -69,12 +79,12 @@ class TorManager:
         self.control_port = self._get_free_port()
         self.incoming_port = self._get_free_port()
 
-        config: dict[str, str] = {
+        config: Dict[str, str] = {
             'SocksPort': str(self.socks_port),
             'ControlPort': str(self.control_port),
             'CookieAuthentication': '1',
-            'DataDirectory': data_dir,
-            'HiddenServiceDir': hs_dir,
+            'DataDirectory': str(data_dir),
+            'HiddenServiceDir': str(hs_dir),
             'HiddenServicePort': f'80 {Constants.LOCALHOST}:{self.incoming_port}',
         }
 
@@ -86,7 +96,15 @@ class TorManager:
         tor_timeout: Optional[int] = None if os.name == 'nt' else 45
 
         def print_tor_output(line: str) -> None:
-            """Handles and formats Tor console output if logging is enabled."""
+            """
+            Handles and formats Tor console output if logging is enabled.
+
+            Args:
+                line (str): The logged string line from the Tor process.
+
+            Returns:
+                None
+            """
             if Settings.get(SettingKey.ENABLE_TOR_LOGGING):
                 sys.stdout.write(f'\r\033[K{Theme.CYAN}[TOR-LOG]{Theme.RESET} {line}\n')
                 sys.stdout.flush()
@@ -111,15 +129,14 @@ class TorManager:
                 else:
                     return False
 
-        # Wait for hostname file
-        hostname_file: str = os.path.join(hs_dir, Constants.HOSTNAME_FILE)
+        hostname_file: Path = hs_dir / Constants.HOSTNAME_FILE
         for _ in range(10):
-            if os.path.exists(hostname_file):
+            if hostname_file.exists():
                 break
             time.sleep(1)
 
-        if os.path.exists(hostname_file):
-            with open(hostname_file, 'r') as f:
+        if hostname_file.exists():
+            with hostname_file.open('r') as f:
                 self.onion = f.read().strip()
         else:
             self.onion = 'unknown'
@@ -127,7 +144,15 @@ class TorManager:
         return self._tm_proc is not None
 
     def stop(self) -> None:
-        """Safely shuts down the Tor process, using force if necessary."""
+        """
+        Safely shuts down the Tor process, using force if necessary.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         if self._tm_proc:
             try:
                 self._tm_proc.terminate()
@@ -163,13 +188,16 @@ class TorManager:
         """
         Retrieves the current hidden service address for the active profile.
 
+        Args:
+            None
+
         Returns:
             Tuple[bool, str]: A success flag and a status message.
         """
-        hs_dir: str = self._pm.get_hidden_service_dir()
-        hostname_file: str = os.path.join(hs_dir, Constants.HOSTNAME_FILE)
-        if os.path.exists(hostname_file):
-            with open(hostname_file, 'r') as f:
+        hs_dir: Path = Path(self._pm.get_hidden_service_dir())
+        hostname_file: Path = hs_dir / Constants.HOSTNAME_FILE
+        if hostname_file.exists():
+            with hostname_file.open('r') as f:
                 onion: str = f.read().strip()
                 return (
                     True,
@@ -183,6 +211,9 @@ class TorManager:
     def generate_address(self) -> Tuple[bool, str]:
         """
         Forces the generation of a new Tor hidden service address by restarting the process.
+
+        Args:
+            None
 
         Returns:
             Tuple[bool, str]: A success flag and a status message.

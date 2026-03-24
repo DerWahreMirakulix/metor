@@ -2,8 +2,8 @@
 Module for managing chat and connection history logs via SQLite.
 """
 
-import os
 from enum import Enum
+from pathlib import Path
 from typing import List, Tuple, Optional
 
 from metor.ui.theme import Theme
@@ -43,22 +43,43 @@ class HistoryManager:
 
         Args:
             pm (ProfileManager): The profile manager instance for context.
+
+        Returns:
+            None
         """
         self._pm: ProfileManager = pm
-        self._db_path: str = os.path.join(self._pm.get_config_dir(), Constants.DB_FILE)
+        self._db_path: Path = Path(self._pm.get_config_dir()) / Constants.DB_FILE
         self._sql: SqlManager = SqlManager(self._db_path)
 
     def log_event(
         self, status: HistoryEvent, onion: Optional[str], reason: str = ''
     ) -> None:
-        """Logs a connection event into the database."""
+        """
+        Logs a connection event into the database.
+
+        Args:
+            status (HistoryEvent): The event type to log.
+            onion (Optional[str]): The associated remote onion identity.
+            reason (str): Optional context for the event.
+
+        Returns:
+            None
+        """
         query: str = 'INSERT INTO history (status, onion, reason) VALUES (?, ?, ?)'
         self._sql.execute(query, (status.value, onion, reason))
 
     def get_history(
         self, filter_onion: Optional[str] = None
     ) -> List[Tuple[str, str, Optional[str], str]]:
-        """Retrieves raw history events from the database."""
+        """
+        Retrieves raw history events from the database.
+
+        Args:
+            filter_onion (Optional[str]): The specific onion to filter by.
+
+        Returns:
+            List[Tuple[str, str, Optional[str], str]]: List of events (timestamp, status, onion, reason).
+        """
         if filter_onion:
             query: str = 'SELECT timestamp, status, onion, reason FROM history WHERE onion = ? ORDER BY timestamp DESC'
             return self._sql.fetchall(query, (filter_onion,))
@@ -67,7 +88,15 @@ class HistoryManager:
             return self._sql.fetchall(query)
 
     def clear_history(self, filter_onion: Optional[str] = None) -> Tuple[bool, str]:
-        """Wipes event logs from the history table and removes orphaned discovered peers."""
+        """
+        Wipes event logs from the history table and removes orphaned discovered peers.
+
+        Args:
+            filter_onion (Optional[str]): The target onion identity. If None, deletes all.
+
+        Returns:
+            Tuple[bool, str]: A success flag and a status message.
+        """
         try:
             if filter_onion:
                 self._sql.execute(
@@ -78,7 +107,6 @@ class HistoryManager:
                 self._sql.execute('DELETE FROM history')
                 msg = f"History for profile '{self._pm.profile_name}' cleared."
 
-            # Cleanup orphaned discovered peers that have no history and no messages left
             cleanup_query: str = """
                 DELETE FROM contacts 
                 WHERE is_saved = 0 
@@ -92,7 +120,16 @@ class HistoryManager:
             return False, 'Failed to clear history.'
 
     def show(self, cm: ContactManager, target: Optional[str] = None) -> str:
-        """Fetches history and constructs a human-readable string for terminal display."""
+        """
+        Fetches history and constructs a human-readable string for terminal display.
+
+        Args:
+            cm (ContactManager): The contact manager for resolving aliases.
+            target (Optional[str]): The target CLI argument (alias or onion).
+
+        Returns:
+            str: The formatted event history output.
+        """
         onion = None
         disp_name = f'profile {Theme.CYAN}{self._pm.profile_name}{Theme.RESET}'
 
