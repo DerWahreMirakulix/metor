@@ -1,6 +1,7 @@
 """
 Module managing Tor network connections, socket lifecycles, and message routing.
 Handles the transition between live TCP streams and fallback Drop & Go messages.
+Ensures strict TCP stream framing and fragmentation resilience.
 """
 
 import socket
@@ -30,7 +31,7 @@ from metor.core.daemon.crypto import Crypto
 
 
 class NetworkManager:
-    """Handles raw sockets, Tor connections, and message buffering."""
+    """Handles raw sockets, Tor connections, and safe message buffering."""
 
     def __init__(
         self,
@@ -68,6 +69,7 @@ class NetworkManager:
         self._lock: threading.Lock = threading.Lock()
         self._connections: Dict[str, socket.socket] = {}
         self._pending_connections: Dict[str, socket.socket] = {}
+        self._initial_buffers: Dict[str, str] = {}
         self._unacked_messages: Dict[str, Dict[str, str]] = {}
 
     def start_listener(self) -> None:
@@ -84,7 +86,7 @@ class NetworkManager:
 
     def get_active_aliases(self) -> List[str]:
         """
-        Returns a list of currently connected aliases.
+        Returns a list of currently connected aliases safely under lock.
 
         Args:
             None
@@ -97,7 +99,7 @@ class NetworkManager:
 
     def get_pending_aliases(self) -> List[str]:
         """
-        Returns a list of aliases waiting for acceptance.
+        Returns a list of aliases waiting for acceptance safely under lock.
 
         Args:
             None
@@ -134,6 +136,7 @@ class NetworkManager:
     def _handle_incoming(self, conn: socket.socket) -> None:
         """
         Authenticates inbound requests and routes them to Live-Chat or Drop-Box.
+        Safely reconstructs fragmented TCP streams.
 
         Args:
             conn (socket.socket): The incoming socket connection.
@@ -144,13 +147,13 @@ class NetworkManager:
         auth_successful: bool = False
         remote_identity: Optional[str] = None
         is_async: bool = False
+        buffer: str = ''
 
         try:
             conn.settimeout(10.0)
             challenge: str = secrets.token_hex(32)
             conn.sendall(f'{TorCommand.CHALLENGE.value} {challenge}\n'.encode('utf-8'))
 
-            buffer: str = ''
             while '\n' not in buffer:
                 data: bytes = conn.recv(4096)
                 if not data:
@@ -178,45 +181,48 @@ class NetworkManager:
 
         if is_async:
             try:
-                while '\n' not in buffer:
+                while True:
+                    while '\n' in buffer:
+                        msg, buffer = buffer.split('\n', 1)
+                        msg = msg.strip()
+                        if not msg:
+                            continue
+                        if msg.startswith(f'{TorCommand.DROP.value} '):
+                            parts = msg.split(' ', 2)
+                            if len(parts) == 3:
+                                msg_id, content = (
+                                    parts[1],
+                                    base64.b64decode(parts[2]).decode('utf-8'),
+                                )
+                                self._mm.queue_message(
+                                    remote_identity,
+                                    MessageDirection.IN,
+                                    MessageType.TEXT,
+                                    content,
+                                    MessageStatus.UNREAD,
+                                )
+                                self._hm.log_event(
+                                    HistoryEvent.ASYNC_RECEIVED,
+                                    remote_identity,
+                                    'Received offline message',
+                                )
+                                conn.sendall(
+                                    f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8')
+                                )
+                                alias: Optional[str] = self._cm.get_alias_by_onion(
+                                    remote_identity
+                                )
+                                self._broadcast(
+                                    IpcEvent(
+                                        type=EventType.INBOX_NOTIFICATION,
+                                        alias=alias,
+                                        text="📬 1 new offline message from '{alias}'.",
+                                    )
+                                )
                     data = conn.recv(4096)
                     if not data:
                         break
                     buffer += data.decode('utf-8')
-
-                for msg in buffer.strip().split('\n'):
-                    if msg.startswith(f'{TorCommand.DROP.value} '):
-                        parts = msg.split(' ', 2)
-                        if len(parts) == 3:
-                            msg_id, content = (
-                                parts[1],
-                                base64.b64decode(parts[2]).decode('utf-8'),
-                            )
-                            self._mm.queue_message(
-                                remote_identity,
-                                MessageDirection.IN,
-                                MessageType.TEXT,
-                                content,
-                                MessageStatus.UNREAD,
-                            )
-                            self._hm.log_event(
-                                HistoryEvent.ASYNC_RECEIVED,
-                                remote_identity,
-                                'Received offline message',
-                            )
-
-                            conn.sendall(f'{TorCommand.ACK.value} {msg_id}\n'.encode())
-                            alias: Optional[str] = self._cm.get_alias_by_onion(
-                                remote_identity
-                            )
-                            self._broadcast(
-                                IpcEvent(
-                                    type=EventType.INBOX_NOTIFICATION,
-                                    alias=alias,
-                                    # We intentionally don't resolve the alias since it is dynamically inserted in the UI
-                                    text="📬 1 new offline message from '{alias}'.",
-                                )
-                            )
             except Exception:
                 pass
             finally:
@@ -231,7 +237,12 @@ class NetworkManager:
 
         with self._lock:
             if alias in self._connections or alias in self._pending_connections:
-                conn.sendall(f'{TorCommand.REJECT.value} {self._tm.onion}\n'.encode())
+                try:
+                    conn.sendall(
+                        f'{TorCommand.REJECT.value} {self._tm.onion}\n'.encode('utf-8')
+                    )
+                except Exception:
+                    pass
                 conn.close()
                 return
 
@@ -240,7 +251,7 @@ class NetworkManager:
             ):
                 self._connections[alias] = conn
                 try:
-                    conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode())
+                    conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8'))
                 except Exception:
                     pass
                 self._hm.log_event(HistoryEvent.CONNECTED, remote_identity)
@@ -249,24 +260,24 @@ class NetworkManager:
                         type=EventType.CONNECTED, alias=alias, onion=remote_identity
                     )
                 )
-                self._start_receiving(alias, conn)
+                self._start_receiving(alias, conn, buffer)
                 return
 
             self._pending_connections[alias] = conn
+            self._initial_buffers[alias] = buffer
 
         self._hm.log_event(HistoryEvent.REQUESTED_BY_REMOTE, remote_identity)
         self._broadcast(
             IpcEvent(
                 type=EventType.INFO,
                 alias=alias,
-                # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                 text=f"Incoming connection from '{{alias}}'. Type '{Theme.GREEN}/accept {{alias}}{Theme.RESET}' or '{Theme.RED}/reject {{alias}}{Theme.RESET}'.",
             )
         )
 
     def connect_to(self, target: str) -> None:
         """
-        Initiates an outbound Tor connection.
+        Initiates an outbound Tor connection and parses the handshake response safely.
 
         Args:
             target (str): The alias or onion address to connect to.
@@ -275,7 +286,6 @@ class NetworkManager:
             None
         """
         alias, onion, exists = self._cm.resolve_target(target)
-        # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
         if not exists or onion == self._tm.onion:
             return
 
@@ -299,7 +309,9 @@ class NetworkManager:
                 challenge: str = challenge_line.strip().split(' ')[1]
                 signature: Optional[str] = self._crypto.sign_challenge(challenge)
                 conn.sendall(
-                    f'{TorCommand.AUTH.value} {self._tm.onion} {signature}\n'.encode()
+                    f'{TorCommand.AUTH.value} {self._tm.onion} {signature}\n'.encode(
+                        'utf-8'
+                    )
                 )
                 conn.settimeout(None)
 
@@ -308,11 +320,10 @@ class NetworkManager:
                     IpcEvent(
                         type=EventType.INFO,
                         alias=alias,
-                        # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                         text="Request sent to '{alias}'. Waiting for acceptance...",
                     )
                 )
-                self._start_receiving(alias or onion, conn)
+                self._start_receiving(alias or onion, conn, buffer)
             else:
                 raise ConnectionError('Handshake incomplete.')
         except Exception:
@@ -320,14 +331,13 @@ class NetworkManager:
                 IpcEvent(
                     type=EventType.INFO,
                     alias=alias,
-                    # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                     text="Failed to connect to '{alias}'.",
                 )
             )
 
     def accept(self, alias: str) -> None:
         """
-        Approves a pending incoming connection.
+        Approves a pending incoming connection and processes any leftover stream buffer.
 
         Args:
             alias (str): The alias to accept.
@@ -339,20 +349,21 @@ class NetworkManager:
             if alias not in self._pending_connections:
                 return
             conn: socket.socket = self._pending_connections.pop(alias)
+            initial_buffer: str = self._initial_buffers.pop(alias, '')
             self._connections[alias] = conn
 
         try:
-            conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode())
+            conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8'))
         except Exception:
             pass
         onion: Optional[str] = self._cm.get_onion_by_alias(alias)
         self._hm.log_event(HistoryEvent.CONNECTED, onion)
         self._broadcast(IpcEvent(type=EventType.CONNECTED, alias=alias, onion=onion))
-        self._start_receiving(alias, conn)
+        self._start_receiving(alias, conn, initial_buffer)
 
     def reject(self, alias: str, initiated_by_self: bool = True) -> None:
         """
-        Rejects a pending connection request.
+        Rejects a pending connection request and cleans up isolated resources.
 
         Args:
             alias (str): The alias to reject.
@@ -365,12 +376,13 @@ class NetworkManager:
             conn = self._connections.pop(alias, None) or self._pending_connections.pop(
                 alias, None
             )
+            self._initial_buffers.pop(alias, None)
 
         if conn:
             if initiated_by_self:
                 try:
                     conn.sendall(
-                        f'{TorCommand.REJECT.value} {self._tm.onion}\n'.encode()
+                        f'{TorCommand.REJECT.value} {self._tm.onion}\n'.encode('utf-8')
                     )
                 except Exception:
                     pass
@@ -386,7 +398,6 @@ class NetworkManager:
             IpcEvent(
                 type=EventType.INFO,
                 alias=alias,
-                # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                 text="Connection with '{alias}' rejected.",
             )
         )
@@ -395,12 +406,12 @@ class NetworkManager:
         self, alias: str, initiated_by_self: bool = True, is_fallback: bool = False
     ) -> None:
         """
-        Terminates a connection and converts un-ACKed messages to drops.
+        Terminates a connection and converts un-ACKed messages to offline drops.
 
         Args:
             alias (str): The alias to disconnect.
             initiated_by_self (bool): Whether the local user initiated the disconnect.
-            is_fallback (bool): Whether this is a fallback network drop.
+            is_fallback (bool): Whether this is an unexpected network drop.
 
         Returns:
             None
@@ -409,6 +420,7 @@ class NetworkManager:
             conn = self._connections.pop(alias, None) or self._pending_connections.pop(
                 alias, None
             )
+            self._initial_buffers.pop(alias, None)
             unacked: Dict[str, str] = self._unacked_messages.pop(alias, {})
 
         if unacked:
@@ -435,7 +447,9 @@ class NetworkManager:
             if initiated_by_self:
                 try:
                     conn.sendall(
-                        f'{TorCommand.DISCONNECT.value} {self._tm.onion}\n'.encode()
+                        f'{TorCommand.DISCONNECT.value} {self._tm.onion}\n'.encode(
+                            'utf-8'
+                        )
                     )
                     time.sleep(0.2)
                     conn.shutdown(socket.SHUT_RDWR)
@@ -460,14 +474,13 @@ class NetworkManager:
             IpcEvent(
                 type=EventType.DISCONNECTED,
                 alias=alias,
-                # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                 text="Disconnected from '{alias}'.",
             )
         )
 
     def disconnect_all(self) -> None:
         """
-        Forcefully disconnects all active and pending peers safely.
+        Forcefully disconnects all active and pending peers safely upon daemon shutdown.
 
         Args:
             None
@@ -486,7 +499,7 @@ class NetworkManager:
 
     def send_message(self, alias: str, msg: str, msg_id: str) -> None:
         """
-        Sends a chat message and buffers it for ACK verification.
+        Sends a live chat message and buffers it for ACK verification.
 
         Args:
             alias (str): The target alias.
@@ -504,48 +517,51 @@ class NetworkManager:
 
         try:
             b64_msg: str = base64.b64encode(msg.encode('utf-8')).decode('utf-8')
-            conn.sendall(f'{TorCommand.MSG.value} {msg_id} {b64_msg}\n'.encode())
+            conn.sendall(f'{TorCommand.MSG.value} {msg_id} {b64_msg}\n'.encode('utf-8'))
         except Exception:
             pass
 
-    def _start_receiving(self, alias: str, conn: socket.socket) -> None:
+    def _start_receiving(
+        self, alias: str, conn: socket.socket, initial_buffer: str = ''
+    ) -> None:
         """
         Starts a background thread to listen for data on a specific live socket.
 
         Args:
             alias (str): The connected alias.
             conn (socket.socket): The active socket connection.
+            initial_buffer (str): Leftover TCP stream buffer from the handshake.
 
         Returns:
             None
         """
         threading.Thread(
-            target=self._receiver_target, args=(alias, conn), daemon=True
+            target=self._receiver_target,
+            args=(alias, conn, initial_buffer),
+            daemon=True,
         ).start()
 
-    def _receiver_target(self, current_alias: str, conn: socket.socket) -> None:
+    def _receiver_target(
+        self, current_alias: str, conn: socket.socket, initial_buffer: str = ''
+    ) -> None:
         """
-        Target processing incoming messages, ACKs, and disconnects.
+        Target processing incoming live messages, ACKs, and disconnects.
+        Uses rigorous TCP line buffering to eliminate data corruption.
 
         Args:
             current_alias (str): The alias associated with the connection.
             conn (socket.socket): The active socket connection.
+            initial_buffer (str): Leftover TCP stream buffer from the handshake.
 
         Returns:
             None
         """
         remote_rejected: bool = False
         remote_disconnected: bool = False
-        buffer: str = ''
+        buffer: str = initial_buffer
 
         try:
             while True:
-                data: bytes = conn.recv(4096)
-                if not data:
-                    break
-
-                buffer += data.decode('utf-8')
-
                 while '\n' in buffer:
                     msg, buffer = buffer.split('\n', 1)
                     msg = msg.strip()
@@ -604,8 +620,15 @@ class NetworkManager:
                                 )
                             except Exception:
                                 pass
+
                 if remote_disconnected or remote_rejected:
                     break
+
+                data: bytes = conn.recv(4096)
+                if not data:
+                    break
+                buffer += data.decode('utf-8')
+
         except Exception:
             pass
         finally:
