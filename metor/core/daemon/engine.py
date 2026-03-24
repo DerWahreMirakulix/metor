@@ -384,7 +384,7 @@ class Daemon:
                     IpcEvent(
                         type=EventType.INFO,
                         alias=alias,
-                        # We intentionally don't resolve alias since it is dynamically inserted in the UI to keep it dynamic
+                        # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                         text="Connecting to '{alias}'...",
                     )
                 )
