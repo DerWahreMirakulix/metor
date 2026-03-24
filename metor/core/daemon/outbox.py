@@ -7,7 +7,7 @@ import socket
 import threading
 import time
 import base64
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from metor.core.tor import TorManager
 from metor.data.message import MessageManager, MessageStatus
@@ -38,6 +38,9 @@ class OutboxWorker:
             hm (HistoryManager): The history logger.
             crypto (Crypto): The cryptographic service for handshakes.
             stop_flag (threading.Event): Event to gracefully shutdown the worker loop.
+
+        Returns:
+            None
         """
         self._tm: TorManager = tm
         self._mm: MessageManager = mm
@@ -46,30 +49,56 @@ class OutboxWorker:
         self._stop_flag: threading.Event = stop_flag
 
     def start(self) -> None:
-        """Starts the worker loop in a background thread."""
+        """
+        Starts the worker loop in a background thread.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         threading.Thread(target=self._loop, daemon=True).start()
 
     def _loop(self) -> None:
-        """Target execution loop checking the database for pending drops."""
+        """
+        Target execution loop checking the database for pending drops.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         while not self._stop_flag.is_set():
-            time.sleep(10)  # Check interval
-            pending_rows: List[tuple] = self._mm.get_pending_outbox()
+            time.sleep(10)
+            pending_rows: List[Tuple[int, str, str, str]] = (
+                self._mm.get_pending_outbox()
+            )
 
             for row in pending_rows:
-                db_id, target_onion, msg_type, payload = row
+                db_id, target_onion, _, payload = row
 
                 try:
                     conn: socket.socket = self._tm.connect(target_onion)
                     conn.settimeout(10)
 
-                    challenge_data: bytes = conn.recv(1024)
-                    challenge: str = challenge_data.decode().strip().split(' ')[1]
+                    buffer: str = ''
+                    while '\n' not in buffer:
+                        chunk: bytes = conn.recv(4096)
+                        if not chunk:
+                            raise ConnectionError(
+                                'Connection dropped during challenge.'
+                            )
+                        buffer += chunk.decode('utf-8')
+
+                    challenge_line, buffer = buffer.split('\n', 1)
+                    challenge: str = challenge_line.strip().split(' ')[1]
                     signature: Optional[str] = self._crypto.sign_challenge(challenge)
 
                     if not signature:
                         continue
 
-                    # Send the ASYNC flag during the handshake
                     auth_msg: str = (
                         f'{TorCommand.AUTH.value} {self._tm.onion} {signature} ASYNC\n'
                     )
@@ -81,21 +110,25 @@ class OutboxWorker:
                     drop_msg: str = f'{TorCommand.DROP.value} {db_id} {b64_payload}\n'
                     conn.sendall(drop_msg.encode('utf-8'))
 
-                    ack_data: bytes = conn.recv(1024)
-                    if (
-                        ack_data
-                        and f'{TorCommand.ACK.value} {db_id}'
-                        in ack_data.decode('utf-8')
-                    ):
-                        self._mm.update_message_status(db_id, MessageStatus.DELIVERED)
-                        self._hm.log_event(
-                            HistoryEvent.ASYNC_SENT,
-                            target_onion,
-                            'Offline message delivered',
-                        )
+                    while '\n' not in buffer:
+                        chunk = conn.recv(4096)
+                        if not chunk:
+                            break
+                        buffer += chunk.decode('utf-8')
+
+                    if '\n' in buffer:
+                        ack_line, buffer = buffer.split('\n', 1)
+                        if f'{TorCommand.ACK.value} {db_id}' in ack_line:
+                            self._mm.update_message_status(
+                                db_id, MessageStatus.DELIVERED
+                            )
+                            self._hm.log_event(
+                                HistoryEvent.ASYNC_SENT,
+                                target_onion,
+                                'Offline message delivered',
+                            )
 
                 except Exception:
-                    # Connection failed or timeout. Remains PENDING for next iteration.
                     pass
                 finally:
                     try:

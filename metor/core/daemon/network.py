@@ -53,6 +53,9 @@ class NetworkManager:
             crypto (Crypto): Cryptographic challenge/response engine.
             broadcast_callback (Callable): Callback to broadcast IPC events.
             stop_flag (threading.Event): Global daemon termination flag.
+
+        Returns:
+            None
         """
         self._tm: TorManager = tm
         self._cm: ContactManager = cm
@@ -68,12 +71,23 @@ class NetworkManager:
         self._unacked_messages: Dict[str, Dict[str, str]] = {}
 
     def start_listener(self) -> None:
-        """Starts the local Tor listener in a background thread."""
+        """
+        Starts the local Tor listener in a background thread.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         threading.Thread(target=self._listener_target, daemon=True).start()
 
     def get_active_aliases(self) -> List[str]:
         """
         Returns a list of currently connected aliases.
+
+        Args:
+            None
 
         Returns:
             List[str]: Active connection aliases.
@@ -85,6 +99,9 @@ class NetworkManager:
         """
         Returns a list of aliases waiting for acceptance.
 
+        Args:
+            None
+
         Returns:
             List[str]: Pending connection aliases.
         """
@@ -92,7 +109,15 @@ class NetworkManager:
             return list(self._pending_connections.keys())
 
     def _listener_target(self) -> None:
-        """Background loop accepting raw incoming Tor sockets."""
+        """
+        Background loop accepting raw incoming Tor sockets.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         listener: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.bind((Constants.LOCALHOST, self._tm.incoming_port or 0))
         listener.listen(5)
@@ -125,14 +150,16 @@ class NetworkManager:
             challenge: str = secrets.token_hex(32)
             conn.sendall(f'{TorCommand.CHALLENGE.value} {challenge}\n'.encode('utf-8'))
 
-            # TCP Frame Buffering for Handshake
             buffer: str = ''
-            data: bytes = conn.recv(2048)
-            if data:
+            while '\n' not in buffer:
+                data: bytes = conn.recv(4096)
+                if not data:
+                    break
                 buffer += data.decode('utf-8')
 
             if '\n' in buffer:
-                line: str = buffer.split('\n')[0].strip()
+                line, buffer = buffer.split('\n', 1)
+                line = line.strip()
                 if line.startswith(f'{TorCommand.AUTH.value} '):
                     parts: List[str] = line.split(' ')
                     if len(parts) >= 3 and self._crypto.verify_signature(
@@ -151,8 +178,13 @@ class NetworkManager:
 
         if is_async:
             try:
-                data = conn.recv(4096)
-                for msg in data.decode().strip().split('\n'):
+                while '\n' not in buffer:
+                    data = conn.recv(4096)
+                    if not data:
+                        break
+                    buffer += data.decode('utf-8')
+
+                for msg in buffer.strip().split('\n'):
                     if msg.startswith(f'{TorCommand.DROP.value} '):
                         parts = msg.split(' ', 2)
                         if len(parts) == 3:
@@ -181,7 +213,7 @@ class NetworkManager:
                                 IpcEvent(
                                     type=EventType.INBOX_NOTIFICATION,
                                     alias=alias,
-                                    text="📬 1 new offline message from '{alias}'.",
+                                    text=f"📬 1 new offline message from '{alias}'.",
                                 )
                             )
             except Exception:
@@ -226,7 +258,7 @@ class NetworkManager:
             IpcEvent(
                 type=EventType.INFO,
                 alias=alias,
-                text=f"Incoming connection from '{{alias}}'. Type '{Theme.GREEN}/accept {{alias}}{Theme.RESET}' or '{Theme.RED}/reject {{alias}}{Theme.RESET}'.",
+                text=f"Incoming connection from '{alias}'. Type '{Theme.GREEN}/accept {alias}{Theme.RESET}' or '{Theme.RED}/reject {alias}{Theme.RESET}'.",
             )
         )
 
@@ -236,6 +268,9 @@ class NetworkManager:
 
         Args:
             target (str): The alias or onion address to connect to.
+
+        Returns:
+            None
         """
         alias, onion, exists = self._cm.resolve_target(target)
         if not exists or onion == self._tm.onion:
@@ -248,28 +283,40 @@ class NetworkManager:
         try:
             conn: socket.socket = self._tm.connect(onion)
             conn.settimeout(10.0)
-            challenge: str = conn.recv(1024).decode().strip().split(' ')[1]
-            signature: Optional[str] = self._crypto.sign_challenge(challenge)
-            conn.sendall(
-                f'{TorCommand.AUTH.value} {self._tm.onion} {signature}\n'.encode()
-            )
-            conn.settimeout(None)
 
-            self._hm.log_event(HistoryEvent.REQUESTED, onion)
-            self._broadcast(
-                IpcEvent(
-                    type=EventType.INFO,
-                    alias=alias,
-                    text="Request sent to '{alias}'. Waiting for acceptance...",
+            buffer: str = ''
+            while '\n' not in buffer:
+                chunk: bytes = conn.recv(4096)
+                if not chunk:
+                    break
+                buffer += chunk.decode('utf-8')
+
+            if '\n' in buffer:
+                challenge_line, buffer = buffer.split('\n', 1)
+                challenge: str = challenge_line.strip().split(' ')[1]
+                signature: Optional[str] = self._crypto.sign_challenge(challenge)
+                conn.sendall(
+                    f'{TorCommand.AUTH.value} {self._tm.onion} {signature}\n'.encode()
                 )
-            )
-            self._start_receiving(alias or onion, conn)
+                conn.settimeout(None)
+
+                self._hm.log_event(HistoryEvent.REQUESTED, onion)
+                self._broadcast(
+                    IpcEvent(
+                        type=EventType.INFO,
+                        alias=alias,
+                        text=f"Request sent to '{alias}'. Waiting for acceptance...",
+                    )
+                )
+                self._start_receiving(alias or onion, conn)
+            else:
+                raise ConnectionError('Handshake incomplete.')
         except Exception:
             self._broadcast(
                 IpcEvent(
                     type=EventType.INFO,
                     alias=alias,
-                    text="Failed to connect to '{alias}'.",
+                    text=f"Failed to connect to '{alias}'.",
                 )
             )
 
@@ -279,6 +326,9 @@ class NetworkManager:
 
         Args:
             alias (str): The alias to accept.
+
+        Returns:
+            None
         """
         with self._lock:
             if alias not in self._pending_connections:
@@ -302,6 +352,9 @@ class NetworkManager:
         Args:
             alias (str): The alias to reject.
             initiated_by_self (bool): Whether the local user initiated the rejection.
+
+        Returns:
+            None
         """
         with self._lock:
             conn = self._connections.pop(alias, None) or self._pending_connections.pop(
@@ -328,7 +381,7 @@ class NetworkManager:
             IpcEvent(
                 type=EventType.INFO,
                 alias=alias,
-                text="Connection with '{alias}' rejected.",
+                text=f"Connection with '{alias}' rejected.",
             )
         )
 
@@ -342,6 +395,9 @@ class NetworkManager:
             alias (str): The alias to disconnect.
             initiated_by_self (bool): Whether the local user initiated the disconnect.
             is_fallback (bool): Whether this is a fallback network drop.
+
+        Returns:
+            None
         """
         with self._lock:
             conn = self._connections.pop(alias, None) or self._pending_connections.pop(
@@ -398,7 +454,7 @@ class NetworkManager:
             IpcEvent(
                 type=EventType.DISCONNECTED,
                 alias=alias,
-                text="Disconnected from '{alias}'.",
+                text=f"Disconnected from '{alias}'.",
             )
         )
 
@@ -412,7 +468,6 @@ class NetworkManager:
         Returns:
             None
         """
-        # Get a static copy of the keys to prevent dictionary changed size during iteration RuntimeError
         with self._lock:
             active_aliases: List[str] = list(self._connections.keys())
             pending_aliases: List[str] = list(self._pending_connections.keys())
@@ -430,6 +485,9 @@ class NetworkManager:
             alias (str): The target alias.
             msg (str): The message content.
             msg_id (str): The unique message identifier.
+
+        Returns:
+            None
         """
         with self._lock:
             if alias not in self._connections:
@@ -450,6 +508,9 @@ class NetworkManager:
         Args:
             alias (str): The connected alias.
             conn (socket.socket): The active socket connection.
+
+        Returns:
+            None
         """
         threading.Thread(
             target=self._receiver_target, args=(alias, conn), daemon=True
