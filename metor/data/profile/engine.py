@@ -38,18 +38,39 @@ class ProfileManager:
 
     # --- Directory Compatibility Proxies for existing architecture ---
     def get_config_dir(self) -> str:
-        """Returns the config dir as a string for compatibility with older modules.
-        Args:\n    None\nReturns:\n    str: Directory path."""
+        """
+        Returns the config dir as a string for compatibility with older modules.
+
+        Args:
+            None
+
+        Returns:
+            str: Directory path.
+        """
         return str(self.paths.get_config_dir())
 
     def get_hidden_service_dir(self) -> str:
-        """Returns HS dir as a string.
-        Args:\n    None\nReturns:\n    str: Directory path."""
+        """
+        Returns HS dir as a string.
+
+        Args:
+            None
+
+        Returns:
+            str: Directory path.
+        """
         return str(self.paths.get_hidden_service_dir())
 
     def get_tor_data_dir(self) -> str:
-        """Returns Tor data dir as a string.
-        Args:\n    None\nReturns:\n    str: Directory path."""
+        """
+        Returns Tor data dir as a string.
+
+        Args:
+            None
+
+        Returns:
+            str: Directory path.
+        """
         return str(self.paths.get_tor_data_dir())
 
     # --- Daemon & Network State ---
@@ -141,14 +162,28 @@ class ProfileManager:
     # --- Class Methods for Global Profile Operations ---
     @classmethod
     def load_default_profile(cls) -> str:
-        """Retrieves the default profile from settings.
-        Args:\n    None\nReturns:\n    str: Default profile name."""
+        """
+        Retrieves the default profile from settings.
+
+        Args:
+            None
+
+        Returns:
+            str: Default profile name.
+        """
         return Settings.get(SettingKey.DEFAULT_PROFILE)
 
     @classmethod
     def set_default_profile(cls, profile_name: str) -> Tuple[bool, str]:
-        """Sets a new default profile.
-        Args:\n    profile_name (str): New profile name.\nReturns:\n    Tuple[bool, str]: Status."""
+        """
+        Sets a new default profile.
+
+        Args:
+            profile_name (str): New profile name.
+
+        Returns:
+            Tuple[bool, str]: Status.
+        """
         safe_name: str = ''.join(
             c for c in profile_name if c.isalnum() or c in ('-', '_')
         )
@@ -267,8 +302,16 @@ class ProfileManager:
 
     @classmethod
     def rename_profile_folder(cls, old_name: str, new_name: str) -> Tuple[bool, str]:
-        """Renames an existing profile directory.
-        Args:\n    old_name (str): Current name.\n    new_name (str): New name.\nReturns:\n    Tuple[bool, str]: Status."""
+        """
+        Renames an existing profile directory.
+
+        Args:
+            old_name (str): Current name.
+            new_name (str): New name.
+
+        Returns:
+            Tuple[bool, str]: Status.
+        """
         safe_old: str = ''.join(c for c in old_name if c.isalnum() or c in ('-', '_'))
         safe_new: str = ''.join(c for c in new_name if c.isalnum() or c in ('-', '_'))
 
