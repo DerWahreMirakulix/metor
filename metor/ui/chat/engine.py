@@ -34,6 +34,9 @@ class Chat:
 
         Args:
             pm (ProfileManager): The manager handling the profile's daemon connection state.
+
+        Returns:
+            None
         """
         self._pm: ProfileManager = pm
         self._renderer: Renderer = Renderer()
@@ -49,6 +52,12 @@ class Chat:
     def run(self) -> None:
         """
         Starts the main chat UI loop, establishes the IPC Client, and handles inputs.
+
+        Args:
+            None
+
+        Returns:
+            None
         """
         ipc_port: Optional[int] = self._pm.get_daemon_port()
         if not ipc_port:
@@ -108,7 +117,15 @@ class Chat:
             self._shutdown()
 
     def _shutdown(self) -> None:
-        """Safely shuts down the IPC client and exits the UI process."""
+        """
+        Safely shuts down the IPC client and exits the UI process.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         if self._ipc:
             self._ipc.stop()
 
@@ -118,7 +135,15 @@ class Chat:
             os.kill(os.getpid(), signal.SIGINT)
 
     def _send_chat_message(self, msg_text: str) -> None:
-        """Routes a text payload dynamically via Live-Chat or Async-Drop."""
+        """
+        Routes a text payload dynamically via Live-Chat or Async-Drop.
+
+        Args:
+            msg_text (str): The text payload to route.
+
+        Returns:
+            None
+        """
         if not self._session.focused_alias or not self._ipc:
             self._renderer.print_message(
                 'No active focus. Use /switch or /connect.',
@@ -164,7 +189,15 @@ class Chat:
             )
 
     def _on_ipc_disconnect(self) -> None:
-        """Callback fired when the IPC Client detects a broken pipe."""
+        """
+        Callback fired when the IPC Client detects a broken pipe.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         self._renderer.print_divider()
         self._renderer.print_message(
             f'{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}',
@@ -174,12 +207,28 @@ class Chat:
         self._shutdown()
 
     def _on_ipc_event(self, event: IpcEvent) -> None:
-        """Forwards incoming IPC events to the EventHandler."""
+        """
+        Forwards incoming IPC events to the EventHandler.
+
+        Args:
+            event (IpcEvent): The incoming IPC event.
+
+        Returns:
+            None
+        """
         if self._handler:
             self._handler.handle(event)
 
     def _print_header(self, clear_screen: bool = False) -> None:
-        """Prints the application welcome header, help info, and connection status."""
+        """
+        Prints the application welcome header, help info, and connection status.
+
+        Args:
+            clear_screen (bool): Whether to wipe the terminal display before printing.
+
+        Returns:
+            None
+        """
         if clear_screen:
             self._renderer.clear_screen()
 

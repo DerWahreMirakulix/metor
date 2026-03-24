@@ -58,6 +58,9 @@ class Daemon:
             cm (ContactManager): Address book and alias resolver.
             hm (HistoryManager): Event logging.
             mm (MessageManager): Offline messages storage.
+
+        Returns:
+            None
         """
         self._pm: ProfileManager = pm
         self._tm: TorManager = tm
@@ -67,9 +70,7 @@ class Daemon:
         self._km: KeyManager = km
 
         self._stop_flag: threading.Event = threading.Event()
-        self._is_locked: bool = (
-            False  # If remote start without password, we start locked
-        )
+        self._is_locked: bool = False
 
         self._crypto: Crypto = Crypto(km)
         self._ipc: IpcServer = IpcServer(pm, self._process_ui_command)
@@ -109,9 +110,6 @@ class Daemon:
         Returns:
             None
         """
-
-        # If running locked (e.g. remote daemon started without password prompt),
-        # we only start the IPC listener and wait for UNLOCK.
         if getattr(self._km, '_password', None) is None and self._pm.is_remote():
             self._is_locked = True
             self._ipc.start()
@@ -143,7 +141,6 @@ class Daemon:
 
         self._network.start_listener()
 
-        # Start IPC if not already running
         if not self._ipc.port:
             self._ipc.start()
 
@@ -155,7 +152,15 @@ class Daemon:
         )
 
     def stop(self) -> None:
-        """Stops the engine and gracefully tears down all sub-services."""
+        """
+        Stops the engine and gracefully tears down all sub-services.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         self._stop_flag.set()
         self._network.disconnect_all()
         self._ipc.stop()
@@ -263,14 +268,12 @@ class Daemon:
                 )
                 return
 
-            # Re-initialize managers with the new password
             self._km = KeyManager(self._pm, cmd.password)
             self._tm = TorManager(self._pm, self._km)
             self._cm = ContactManager(self._pm, cmd.password)
             self._hm = HistoryManager(self._pm, cmd.password)
             self._mm = MessageManager(self._pm, cmd.password)
 
-            # Update dependencies
             self._crypto = Crypto(self._km)
             self._network = NetworkManager(
                 self._tm,
@@ -366,6 +369,7 @@ class Daemon:
 
                 alias, _, exists = self._cm.resolve_target(cmd.target)
 
+                # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
                 if not exists:
                     self._ipc.send_to(
                         conn,
@@ -380,6 +384,7 @@ class Daemon:
                     IpcEvent(
                         type=EventType.INFO,
                         alias=alias,
+                        # We intentionally don't resolve alias since it is dynamically inserted in the UI to keep it dynamic
                         text="Connecting to '{alias}'...",
                     )
                 )
@@ -417,6 +422,7 @@ class Daemon:
 
                 _, onion, exists = self._cm.resolve_target(cmd.target)
 
+                # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
                 if exists:
                     self._mm.queue_message(
                         onion,
@@ -442,6 +448,7 @@ class Daemon:
         elif cmd.action == Action.MARK_READ:
             if cmd.target:
                 alias, onion, exists = self._cm.resolve_target(cmd.target)
+                # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
                 if exists:
                     raw_messages = self._mm.get_and_read_inbox(onion)
                     messages = [
@@ -473,6 +480,7 @@ class Daemon:
 
                 alias, _, exists = self._cm.resolve_target(cmd.target)
 
+                # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
                 if not exists:
                     self._ipc.send_to(
                         conn,
@@ -494,6 +502,7 @@ class Daemon:
         elif cmd.action == Action.CLEAR_HISTORY:
             if cmd.target:
                 _, onion, exists = self._cm.resolve_target(cmd.target)
+                # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
                 if exists:
                     success, msg = self._hm.clear_history(onion)
                 else:
@@ -517,6 +526,7 @@ class Daemon:
         elif cmd.action == Action.CLEAR_MESSAGES:
             if cmd.target:
                 _, onion, exists = self._cm.resolve_target(cmd.target)
+                # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
                 if exists:
                     success, msg = self._mm.clear_messages(onion)
                 else:

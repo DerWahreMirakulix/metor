@@ -213,7 +213,8 @@ class NetworkManager:
                                 IpcEvent(
                                     type=EventType.INBOX_NOTIFICATION,
                                     alias=alias,
-                                    text=f"📬 1 new offline message from '{alias}'.",
+                                    # We intentionally don't resolve alias since it is dynamically inserted in the UI to keep it dynamic
+                                    text="📬 1 new offline message from '{alias}'.",
                                 )
                             )
             except Exception:
@@ -258,7 +259,8 @@ class NetworkManager:
             IpcEvent(
                 type=EventType.INFO,
                 alias=alias,
-                text=f"Incoming connection from '{alias}'. Type '{Theme.GREEN}/accept {alias}{Theme.RESET}' or '{Theme.RED}/reject {alias}{Theme.RESET}'.",
+                # We intentionally don't resolve alias since it is dynamically inserted in the UI to keep it dynamic
+                text=f"Incoming connection from '{{alias}}'. Type '{Theme.GREEN}/accept {{alias}}{Theme.RESET}' or '{Theme.RED}/reject {{alias}}{Theme.RESET}'.",
             )
         )
 
@@ -273,6 +275,7 @@ class NetworkManager:
             None
         """
         alias, onion, exists = self._cm.resolve_target(target)
+        # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
         if not exists or onion == self._tm.onion:
             return
 
@@ -305,7 +308,8 @@ class NetworkManager:
                     IpcEvent(
                         type=EventType.INFO,
                         alias=alias,
-                        text=f"Request sent to '{alias}'. Waiting for acceptance...",
+                        # We intentionally don't resolve alias since it is dynamically inserted in the UI to keep it dynamic
+                        text="Request sent to '{alias}'. Waiting for acceptance...",
                     )
                 )
                 self._start_receiving(alias or onion, conn)
@@ -316,7 +320,8 @@ class NetworkManager:
                 IpcEvent(
                     type=EventType.INFO,
                     alias=alias,
-                    text=f"Failed to connect to '{alias}'.",
+                    # We intentionally don't resolve alias since it is dynamically inserted in the UI to keep it dynamic
+                    text="Failed to connect to '{alias}'.",
                 )
             )
 
@@ -381,7 +386,8 @@ class NetworkManager:
             IpcEvent(
                 type=EventType.INFO,
                 alias=alias,
-                text=f"Connection with '{alias}' rejected.",
+                # We intentionally don't resolve alias since it is dynamically inserted in the UI to keep it dynamic
+                text="Connection with '{alias}' rejected.",
             )
         )
 
@@ -454,7 +460,8 @@ class NetworkManager:
             IpcEvent(
                 type=EventType.DISCONNECTED,
                 alias=alias,
-                text=f"Disconnected from '{alias}'.",
+                # We intentionally don't resolve alias since it is dynamically inserted in the UI to keep it dynamic
+                text="Disconnected from '{alias}'.",
             )
         )
 

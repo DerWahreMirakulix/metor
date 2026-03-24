@@ -187,6 +187,7 @@ class EventHandler:
         if old_alias == alias:
             if alias:
                 self._renderer.print_message(
+                    # We intentionally don't resolve alias since it is dynamically inserted in the UI to keep it dynamic
                     "Already focused on '{alias}'.",
                     alias=alias,
                     msg_type=UIMessageType.INFO,
@@ -206,6 +207,7 @@ class EventHandler:
         if not hide_message:
             if alias:
                 self._renderer.print_message(
+                    # We intentionally don't resolve alias since it is dynamically inserted in the UI to keep it dynamic
                     "Switched focus to '{alias}'.",
                     alias=alias,
                     msg_type=UIMessageType.INFO,
@@ -215,6 +217,7 @@ class EventHandler:
                 )
             elif old_alias:
                 self._renderer.print_message(
+                    # We intentionally don't resolve alias since it is dynamically inserted in the UI to keep it dynamic
                     "Removed focus from '{alias}'.",
                     alias=old_alias,
                     msg_type=UIMessageType.INFO,

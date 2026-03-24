@@ -180,6 +180,7 @@ class CliProxy:
             if action == 'clear':
                 if target:
                     _, onion, exists = self._cm.resolve_target(target)
+                    # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
                     if not exists:
                         return f"Contact '{target}' not found."
                     _, msg = self._hm.clear_history(onion)
@@ -201,6 +202,7 @@ class CliProxy:
             if action == 'clear':
                 if target:
                     _, onion, exists = self._cm.resolve_target(target)
+                    # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
                     if not exists:
                         return f"Contact '{target}' not found."
                     _, msg = self._mm.clear_messages(onion)

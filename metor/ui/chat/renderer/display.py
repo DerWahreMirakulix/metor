@@ -22,6 +22,9 @@ class Display:
 
         Args:
             initial_prompt (str): The base prompt string (e.g., '$ ').
+
+        Returns:
+            None
         """
         self._initial_prompt: str = initial_prompt
         self.all_msgs: List[UIChatLine] = []
@@ -82,6 +85,9 @@ class Display:
 
         Args:
             last_visual_lines (int): The number of lines the input previously occupied.
+
+        Returns:
+            None
         """
         if last_visual_lines > 1:
             sys.stdout.write(f'\033[{last_visual_lines - 1}A')
@@ -106,6 +112,9 @@ class Display:
             cursor_index (int): The current cursor position in the array.
             input_lines (int): Total visual lines the input occupies.
             cols (int): Terminal width.
+
+        Returns:
+            None
         """
         sys.stdout.write(prompt)
         padding: str = ' ' * len(prompt)
@@ -129,7 +138,15 @@ class Display:
         sys.stdout.flush()
 
     def clear_screen(self) -> None:
-        """Wipes the terminal display completely."""
+        """
+        Wipes the terminal display completely.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         sys.stdout.write('\033[2J\033[H')
         sys.stdout.flush()
         self.all_msgs.clear()
