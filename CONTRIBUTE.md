@@ -17,6 +17,7 @@ When contributing to this repository, you MUST strictly adhere to the following 
 
 ## 3. Documentation (Docstrings)
 
+- **Module Headers:** Every Python file MUST start with a top-level module docstring (triple double quotes `"""`) explaining the purpose of the file.
 - **Google Style:** Use Google-style docstrings for every class and method.
 - **Meaningful Descriptions:** Explain _what_ the function does and _why_.
 - **Input/Output (STRICT):** Every method docstring MUST have an `Args:` and `Returns:` block. If a function takes no arguments, write `Args:\n    None`. If it returns nothing, write `Returns:\n    None`.
@@ -36,5 +37,5 @@ When contributing to this repository, you MUST strictly adhere to the following 
 
 ## 6. Code Formatting (Ruff)
 
-- **Imports First:** All `import` statements MUST be located at the very top of the file.
+- **Imports First:** All `import` statements MUST be located at the very top of the file (immediately following the module docstring).
 - **Single Quotes:** Always use single quotes (`'`) for strings unless the string itself contains a single quote. Double quotes are strictly for docstrings (`"""`).
