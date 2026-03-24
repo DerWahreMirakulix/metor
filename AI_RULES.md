@@ -35,6 +35,7 @@ When writing or modifying code for this repository, you MUST strictly adhere to 
 
 ## 5. Code Formatting (Ruff)
 
+- **Imports First:** All `import` statements MUST be located at the very top of the file, immediately following the module-level docstring (if present) and before any code or constants.
 - **Single Quotes:** Always use single quotes (`'`) for strings unless the string itself contains a single quote. (Double quotes are only for docstrings `"""`).
 - **Clean Code:** Keep functions small and focused on a single responsibility.
 

@@ -14,19 +14,18 @@ from metor.utils.lock import FileLock
 
 
 class SettingKey(str, Enum):
-    """Available global configuration keys."""
+    """Available global configuration keys split into logical domains."""
 
-    DEFAULT_PROFILE = 'default_profile'
-    PROMPT_SIGN = 'prompt_sign'
-    MAX_TOR_RETRIES = 'max_tor_retries'
-    ENABLE_TOR_LOGGING = 'enable_tor_logging'
-    AUTO_ACCEPT_CONTACTS = 'auto_accept_contacts'
+    DEFAULT_PROFILE = 'chat.default_profile'
+    PROMPT_SIGN = 'chat.prompt_sign'
+    MAX_TOR_RETRIES = 'daemon.max_tor_retries'
+    ENABLE_TOR_LOGGING = 'daemon.enable_tor_logging'
+    AUTO_ACCEPT_CONTACTS = 'daemon.auto_accept_contacts'
 
 
 class Settings:
-    """Dynamic application settings manager reading from and writing to a global JSON file."""
+    """Dynamic application settings manager reading from and writing to a nested global JSON file."""
 
-    # Default values fallback mapping Enum values (strings) to their defaults
     _DEFAULTS: Dict[str, Any] = {
         SettingKey.DEFAULT_PROFILE.value: 'default',
         SettingKey.PROMPT_SIGN.value: '$',
@@ -49,21 +48,27 @@ class Settings:
         return os.path.join(data_dir, Constants.SETTINGS_FILE)
 
     @classmethod
-    def _load_settings(cls) -> Dict[str, Any]:
+    def _load_settings(cls) -> Dict[str, Dict[str, Any]]:
         """
-        Loads the settings from the JSON file without locking (safe for pure reads).
+        Loads the settings from the JSON file into a nested structure.
 
         Returns:
-            Dict[str, Any]: The loaded settings dictionary.
+            Dict[str, Dict[str, Any]]: The loaded settings dictionary partitioned by domain.
         """
         path: str = cls.get_global_settings_path()
         if os.path.exists(path):
             try:
                 with open(path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    if 'chat' not in data or 'daemon' not in data:
+                        return {
+                            'daemon': data.get('daemon', {}),
+                            'chat': data.get('chat', {}),
+                        }
+                    return data
             except (json.JSONDecodeError, IOError):
                 pass
-        return {}
+        return {'daemon': {}, 'chat': {}}
 
     @classmethod
     def get(cls, key: SettingKey) -> Any:
@@ -76,26 +81,33 @@ class Settings:
         Returns:
             Any: The value of the setting.
         """
-        data: Dict[str, Any] = cls._load_settings()
-        return data.get(key.value, cls._DEFAULTS.get(key.value))
+        data: Dict[str, Dict[str, Any]] = cls._load_settings()
+        category, sub_key = key.value.split('.', 1)
+
+        if category in data and sub_key in data[category]:
+            return data[category][sub_key]
+
+        return cls._DEFAULTS.get(key.value)
 
     @classmethod
     def set(cls, key: SettingKey, value: Any) -> None:
         """
-        Updates a setting value and saves it safely to the JSON file using a lock.
+        Updates a setting value and saves it safely to the nested JSON file using a lock.
 
         Args:
             key (SettingKey): The setting key enum to update.
             value (Any): The new value for the setting.
-
-        Returns:
-            None
         """
         path: str = cls.get_global_settings_path()
 
-        # Centralized locking logic applied via Context Manager
         with FileLock(path):
-            data: Dict[str, Any] = cls._load_settings()
-            data[key.value] = value
+            data: Dict[str, Dict[str, Any]] = cls._load_settings()
+            category, sub_key = key.value.split('.', 1)
+
+            if category not in data:
+                data[category] = {}
+
+            data[category][sub_key] = value
+
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4)

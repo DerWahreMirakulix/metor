@@ -165,6 +165,18 @@ class Help:
             )
             + Help._format_line(
                 sub_ind,
+                'metor unlock <password>',
+                'Unlock an encrypted daemon instance over IPC.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
+                'metor settings set <key> <val>',
+                'Configure specific chat or daemon settings.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
                 'metor chat',
                 'Enter the interactive multi-chat UI.',
                 Help.DESC_COLUMN,
@@ -177,7 +189,7 @@ class Help:
             )
             + Help._format_line(
                 sub_ind,
-                'metor purge',
+                'metor purge [--nuke-remote]',
                 'Wipe ALL profiles, keys, and databases.\n',
                 Help.DESC_COLUMN,
             )
@@ -221,20 +233,20 @@ class Help:
             )
             + Help._format_line(
                 sub_ind,
-                'metor profiles [list|add|rm]',
-                'List, create, or remove isolated profiles.',
+                'metor profiles [list|add]',
+                'List or create isolated profiles.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
+                'metor profiles rm <name> [--nuke-remote]',
+                'Remove a profile and optionally its remote daemon.',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
                 sub_ind,
                 'metor profiles [rename|set-default|clear]',
                 'Manage existing profile configurations.',
-                Help.DESC_COLUMN,
-            )
-            + Help._format_line(
-                sub_ind,
-                'metor profiles add <name> [--remote] [--port <int>]',
-                'Create a new profile (local or remote via SSH).',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(

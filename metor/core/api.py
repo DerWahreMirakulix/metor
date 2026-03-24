@@ -39,6 +39,11 @@ class Action(str, Enum):
     GET_ADDRESS = 'get_address'
     GENERATE_ADDRESS = 'generate_address'
 
+    # Settings & Security Actions
+    SET_SETTING = 'set_setting'
+    SELF_DESTRUCT = 'self_destruct'
+    UNLOCK = 'unlock'
+
 
 class EventType(str, Enum):
     """Enumeration of events broadcasted by the Daemon to the connected UIs."""
@@ -97,6 +102,9 @@ class IpcCommand(IpcMessage):
     is_header: bool = False
     chat_mode: bool = False
     limit: int = 50
+    setting_key: Optional[str] = None
+    setting_value: Optional[str] = None
+    password: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'IpcCommand':
@@ -121,6 +129,9 @@ class IpcCommand(IpcMessage):
             is_header=data.get('is_header', False),
             chat_mode=data.get('chat_mode', False),
             limit=data.get('limit', 50),
+            setting_key=data.get('setting_key'),
+            setting_value=data.get('setting_value'),
+            password=data.get('password'),
         )
 
 

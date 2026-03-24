@@ -1,6 +1,7 @@
 """
 Module defining the primary background daemon engine.
 Orchestrates Network, IPC API, and Outbox routing seamlessly.
+Handles Unlock operations and Nuke/Purge protocols.
 """
 
 import socket
@@ -26,6 +27,7 @@ from metor.data.messages import (
 
 from metor.core.api import IpcCommand, IpcEvent, Action, EventType
 from metor.ui.theme import Theme
+from metor.utils.constants import Constants
 from metor.utils.helper import clean_onion
 
 from metor.core.daemon.crypto import Crypto
@@ -62,8 +64,12 @@ class DaemonEngine:
         self._cm: ContactManager = cm
         self._hm: HistoryManager = hm
         self._mm: MessageManager = mm
+        self._km: KeyManager = km
 
         self._stop_flag: threading.Event = threading.Event()
+        self._is_locked: bool = (
+            False  # If remote start without password, we start locked
+        )
 
         self._crypto: Crypto = Crypto(km)
         self._ipc: IpcServer = IpcServer(pm, self._process_ui_command)
@@ -92,18 +98,15 @@ class DaemonEngine:
 
     def run(self) -> None:
         """Starts the Engine infrastructure."""
-        if not self._tm.start():
-            print('Daemon: Failed to start Tor.')
-            return
 
-        self._network.start_listener()
-        self._ipc.start()
-        self._outbox.start()
-
-        print(
-            f'Daemon running... Onion: {Theme.YELLOW}{clean_onion(self._tm.onion or "")}{Theme.RESET}.onion '
-            f'| IPC Port: {Theme.YELLOW}{self._ipc.port}{Theme.RESET}'
-        )
+        # If running locked (e.g. remote daemon started without password prompt),
+        # we only start the IPC listener and wait for UNLOCK.
+        if getattr(self._km, '_password', None) is None and self._pm.is_remote():
+            self._is_locked = True
+            self._ipc.start()
+            print('Daemon running in LOCKED mode... Waiting for IPC unlock.')
+        else:
+            self._start_subsystems()
 
         try:
             while not self._stop_flag.is_set():
@@ -113,6 +116,25 @@ class DaemonEngine:
         finally:
             self.stop()
 
+    def _start_subsystems(self) -> None:
+        """Initializes the actual Tor and Network components once unlocked."""
+        if not self._tm.start():
+            print('Daemon: Failed to start Tor.')
+            return
+
+        self._network.start_listener()
+
+        # Start IPC if not already running
+        if not self._ipc.port:
+            self._ipc.start()
+
+        self._outbox.start()
+
+        print(
+            f'Daemon active. Onion: {Theme.YELLOW}{clean_onion(self._tm.onion or "")}{Theme.RESET}.onion '
+            f'| IPC Port: {Theme.YELLOW}{self._ipc.port}{Theme.RESET}'
+        )
+
     def stop(self) -> None:
         """Stops the engine and gracefully tears down all sub-services."""
         self._stop_flag.set()
@@ -120,6 +142,44 @@ class DaemonEngine:
         self._ipc.stop()
         self._pm.clear_daemon_port()
         self._tm.stop()
+
+    def _nuke_data(self) -> None:
+        """
+        Securely erases local SQLite DB and Tor keys, and initiates shutdown.
+        """
+        import stat
+
+        db_path: str = os.path.join(self._pm.get_config_dir(), Constants.DB_FILE)
+        if os.path.exists(db_path):
+            with open(db_path, 'ba+') as f:
+                length: int = f.tell()
+                f.seek(0)
+                f.write(os.urandom(length))
+            os.remove(db_path)
+
+        hs_dir: str = self._pm.get_hidden_service_dir()
+        for key_file in [
+            Constants.METOR_SECRET_KEY,
+            Constants.TOR_SECRET_KEY,
+            Constants.TOR_PUBLIC_KEY,
+        ]:
+            key_path = os.path.join(hs_dir, key_file)
+            if os.path.exists(key_path):
+                os.chmod(key_path, stat.S_IWRITE)
+                with open(key_path, 'ba+') as f:
+                    length = f.tell()
+                    f.seek(0)
+                    f.write(os.urandom(length))
+                os.remove(key_path)
+
+        self._ipc.broadcast(
+            IpcEvent(
+                type=EventType.SYSTEM,
+                text=f'{Theme.RED}CRITICAL: DAEMON SELF DESTRUCT INITIATED. Shutting down immediately.{Theme.RESET}',
+            )
+        )
+
+        self.stop()
 
     def _is_self_target(self, target: str) -> bool:
         """
@@ -151,6 +211,92 @@ class DaemonEngine:
             cmd (IpcCommand): The parsed command object.
             conn (socket.socket): The connection to respond to.
         """
+        if cmd.action == Action.SELF_DESTRUCT:
+            self._ipc.send_to(
+                conn,
+                IpcEvent(
+                    type=EventType.CLI_RESPONSE,
+                    text=f'{Theme.GREEN}Self-destruct command accepted. Nuking daemon...{Theme.RESET}',
+                ),
+            )
+            threading.Thread(target=self._nuke_data, daemon=True).start()
+            return
+
+        if cmd.action == Action.UNLOCK:
+            if not self._is_locked:
+                self._ipc.send_to(
+                    conn,
+                    IpcEvent(
+                        type=EventType.CLI_RESPONSE, text='Daemon is already unlocked.'
+                    ),
+                )
+                return
+
+            # Re-initialize managers with the new password
+            self._km = KeyManager(self._pm, cmd.password)
+            self._tm = TorManager(self._pm, self._km)
+            self._cm = ContactManager(self._pm, cmd.password)
+            self._hm = HistoryManager(self._pm, cmd.password)
+            self._mm = MessageManager(self._pm, cmd.password)
+
+            # Update dependencies
+            self._crypto = Crypto(self._km)
+            self._network = NetworkManager(
+                self._tm,
+                self._cm,
+                self._hm,
+                self._mm,
+                self._crypto,
+                self._ipc.broadcast,
+                self._stop_flag,
+            )
+            self._outbox = OutboxWorker(
+                self._tm, self._mm, self._hm, self._crypto, self._stop_flag
+            )
+
+            self._is_locked = False
+            self._start_subsystems()
+            self._ipc.send_to(
+                conn,
+                IpcEvent(
+                    type=EventType.CLI_RESPONSE,
+                    text=f'{Theme.GREEN}Daemon unlocked successfully.{Theme.RESET}',
+                ),
+            )
+            return
+
+        if cmd.action == Action.SET_SETTING:
+            if cmd.setting_key and cmd.setting_value:
+                try:
+                    from metor.data.settings import Settings, SettingKey
+
+                    Settings.set(SettingKey(cmd.setting_key), cmd.setting_value)
+                    self._ipc.send_to(
+                        conn,
+                        IpcEvent(
+                            type=EventType.CLI_RESPONSE, text='Daemon setting updated.'
+                        ),
+                    )
+                except Exception as e:
+                    self._ipc.send_to(
+                        conn,
+                        IpcEvent(
+                            type=EventType.CLI_RESPONSE,
+                            text=f'Failed to update setting: {e}',
+                        ),
+                    )
+            return
+
+        if self._is_locked:
+            self._ipc.send_to(
+                conn,
+                IpcEvent(
+                    type=EventType.CLI_RESPONSE,
+                    text=f'{Theme.RED}Daemon is locked. Please unlock first.{Theme.RESET}',
+                ),
+            )
+            return
+
         if cmd.action == Action.INIT:
             self._ipc.send_to(conn, IpcEvent(type=EventType.INIT, onion=self._tm.onion))
 

@@ -6,6 +6,7 @@ import argparse
 import os
 import shutil
 import psutil
+import getpass
 from typing import List, Optional
 
 from metor.ui.help import Help
@@ -15,6 +16,11 @@ from metor.utils.constants import Constants
 from metor.ui.chat import Chat
 from metor.core.daemon import Daemon
 from metor.core.proxy import CliProxy
+from metor.core.key import KeyManager
+from metor.core.tor import TorManager
+from metor.data.history import HistoryManager
+from metor.data.contact import ContactManager
+from metor.data.messages import MessageManager
 
 
 class MetorApp:
@@ -70,6 +76,50 @@ class MetorApp:
             temp_pm.clear_daemon_port()
         return killed
 
+    def _nuke_remote_profiles(self, profile_names: List[str]) -> bool:
+        """
+        Sends the self-destruct command to the specified remote profiles.
+        If any fail, prompts the user for confirmation to proceed anyway.
+
+        Args:
+            profile_names (List[str]): List of remote profile names to nuke.
+
+        Returns:
+            bool: True if successful or user overridden, False if aborted.
+        """
+        failed_remotes: List[str] = []
+        for r in profile_names:
+            pm = ProfileManager(r)
+            if not pm.is_remote():
+                print(
+                    f"{Theme.YELLOW}Warning: '{r}' is a local profile. "
+                    f'Ignoring --nuke-remote.{Theme.RESET}'
+                )
+                continue
+
+            proxy = CliProxy(pm)
+            res: str = proxy.nuke_daemon()
+            if 'Error' in res or 'Failed' in res:
+                failed_remotes.append(r)
+            else:
+                print(
+                    f"{Theme.GREEN}Remote daemon for '{r}' "
+                    f'nuked successfully.{Theme.RESET}'
+                )
+
+        if failed_remotes:
+            print(
+                f'{Theme.RED}CRITICAL: Failed to reach remote daemons for profiles: '
+                f'{", ".join(failed_remotes)}{Theme.RESET}'
+            )
+            override: str = input(
+                'You will lock yourself out of these remotes! '
+                'Proceed with local wipe anyway? y/N: '
+            )
+            if override.strip().lower() != 'y':
+                return False
+        return True
+
     def execute(self) -> None:
         """Parses the CLI arguments and executes the corresponding application logic."""
         cmd: str = self.args.command
@@ -91,20 +141,37 @@ class MetorApp:
                 )
                 return
 
-            from metor.core.key import KeyManager
-            from metor.core.tor import TorManager
-            from metor.data.history import HistoryManager
-            from metor.data.contact import ContactManager
-            from metor.data.messages import MessageManager
+            print(f"Starting daemon for profile '{self._pm.profile_name}'...")
+            password: str = getpass.getpass(
+                f'{Theme.CYAN}Enter Master Password: {Theme.RESET}'
+            )
 
-            km = KeyManager(self._pm)
+            if not password:
+                print(
+                    f'{Theme.RED}Error:{Theme.RESET} Master password cannot be empty.'
+                )
+                return
+
+            km = KeyManager(self._pm, password)
             tm = TorManager(self._pm, km)
-            cm = ContactManager(self._pm)
-            hm = HistoryManager(self._pm)
-            mm = MessageManager(self._pm)
+            cm = ContactManager(self._pm, password)
+            hm = HistoryManager(self._pm, password)
+            mm = MessageManager(self._pm, password)
 
             daemon = Daemon(self._pm, km, tm, cm, hm, mm)
             daemon.run()
+
+        elif cmd == 'unlock':
+            if not sub:
+                print('Usage: metor unlock <password>')
+            else:
+                print(self.proxy.unlock_daemon(sub))
+
+        elif cmd == 'settings':
+            if sub == 'set' and len(ext) >= 2:
+                print(self.proxy.handle_settings(ext[0], ext[1]))
+            else:
+                print('Usage: metor settings set <daemon.key|chat.key> <value>')
 
         elif cmd == 'chat':
             if not self._pm.is_daemon_running():
@@ -123,11 +190,29 @@ class MetorApp:
             )
 
         elif cmd == 'purge':
+            is_nuke_remote: bool = '--nuke-remote' in ext or sub == '--nuke-remote'
+
             print(
                 f'{Theme.RED}WARNING: You are about to PERMANENTLY wipe the entire Metor directory!{Theme.RESET}'
             )
+            if is_nuke_remote:
+                print(
+                    f'{Theme.RED}This includes sending SELF_DESTRUCT to all remote profiles!{Theme.RESET}'
+                )
+
             confirmation: str = input("Type 'yes' to proceed: ")
+
             if confirmation.strip().lower() == 'yes':
+                if is_nuke_remote:
+                    remotes: List[str] = [
+                        p
+                        for p in ProfileManager.get_all_profiles()
+                        if ProfileManager(p).is_remote()
+                    ]
+                    if not self._nuke_remote_profiles(remotes):
+                        print('Purge aborted.')
+                        return
+
                 self._cleanup_processes()
                 if os.path.exists(Constants.DATA):
                     shutil.rmtree(Constants.DATA)
@@ -207,10 +292,18 @@ class MetorApp:
                     print(msg)
             elif sub in ('rm', 'remove'):
                 if len(ext) < 1:
-                    print('Usage: metor profiles rm <name>')
+                    print('Usage: metor profiles rm <name> [--nuke-remote]')
                 else:
+                    target_profile: str = ext[0]
+                    is_nuke_remote: bool = '--nuke-remote' in ext
+
+                    if is_nuke_remote:
+                        if not self._nuke_remote_profiles([target_profile]):
+                            print('Profile removal aborted.')
+                            return
+
                     _, msg = ProfileManager.remove_profile_folder(
-                        ext[0], self._pm.profile_name
+                        target_profile, self._pm.profile_name
                     )
                     print(msg)
             elif sub == 'rename':
@@ -229,7 +322,6 @@ class MetorApp:
                 if len(ext) < 1:
                     print('Usage: metor profiles clear <name>')
                 else:
-                    # FIX 3: Prevent local clears on remote profiles to avoid confusion.
                     target_pm = ProfileManager(ext[0])
                     if target_pm.is_remote():
                         print(

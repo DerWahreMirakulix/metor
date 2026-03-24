@@ -9,7 +9,14 @@ description = "A simple Tor messenger."
 authors = [{ name = "LuRex" }]
 requires-python = ">=3.7"
 license = { text = "GPLv3" }
-dependencies = ["stem", "PySocks", "pynacl", "psutil", "python-dotenv"]
+dependencies = [
+    "stem",
+    "PySocks",
+    "pynacl",
+    "psutil",
+    "python-dotenv",
+    "sqlcipher3-binary",
+]
 
 [project.scripts]
 metor = "metor.main:main"

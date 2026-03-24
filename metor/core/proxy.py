@@ -11,8 +11,8 @@ from metor.data.profile import ProfileManager
 from metor.core.api import IpcCommand, Action, IpcEvent
 from metor.utils.constants import Constants
 from metor.ui.theme import Theme
+from metor.data.settings import Settings, SettingKey
 
-# Local Managers
 from metor.core.key import KeyManager
 from metor.core.tor import TorManager
 from metor.data.history import HistoryManager
@@ -33,14 +33,27 @@ class CliProxy:
         self._pm: ProfileManager = pm
         self.is_remote: bool = self._pm.is_remote()
 
-        # FIX 2: Only initialize local DB connections if the daemon is NOT running locally.
         if not self.is_remote and not self._pm.is_daemon_running():
-            self._km: Optional[KeyManager] = KeyManager(self._pm)
-            self._hm: Optional[HistoryManager] = HistoryManager(self._pm)
-            self._cm: Optional[ContactManager] = ContactManager(self._pm)
-            self._mm: Optional[MessageManager] = MessageManager(self._pm)
+            self._km: Optional[KeyManager] = KeyManager(self._pm, None)
+            self._hm: Optional[HistoryManager] = HistoryManager(self._pm, None)
+            self._cm: Optional[ContactManager] = ContactManager(self._pm, None)
+            self._mm: Optional[MessageManager] = MessageManager(self._pm, None)
         else:
             self._km = self._hm = self._cm = self._mm = None
+
+    def _prefix_remote(self, text: str) -> str:
+        """
+        Prepends a [Remote] tag to output strings if operating via IPC on a remote profile.
+
+        Args:
+            text (str): The raw output string.
+
+        Returns:
+            str: The prefixed string.
+        """
+        if self.is_remote:
+            return f'{Theme.PURPLE}[Remote]{Theme.RESET} {text}'
+        return text
 
     def _request_ipc(self, cmd: IpcCommand, wait_for_response: bool = True) -> str:
         """
@@ -56,9 +69,9 @@ class CliProxy:
         port: Optional[int] = self._pm.get_daemon_port()
         if not port:
             if self.is_remote:
-                return (
+                return self._prefix_remote(
                     f'{Theme.RED}Error:{Theme.RESET} Cannot reach remote Daemon on port {self._pm.get_static_port()}.\n'
-                    f'Did you forget the SSH tunnel? (ssh -N -L {self._pm.get_static_port()}:127.0.0.1:{self._pm.get_static_port()} user@server)'
+                    f'Did you forget the SSH tunnel?'
                 )
             return f'{Theme.RED}Error:{Theme.RESET} Local daemon is not running.'
 
@@ -69,7 +82,9 @@ class CliProxy:
                 s.sendall((cmd.to_json() + '\n').encode('utf-8'))
 
                 if not wait_for_response:
-                    return f'{Theme.GREEN}Command successfully sent to daemon.{Theme.RESET}'
+                    return self._prefix_remote(
+                        f'{Theme.GREEN}Command successfully sent to daemon.{Theme.RESET}'
+                    )
 
                 buffer: str = ''
                 while True:
@@ -83,10 +98,59 @@ class CliProxy:
                 if buffer:
                     resp_dict: Dict[str, Any] = json.loads(buffer.split('\n')[0])
                     event = IpcEvent.from_dict(resp_dict)
-                    return event.text if event.text else 'Success.'
+                    return self._prefix_remote(event.text if event.text else 'Success.')
         except Exception:
             pass
-        return f'{Theme.RED}Failed to communicate with the daemon.{Theme.RESET}'
+        return self._prefix_remote(
+            f'{Theme.RED}Failed to communicate with the daemon.{Theme.RESET}'
+        )
+
+    def unlock_daemon(self, password: str) -> str:
+        """
+        Sends the master password to unlock a remote daemon.
+
+        Args:
+            password (str): The master password.
+
+        Returns:
+            str: Status message.
+        """
+        return self._request_ipc(IpcCommand(action=Action.UNLOCK, password=password))
+
+    def nuke_daemon(self) -> str:
+        """
+        Sends the self-destruct command to the daemon and waits for acknowledgment.
+
+        Returns:
+            str: Status message.
+        """
+        return self._request_ipc(
+            IpcCommand(action=Action.SELF_DESTRUCT), wait_for_response=True
+        )
+
+    def handle_settings(self, key: str, value: str) -> str:
+        """
+        Routes setting changes. Chat settings are applied locally; daemon settings via IPC.
+
+        Args:
+            key (str): The setting key string.
+            value (str): The new value.
+
+        Returns:
+            str: Status message.
+        """
+        try:
+            setting_enum = SettingKey(key)
+        except ValueError:
+            return f"{Theme.RED}Error:{Theme.RESET} Unknown setting key '{key}'."
+
+        if setting_enum.value.startswith('chat.'):
+            Settings.set(setting_enum, value)
+            return f"{Theme.GREEN}Local chat setting '{key}' updated.{Theme.RESET}"
+
+        return self._request_ipc(
+            IpcCommand(action=Action.SET_SETTING, setting_key=key, setting_value=value)
+        )
 
     def get_address(self, generate: bool = False) -> str:
         """Retrieves or generates the hidden service address."""

@@ -6,7 +6,7 @@ import os
 import shutil
 import json
 from enum import Enum
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional, Dict, Any, Union
 
 from metor.data.settings import SettingKey, Settings
 from metor.data.sql import SqlManager
@@ -103,32 +103,46 @@ class ProfileManager:
                 pass
         return {}
 
-    def get_config(self, key: ProfileConfigKey, default: Any = None) -> Any:
+    def get_config(
+        self, key: Union[ProfileConfigKey, SettingKey, str], default: Any = None
+    ) -> Any:
         """
-        Retrieves a specific configuration value from the profile.
+        Retrieves a configuration value cascading through the Profile, Global Settings, and Default.
 
         Args:
-            key (ProfileConfigKey): The setting key to retrieve.
+            key (Union[ProfileConfigKey, SettingKey, str]): The setting key to retrieve.
             default (Any): The default value to return if not found.
 
         Returns:
-            Any: The value of the configuration key.
+            Any: The cascaded value of the configuration key.
         """
+        key_str: str = key.value if isinstance(key, Enum) else key
         data: Dict[str, Any] = self._load_config()
-        return data.get(key.value, default)
 
-    def set_config(self, key: ProfileConfigKey, value: Any) -> None:
+        if key_str in data:
+            return data[key_str]
+
+        try:
+            global_key = SettingKey(key_str)
+            return Settings.get(global_key)
+        except ValueError:
+            pass
+
+        return default
+
+    def set_config(self, key: Union[ProfileConfigKey, str], value: Any) -> None:
         """
         Safely writes a configuration value to the profile using FileLock.
 
         Args:
-            key (ProfileConfigKey): The setting key to set.
+            key (Union[ProfileConfigKey, str]): The setting key to set.
             value (Any): The value to store.
         """
+        key_str: str = key.value if isinstance(key, Enum) else key
         path: str = self.get_config_file()
         with FileLock(path):
             data: Dict[str, Any] = self._load_config()
-            data[key.value] = value
+            data[key_str] = value
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4)
 
