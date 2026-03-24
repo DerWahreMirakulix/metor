@@ -21,6 +21,7 @@ When writing or modifying code for this repository, you MUST strictly adhere to 
 - **Google Style:** Use Google-style docstrings for every class and method.
 - **Meaningful Descriptions:** Do not just repeat the function name. Explain _what_ it does and _why_.
 - **Input/Output:** Every docstring MUST include an `Args:` block (with types and descriptions) and a `Returns:` block (with types and descriptions). Exceptions must be documented under `Raises:`.
+- **Comments:** Keep comments strictly objective and architecturally useful. Do not include conversational filler, changelog notes, or self-referential remarks in the code (e.g., absolutely no "NEW:", "As requested:", or "I changed this part"). Write comments for a production codebase, not a tutorial.
 
 ## 4. Architecture & Design Principles
 
