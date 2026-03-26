@@ -28,7 +28,7 @@ class Config:
 
     def _load(self) -> Dict[str, Any]:
         """
-        Loads the JSON configuration from disk safely.
+        Loads the JSON configuration from disk safely. Generates default config if missing.
 
         Args:
             None
@@ -43,7 +43,17 @@ class Config:
                     return json.load(f)
             except (json.JSONDecodeError, IOError):
                 pass
-        return {}
+
+        default_data: Dict[str, Any] = {
+            ProfileConfigKey.IS_REMOTE.value: False,
+            ProfileConfigKey.DAEMON_PORT.value: None,
+        }
+
+        with FileLock(config_file):
+            with config_file.open('w', encoding='utf-8') as f:
+                json.dump(default_data, f, indent=4)
+
+        return default_data
 
     def get(
         self, key: Union[ProfileConfigKey, SettingKey, str], default: Any = None

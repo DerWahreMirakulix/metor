@@ -253,26 +253,46 @@ class MessageManager:
             )
         return result
 
-    def clear_messages(self, onion: Optional[str] = None) -> Tuple[bool, str]:
+    def clear_messages(
+        self, onion: Optional[str] = None, non_contacts_only: bool = False
+    ) -> Tuple[bool, str]:
         """
         Wipes the message table completely or just for a specific contact,
-        and removes orphaned discovered peers.
+        and removes orphaned discovered peers. Allows filtering by non-contacts.
 
         Args:
-            onion (Optional[str]): The target onion identity. If None, deletes all.
+            onion (Optional[str]): The target onion identity. If None, deletes globally based on flags.
+            non_contacts_only (bool): If True, only deletes messages from unsaved peers.
 
         Returns:
             Tuple[bool, str]: A success flag and a status message.
         """
         try:
-            if onion:
-                self._sql.execute(
-                    'DELETE FROM messages WHERE contact_onion = ?', (onion,)
-                )
-                msg = f"All messages for '{onion}' cleared."
+            if non_contacts_only:
+                if onion:
+                    query: str = """
+                        DELETE FROM messages 
+                        WHERE contact_onion = ? 
+                        AND contact_onion NOT IN (SELECT onion FROM contacts WHERE is_saved = 1)
+                    """
+                    self._sql.execute(query, (onion,))
+                    msg = f"Messages for non-contact '{onion}' cleared."
+                else:
+                    query: str = """
+                        DELETE FROM messages 
+                        WHERE contact_onion NOT IN (SELECT onion FROM contacts WHERE is_saved = 1)
+                    """
+                    self._sql.execute(query)
+                    msg = f"All messages from non-contacts in profile '{self._pm.profile_name}' cleared."
             else:
-                self._sql.execute('DELETE FROM messages')
-                msg = f"All messages in profile '{self._pm.profile_name}' cleared."
+                if onion:
+                    self._sql.execute(
+                        'DELETE FROM messages WHERE contact_onion = ?', (onion,)
+                    )
+                    msg = f"All messages for '{onion}' cleared."
+                else:
+                    self._sql.execute('DELETE FROM messages')
+                    msg = f"All messages in profile '{self._pm.profile_name}' cleared."
 
             cleanup_query: str = """
                 DELETE FROM contacts 

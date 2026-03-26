@@ -221,8 +221,8 @@ class Help:
             )
             + Help._format_line(
                 sub_ind,
-                'metor messages clear [alias]',
-                'Delete message history.\n',
+                'metor messages clear [alias] [--non-contacts]',
+                'Delete message history (or only from unsaved peers).\n',
                 Help.DESC_COLUMN,
             )
             + f'{ind}{Theme.YELLOW}Profile & Identity:{Theme.RESET}\n'

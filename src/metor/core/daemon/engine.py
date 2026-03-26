@@ -603,14 +603,14 @@ class Daemon:
                 _, onion, exists = self._cm.resolve_target(cmd.target)
                 # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
                 if exists:
-                    success, msg = self._mm.clear_messages(onion)
+                    success, msg = self._mm.clear_messages(onion, cmd.non_contacts_only)
                 else:
                     success, msg = (
                         False,
                         'Contact not found.',
                     )
             else:
-                success, msg = self._mm.clear_messages()
+                success, msg = self._mm.clear_messages(None, cmd.non_contacts_only)
             self._ipc.send_to(
                 conn, IpcEvent(type=EventType.CLI_RESPONSE, text=msg, success=success)
             )

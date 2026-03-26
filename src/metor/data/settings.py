@@ -76,6 +76,7 @@ class Settings:
     def _load_settings(cls) -> Dict[str, Dict[str, Any]]:
         """
         Loads the settings from the JSON file into a nested structure.
+        Creates the default structure and writes it to disk if the file is missing.
 
         Args:
             None
@@ -96,7 +97,19 @@ class Settings:
                     return data
             except (json.JSONDecodeError, IOError):
                 pass
-        return {'ui': {}, 'daemon': {}, 'data': {}, 'security': {}}
+
+        data = {'ui': {}, 'daemon': {}, 'data': {}, 'security': {}}
+        for key_enum, val in cls._DEFAULTS.items():
+            category: str
+            sub_key: str
+            category, sub_key = key_enum.split('.', 1)
+            data[category][sub_key] = val
+
+        with FileLock(path):
+            with path.open('w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4)
+
+        return data
 
     @classmethod
     def get(cls, key: SettingKey) -> Any:

@@ -106,6 +106,7 @@ class IpcCommand(IpcMessage):
     setting_key: Optional[str] = None
     setting_value: Optional[str] = None
     password: Optional[str] = None
+    non_contacts_only: bool = False
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'IpcCommand':
@@ -133,6 +134,7 @@ class IpcCommand(IpcMessage):
             setting_key=data.get('setting_key'),
             setting_value=data.get('setting_value'),
             password=data.get('password'),
+            non_contacts_only=data.get('non_contacts_only', False),
         )
 
 

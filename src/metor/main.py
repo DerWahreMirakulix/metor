@@ -243,19 +243,28 @@ class MetorApp:
 
         elif cmd == 'messages':
             action: str = 'clear' if sub == 'clear' else 'show'
+            non_contacts_only: bool = '--non-contacts' in ext
+            clean_ext: List[str] = [x for x in ext if x != '--non-contacts']
+
             target: Optional[str] = (
-                ext[0] if ext else (sub if sub not in ('show', 'clear') else None)
+                clean_ext[0]
+                if clean_ext
+                else (sub if sub not in ('show', 'clear') else None)
             )
             limit_str: Optional[str] = (
-                ext[1]
-                if len(ext) > 1
-                else (ext[0] if ext and action == 'show' and sub != 'show' else None)
+                clean_ext[1]
+                if len(clean_ext) > 1
+                else (
+                    clean_ext[0]
+                    if clean_ext and action == 'show' and sub != 'show'
+                    else None
+                )
             )
             limit: Optional[int] = (
                 int(limit_str) if limit_str and limit_str.isdigit() else None
             )
 
-            print(self.proxy.handle_messages(action, target, limit))
+            print(self.proxy.handle_messages(action, target, limit, non_contacts_only))
 
         elif cmd == 'history':
             action = 'clear' if sub == 'clear' else 'show'

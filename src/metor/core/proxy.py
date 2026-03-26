@@ -230,7 +230,11 @@ class CliProxy:
         return 'Initialization error.'
 
     def handle_messages(
-        self, action: str, target: Optional[str] = None, limit: Optional[int] = None
+        self,
+        action: str,
+        target: Optional[str] = None,
+        limit: Optional[int] = None,
+        non_contacts_only: bool = False,
     ) -> str:
         """
         Views or clears past messages.
@@ -239,6 +243,7 @@ class CliProxy:
             action (str): The action to perform ('show' or 'clear').
             target (Optional[str]): The specific alias to target.
             limit (Optional[int]): Maximum number of messages to fetch.
+            non_contacts_only (bool): Restrict clear operation to unsaved peers.
 
         Returns:
             str: The formatted message output or a status message.
@@ -247,7 +252,14 @@ class CliProxy:
             act: Action = (
                 Action.CLEAR_MESSAGES if action == 'clear' else Action.GET_MESSAGES
             )
-            return self._request_ipc(IpcCommand(action=act, target=target, limit=limit))
+            return self._request_ipc(
+                IpcCommand(
+                    action=act,
+                    target=target,
+                    limit=limit,
+                    non_contacts_only=non_contacts_only,
+                )
+            )
 
         if self._mm and self._cm:
             if action == 'clear':
@@ -256,9 +268,9 @@ class CliProxy:
                     # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
                     if not exists:
                         return f"Contact '{target}' not found."
-                    _, msg = self._mm.clear_messages(onion)
+                    _, msg = self._mm.clear_messages(onion, non_contacts_only)
                     return msg
-                _, msg = self._mm.clear_messages()
+                _, msg = self._mm.clear_messages(None, non_contacts_only)
                 return msg
             return self._mm.show_history(target, self._cm, limit)
         return 'Initialization error.'
