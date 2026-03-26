@@ -7,7 +7,7 @@ import json
 import dataclasses
 from dataclasses import dataclass, asdict, field
 from enum import Enum
-from typing import Optional, List, Dict, Any, Type
+from typing import Optional, List, Dict, Any, Type, Union
 
 
 class Action(str, Enum):
@@ -267,7 +267,7 @@ class ClearProfileDbCommand(IpcCommand):
 @dataclass
 class SetSettingCommand(IpcCommand):
     setting_key: str
-    setting_value: str
+    setting_value: Union[str, int, float, bool]
     action: Action = field(default=Action.SET_SETTING, init=False)
 
 

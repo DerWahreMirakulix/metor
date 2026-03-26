@@ -12,6 +12,7 @@ import sys
 import os
 import signal
 from typing import Any, Optional, Set
+from pathlib import Path
 
 from metor.core.key import KeyManager
 from metor.core.tor import TorManager
@@ -64,7 +65,7 @@ from metor.data.message import (
 from metor.data.settings import Settings, SettingKey
 from metor.ui.theme import Theme
 from metor.utils.constants import Constants
-from metor.utils.helper import clean_onion
+from metor.utils.helper import clean_onion, secure_shred_file
 
 # Local Package Imports
 from metor.core.daemon.crypto import Crypto
@@ -175,8 +176,10 @@ class Daemon:
         Returns:
             None
         """
-        if not self._tm.start():
-            print('Daemon: Failed to start Tor.')
+        success, msg = self._tm.start()
+        if not success:
+            print(f'{Theme.RED}{msg}{Theme.RESET}')
+            self._stop_flag.set()
             return
 
         self._network.start_listener()
@@ -210,7 +213,6 @@ class Daemon:
     def _nuke_data(self) -> None:
         """
         Securely erases local SQLite DB and Tor keys, and initiates shutdown.
-        Warning: Data shredding may be ineffective on modern SSDs due to wear-leveling.
 
         Args:
             None
@@ -218,32 +220,17 @@ class Daemon:
         Returns:
             None
         """
-        import stat
-        import secrets
-        from pathlib import Path
-
         db_path: Path = Path(self._pm.get_config_dir()) / Constants.DB_FILE
-        if db_path.exists():
-            with db_path.open('ba+') as f:
-                length: int = f.tell()
-                f.seek(0)
-                f.write(secrets.token_bytes(length))
-            db_path.unlink()
+        secure_shred_file(db_path)
 
         hs_dir: Path = Path(self._pm.get_hidden_service_dir())
         for key_file in [
             Constants.METOR_SECRET_KEY,
             Constants.TOR_SECRET_KEY,
+            f'{Constants.TOR_SECRET_KEY}.enc',
             Constants.TOR_PUBLIC_KEY,
         ]:
-            key_path: Path = hs_dir / key_file
-            if key_path.exists():
-                key_path.chmod(stat.S_IWRITE)
-                with key_path.open('ba+') as f:
-                    length = f.tell()
-                    f.seek(0)
-                    f.write(secrets.token_bytes(length))
-                key_path.unlink()
+            secure_shred_file(hs_dir / key_file)
 
         self._ipc.broadcast(
             SystemEvent(
@@ -388,11 +375,17 @@ class Daemon:
             try:
                 Settings.set(SettingKey(cmd.setting_key), cmd.setting_value)
                 self._ipc.send_to(
-                    conn, CliResponseEvent(text='Daemon setting updated.')
+                    conn,
+                    CliResponseEvent(
+                        text=f"Daemon setting '{cmd.setting_key}' updated."
+                    ),
                 )
+            except TypeError as e:
+                self._ipc.send_to(conn, CliResponseEvent(text=str(e), success=False))
             except Exception:
                 self._ipc.send_to(
-                    conn, CliResponseEvent(text='Failed to update setting.')
+                    conn,
+                    CliResponseEvent(text='Failed to update setting.', success=False),
                 )
             return
 
@@ -428,7 +421,6 @@ class Daemon:
 
             alias, _, exists = self._cm.resolve_target(cmd.target)
 
-            # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
             if not exists:
                 self._ipc.send_to(
                     conn,
@@ -441,7 +433,6 @@ class Daemon:
             self._ipc.broadcast(
                 InfoEvent(
                     alias=alias,
-                    # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                     text="Connecting to '{alias}'...",
                 )
             )
@@ -479,7 +470,6 @@ class Daemon:
 
             _, onion, exists = self._cm.resolve_target(cmd.target)
 
-            # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
             if exists:
                 self._mm.queue_message(
                     onion,
@@ -509,7 +499,6 @@ class Daemon:
                 self._ipc.send_to(conn, CliResponseEvent(text=text))
             else:
                 alias, onion, exists = self._cm.resolve_target(cmd.target)
-                # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
                 if exists:
                     raw_messages = self._mm.get_and_read_inbox(onion)
                     messages = [
@@ -532,7 +521,6 @@ class Daemon:
 
                 alias, _, exists = self._cm.resolve_target(cmd.target)
 
-                # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
                 if not exists:
                     self._ipc.send_to(
                         conn,
@@ -549,7 +537,6 @@ class Daemon:
         elif isinstance(cmd, ClearHistoryCommand):
             if cmd.target:
                 _, onion, exists = self._cm.resolve_target(cmd.target)
-                # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
                 if exists:
                     success, msg = self._hm.clear_history(onion)
                 else:
@@ -568,7 +555,6 @@ class Daemon:
         elif isinstance(cmd, ClearMessagesCommand):
             if cmd.target:
                 _, onion, exists = self._cm.resolve_target(cmd.target)
-                # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
                 if exists:
                     success, msg = self._mm.clear_messages(onion, cmd.non_contacts_only)
                 else:

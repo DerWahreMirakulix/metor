@@ -14,28 +14,25 @@ from metor.utils.lock import FileLock
 
 
 class SettingKey(str, Enum):
-    """Available global configuration keys strictly isolated by domain (DDD)."""
+    """Available global configuration keys strictly isolated by Client (ui) and Server (daemon) domains."""
 
-    # 1. User Interface & Limits
+    # 1. User Interface (Client)
     DEFAULT_PROFILE = 'ui.default_profile'
     PROMPT_SIGN = 'ui.prompt_sign'
     CHAT_LIMIT = 'ui.chat_limit'
     HISTORY_LIMIT = 'ui.history_limit'
     MESSAGES_LIMIT = 'ui.messages_limit'
 
-    # 2. Core Daemon & Network
+    # 2. Core Daemon (Server - Network, Persistence & Security)
     MAX_TOR_RETRIES = 'daemon.max_tor_retries'
     TOR_TIMEOUT = 'daemon.tor_timeout'
     ENABLE_TOR_LOGGING = 'daemon.enable_tor_logging'
+    ENABLE_SQL_LOGGING = 'daemon.enable_sql_logging'
     AUTO_ACCEPT_CONTACTS = 'daemon.auto_accept_contacts'
-
-    # 3. Data Persistence
-    RECORD_EVENTS = 'data.record_events'
-    ALLOW_ASYNC = 'data.allow_async'
-
-    # 4. Security & OPSEC
-    REQUIRE_LOCAL_AUTH = 'security.require_local_auth'
-    BURN_AFTER_READ = 'security.burn_after_read'
+    RECORD_EVENTS = 'daemon.record_events'
+    ALLOW_ASYNC = 'daemon.allow_async'
+    REQUIRE_LOCAL_AUTH = 'daemon.require_local_auth'
+    BURN_AFTER_READ = 'daemon.burn_after_read'
 
 
 class Settings:
@@ -50,6 +47,7 @@ class Settings:
         SettingKey.MAX_TOR_RETRIES.value: 3,
         SettingKey.TOR_TIMEOUT.value: 10.0,
         SettingKey.ENABLE_TOR_LOGGING.value: False,
+        SettingKey.ENABLE_SQL_LOGGING.value: False,
         SettingKey.AUTO_ACCEPT_CONTACTS.value: True,
         SettingKey.RECORD_EVENTS.value: True,
         SettingKey.ALLOW_ASYNC.value: True,
@@ -90,7 +88,7 @@ class Settings:
                 with path.open('r', encoding='utf-8') as f:
                     data: Dict[str, Dict[str, Any]] = json.load(f)
 
-                    for domain in ('ui', 'daemon', 'data', 'security'):
+                    for domain in ('ui', 'daemon'):
                         if domain not in data:
                             data[domain] = {}
 
@@ -98,7 +96,7 @@ class Settings:
             except (json.JSONDecodeError, IOError):
                 pass
 
-        data = {'ui': {}, 'daemon': {}, 'data': {}, 'security': {}}
+        data = {'ui': {}, 'daemon': {}}
         for key_enum, val in cls._DEFAULTS.items():
             category: str
             sub_key: str
@@ -136,14 +134,32 @@ class Settings:
     def set(cls, key: SettingKey, value: Any) -> None:
         """
         Updates a setting value and saves it safely to the nested JSON file using a lock.
+        Enforces strict type validation against the default configuration schema.
 
         Args:
             key (SettingKey): The setting key enum to update.
             value (Any): The new value for the setting.
 
+        Raises:
+            TypeError: If the provided value does not match the expected type schema.
+
         Returns:
             None
         """
+        default_val: Any = cls._DEFAULTS.get(key.value)
+        if default_val is not None:
+            expected_type: type = type(default_val)
+            if (
+                expected_type is float
+                and isinstance(value, (int, float))
+                and not isinstance(value, bool)
+            ):
+                value = float(value)
+            elif type(value) is not expected_type:
+                raise TypeError(
+                    f"Invalid type for '{key.value}'. Expected {expected_type.__name__}, got {type(value).__name__}."
+                )
+
         path: Path = cls.get_global_settings_path()
 
         with FileLock(path):

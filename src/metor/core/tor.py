@@ -9,6 +9,7 @@ import time
 import socks
 import stem.process
 import sys
+import nacl.exceptions
 from pathlib import Path
 from typing import Tuple, Optional, Any, Dict
 
@@ -16,7 +17,7 @@ from metor.data.profile import ProfileManager
 from metor.data.settings import SettingKey, Settings
 from metor.ui.theme import Theme
 from metor.utils.constants import Constants
-from metor.utils.helper import clean_onion
+from metor.utils.helper import clean_onion, secure_shred_file
 
 # Local Package Imports
 from metor.core.key import KeyManager
@@ -61,20 +62,64 @@ class TorManager:
         s.close()
         return port
 
-    def start(self) -> bool:
+    def _provision_runtime_keys(self) -> Tuple[bool, str]:
         """
-        Starts the Tor process and sets up ports and the onion address.
+        Injects the plaintext Ed25519 key exclusively for the Tor C-Process runtime.
+        This file is shredded upon termination to maintain Data-At-Rest encryption.
 
         Args:
             None
 
         Returns:
-            bool: True if the Tor process started successfully, False otherwise.
+            Tuple[bool, str]: Success flag and an explicit error message if failed.
+        """
+        hs_dir: Path = Path(self._pm.get_hidden_service_dir())
+        try:
+            decrypted_tor_key: bytes = self._km.get_decrypted_tor_key()
+            tor_sec_path: Path = hs_dir / Constants.TOR_SECRET_KEY
+            with tor_sec_path.open('wb') as f:
+                f.write(decrypted_tor_key)
+            tor_sec_path.chmod(0o600)
+            return True, ''
+        except nacl.exceptions.CryptoError:
+            return False, 'Invalid master password.'
+        except Exception:
+            return False, 'Filesystem error during key injection.'
+
+    def _shred_runtime_keys(self) -> None:
+        """
+        Securely shreds the plaintext runtime keys from the filesystem.
+        Leaves the public key and encrypted master key intact.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        hs_dir: Path = Path(self._pm.get_hidden_service_dir())
+        # We only shred the secret key. Tor requires the public key to exist.
+        secure_shred_file(hs_dir / Constants.TOR_SECRET_KEY)
+
+    def start(self) -> Tuple[bool, str]:
+        """
+        Starts the Tor process and sets up ports and the onion address.
+        Centralizes the startup error message reporting.
+
+        Args:
+            None
+
+        Returns:
+            Tuple[bool, str]: Success flag and specific reason for failure.
         """
         hs_dir: Path = Path(self._pm.get_hidden_service_dir())
         data_dir: Path = Path(self._pm.get_tor_data_dir())
 
         self._km.generate_keys()
+
+        success, msg = self._provision_runtime_keys()
+        if not success:
+            return False, msg
 
         self.socks_port = self._get_free_port()
         self.control_port = self._get_free_port()
@@ -111,6 +156,7 @@ class TorManager:
                 sys.stdout.flush()
 
         max_retries: int = Settings.get(SettingKey.MAX_TOR_RETRIES)
+
         for attempt in range(max_retries):
             try:
                 self._tm_proc = stem.process.launch_tor_with_config(
@@ -128,7 +174,7 @@ class TorManager:
                     time.sleep(2)
                     continue
                 else:
-                    return False
+                    return False, 'Tor process terminated'
 
         hostname_file: Path = hs_dir / Constants.HOSTNAME_FILE
         for _ in range(10):
@@ -142,11 +188,15 @@ class TorManager:
         else:
             self.onion = 'unknown'
 
-        return self._tm_proc is not None
+        if self._tm_proc is None:
+            return False, 'Failed to launch the Tor binary.'
+
+        return True, 'Success'
 
     def stop(self) -> None:
         """
-        Safely shuts down the Tor process, using force if necessary.
+        Safely shuts down the Tor process, using force if necessary, and securely
+        shreds the plaintext runtime keys to ensure complete Data-At-Rest encryption.
 
         Args:
             None
@@ -166,6 +216,8 @@ class TorManager:
             finally:
                 self._tm_proc = None
 
+        self._shred_runtime_keys()
+
     def connect(self, onion: str) -> socks.socksocket:
         """
         Establishes a SOCKS5 connection to a remote Tor peer.
@@ -183,7 +235,6 @@ class TorManager:
         timeout: float = Settings.get(SettingKey.TOR_TIMEOUT)
         s.settimeout(timeout)
         s.connect((onion, 80))
-        # Deliberately leaving the timeout applied to mitigate Slowloris-style attacks on the socket
         return s
 
     def get_address(self) -> Tuple[bool, str]:
@@ -226,11 +277,11 @@ class TorManager:
                 f"Changing the address for profile '{self._pm.profile_name}' is not possible while a daemon is running.",
             )
 
-        success: bool = self.start()
+        success, msg = self.start()
         if not success:
             return (
                 False,
-                f"Failed to start Tor for profile '{self._pm.profile_name}'. Please check your Tor configuration and logs.",
+                f"Failed to start Tor for profile '{self._pm.profile_name}'. Reason: {msg}",
             )
         self.stop()
 

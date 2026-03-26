@@ -70,6 +70,7 @@ class KeyManager:
         """
         Generates Metor application keys and Tor hidden service keys if they do not exist.
         Encrypts the keys on disk if a master password is set. Uses cryptographically secure PRNG.
+        Tor keys are stored with an .enc extension to fulfill Data-At-Rest requirements.
 
         Args:
             None
@@ -78,10 +79,17 @@ class KeyManager:
             None
         """
         metor_key_path: Path = self._hs_dir / Constants.METOR_SECRET_KEY
-        tor_sec_path: Path = self._hs_dir / Constants.TOR_SECRET_KEY
+        tor_sec_enc_path: Path = self._hs_dir / f'{Constants.TOR_SECRET_KEY}.enc'
         tor_pub_path: Path = self._hs_dir / Constants.TOR_PUBLIC_KEY
 
-        if metor_key_path.exists() and tor_sec_path.exists():
+        # Fallback for older databases during migration
+        legacy_tor_sec_path: Path = self._hs_dir / Constants.TOR_SECRET_KEY
+
+        if (
+            metor_key_path.exists()
+            and (tor_sec_enc_path.exists() or legacy_tor_sec_path.exists())
+            and tor_pub_path.exists()
+        ):
             return
 
         seed: bytes = secrets.token_bytes(32)
@@ -107,10 +115,12 @@ class KeyManager:
             f.write(pynacl_secret_key)
         metor_key_path.chmod(0o600)
 
-        with tor_sec_path.open('wb') as f:
+        # Always save the encrypted master key safely at rest
+        with tor_sec_enc_path.open('wb') as f:
             f.write(raw_tor_sec)
-        tor_sec_path.chmod(0o600)
+        tor_sec_enc_path.chmod(0o600)
 
+        # Write public key (plaintext, required by Tor alongside the secret key)
         with tor_pub_path.open('wb') as f:
             f.write(raw_tor_pub)
         tor_pub_path.chmod(0o600)
@@ -137,7 +147,7 @@ class KeyManager:
     def get_decrypted_tor_key(self) -> bytes:
         """
         Retrieves and decrypts the Tor secret key.
-        This is used for memory-injecting the key securely to the Tor process.
+        This is used for provisioning the plaintext key to Tor exclusively during runtime.
 
         Args:
             None
@@ -145,7 +155,11 @@ class KeyManager:
         Returns:
             bytes: The decrypted raw Tor secret key format.
         """
-        key_path: Path = self._hs_dir / Constants.TOR_SECRET_KEY
+        key_path: Path = self._hs_dir / f'{Constants.TOR_SECRET_KEY}.enc'
+        if not key_path.exists():
+            # Support legacy paths if the `.enc` suffix hasn't been migrated
+            key_path = self._hs_dir / Constants.TOR_SECRET_KEY
+
         with key_path.open('rb') as f:
             data: bytes = f.read()
 

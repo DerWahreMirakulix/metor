@@ -5,7 +5,7 @@ Routes requests to local SQLite managers or the Daemon via IPC automatically.
 
 import socket
 import json
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Union
 
 from metor.data.profile import ProfileManager
 from metor.data.settings import Settings, SettingKey
@@ -156,9 +156,35 @@ class CliProxy:
         """
         return self._request_ipc(SelfDestructCommand(), wait_for_response=True)
 
+    def _parse_setting_value(self, value: str) -> Union[str, int, float, bool]:
+        """
+        Converts raw CLI string input into native Python types for clean persistence.
+
+        Args:
+            value (str): The string value from sys.argv.
+
+        Returns:
+            Union[str, int, float, bool]: The correctly typed value.
+        """
+        val_lower: str = value.lower()
+        if val_lower == 'true':
+            return True
+        if val_lower == 'false':
+            return False
+
+        if value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
+            return int(value)
+
+        try:
+            return float(value)
+        except ValueError:
+            return value
+
     def handle_settings(self, key: str, value: str) -> str:
         """
-        Routes setting changes. Chat settings are applied locally; daemon settings via IPC.
+        Routes setting changes. UI settings are applied locally. Daemon settings are
+        routed via IPC if running, or applied locally if the daemon is offline.
+        Enforces strict native typing is maintained.
 
         Args:
             key (str): The setting key string.
@@ -172,13 +198,26 @@ class CliProxy:
         except ValueError:
             return f"Unknown setting key '{key}'."
 
-        if setting_enum.value.startswith('ui.'):
-            Settings.set(setting_enum, value)
-            return f"Local setting '{key}' updated."
+        parsed_value: Union[str, int, float, bool] = self._parse_setting_value(value)
 
-        return self._request_ipc(
-            SetSettingCommand(setting_key=key, setting_value=value)
-        )
+        if setting_enum.value.startswith('ui.'):
+            try:
+                Settings.set(setting_enum, parsed_value)
+                return f"Local UI setting '{key}' updated."
+            except TypeError as e:
+                return str(e)
+
+        if self.is_remote or self._pm.is_daemon_running():
+            return self._request_ipc(
+                SetSettingCommand(setting_key=key, setting_value=parsed_value)
+            )
+
+        # Local daemon is offline, write directly to file
+        try:
+            Settings.set(setting_enum, parsed_value)
+            return f"Offline daemon setting '{key}' updated locally."
+        except TypeError as e:
+            return str(e)
 
     def get_address(self, generate: bool = False) -> str:
         """

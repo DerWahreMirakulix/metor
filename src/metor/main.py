@@ -165,9 +165,17 @@ class MetorApp:
 
             km: KeyManager = KeyManager(self._pm, password)
             tm: TorManager = TorManager(self._pm, km)
-            cm: ContactManager = ContactManager(self._pm, password)
-            hm: HistoryManager = HistoryManager(self._pm, password)
-            mm: MessageManager = MessageManager(self._pm, password)
+
+            try:
+                cm: ContactManager = ContactManager(self._pm, password)
+                hm: HistoryManager = HistoryManager(self._pm, password)
+                mm: MessageManager = MessageManager(self._pm, password)
+            except ValueError:
+                print(
+                    f'{Theme.RED}The database is corrupted from a previous crash or syntax error.{Theme.RESET}\n'
+                    "You need to run 'metor purge' or manually delete the storage.db."
+                )
+                return
 
             daemon: Daemon = Daemon(self._pm, km, tm, cm, hm, mm)
             daemon.run()
