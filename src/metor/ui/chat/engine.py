@@ -10,7 +10,13 @@ import threading
 import secrets
 from typing import Optional
 
-from metor.core.api import IpcCommand, Action, IpcEvent
+from metor.core.api import (
+    IpcEvent,
+    InitCommand,
+    MsgCommand,
+    SendDropCommand,
+    GetConnectionsCommand,
+)
 from metor.data.profile import ProfileManager
 from metor.ui.help import Help
 from metor.ui.theme import Theme
@@ -85,7 +91,7 @@ class Chat:
         )
         self._dispatcher = CommandDispatcher(self._ipc, self._session, self._renderer)
 
-        self._ipc.send_command(IpcCommand(action=Action.INIT))
+        self._ipc.send_command(InitCommand())
         self._init_event.wait(timeout=2.0)
 
         self._print_header()
@@ -156,8 +162,7 @@ class Chat:
 
         if is_live:
             self._ipc.send_command(
-                IpcCommand(
-                    action=Action.MSG,
+                MsgCommand(
                     target=self._session.focused_alias,
                     text=msg_text,
                     msg_id=msg_id,
@@ -172,11 +177,9 @@ class Chat:
             )
         else:
             self._ipc.send_command(
-                IpcCommand(
-                    action=Action.SEND_DROP,
+                SendDropCommand(
                     target=self._session.focused_alias,
                     text=msg_text,
-                    msg_id=msg_id,
                 )
             )
             self._renderer.print_message(
@@ -242,9 +245,7 @@ class Chat:
 
         self._conn_event.clear()
         if self._ipc:
-            self._ipc.send_command(
-                IpcCommand(action=Action.GET_CONNECTIONS, is_header=True)
-            )
+            self._ipc.send_command(GetConnectionsCommand(is_header=True))
 
         self._conn_event.wait(timeout=1.0)
 

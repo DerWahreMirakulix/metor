@@ -16,7 +16,29 @@ from metor.ui.theme import Theme
 from metor.utils.constants import Constants
 
 # Local Package Imports
-from metor.core.api import IpcCommand, Action, IpcEvent
+from metor.core.api import (
+    IpcCommand,
+    IpcEvent,
+    CliResponseEvent,
+    UnlockCommand,
+    SelfDestructCommand,
+    SetSettingCommand,
+    GenerateAddressCommand,
+    GetAddressCommand,
+    SendDropCommand,
+    ClearHistoryCommand,
+    GetHistoryCommand,
+    ClearMessagesCommand,
+    GetMessagesCommand,
+    MarkReadCommand,
+    GetInboxCommand,
+    GetContactsListCommand,
+    AddContactCommand,
+    RemoveContactCommand,
+    RenameContactCommand,
+    ClearContactsCommand,
+    ClearProfileDbCommand,
+)
 from metor.core.key import KeyManager
 from metor.core.tor import TorManager
 
@@ -99,9 +121,13 @@ class CliProxy:
                 if buffer:
                     resp_dict: Dict[str, Any] = json.loads(buffer.split('\n')[0])
                     event: IpcEvent = IpcEvent.from_dict(resp_dict)
-                    return self._prefix_remote(
-                        event.text if event.text else 'Command executed successfully.'
-                    )
+
+                    if isinstance(event, CliResponseEvent):
+                        return self._prefix_remote(event.text)
+                    elif getattr(event, 'text', None):
+                        return self._prefix_remote(getattr(event, 'text'))
+
+                    return self._prefix_remote('Command executed successfully.')
         except Exception:
             pass
         return self._prefix_remote('Failed to communicate with the daemon.')
@@ -116,7 +142,7 @@ class CliProxy:
         Returns:
             str: Status message.
         """
-        return self._request_ipc(IpcCommand(action=Action.UNLOCK, password=password))
+        return self._request_ipc(UnlockCommand(password=password))
 
     def nuke_daemon(self) -> str:
         """
@@ -128,9 +154,7 @@ class CliProxy:
         Returns:
             str: Status message.
         """
-        return self._request_ipc(
-            IpcCommand(action=Action.SELF_DESTRUCT), wait_for_response=True
-        )
+        return self._request_ipc(SelfDestructCommand(), wait_for_response=True)
 
     def handle_settings(self, key: str, value: str) -> str:
         """
@@ -153,7 +177,7 @@ class CliProxy:
             return f"Local setting '{key}' updated."
 
         return self._request_ipc(
-            IpcCommand(action=Action.SET_SETTING, setting_key=key, setting_value=value)
+            SetSettingCommand(setting_key=key, setting_value=value)
         )
 
     def get_address(self, generate: bool = False) -> str:
@@ -167,8 +191,10 @@ class CliProxy:
             str: The formatted onion address or an error message.
         """
         if self.is_remote or self._pm.is_daemon_running():
-            action: Action = Action.GENERATE_ADDRESS if generate else Action.GET_ADDRESS
-            return self._request_ipc(IpcCommand(action=action))
+            cmd: IpcCommand = (
+                GenerateAddressCommand() if generate else GetAddressCommand()
+            )
+            return self._request_ipc(cmd)
 
         if self._km:
             tm: TorManager = TorManager(self._pm, self._km)
@@ -190,10 +216,9 @@ class CliProxy:
         if not self.is_remote and not self._pm.is_daemon_running():
             return 'The daemon must be running to send drops.'
 
-        cmd: IpcCommand = IpcCommand(
-            action=Action.SEND_DROP, target=target_alias, text=text
+        return self._request_ipc(
+            SendDropCommand(target=target_alias, text=text), wait_for_response=False
         )
-        return self._request_ipc(cmd, wait_for_response=False)
 
     def handle_history(
         self, action: str, target: Optional[str] = None, limit: Optional[int] = None
@@ -210,10 +235,12 @@ class CliProxy:
             str: The formatted history output or a status message.
         """
         if self.is_remote or self._pm.is_daemon_running():
-            act: Action = (
-                Action.CLEAR_HISTORY if action == 'clear' else Action.GET_HISTORY
+            cmd: IpcCommand = (
+                ClearHistoryCommand(target=target)
+                if action == 'clear'
+                else GetHistoryCommand(target=target, limit=limit)
             )
-            return self._request_ipc(IpcCommand(action=act, target=target, limit=limit))
+            return self._request_ipc(cmd)
 
         if self._hm and self._cm:
             if action == 'clear':
@@ -249,17 +276,12 @@ class CliProxy:
             str: The formatted message output or a status message.
         """
         if self.is_remote or self._pm.is_daemon_running():
-            act: Action = (
-                Action.CLEAR_MESSAGES if action == 'clear' else Action.GET_MESSAGES
+            cmd: IpcCommand = (
+                ClearMessagesCommand(target=target, non_contacts_only=non_contacts_only)
+                if action == 'clear'
+                else GetMessagesCommand(target=target, limit=limit)
             )
-            return self._request_ipc(
-                IpcCommand(
-                    action=act,
-                    target=target,
-                    limit=limit,
-                    non_contacts_only=non_contacts_only,
-                )
-            )
+            return self._request_ipc(cmd)
 
         if self._mm and self._cm:
             if action == 'clear':
@@ -277,7 +299,7 @@ class CliProxy:
 
     def handle_inbox(self, action: str, target: Optional[str] = None) -> str:
         """
-        Views the inbox or reads unread messages.
+        Views the inbox or reads unread messages. Forces the Daemon to format locally for CLI.
 
         Args:
             action (str): The action to perform ('inbox' or 'read').
@@ -287,8 +309,12 @@ class CliProxy:
             str: The formatted inbox or message strings.
         """
         if self.is_remote or self._pm.is_daemon_running():
-            act: Action = Action.MARK_READ if action == 'read' else Action.GET_INBOX
-            return self._request_ipc(IpcCommand(action=act, target=target))
+            cmd: IpcCommand = (
+                MarkReadCommand(target=target, cli_mode=True)
+                if action == 'read' and target
+                else GetInboxCommand(cli_mode=True)
+            )
+            return self._request_ipc(cmd)
 
         if self._mm and self._cm:
             if action == 'read':
@@ -309,9 +335,7 @@ class CliProxy:
             str: Formatted list of contacts.
         """
         if self.is_remote or self._pm.is_daemon_running():
-            return self._request_ipc(
-                IpcCommand(action=Action.GET_CONTACTS_LIST, chat_mode=False)
-            )
+            return self._request_ipc(GetContactsListCommand(chat_mode=False))
         if self._cm:
             return self._cm.show(chat_mode=False)
         return 'Initialization error.'
@@ -329,8 +353,7 @@ class CliProxy:
         """
         if self.is_remote or self._pm.is_daemon_running():
             return self._request_ipc(
-                IpcCommand(action=Action.ADD_CONTACT, alias=alias, onion=onion),
-                wait_for_response=False,
+                AddContactCommand(alias=alias, onion=onion), wait_for_response=False
             )
         if not onion:
             return (
@@ -353,8 +376,7 @@ class CliProxy:
         """
         if self.is_remote or self._pm.is_daemon_running():
             return self._request_ipc(
-                IpcCommand(action=Action.REMOVE_CONTACT, alias=alias),
-                wait_for_response=False,
+                RemoveContactCommand(alias=alias), wait_for_response=False
             )
         if self._cm:
             _, msg = self._cm.remove_contact(alias)
@@ -374,7 +396,7 @@ class CliProxy:
         """
         if self.is_remote or self._pm.is_daemon_running():
             return self._request_ipc(
-                IpcCommand(action=Action.RENAME_CONTACT, old_alias=old, new_alias=new),
+                RenameContactCommand(old_alias=old, new_alias=new),
                 wait_for_response=False,
             )
         if self._cm and self._hm:
@@ -395,7 +417,7 @@ class CliProxy:
             str: Status message.
         """
         if self.is_remote or self._pm.is_daemon_running():
-            return self._request_ipc(IpcCommand(action=Action.CLEAR_CONTACTS))
+            return self._request_ipc(ClearContactsCommand())
         if self._cm:
             _, msg = self._cm.clear_contacts()
             return msg
@@ -412,7 +434,7 @@ class CliProxy:
             str: Status message.
         """
         if self.is_remote or self._pm.is_daemon_running():
-            return self._request_ipc(IpcCommand(action=Action.CLEAR_PROFILE_DB))
+            return self._request_ipc(ClearProfileDbCommand())
 
         _, msg = ProfileManager.clear_profile_db(self._pm.profile_name)
         return msg
