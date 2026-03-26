@@ -46,6 +46,19 @@ class IpcServer:
         self._stop_flag: threading.Event = threading.Event()
         self.port: Optional[int] = None
 
+    def has_active_clients(self) -> bool:
+        """
+        Checks if there are currently active UI clients connected to the daemon.
+
+        Args:
+            None
+
+        Returns:
+            bool: True if headful (clients > 0), False if headless.
+        """
+        with self._lock:
+            return len(self._clients) > 0
+
     def start(self) -> None:
         """
         Starts the local IPC server in a background thread.

@@ -285,12 +285,13 @@ class CliProxy:
             if action == 'clear':
                 if target:
                     _, onion, exists = self._cm.resolve_target(target)
-                    # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
                     if not exists:
                         return f"Contact '{target}' not found."
                     _, msg = self._hm.clear_history(onion)
+                    self._cm.cleanup_orphans([])
                     return msg
                 _, msg = self._hm.clear_history()
+                self._cm.cleanup_orphans([])
                 return msg
             return self._hm.show(self._cm, target, limit)
         return 'Initialization error.'
@@ -326,22 +327,22 @@ class CliProxy:
             if action == 'clear':
                 if target:
                     _, onion, exists = self._cm.resolve_target(target)
-                    # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
                     if not exists:
                         return f"Contact '{target}' not found."
                     _, msg = self._mm.clear_messages(onion, non_contacts_only)
+                    self._cm.cleanup_orphans([])
                     return msg
                 _, msg = self._mm.clear_messages(None, non_contacts_only)
+                self._cm.cleanup_orphans([])
                 return msg
             return self._mm.show_history(target, self._cm, limit)
         return 'Initialization error.'
 
-    def handle_inbox(self, action: str, target: Optional[str] = None) -> str:
+    def handle_inbox(self, target: Optional[str] = None) -> str:
         """
         Views the inbox or reads unread messages. Forces the Daemon to format locally for CLI.
 
         Args:
-            action (str): The action to perform ('inbox' or 'read').
             target (Optional[str]): The specific alias to read from, if applicable.
 
         Returns:
@@ -350,15 +351,13 @@ class CliProxy:
         if self.is_remote or self._pm.is_daemon_running():
             cmd: IpcCommand = (
                 MarkReadCommand(target=target, cli_mode=True)
-                if action == 'read' and target
+                if target
                 else GetInboxCommand(cli_mode=True)
             )
             return self._request_ipc(cmd)
 
         if self._mm and self._cm:
-            if action == 'read':
-                if target is None:
-                    return 'Usage: metor read <alias>'
+            if target:
                 return self._mm.show_read(target, self._cm)
             return self._mm.show_inbox(self._cm)
         return 'Initialization error.'
@@ -391,9 +390,7 @@ class CliProxy:
             str: Status message.
         """
         if self.is_remote or self._pm.is_daemon_running():
-            return self._request_ipc(
-                AddContactCommand(alias=alias, onion=onion), wait_for_response=False
-            )
+            return self._request_ipc(AddContactCommand(alias=alias, onion=onion))
         if not onion:
             return (
                 'Daemon not running. Cannot save a RAM alias without an active session.'
@@ -414,11 +411,10 @@ class CliProxy:
             str: Status message.
         """
         if self.is_remote or self._pm.is_daemon_running():
-            return self._request_ipc(
-                RemoveContactCommand(alias=alias), wait_for_response=False
-            )
+            return self._request_ipc(RemoveContactCommand(alias=alias))
         if self._cm:
-            _, msg = self._cm.remove_contact(alias)
+            _, msg, _, _ = self._cm.remove_contact(alias, active_onions=[])
+            self._cm.cleanup_orphans([])
             return msg
         return 'Initialization error.'
 
@@ -434,14 +430,9 @@ class CliProxy:
             str: Status message.
         """
         if self.is_remote or self._pm.is_daemon_running():
-            return self._request_ipc(
-                RenameContactCommand(old_alias=old, new_alias=new),
-                wait_for_response=False,
-            )
+            return self._request_ipc(RenameContactCommand(old_alias=old, new_alias=new))
         if self._cm and self._hm:
             success, msg = self._cm.rename_contact(old, new)
-            if success:
-                self._hm.update_alias(old, new)
             return msg
         return 'Initialization error.'
 
@@ -458,7 +449,8 @@ class CliProxy:
         if self.is_remote or self._pm.is_daemon_running():
             return self._request_ipc(ClearContactsCommand())
         if self._cm:
-            _, msg = self._cm.clear_contacts()
+            _, msg, _, _ = self._cm.clear_contacts(active_onions=[])
+            self._cm.cleanup_orphans([])
             return msg
         return 'Initialization error.'
 

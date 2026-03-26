@@ -115,7 +115,7 @@ class InputHandler:
                 return 'SPECIAL:NEWLINE'
             return ch1
 
-    def process_key(self, ch: str) -> bool:
+    def process_key(self, ch: str) -> Optional[str]:
         """
         Processes a keyboard event, updating the input buffer and history pointers.
 
@@ -123,7 +123,7 @@ class InputHandler:
             ch (str): The keystroke character or command.
 
         Returns:
-            bool: True if the enter key was pressed and input is ready, False otherwise.
+            Optional[str]: The completed input line if enter was pressed, None otherwise.
         """
         if ch.startswith('SPECIAL:'):
             key: str = ch.split(':')[1]
@@ -162,7 +162,7 @@ class InputHandler:
             self.current_input = ''
             self.line_chars = []
             self.cursor_index = 0
-            return True
+            return line
 
         elif ch in ('\b', '\x7f'):
             if self.cursor_index > 0:
@@ -173,4 +173,4 @@ class InputHandler:
             self.cursor_index += 1
 
         self.current_input = ''.join(self.line_chars)
-        return False
+        return None

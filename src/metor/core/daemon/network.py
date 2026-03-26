@@ -1,7 +1,7 @@
 """
 Module managing Tor network connections, socket lifecycles, and message routing.
 Handles the transition between live TCP streams and fallback Drop & Go messages.
-Ensures strict TCP stream framing and fragmentation resilience.
+Enforces strict TCP stream framing and fragmentation resilience.
 """
 
 import socket
@@ -9,10 +9,22 @@ import threading
 import time
 import base64
 import secrets
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional, Callable, Tuple, Any
 
 from metor.core.tor import TorManager
-from metor.core.api import IpcEvent, EventType
+from metor.core.api import (
+    IpcEvent,
+    SystemEvent,
+    ConnectedEvent,
+    InfoEvent,
+    DisconnectedEvent,
+    InboxNotificationEvent,
+    InboxDataEvent,
+    MsgFallbackToDropEvent,
+    AckEvent,
+    RemoteMsgEvent,
+    ContactRemovedEvent,
+)
 from metor.data.history import HistoryManager, HistoryEvent
 from metor.data.contact import ContactManager
 from metor.data.message import (
@@ -41,6 +53,7 @@ class NetworkManager:
         mm: MessageManager,
         crypto: Crypto,
         broadcast_callback: Callable[[IpcEvent], None],
+        has_clients_callback: Callable[[], bool],
         stop_flag: threading.Event,
     ) -> None:
         """
@@ -53,6 +66,7 @@ class NetworkManager:
             mm (MessageManager): Offline messages manager.
             crypto (Crypto): Cryptographic challenge/response engine.
             broadcast_callback (Callable): Callback to broadcast IPC events.
+            has_clients_callback (Callable): Callback to check for active UI clients.
             stop_flag (threading.Event): Global daemon termination flag.
 
         Returns:
@@ -64,13 +78,17 @@ class NetworkManager:
         self._mm: MessageManager = mm
         self._crypto: Crypto = crypto
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
+        self._has_clients_callback: Callable[[], bool] = has_clients_callback
         self._stop_flag: threading.Event = stop_flag
 
         self._lock: threading.Lock = threading.Lock()
+        # All routing dictionaries strictly map ONION -> SOCKET / BUFFER
+        # This prevents any desync bugs if the user renames an active alias in the UI.
         self._connections: Dict[str, socket.socket] = {}
         self._pending_connections: Dict[str, socket.socket] = {}
         self._initial_buffers: Dict[str, str] = {}
         self._unacked_messages: Dict[str, Dict[str, str]] = {}
+        self._ram_buffers: Dict[str, List[Tuple[str, str]]] = {}
 
     def start_listener(self) -> None:
         """
@@ -84,9 +102,25 @@ class NetworkManager:
         """
         threading.Thread(target=self._listener_target, daemon=True).start()
 
+    def get_active_onions(self) -> List[str]:
+        """
+        Returns a list of all currently connected and pending onions.
+
+        Args:
+            None
+
+        Returns:
+            List[str]: Active Tor connection onions to preserve.
+        """
+        with self._lock:
+            return list(self._connections.keys()) + list(
+                self._pending_connections.keys()
+            )
+
     def get_active_aliases(self) -> List[str]:
         """
         Returns a list of currently connected aliases safely under lock.
+        Dynamically resolves the current alias from the active onions.
 
         Args:
             None
@@ -95,11 +129,14 @@ class NetworkManager:
             List[str]: Active connection aliases.
         """
         with self._lock:
-            return list(self._connections.keys())
+            return [
+                self._cm.get_alias_by_onion(onion) for onion in self._connections.keys()
+            ]
 
     def get_pending_aliases(self) -> List[str]:
         """
         Returns a list of aliases waiting for acceptance safely under lock.
+        Dynamically resolves the current alias from the pending onions.
 
         Args:
             None
@@ -108,7 +145,77 @@ class NetworkManager:
             List[str]: Pending connection aliases.
         """
         with self._lock:
-            return list(self._pending_connections.keys())
+            return [
+                self._cm.get_alias_by_onion(onion)
+                for onion in self._pending_connections.keys()
+            ]
+
+    def flush_ram_buffer(self, onion: str) -> None:
+        """
+        Flushes the headless RAM buffer to the UI and fires pending Tor ACKs.
+
+        Args:
+            onion (str): The target onion to flush.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            if onion not in self._connections:
+                return
+            buffered_msgs: List[Tuple[str, str]] = self._ram_buffers.pop(onion, [])
+            conn: socket.socket = self._connections[onion]
+
+        if not buffered_msgs:
+            return
+
+        alias: Optional[str] = self._cm.get_alias_by_onion(onion)
+        messages_data: List[Dict[str, Any]] = [
+            {'id': msg_id, 'payload': content, 'type': 'text', 'timestamp': ''}
+            for msg_id, content in buffered_msgs
+        ]
+
+        self._broadcast(
+            InboxDataEvent(alias=alias, messages=messages_data, is_live_flush=True)
+        )
+
+        for msg_id, _ in buffered_msgs:
+            try:
+                conn.sendall(f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8'))
+            except Exception:
+                pass
+
+    def force_fallback(self, target: str) -> None:
+        """
+        Forces all unacknowledged outgoing live messages to the drop queue.
+
+        Args:
+            target (str): The target alias or onion address.
+
+        Returns:
+            None
+        """
+        alias, onion, exists = self._cm.resolve_target(target)
+        if not exists:
+            return
+
+        with self._lock:
+            unacked: Dict[str, str] = self._unacked_messages.pop(onion, {})
+
+        if not unacked:
+            return
+
+        for msg_id, content in unacked.items():
+            self._mm.queue_message(
+                onion,
+                MessageDirection.OUT,
+                MessageType.TEXT,
+                content,
+                MessageStatus.PENDING,
+            )
+
+        self._hm.log_event(HistoryEvent.ASYNC_QUEUED, onion, 'Manual fallback to drop')
+        self._broadcast(MsgFallbackToDropEvent(msg_ids=list(unacked.keys())))
 
     def _listener_target(self) -> None:
         """
@@ -145,7 +252,7 @@ class NetworkManager:
             None
         """
         auth_successful: bool = False
-        remote_identity: Optional[str] = None
+        onion: Optional[str] = None
         is_async: bool = False
         buffer: str = ''
 
@@ -168,19 +275,19 @@ class NetworkManager:
                     if len(parts) >= 3 and self._crypto.verify_signature(
                         parts[1], challenge, parts[2]
                     ):
-                        remote_identity = parts[1]
+                        onion = parts[1]
                         auth_successful = True
                         if len(parts) >= 4 and parts[3] == 'ASYNC':
                             is_async = True
         except Exception:
             pass
 
-        if not auth_successful or not remote_identity:
+        if not auth_successful or not onion:
             conn.close()
             return
 
         if is_async:
-            if not Settings.get(SettingKey.ALLOW_ASYNC):
+            if not Settings.get(SettingKey.ALLOW_DROPS):
                 conn.close()
                 return
 
@@ -198,27 +305,38 @@ class NetworkManager:
                                     parts[1],
                                     base64.b64decode(parts[2]).decode('utf-8'),
                                 )
+
+                                is_ephemeral: bool = Settings.get(
+                                    SettingKey.EPHEMERAL_MESSAGES
+                                )
+                                status: MessageStatus = (
+                                    MessageStatus.READ
+                                    if is_ephemeral
+                                    else MessageStatus.UNREAD
+                                )
+
                                 self._mm.queue_message(
-                                    remote_identity,
+                                    onion,
                                     MessageDirection.IN,
                                     MessageType.TEXT,
                                     content,
-                                    MessageStatus.UNREAD,
+                                    status,
                                 )
+
                                 self._hm.log_event(
                                     HistoryEvent.ASYNC_RECEIVED,
-                                    remote_identity,
-                                    'Received offline message',
+                                    onion,
                                 )
+
                                 conn.sendall(
                                     f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8')
                                 )
+
                                 alias: Optional[str] = self._cm.get_alias_by_onion(
-                                    remote_identity
+                                    onion
                                 )
                                 self._broadcast(
-                                    IpcEvent(
-                                        type=EventType.INBOX_NOTIFICATION,
+                                    InboxNotificationEvent(
                                         alias=alias,
                                         # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                                         text="📬 1 new offline message from '{alias}'.",
@@ -235,13 +353,13 @@ class NetworkManager:
             return
 
         conn.settimeout(None)
-        alias = self._cm.get_alias_by_onion(remote_identity)
+        alias = self._cm.get_alias_by_onion(onion)
         if not alias:
             conn.close()
             return
 
         with self._lock:
-            if alias in self._connections or alias in self._pending_connections:
+            if onion in self._connections or onion in self._pending_connections:
                 try:
                     conn.sendall(
                         f'{TorCommand.REJECT.value} {self._tm.onion}\n'.encode('utf-8')
@@ -254,27 +372,24 @@ class NetworkManager:
             if (alias in self._cm.get_all_contacts()) and Settings.get(
                 SettingKey.AUTO_ACCEPT_CONTACTS
             ):
-                self._connections[alias] = conn
+                self._connections[onion] = conn
                 try:
                     conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8'))
                 except Exception:
                     pass
-                self._hm.log_event(HistoryEvent.CONNECTED, remote_identity)
-                self._broadcast(
-                    IpcEvent(
-                        type=EventType.CONNECTED, alias=alias, onion=remote_identity
-                    )
-                )
-                self._start_receiving(alias, conn, buffer)
+
+                self._hm.log_event(HistoryEvent.CONNECTED, onion)
+                self._broadcast(ConnectedEvent(alias=alias, onion=onion))
+                self._start_receiving(onion, conn, buffer)
                 return
 
-            self._pending_connections[alias] = conn
-            self._initial_buffers[alias] = buffer
+            self._pending_connections[onion] = conn
+            self._initial_buffers[onion] = buffer
 
-        self._hm.log_event(HistoryEvent.REQUESTED_BY_REMOTE, remote_identity)
+        self._hm.log_event(HistoryEvent.REQUESTED_BY_REMOTE, onion)
+
         self._broadcast(
-            IpcEvent(
-                type=EventType.INFO,
+            InfoEvent(
                 alias=alias,
                 # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                 text=f"Incoming connection from '{{alias}}'. Type '{Theme.GREEN}/accept {{alias}}{Theme.RESET}' or '{Theme.RED}/reject {{alias}}{Theme.RESET}'.",
@@ -297,7 +412,7 @@ class NetworkManager:
             return
 
         with self._lock:
-            if alias in self._connections:
+            if onion in self._connections:
                 return
 
         try:
@@ -323,89 +438,113 @@ class NetworkManager:
                 conn.settimeout(None)
 
                 self._hm.log_event(HistoryEvent.REQUESTED, onion)
+
                 self._broadcast(
-                    IpcEvent(
-                        type=EventType.INFO,
+                    InfoEvent(
                         alias=alias,
                         # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                         text="Request sent to '{alias}'. Waiting for acceptance...",
                     )
                 )
-                self._start_receiving(alias or onion, conn, buffer)
+                self._start_receiving(onion, conn, buffer)
             else:
                 raise ConnectionError('Handshake incomplete.')
         except Exception:
             self._broadcast(
-                IpcEvent(
-                    type=EventType.INFO,
+                InfoEvent(
                     alias=alias,
                     # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                     text="Failed to connect to '{alias}'.",
                 )
             )
 
-    def accept(self, alias: str) -> None:
+    def accept(self, target: str) -> None:
         """
         Approves a pending incoming connection and processes any leftover stream buffer.
 
         Args:
-            alias (str): The alias to accept.
+            target (str): The target alias or onion.
 
         Returns:
             None
         """
+        alias, onion, exists = self._cm.resolve_target(target)
+        # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
+        if not exists:
+            self._broadcast(SystemEvent(text=f"Cannot accept: '{target}' not found."))
+            return
+
         with self._lock:
-            if alias not in self._pending_connections:
+            if onion not in self._pending_connections:
+                self._broadcast(
+                    SystemEvent(text=f"No pending connection from '{alias}' to accept.")
+                )
                 return
-            conn: socket.socket = self._pending_connections.pop(alias)
-            initial_buffer: str = self._initial_buffers.pop(alias, '')
-            self._connections[alias] = conn
+            conn: socket.socket = self._pending_connections.pop(onion)
+            initial_buffer: str = self._initial_buffers.pop(onion, '')
+            self._connections[onion] = conn
 
         try:
             conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8'))
         except Exception:
             pass
-        onion: Optional[str] = self._cm.get_onion_by_alias(alias)
-        self._hm.log_event(HistoryEvent.CONNECTED, onion)
-        self._broadcast(IpcEvent(type=EventType.CONNECTED, alias=alias, onion=onion))
-        self._start_receiving(alias, conn, initial_buffer)
 
-    def reject(self, alias: str, initiated_by_self: bool = True) -> None:
+        self._hm.log_event(HistoryEvent.CONNECTED, onion)
+
+        self._broadcast(ConnectedEvent(alias=alias, onion=onion))
+        self._start_receiving(onion, conn, initial_buffer)
+
+    def reject(self, target: str, initiated_by_self: bool = True) -> None:
         """
         Rejects a pending connection request and cleans up isolated resources.
 
         Args:
-            alias (str): The alias to reject.
+            target (str): The target alias or onion.
             initiated_by_self (bool): Whether the local user initiated the rejection.
 
         Returns:
             None
         """
-        with self._lock:
-            conn = self._connections.pop(alias, None) or self._pending_connections.pop(
-                alias, None
-            )
-            self._initial_buffers.pop(alias, None)
-
-        if conn:
+        alias, onion, exists = self._cm.resolve_target(target)
+        # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
+        if not exists:
             if initiated_by_self:
-                try:
-                    conn.sendall(
-                        f'{TorCommand.REJECT.value} {self._tm.onion}\n'.encode('utf-8')
-                    )
-                except Exception:
-                    pass
-            conn.close()
+                self._broadcast(
+                    SystemEvent(text=f"Cannot reject: '{target}' not found.")
+                )
+            return
+
+        with self._lock:
+            conn = self._connections.pop(onion, None) or self._pending_connections.pop(
+                onion, None
+            )
+            self._initial_buffers.pop(onion, None)
+
+        if not conn:
+            if initiated_by_self:
+                self._broadcast(
+                    SystemEvent(text=f"No connection with '{alias}' to reject.")
+                )
+            return
+
+        if initiated_by_self:
+            try:
+                conn.sendall(
+                    f'{TorCommand.REJECT.value} {self._tm.onion}\n'.encode('utf-8')
+                )
+            except Exception:
+                pass
+        conn.close()
 
         status: HistoryEvent = (
             HistoryEvent.REJECTED
             if initiated_by_self
             else HistoryEvent.REJECTED_BY_REMOTE
         )
-        self._hm.log_event(status, self._cm.get_onion_by_alias(alias))
+        self._hm.log_event(status, onion)
+
         self._broadcast(
-            IpcEvent(
-                type=EventType.INFO,
+            InfoEvent(
                 alias=alias,
                 # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                 text="Connection with '{alias}' rejected.",
@@ -413,45 +552,62 @@ class NetworkManager:
         )
 
     def disconnect(
-        self, alias: str, initiated_by_self: bool = True, is_fallback: bool = False
+        self, target: str, initiated_by_self: bool = True, is_fallback: bool = False
     ) -> None:
         """
         Terminates a connection and converts un-ACKed messages to offline drops.
 
         Args:
-            alias (str): The alias to disconnect.
+            target (str): The target alias or onion.
             initiated_by_self (bool): Whether the local user initiated the disconnect.
             is_fallback (bool): Whether this is an unexpected network drop.
 
         Returns:
             None
         """
+        alias, onion, exists = self._cm.resolve_target(target)
+        # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
+        if not exists:
+            if initiated_by_self:
+                self._broadcast(
+                    SystemEvent(text=f"Cannot disconnect: '{target}' not found.")
+                )
+            return
+
         with self._lock:
-            conn = self._connections.pop(alias, None) or self._pending_connections.pop(
-                alias, None
+            conn = self._connections.pop(onion, None) or self._pending_connections.pop(
+                onion, None
             )
-            self._initial_buffers.pop(alias, None)
-            unacked: Dict[str, str] = self._unacked_messages.pop(alias, {})
+            self._initial_buffers.pop(onion, None)
+            self._ram_buffers.pop(onion, None)
+
+            unacked: Dict[str, str] = {}
+            if Settings.get(SettingKey.FALLBACK_TO_DROP):
+                unacked = self._unacked_messages.pop(onion, {})
+
+        # GUARD: Prevent double-logging if the connection was already terminated
+        if not conn and not unacked:
+            if initiated_by_self:
+                self._broadcast(
+                    SystemEvent(
+                        text=f"No active connection with '{alias}' to disconnect."
+                    )
+                )
+            return
 
         if unacked:
-            onion: Optional[str] = self._cm.get_onion_by_alias(alias)
-            if onion:
-                for content in unacked.values():
-                    self._mm.queue_message(
-                        onion,
-                        MessageDirection.OUT,
-                        MessageType.TEXT,
-                        content,
-                        MessageStatus.PENDING,
-                    )
-                self._hm.log_event(
-                    HistoryEvent.ASYNC_QUEUED, onion, 'Unacked msgs converted to drop'
+            for content in unacked.values():
+                self._mm.queue_message(
+                    onion,
+                    MessageDirection.OUT,
+                    MessageType.TEXT,
+                    content,
+                    MessageStatus.PENDING,
                 )
-            self._broadcast(
-                IpcEvent(
-                    type=EventType.MSG_FALLBACK_TO_DROP, msg_ids=list(unacked.keys())
-                )
+            self._hm.log_event(
+                HistoryEvent.ASYNC_QUEUED, onion, 'Unacked msgs converted to drop'
             )
+            self._broadcast(MsgFallbackToDropEvent(msg_ids=list(unacked.keys())))
 
         if conn:
             if initiated_by_self:
@@ -479,14 +635,19 @@ class NetworkManager:
                 else HistoryEvent.DISCONNECTED_BY_REMOTE
             )
         )
-        self._hm.log_event(status, self._cm.get_onion_by_alias(alias))
+        self._hm.log_event(status, onion)
+
         self._broadcast(
-            IpcEvent(
-                type=EventType.DISCONNECTED,
+            DisconnectedEvent(
                 alias=alias,
-                text="Disconnected from '{alias}'.",
+                text=f"Disconnected from '{alias}'.",
             )
         )
+
+        # Cleanup orphans, keeping current active connections alive
+        deleted_aliases = self._cm.cleanup_orphans(self.get_active_onions())
+        for a in deleted_aliases:
+            self._broadcast(ContactRemovedEvent(alias=a))
 
     def disconnect_all(self) -> None:
         """
@@ -499,31 +660,35 @@ class NetworkManager:
             None
         """
         with self._lock:
-            active_aliases: List[str] = list(self._connections.keys())
-            pending_aliases: List[str] = list(self._pending_connections.keys())
+            onions_to_disconnect: List[str] = list(self._connections.keys()) + list(
+                self._pending_connections.keys()
+            )
 
-        aliases_to_disconnect: List[str] = active_aliases + pending_aliases
+        for onion in onions_to_disconnect:
+            self.disconnect(onion, initiated_by_self=True)
 
-        for alias in aliases_to_disconnect:
-            self.disconnect(alias, initiated_by_self=True)
-
-    def send_message(self, alias: str, msg: str, msg_id: str) -> None:
+    def send_message(self, target: str, msg: str, msg_id: str) -> None:
         """
         Sends a live chat message and buffers it for ACK verification.
 
         Args:
-            alias (str): The target alias.
+            target (str): The target alias or onion.
             msg (str): The message content.
             msg_id (str): The unique message identifier.
 
         Returns:
             None
         """
+        alias, onion, exists = self._cm.resolve_target(target)
+        # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
+        if not exists:
+            return
+
         with self._lock:
-            if alias not in self._connections:
+            if onion not in self._connections:
                 return
-            conn: socket.socket = self._connections[alias]
-            self._unacked_messages.setdefault(alias, {})[msg_id] = msg
+            conn: socket.socket = self._connections[onion]
+            self._unacked_messages.setdefault(onion, {})[msg_id] = msg
 
         try:
             b64_msg: str = base64.b64encode(msg.encode('utf-8')).decode('utf-8')
@@ -532,13 +697,13 @@ class NetworkManager:
             pass
 
     def _start_receiving(
-        self, alias: str, conn: socket.socket, initial_buffer: str = ''
+        self, onion: str, conn: socket.socket, initial_buffer: str = ''
     ) -> None:
         """
         Starts a background thread to listen for data on a specific live socket.
 
         Args:
-            alias (str): The connected alias.
+            onion (str): The connected remote onion.
             conn (socket.socket): The active socket connection.
             initial_buffer (str): Leftover TCP stream buffer from the handshake.
 
@@ -547,19 +712,19 @@ class NetworkManager:
         """
         threading.Thread(
             target=self._receiver_target,
-            args=(alias, conn, initial_buffer),
+            args=(onion, conn, initial_buffer),
             daemon=True,
         ).start()
 
     def _receiver_target(
-        self, current_alias: str, conn: socket.socket, initial_buffer: str = ''
+        self, onion: str, conn: socket.socket, initial_buffer: str = ''
     ) -> None:
         """
         Target processing incoming live messages, ACKs, and disconnects.
-        Uses rigorous TCP line buffering to eliminate data corruption.
+        Uses rigorous TCP line buffering and Headful/Headless routing logic.
 
         Args:
-            current_alias (str): The alias associated with the connection.
+            onion (str): The remote onion associated with the connection.
             conn (socket.socket): The active socket connection.
             initial_buffer (str): Leftover TCP stream buffer from the handshake.
 
@@ -580,17 +745,17 @@ class NetworkManager:
 
                     if msg == TorCommand.ACCEPTED.value:
                         with self._lock:
-                            if current_alias in self._pending_connections:
-                                self._pending_connections.pop(current_alias)
-                            self._connections[current_alias] = conn
-                        onion: Optional[str] = self._cm.get_onion_by_alias(
-                            current_alias
-                        )
+                            if onion in self._pending_connections:
+                                self._pending_connections.pop(onion)
+                            self._connections[onion] = conn
+                        # alias is defined since onion can't be None and has to be valid
+                        alias: str = self._cm.get_alias_by_onion(onion)
+
                         self._hm.log_event(HistoryEvent.CONNECTED, onion)
+
                         self._broadcast(
-                            IpcEvent(
-                                type=EventType.CONNECTED,
-                                alias=current_alias,
+                            ConnectedEvent(
+                                alias=alias,
                                 onion=onion,
                             )
                         )
@@ -605,31 +770,49 @@ class NetworkManager:
                     elif msg.startswith(f'{TorCommand.ACK.value} '):
                         msg_id: str = msg.split(' ')[1]
                         with self._lock:
-                            if current_alias in self._unacked_messages:
-                                self._unacked_messages[current_alias].pop(msg_id, None)
-                        self._broadcast(IpcEvent(type=EventType.ACK, msg_id=msg_id))
+                            if onion in self._unacked_messages:
+                                self._unacked_messages[onion].pop(msg_id, None)
+                        self._broadcast(AckEvent(msg_id=msg_id))
 
                     elif msg.startswith(f'{TorCommand.MSG.value} '):
                         parts: List[str] = msg.split(' ', 2)
                         if len(parts) == 3:
-                            try:
-                                conn.sendall(
-                                    f'{TorCommand.ACK.value} {parts[1]}\n'.encode(
-                                        'utf-8'
+                            msg_id = parts[1]
+                            content: str = base64.b64decode(parts[2]).decode('utf-8')
+                            alias = self._cm.get_alias_by_onion(onion)
+
+                            if self._has_clients_callback():
+                                # Headful Routing: Relay to UI and ACK
+                                try:
+                                    conn.sendall(
+                                        f'{TorCommand.ACK.value} {msg_id}\n'.encode(
+                                            'utf-8'
+                                        )
                                     )
-                                )
-                                content: str = base64.b64decode(parts[2]).decode(
-                                    'utf-8'
-                                )
-                                self._broadcast(
-                                    IpcEvent(
-                                        type=EventType.REMOTE_MSG,
-                                        alias=current_alias,
-                                        text=content,
+                                    self._broadcast(
+                                        RemoteMsgEvent(
+                                            alias=alias,
+                                            text=content,
+                                        )
                                     )
+                                except Exception:
+                                    pass
+                            else:
+                                # Headless Routing: RAM Buffering
+                                buffer_size: int = 0
+                                with self._lock:
+                                    if onion not in self._ram_buffers:
+                                        self._ram_buffers[onion] = []
+                                    self._ram_buffers[onion].append((msg_id, content))
+                                    buffer_size = len(self._ram_buffers[onion])
+
+                                max_limit: int = Settings.get(
+                                    SettingKey.MAX_UNSEEN_LIVE_MSGS
                                 )
-                            except Exception:
-                                pass
+                                if buffer_size >= max_limit:
+                                    # Overflow protection triggered
+                                    self.disconnect(onion, initiated_by_self=True)
+                                    break
 
                 if remote_disconnected or remote_rejected:
                     break
@@ -643,10 +826,8 @@ class NetworkManager:
             pass
         finally:
             if remote_rejected:
-                self.reject(current_alias, initiated_by_self=False)
+                self.reject(onion, initiated_by_self=False)
             elif remote_disconnected:
-                self.disconnect(current_alias, initiated_by_self=False)
+                self.disconnect(onion, initiated_by_self=False)
             else:
-                self.disconnect(
-                    current_alias, initiated_by_self=False, is_fallback=True
-                )
+                self.disconnect(onion, initiated_by_self=False, is_fallback=True)

@@ -9,6 +9,7 @@
     "dotenv",
     "getpid",
     "getwch",
+    "Headful",
     "kbhit",
     "keypair",
     "lifecycles",

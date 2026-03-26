@@ -7,9 +7,10 @@ import socket
 import threading
 import time
 import base64
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Callable
 
 from metor.core.tor import TorManager
+from metor.core.api import IpcEvent, AckEvent
 from metor.data.message import MessageManager, MessageStatus
 from metor.data.history import HistoryManager, HistoryEvent
 
@@ -27,6 +28,7 @@ class OutboxWorker:
         mm: MessageManager,
         hm: HistoryManager,
         crypto: Crypto,
+        broadcast_callback: Callable[[IpcEvent], None],
         stop_flag: threading.Event,
     ) -> None:
         """
@@ -37,6 +39,7 @@ class OutboxWorker:
             mm (MessageManager): The database manager for accessing pending messages.
             hm (HistoryManager): The history logger.
             crypto (Crypto): The cryptographic service for handshakes.
+            broadcast_callback (Callable): Callback to broadcast IPC events.
             stop_flag (threading.Event): Event to gracefully shutdown the worker loop.
 
         Returns:
@@ -46,6 +49,7 @@ class OutboxWorker:
         self._mm: MessageManager = mm
         self._hm: HistoryManager = hm
         self._crypto: Crypto = crypto
+        self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
         self._stop_flag: threading.Event = stop_flag
 
     def start(self) -> None:
@@ -125,8 +129,8 @@ class OutboxWorker:
                             self._hm.log_event(
                                 HistoryEvent.ASYNC_SENT,
                                 target_onion,
-                                'Offline message delivered',
                             )
+                            self._broadcast(AckEvent(msg_id=str(db_id), text=payload))
 
                 except Exception:
                     pass

@@ -9,7 +9,7 @@ from typing import List, Tuple, Optional
 
 from metor.ui.theme import Theme
 from metor.utils.constants import Constants
-from metor.utils.helper import get_divider_string, get_header_string
+from metor.utils.helper import get_divider_string, get_header_string, clean_onion
 
 # Local Package Imports
 from metor.data.profile import ProfileManager
@@ -59,7 +59,7 @@ class HistoryManager:
     ) -> None:
         """
         Logs a connection event into the database. Bypasses logging entirely
-        if the record_events policy is disabled, enforcing a Zero-Trace state.
+        if the respective record_events policy is disabled, enforcing a Zero-Trace state.
 
         Args:
             status (HistoryEvent): The event type to log.
@@ -69,9 +69,21 @@ class HistoryManager:
         Returns:
             None
         """
-        if not Settings.get(SettingKey.RECORD_EVENTS):
-            return
+        is_drop_event: bool = status in (
+            HistoryEvent.ASYNC_QUEUED,
+            HistoryEvent.ASYNC_SENT,
+            HistoryEvent.ASYNC_RECEIVED,
+            HistoryEvent.ASYNC_FAILED,
+        )
 
+        if is_drop_event:
+            if not Settings.get(SettingKey.RECORD_DROP_EVENTS):
+                return
+        else:
+            if not Settings.get(SettingKey.RECORD_LIVE_EVENTS):
+                return
+
+        onion = clean_onion(onion) if onion else None
         query: str = 'INSERT INTO history (status, onion, reason) VALUES (?, ?, ?)'
         self._sql.execute(query, (status.value, onion, reason))
 
@@ -100,7 +112,7 @@ class HistoryManager:
 
     def clear_history(self, filter_onion: Optional[str] = None) -> Tuple[bool, str]:
         """
-        Wipes event logs from the history table and removes orphaned discovered peers.
+        Wipes event logs from the history table strictly maintaining domain boundaries.
 
         Args:
             filter_onion (Optional[str]): The target onion identity. If None, deletes all.
@@ -118,17 +130,22 @@ class HistoryManager:
                 self._sql.execute('DELETE FROM history')
                 msg = f"History for profile '{self._pm.profile_name}' cleared."
 
-            cleanup_query: str = """
-                DELETE FROM contacts 
-                WHERE is_saved = 0 
-                AND onion NOT IN (SELECT onion FROM history WHERE onion IS NOT NULL)
-                AND onion NOT IN (SELECT contact_onion FROM messages)
-            """
-            self._sql.execute(cleanup_query)
-
             return True, msg
         except Exception:
             return False, 'Failed to clear history.'
+
+    def update_alias(self, old_alias: str, new_alias: str) -> None:
+        """
+        No-op method kept for API compatibility, since history is strictly indexed by onion.
+
+        Args:
+            old_alias (str): The old alias.
+            new_alias (str): The new alias.
+
+        Returns:
+            None
+        """
+        pass
 
     def show(
         self,

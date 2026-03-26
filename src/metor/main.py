@@ -51,7 +51,9 @@ class MetorApp:
         self.parser.add_argument('subcommand', nargs='?')
         self.parser.add_argument('extra', nargs='*')
 
-        self.args: argparse.Namespace = self.parser.parse_args()
+        self.args, unknown = self.parser.parse_known_args()
+        self.args.extra.extend(unknown)
+
         self._pm: ProfileManager = ProfileManager(self.args.profile)
         self.proxy: CliProxy = CliProxy(self._pm)
 
@@ -241,13 +243,7 @@ class MetorApp:
                 print(self.proxy.send_drop(sub, ' '.join(ext)))
 
         elif cmd == 'inbox':
-            print(self.proxy.handle_inbox('inbox'))
-
-        elif cmd == 'read':
-            if not sub:
-                print('Usage: metor read <alias>')
-            else:
-                print(self.proxy.handle_inbox('read', sub))
+            print(self.proxy.handle_inbox(sub))
 
         elif cmd == 'messages':
             action: str = 'clear' if sub == 'clear' else 'show'

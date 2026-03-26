@@ -7,7 +7,7 @@ import sys
 import shutil
 import signal
 import time
-from typing import Optional, Any
+from typing import List, Dict, Optional, Any
 
 from metor.data.settings import SettingKey, Settings
 from metor.ui.chat.models import UIMessageType, UIChatLine
@@ -80,7 +80,7 @@ class Renderer:
         is_pending: bool = True,
     ) -> None:
         """
-        Safely renders a new message to the terminal. Constrains buffer size via settings.
+        Safely renders a new message to the terminal. Constrains buffer size via sliding window.
 
         Args:
             msg (Any): The message content to render.
@@ -113,10 +113,9 @@ class Renderer:
             self._display.all_msgs.append(chat_line)
 
             limit: int = Settings.get(SettingKey.CHAT_LIMIT)
+            # Sliding window: We only pop one to maintain the high-watermark or stay at the limit
             if len(self._display.all_msgs) > limit:
-                self._display.all_msgs = self._display.all_msgs[-limit:]
-                self._full_redraw_locked(cols)
-                return
+                self._display.all_msgs.pop(0)
 
             formatted: str = Formatter.format_msg(
                 chat_line, self._initial_prompt, self._current_focus
@@ -140,19 +139,73 @@ class Renderer:
 
             sys.stdout.flush()
 
-    def mark_acked(self, msg_id: str) -> None:
+    def print_messages_batch(
+        self,
+        messages_data: List[Dict[str, Any]],
+        alias: str,
+        is_live_flush: bool = False,
+    ) -> None:
         """
-        Marks a pending message as acknowledged and redraws it in green.
+        Processes a burst of offline drops or a headless RAM flush in a single redraw.
+        Respects the chat_buffer_padding setting to ensure smooth scrolling.
 
         Args:
-            msg_id (str): The unique message identifier to acknowledge.
+            messages_data (List[Dict[str, Any]]): The list of raw message dictionaries.
+            alias (str): The target alias.
+            is_live_flush (bool): Flag denoting if these messages are a live buffer flush.
+
+        Returns:
+            None
+        """
+        if not messages_data:
+            return
+
+        with self._display.print_lock:
+            cols: int = shutil.get_terminal_size().columns
+            if cols < 1:
+                cols = 80
+
+            self._display.clear_input_area(self._last_visual_lines)
+
+            for msg_dict in messages_data:
+                chat_line: UIChatLine = UIChatLine(
+                    text=str(msg_dict['payload']),
+                    msg_type=UIMessageType.REMOTE,
+                    alias=alias,
+                    is_pending=False,
+                    msg_id=str(msg_dict.get('id', '')),
+                    is_drop=not is_live_flush,
+                )
+                self._display.all_msgs.append(chat_line)
+
+            limit: int = Settings.get(SettingKey.CHAT_LIMIT)
+            padding: int = Settings.get(SettingKey.CHAT_BUFFER_PADDING)
+            total_limit: int = limit + padding
+
+            while len(self._display.all_msgs) > total_limit:
+                self._display.all_msgs.pop(0)
+
+            self._full_redraw_locked(cols)
+
+    def mark_acked(
+        self, msg_id: Optional[str] = None, text: Optional[str] = None
+    ) -> None:
+        """
+        Marks a pending message as acknowledged and redraws it in green.
+        Fallback to text matching if DB ID mapping is unavailable (e.g. Drops).
+
+        Args:
+            msg_id (Optional[str]): The unique message identifier to acknowledge.
+            text (Optional[str]): The exact payload text of the message.
 
         Returns:
             None
         """
         start_idx: int = -1
         for i, msg in enumerate(self._display.all_msgs):
-            if msg.msg_id == msg_id:
+            if (msg_id and msg.msg_id == msg_id) or (
+                text and msg.text == text and msg.is_drop and msg.is_pending
+            ):
                 msg.is_pending = False
                 if start_idx == -1:
                     start_idx = i
@@ -410,14 +463,13 @@ class Renderer:
                 if cols < 1:
                     cols = 80
 
-                ready: bool = self._input.process_key(ch)
+                result: Optional[str] = self._input.process_key(ch)
                 self._display.clear_input_area(self._last_visual_lines)
 
-                if ready:
+                if result is not None:
+                    self._last_visual_lines = 1
                     sys.stdout.flush()
-                    return (
-                        ''.join(self._input.history[-1]) if self._input.history else ''
-                    )
+                    return result
 
                 self._last_visual_lines = self._display.get_input_visual_lines(
                     self._input.current_input, self._prompt, cols

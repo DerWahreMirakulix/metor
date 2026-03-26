@@ -52,7 +52,7 @@ class Help:
             f'{ind}{Theme.PURPLE}Chat Mode:{Theme.RESET}\n\n'
             + f'{ind}* The [alias] can be omitted if you are currently focused on a peer.\n'
             + f'{ind}* Any other text entered is sent to the focused peer.\n\n'
-            + f'{sub_ind}{Theme.PURPLE}Core Commands:{Theme.RESET}\n'
+            + f'{sub_ind}{Theme.PURPLE}Session & Connection:{Theme.RESET}\n'
             + Help._format_line(
                 sub_sub_ind,
                 '/connect <onion|alias>',
@@ -85,20 +85,27 @@ class Help:
             )
             + Help._format_line(
                 sub_sub_ind,
+                '/fallback [alias]',
+                'Force pending live messages into offline drops.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_sub_ind,
                 '/sessions',
-                'List all active and pending sessions.',
+                'List all active and pending sessions.\n',
+                Help.DESC_COLUMN,
+            )
+            + f'{sub_ind}{Theme.PURPLE}Messaging & Display:{Theme.RESET}\n'
+            + Help._format_line(
+                sub_sub_ind,
+                '/inbox [alias]',
+                'Check inbox counts or read drops from an alias.',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
                 sub_sub_ind,
                 '/clear',
-                'Wipe the current chat display.',
-                Help.DESC_COLUMN,
-            )
-            + Help._format_line(
-                sub_sub_ind,
-                '/exit',
-                'Close the UI (Daemon stays active).\n',
+                'Wipe the current chat display.\n',
                 Help.DESC_COLUMN,
             )
             + f'{sub_ind}{Theme.PURPLE}Contact Management:{Theme.RESET}\n'
@@ -123,7 +130,14 @@ class Help:
             + Help._format_line(
                 sub_sub_ind,
                 '/contacts rename [old] <new>',
-                'Change the name of any RAM or Disk alias.',
+                'Change the name of any RAM or Disk alias.\n',
+                Help.DESC_COLUMN,
+            )
+            + f'{sub_ind}{Theme.PURPLE}System:{Theme.RESET}\n'
+            + Help._format_line(
+                sub_sub_ind,
+                '/exit',
+                'Close the UI (Daemon stays active).',
                 Help.DESC_COLUMN,
             )
         )
@@ -154,7 +168,7 @@ class Help:
                 "Set the active profile (default: 'default').\n",
                 Help.DESC_COLUMN,
             )
-            + f'{ind}{Theme.YELLOW}Core Commands:{Theme.RESET}\n'
+            + f'{ind}{Theme.YELLOW}Core Operations:{Theme.RESET}\n'
             + Help._format_line(
                 sub_ind, 'metor help', 'Show this help overview.', Help.DESC_COLUMN
             )
@@ -172,29 +186,11 @@ class Help:
             )
             + Help._format_line(
                 sub_ind,
-                'metor settings set <domain.key> <val>',
-                'Configure specific domain settings (ui, daemon, data, security).',
-                Help.DESC_COLUMN,
-            )
-            + Help._format_line(
-                sub_ind,
                 'metor chat',
-                'Enter the interactive multi-chat UI.',
+                'Enter the interactive multi-chat UI.\n',
                 Help.DESC_COLUMN,
             )
-            + Help._format_line(
-                sub_ind,
-                'metor cleanup',
-                'Kill zombie Tor processes and clear locks.',
-                Help.DESC_COLUMN,
-            )
-            + Help._format_line(
-                sub_ind,
-                'metor purge [--nuke-remote]',
-                'Wipe ALL profiles, keys, and databases.\n',
-                Help.DESC_COLUMN,
-            )
-            + f'{ind}{Theme.YELLOW}Asynchronous Messaging (Headless):{Theme.RESET}\n'
+            + f'{ind}{Theme.YELLOW}Messaging & History:{Theme.RESET}\n'
             + Help._format_line(
                 sub_ind,
                 'metor send <alias> "msg"',
@@ -203,14 +199,8 @@ class Help:
             )
             + Help._format_line(
                 sub_ind,
-                'metor inbox',
-                'Check for unread offline messages.',
-                Help.DESC_COLUMN,
-            )
-            + Help._format_line(
-                sub_ind,
-                'metor read <alias>',
-                'Read and clear unread messages from an alias.',
+                'metor inbox [alias]',
+                'Check for unread offline messages or read them.',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
@@ -222,32 +212,7 @@ class Help:
             + Help._format_line(
                 sub_ind,
                 'metor messages clear [alias] [--non-contacts]',
-                'Delete message history (or only from unsaved peers).\n',
-                Help.DESC_COLUMN,
-            )
-            + f'{ind}{Theme.YELLOW}Profile & Identity:{Theme.RESET}\n'
-            + Help._format_line(
-                sub_ind,
-                'metor address [show|generate]',
-                'View or cycle your hidden service address.',
-                Help.DESC_COLUMN,
-            )
-            + Help._format_line(
-                sub_ind,
-                'metor profiles [list|add]',
-                'List or create isolated profiles.',
-                Help.DESC_COLUMN,
-            )
-            + Help._format_line(
-                sub_ind,
-                'metor profiles rm <name> [--nuke-remote]',
-                'Remove a profile and optionally its remote daemon.',
-                Help.DESC_COLUMN,
-            )
-            + Help._format_line(
-                sub_ind,
-                'metor profiles [rename|set-default|clear]',
-                'Manage existing profile configurations.',
+                'Delete message history (or only from unsaved peers).',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
@@ -256,7 +221,7 @@ class Help:
                 'View or wipe the connection event log.\n',
                 Help.DESC_COLUMN,
             )
-            + f'{ind}{Theme.YELLOW}External Contact Management:{Theme.RESET}\n'
+            + f'{ind}{Theme.YELLOW}Contact Management:{Theme.RESET}\n'
             + Help._format_line(
                 sub_ind,
                 'metor contacts [list]',
@@ -266,13 +231,13 @@ class Help:
             + Help._format_line(
                 sub_ind,
                 'metor contacts add <alias> [onion]',
-                'Add a manual contact or save a running RAM alias.',
+                'Save a RAM alias or add a new manual contact.',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
                 sub_ind,
                 'metor contacts rm <alias>',
-                'Delete contact (active sessions revert to RAM).',
+                'Remove from disk (active chat reverts to RAM).',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
@@ -285,6 +250,68 @@ class Help:
                 sub_ind,
                 'metor contacts clear',
                 'Wipe the address book completely.\n',
+                Help.DESC_COLUMN,
+            )
+            + f'{ind}{Theme.YELLOW}Profile & Identity:{Theme.RESET}\n'
+            + Help._format_line(
+                sub_ind,
+                'metor profiles [list]',
+                'List all isolated profiles.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
+                'metor profiles add <name> [--remote] [--port]',
+                'Create a new isolated profile.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
+                'metor profiles rm <name> [--nuke-remote]',
+                'Remove a profile and optionally its remote daemon.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
+                'metor profiles rename <old> <new>',
+                'Rename an existing profile.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
+                'metor profiles set-default <name>',
+                'Set the default startup profile.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
+                'metor profiles clear <name>',
+                'Wipe the SQLite database of a profile.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
+                'metor address [show|generate]',
+                'View or cycle your hidden service address.\n',
+                Help.DESC_COLUMN,
+            )
+            + f'{ind}{Theme.YELLOW}System & Settings:{Theme.RESET}\n'
+            + Help._format_line(
+                sub_ind,
+                'metor settings set <domain.key> <val>',
+                'Configure specific domain settings.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
+                'metor cleanup',
+                'Kill zombie Tor processes and clear locks.',
+                Help.DESC_COLUMN,
+            )
+            + Help._format_line(
+                sub_ind,
+                'metor purge [--nuke-remote]',
+                'Wipe ALL profiles, keys, and databases.\n',
                 Help.DESC_COLUMN,
             )
             + f'{ind}- - -\n\n'

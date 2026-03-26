@@ -49,7 +49,7 @@ class Session:
         contacts: List[str] = self.header_contacts
 
         if not active and not pending and not is_header_mode:
-            return 'No active or pending connections.'
+            return 'No active or pending sessions.'
 
         lines: List[str] = []
         if active:

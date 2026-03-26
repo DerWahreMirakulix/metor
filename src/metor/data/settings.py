@@ -22,6 +22,7 @@ class SettingKey(str, Enum):
     CHAT_LIMIT = 'ui.chat_limit'
     HISTORY_LIMIT = 'ui.history_limit'
     MESSAGES_LIMIT = 'ui.messages_limit'
+    CHAT_BUFFER_PADDING = 'ui.chat_buffer_padding'
 
     # 2. Core Daemon (Server - Network, Persistence & Security)
     MAX_TOR_RETRIES = 'daemon.max_tor_retries'
@@ -29,10 +30,13 @@ class SettingKey(str, Enum):
     ENABLE_TOR_LOGGING = 'daemon.enable_tor_logging'
     ENABLE_SQL_LOGGING = 'daemon.enable_sql_logging'
     AUTO_ACCEPT_CONTACTS = 'daemon.auto_accept_contacts'
-    RECORD_EVENTS = 'daemon.record_events'
-    ALLOW_ASYNC = 'daemon.allow_async'
     REQUIRE_LOCAL_AUTH = 'daemon.require_local_auth'
-    BURN_AFTER_READ = 'daemon.burn_after_read'
+    ALLOW_DROPS = 'daemon.allow_drops'
+    EPHEMERAL_MESSAGES = 'daemon.ephemeral_messages'
+    RECORD_LIVE_EVENTS = 'daemon.record_live_events'
+    RECORD_DROP_EVENTS = 'daemon.record_drop_events'
+    FALLBACK_TO_DROP = 'daemon.fallback_to_drop'
+    MAX_UNSEEN_LIVE_MSGS = 'daemon.max_unseen_live_msgs'
 
 
 class Settings:
@@ -44,15 +48,19 @@ class Settings:
         SettingKey.CHAT_LIMIT.value: 50,
         SettingKey.HISTORY_LIMIT.value: 50,
         SettingKey.MESSAGES_LIMIT.value: 50,
+        SettingKey.CHAT_BUFFER_PADDING.value: 20,
         SettingKey.MAX_TOR_RETRIES.value: 3,
         SettingKey.TOR_TIMEOUT.value: 10.0,
         SettingKey.ENABLE_TOR_LOGGING.value: False,
         SettingKey.ENABLE_SQL_LOGGING.value: False,
         SettingKey.AUTO_ACCEPT_CONTACTS.value: True,
-        SettingKey.RECORD_EVENTS.value: True,
-        SettingKey.ALLOW_ASYNC.value: True,
         SettingKey.REQUIRE_LOCAL_AUTH.value: False,
-        SettingKey.BURN_AFTER_READ.value: False,
+        SettingKey.ALLOW_DROPS.value: True,
+        SettingKey.EPHEMERAL_MESSAGES.value: False,
+        SettingKey.RECORD_LIVE_EVENTS.value: True,
+        SettingKey.RECORD_DROP_EVENTS.value: True,
+        SettingKey.FALLBACK_TO_DROP.value: True,
+        SettingKey.MAX_UNSEEN_LIVE_MSGS.value: 20,
     }
 
     @staticmethod

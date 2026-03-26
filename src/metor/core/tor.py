@@ -17,7 +17,7 @@ from metor.data.profile import ProfileManager
 from metor.data.settings import SettingKey, Settings
 from metor.ui.theme import Theme
 from metor.utils.constants import Constants
-from metor.utils.helper import clean_onion, secure_shred_file
+from metor.utils.helper import clean_onion, secure_shred_file, ensure_onion_format
 
 # Local Package Imports
 from metor.core.key import KeyManager
@@ -184,7 +184,7 @@ class TorManager:
 
         if hostname_file.exists():
             with hostname_file.open('r') as f:
-                self.onion = f.read().strip()
+                self.onion = clean_onion(f.read().strip())
         else:
             self.onion = 'unknown'
 
@@ -228,13 +228,14 @@ class TorManager:
         Returns:
             socks.socksocket: The established proxy socket.
         """
+        onion_formatted = ensure_onion_format(onion)
         s: socks.socksocket = socks.socksocket()
         s.set_proxy(
             proxy_type=socks.SOCKS5, addr=Constants.LOCALHOST, port=self.socks_port
         )
         timeout: float = Settings.get(SettingKey.TOR_TIMEOUT)
         s.settimeout(timeout)
-        s.connect((onion, 80))
+        s.connect((onion_formatted, 80))
         return s
 
     def get_address(self) -> Tuple[bool, str]:

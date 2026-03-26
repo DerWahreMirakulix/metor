@@ -30,6 +30,7 @@ class Action(str, Enum):
     SEND_DROP = 'send_drop'
     GET_INBOX = 'get_inbox'
     MARK_READ = 'mark_read'
+    FALLBACK = 'fallback'
 
     GET_HISTORY = 'get_history'
     CLEAR_HISTORY = 'clear_history'
@@ -58,6 +59,7 @@ class EventType(str, Enum):
     CONNECTIONS_STATE = 'connections_state'
     SWITCH_SUCCESS = 'switch_success'
     CONTACT_LIST = 'contact_list'
+    CONTACT_REMOVED = 'contact_removed'
 
     INBOX_NOTIFICATION = 'inbox_notification'
     INBOX_DATA = 'inbox_data'
@@ -223,6 +225,12 @@ class MarkReadCommand(IpcCommand):
 
 
 @dataclass
+class FallbackCommand(IpcCommand):
+    target: str
+    action: Action = field(default=Action.FALLBACK, init=False)
+
+
+@dataclass
 class GetHistoryCommand(IpcCommand):
     target: Optional[str] = None
     limit: Optional[int] = None
@@ -314,6 +322,7 @@ class RemoteMsgEvent(IpcEvent):
 @dataclass
 class AckEvent(IpcEvent):
     msg_id: str
+    text: Optional[str] = None
     type: EventType = field(default=EventType.ACK, init=False)
 
 
@@ -336,7 +345,14 @@ class RenameSuccessEvent(IpcEvent):
     old_alias: str
     new_alias: str
     is_demotion: bool = False
+    was_saved: bool = True
     type: EventType = field(default=EventType.RENAME_SUCCESS, init=False)
+
+
+@dataclass
+class ContactRemovedEvent(IpcEvent):
+    alias: str
+    type: EventType = field(default=EventType.CONTACT_REMOVED, init=False)
 
 
 @dataclass
@@ -372,6 +388,7 @@ class InboxDataEvent(IpcEvent):
     alias: Optional[str] = None
     messages: List[Dict[str, Any]] = field(default_factory=list)
     inbox_counts: Dict[str, int] = field(default_factory=dict)
+    is_live_flush: bool = False
     type: EventType = field(default=EventType.INBOX_DATA, init=False)
 
 
@@ -407,6 +424,7 @@ _CMD_MAP: Dict[Action, Type[IpcCommand]] = {
     Action.SEND_DROP: SendDropCommand,
     Action.GET_INBOX: GetInboxCommand,
     Action.MARK_READ: MarkReadCommand,
+    Action.FALLBACK: FallbackCommand,
     Action.GET_HISTORY: GetHistoryCommand,
     Action.CLEAR_HISTORY: ClearHistoryCommand,
     Action.GET_MESSAGES: GetMessagesCommand,
@@ -428,6 +446,7 @@ _EVENT_MAP: Dict[EventType, Type[IpcEvent]] = {
     EventType.CONNECTED: ConnectedEvent,
     EventType.DISCONNECTED: DisconnectedEvent,
     EventType.RENAME_SUCCESS: RenameSuccessEvent,
+    EventType.CONTACT_REMOVED: ContactRemovedEvent,
     EventType.CONNECTIONS_STATE: ConnectionsStateEvent,
     EventType.SWITCH_SUCCESS: SwitchSuccessEvent,
     EventType.CONTACT_LIST: ContactListEvent,

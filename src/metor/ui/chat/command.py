@@ -4,7 +4,21 @@ Module defining the command parser and dispatcher for UI slash commands.
 
 from typing import List, Optional
 
-from metor.core.api import IpcCommand, Action
+from metor.core.api import (
+    DisconnectCommand,
+    ConnectCommand,
+    AcceptCommand,
+    RejectCommand,
+    SwitchCommand,
+    GetConnectionsCommand,
+    GetContactsListCommand,
+    AddContactCommand,
+    RemoveContactCommand,
+    RenameContactCommand,
+    GetInboxCommand,
+    MarkReadCommand,
+    FallbackCommand,
+)
 
 # Local Package Imports
 from metor.ui.chat.renderer import Renderer
@@ -52,9 +66,10 @@ class CommandDispatcher:
         if cmd == '/end':
             target: Optional[str] = arg if arg else self._session.focused_alias
             if target:
-                self._ipc.send_command(
-                    IpcCommand(action=Action.DISCONNECT, target=target)
-                )
+                self._ipc.send_command(DisconnectCommand(target=target))
+                if target == self._session.focused_alias:
+                    self._session.focused_alias = None
+                    self._renderer.set_focus(None)
             else:
                 self._renderer.print_message(
                     'No active connection to end.', msg_type=UIMessageType.SYSTEM
@@ -64,7 +79,7 @@ class CommandDispatcher:
             if arg:
                 if self._session.focused_alias is None:
                     self._session.pending_focus_target = arg
-                self._ipc.send_command(IpcCommand(action=Action.CONNECT, target=arg))
+                self._ipc.send_command(ConnectCommand(target=arg))
             else:
                 self._renderer.print_message(
                     'Usage: /connect <onion|alias>', msg_type=UIMessageType.SYSTEM
@@ -74,7 +89,7 @@ class CommandDispatcher:
             if arg:
                 if self._session.focused_alias is None:
                     self._session.pending_focus_target = arg
-                self._ipc.send_command(IpcCommand(action=Action.ACCEPT, target=arg))
+                self._ipc.send_command(AcceptCommand(target=arg))
             else:
                 self._renderer.print_message(
                     'Usage: /accept [alias]', msg_type=UIMessageType.SYSTEM
@@ -82,7 +97,7 @@ class CommandDispatcher:
 
         elif cmd == '/reject':
             if arg:
-                self._ipc.send_command(IpcCommand(action=Action.REJECT, target=arg))
+                self._ipc.send_command(RejectCommand(target=arg))
             else:
                 self._renderer.print_message(
                     'Usage: /reject [alias]', msg_type=UIMessageType.SYSTEM
@@ -91,18 +106,31 @@ class CommandDispatcher:
         elif cmd == '/switch':
             if arg:
                 if arg == '..':
-                    self._ipc.send_command(
-                        IpcCommand(action=Action.SWITCH, target=None)
-                    )
+                    self._ipc.send_command(SwitchCommand(target=None))
                 else:
-                    self._ipc.send_command(IpcCommand(action=Action.SWITCH, target=arg))
+                    self._ipc.send_command(SwitchCommand(target=arg))
             else:
                 self._renderer.print_message(
                     'Usage: /switch [..|<onion|alias>]', msg_type=UIMessageType.SYSTEM
                 )
 
+        elif cmd == '/fallback':
+            target = arg if arg else self._session.focused_alias
+            if target:
+                self._ipc.send_command(FallbackCommand(target=target))
+            else:
+                self._renderer.print_message(
+                    'Usage: /fallback [alias]', msg_type=UIMessageType.SYSTEM
+                )
+
+        elif cmd == '/inbox':
+            if arg:
+                self._ipc.send_command(MarkReadCommand(target=arg))
+            else:
+                self._ipc.send_command(GetInboxCommand(cli_mode=True))
+
         elif cmd == '/sessions':
-            self._ipc.send_command(IpcCommand(action=Action.GET_CONNECTIONS))
+            self._ipc.send_command(GetConnectionsCommand())
 
         elif cmd.startswith('/contacts'):
             self._dispatch_contacts(parts)
@@ -125,27 +153,17 @@ class CommandDispatcher:
         subcmd: str = parts[1] if len(parts) > 1 else 'list'
 
         if subcmd == 'list':
-            self._ipc.send_command(
-                IpcCommand(action=Action.GET_CONTACTS_LIST, chat_mode=True)
-            )
+            self._ipc.send_command(GetContactsListCommand(chat_mode=True))
         elif subcmd == 'add':
             if len(parts) == 2 and self._session.focused_alias:
                 self._ipc.send_command(
-                    IpcCommand(
-                        action=Action.ADD_CONTACT, alias=self._session.focused_alias
-                    )
+                    AddContactCommand(alias=self._session.focused_alias)
                 )
             elif len(parts) == 3:
-                self._ipc.send_command(
-                    IpcCommand(action=Action.ADD_CONTACT, alias=parts[2].lower())
-                )
+                self._ipc.send_command(AddContactCommand(alias=parts[2].lower()))
             elif len(parts) == 4:
                 self._ipc.send_command(
-                    IpcCommand(
-                        action=Action.ADD_CONTACT,
-                        alias=parts[2].lower(),
-                        onion=parts[3],
-                    )
+                    AddContactCommand(alias=parts[2].lower(), onion=parts[3])
                 )
             else:
                 self._renderer.print_message(
@@ -155,14 +173,10 @@ class CommandDispatcher:
         elif subcmd in ('rm', 'remove'):
             if len(parts) == 2 and self._session.focused_alias:
                 self._ipc.send_command(
-                    IpcCommand(
-                        action=Action.REMOVE_CONTACT, alias=self._session.focused_alias
-                    )
+                    RemoveContactCommand(alias=self._session.focused_alias)
                 )
             elif len(parts) == 3:
-                self._ipc.send_command(
-                    IpcCommand(action=Action.REMOVE_CONTACT, alias=parts[2].lower())
-                )
+                self._ipc.send_command(RemoveContactCommand(alias=parts[2].lower()))
             else:
                 self._renderer.print_message(
                     'Usage: /contacts rm <alias>', msg_type=UIMessageType.SYSTEM
@@ -178,11 +192,7 @@ class CommandDispatcher:
                 )
                 return
             self._ipc.send_command(
-                IpcCommand(
-                    action=Action.RENAME_CONTACT,
-                    old_alias=old_alias,
-                    new_alias=new_alias,
-                )
+                RenameContactCommand(old_alias=old_alias, new_alias=new_alias)
             )
         else:
             self._renderer.print_message(

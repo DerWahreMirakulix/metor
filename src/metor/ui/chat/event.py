@@ -20,9 +20,11 @@ from metor.core.api import (
     InboxNotificationEvent,
     InboxDataEvent,
     RenameSuccessEvent,
+    ContactRemovedEvent,
     ConnectionsStateEvent,
     ContactListEvent,
     SwitchSuccessEvent,
+    CliResponseEvent,
 )
 from metor.utils.helper import clean_onion
 
@@ -95,7 +97,7 @@ class EventHandler:
                 )
 
             elif isinstance(event, AckEvent):
-                self._renderer.mark_acked(event.msg_id)
+                self._renderer.mark_acked(msg_id=event.msg_id, text=event.text)
 
             elif isinstance(event, ConnectedEvent):
                 if event.alias not in self._session.active_connections:
@@ -103,7 +105,7 @@ class EventHandler:
 
                 self._renderer.print_message(
                     # We intentionally don't resolve the alias since it is dynamically inserted in the UI
-                    'Connected.',
+                    "Connected to '{alias}'.",
                     msg_type=UIMessageType.INFO,
                     alias=event.alias,
                 )
@@ -134,22 +136,21 @@ class EventHandler:
                 self._renderer.apply_fallback_to_drop(event.msg_ids)
 
             elif isinstance(event, InboxNotificationEvent):
-                self._renderer.print_message(
-                    event.text,
-                    msg_type=UIMessageType.INFO,
-                    alias=event.alias,
-                )
+                if event.alias and event.alias == self._session.focused_alias:
+                    # Auto-read drops if we are already focused on this peer
+                    self._ipc.send_command(MarkReadCommand(target=event.alias))
+                else:
+                    self._renderer.print_message(
+                        event.text,
+                        msg_type=UIMessageType.INFO,
+                        alias=event.alias,
+                    )
 
             elif isinstance(event, InboxDataEvent):
                 if event.alias and event.messages:
-                    for msg in event.messages:
-                        self._renderer.print_message(
-                            msg['payload'],
-                            msg_type=UIMessageType.REMOTE,
-                            alias=event.alias,
-                            is_drop=True,
-                            is_pending=False,
-                        )
+                    self._renderer.print_messages_batch(
+                        event.messages, event.alias, event.is_live_flush
+                    )
 
             elif isinstance(event, RenameSuccessEvent):
                 if event.old_alias in self._session.active_connections:
@@ -162,15 +163,22 @@ class EventHandler:
                     self._switch_focus(event.new_alias, hide_message=True)
 
                 if event.is_demotion:
-                    self._renderer.print_message(
-                        f"Contact '{event.old_alias}' removed. Session downgraded to '{event.new_alias}'.",
-                        msg_type=UIMessageType.SYSTEM,
-                    )
-                else:
-                    self._renderer.print_message(
-                        f"Renamed '{event.old_alias}' to '{event.new_alias}'.",
-                        msg_type=UIMessageType.SYSTEM,
-                    )
+                    if getattr(event, 'was_saved', True):
+                        self._renderer.print_message(
+                            f"Contact '{event.old_alias}' removed. Session downgraded to '{event.new_alias}'.",
+                            msg_type=UIMessageType.SYSTEM,
+                        )
+                    else:
+                        self._renderer.print_message(
+                            f"Discovered peer '{event.old_alias}' anonymized to '{event.new_alias}'.",
+                            msg_type=UIMessageType.SYSTEM,
+                        )
+
+            elif isinstance(event, ContactRemovedEvent):
+                if event.alias in self._session.active_connections:
+                    self._session.active_connections.remove(event.alias)
+                if self._session.focused_alias == event.alias:
+                    self._switch_focus(None, hide_message=True)
 
             elif isinstance(event, ConnectionsStateEvent):
                 self._session.active_connections = event.active
@@ -190,6 +198,9 @@ class EventHandler:
 
             elif isinstance(event, SwitchSuccessEvent):
                 self._switch_focus(event.alias)
+
+            elif isinstance(event, CliResponseEvent):
+                self._renderer.print_message(event.text, msg_type=UIMessageType.SYSTEM)
 
         except Exception:
             pass

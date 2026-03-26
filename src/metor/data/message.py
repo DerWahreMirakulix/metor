@@ -9,7 +9,7 @@ from typing import List, Tuple, Dict, Any, Optional
 
 from metor.ui.theme import Theme
 from metor.utils.constants import Constants
-from metor.utils.helper import get_divider_string, get_header_string
+from metor.utils.helper import get_divider_string, get_header_string, clean_onion
 
 # Local Package Imports
 from metor.data.profile import ProfileManager
@@ -93,7 +93,7 @@ class MessageManager:
         status: MessageStatus,
     ) -> int:
         """
-        Inserts a new message into the database.
+        Inserts a new message into the database strictly ensuring uniform ONION format.
 
         Args:
             contact_onion (str): The onion address of the remote peer.
@@ -105,6 +105,7 @@ class MessageManager:
         Returns:
             int: The inserted row ID.
         """
+        contact_onion = clean_onion(contact_onion)
         query: str = """
             INSERT INTO messages (contact_onion, direction, msg_type, payload, status) 
             VALUES (?, ?, ?, ?, ?)
@@ -257,8 +258,8 @@ class MessageManager:
         self, onion: Optional[str] = None, non_contacts_only: bool = False
     ) -> Tuple[bool, str]:
         """
-        Wipes the message table completely or just for a specific contact,
-        and removes orphaned discovered peers. Allows filtering by non-contacts.
+        Wipes the message table completely or just for a specific contact.
+        Maintains domain boundaries by leaving contact deletion to the Daemon orchestrator.
 
         Args:
             onion (Optional[str]): The target onion identity. If None, deletes globally based on flags.
@@ -293,14 +294,6 @@ class MessageManager:
                 else:
                     self._sql.execute('DELETE FROM messages')
                     msg = f"All messages in profile '{self._pm.profile_name}' cleared."
-
-            cleanup_query: str = """
-                DELETE FROM contacts 
-                WHERE is_saved = 0 
-                AND onion NOT IN (SELECT onion FROM history WHERE onion IS NOT NULL)
-                AND onion NOT IN (SELECT contact_onion FROM messages)
-            """
-            self._sql.execute(cleanup_query)
 
             return True, msg
         except Exception:
