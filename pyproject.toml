@@ -24,9 +24,5 @@ metor = "metor.main:main"
 [tool.setuptools]
 include-package-data = true
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["metor", "metor.*"]
-
 [tool.ruff.format]
 quote-style = "single"
