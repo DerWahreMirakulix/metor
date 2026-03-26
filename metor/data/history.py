@@ -1,5 +1,6 @@
 """
 Module for managing chat and connection history logs via SQLite.
+Enforces Data-at-Rest policies and Zero-Trace architecture.
 """
 
 from enum import Enum
@@ -14,6 +15,7 @@ from metor.utils.helper import get_divider_string, get_header_string
 from metor.data.profile import ProfileManager
 from metor.data.contact import ContactManager
 from metor.data.sql import SqlManager
+from metor.data.settings import Settings, SettingKey
 
 
 class HistoryEvent(str, Enum):
@@ -37,25 +39,27 @@ class HistoryEvent(str, Enum):
 class HistoryManager:
     """Manages connection history logging using an SQLite database."""
 
-    def __init__(self, pm: ProfileManager) -> None:
+    def __init__(self, pm: ProfileManager, password: Optional[str] = None) -> None:
         """
         Initializes the HistoryManager and its underlying SqlManager.
 
         Args:
             pm (ProfileManager): The profile manager instance for context.
+            password (Optional[str]): The master password for SQLCipher encryption.
 
         Returns:
             None
         """
         self._pm: ProfileManager = pm
         self._db_path: Path = Path(self._pm.get_config_dir()) / Constants.DB_FILE
-        self._sql: SqlManager = SqlManager(self._db_path)
+        self._sql: SqlManager = SqlManager(self._db_path, password)
 
     def log_event(
         self, status: HistoryEvent, onion: Optional[str], reason: str = ''
     ) -> None:
         """
-        Logs a connection event into the database.
+        Logs a connection event into the database. Bypasses logging entirely
+        if the record_events policy is disabled, enforcing a Zero-Trace state.
 
         Args:
             status (HistoryEvent): The event type to log.
@@ -65,27 +69,34 @@ class HistoryManager:
         Returns:
             None
         """
+        if not Settings.get(SettingKey.RECORD_EVENTS):
+            return
+
         query: str = 'INSERT INTO history (status, onion, reason) VALUES (?, ?, ?)'
         self._sql.execute(query, (status.value, onion, reason))
 
     def get_history(
-        self, filter_onion: Optional[str] = None
+        self, filter_onion: Optional[str] = None, limit: Optional[int] = None
     ) -> List[Tuple[str, str, Optional[str], str]]:
         """
         Retrieves raw history events from the database.
 
         Args:
             filter_onion (Optional[str]): The specific onion to filter by.
+            limit (Optional[int]): The maximum number of events to retrieve.
 
         Returns:
             List[Tuple[str, str, Optional[str], str]]: List of events (timestamp, status, onion, reason).
         """
+        actual_limit: int = (
+            limit if limit is not None else Settings.get(SettingKey.HISTORY_LIMIT)
+        )
         if filter_onion:
-            query: str = 'SELECT timestamp, status, onion, reason FROM history WHERE onion = ? ORDER BY timestamp DESC'
-            return self._sql.fetchall(query, (filter_onion,))
+            query: str = 'SELECT timestamp, status, onion, reason FROM history WHERE onion = ? ORDER BY timestamp DESC LIMIT ?'
+            return self._sql.fetchall(query, (filter_onion, actual_limit))
         else:
-            query: str = 'SELECT timestamp, status, onion, reason FROM history ORDER BY timestamp DESC'
-            return self._sql.fetchall(query)
+            query: str = 'SELECT timestamp, status, onion, reason FROM history ORDER BY timestamp DESC LIMIT ?'
+            return self._sql.fetchall(query, (actual_limit,))
 
     def clear_history(self, filter_onion: Optional[str] = None) -> Tuple[bool, str]:
         """
@@ -119,13 +130,19 @@ class HistoryManager:
         except Exception:
             return False, 'Failed to clear history.'
 
-    def show(self, cm: ContactManager, target: Optional[str] = None) -> str:
+    def show(
+        self,
+        cm: ContactManager,
+        target: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> str:
         """
         Fetches history and constructs a human-readable string for terminal display.
 
         Args:
             cm (ContactManager): The contact manager for resolving aliases.
             target (Optional[str]): The target CLI argument (alias or onion).
+            limit (Optional[int]): The maximum number of events to fetch.
 
         Returns:
             str: The formatted event history output.
@@ -139,7 +156,7 @@ class HistoryManager:
                 return f"Contact '{target}' not found."
             disp_name = f'contact {Theme.CYAN}{alias}{Theme.RESET}'
 
-        rows: List[Tuple[str, str, Optional[str], str]] = self.get_history(onion)
+        rows: List[Tuple[str, str, Optional[str], str]] = self.get_history(onion, limit)
 
         if not rows:
             return f'No event history available for {disp_name}.'

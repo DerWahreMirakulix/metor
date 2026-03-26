@@ -14,13 +14,28 @@ from metor.utils.lock import FileLock
 
 
 class SettingKey(str, Enum):
-    """Available global configuration keys split into logical domains."""
+    """Available global configuration keys strictly isolated by domain (DDD)."""
 
-    DEFAULT_PROFILE = 'chat.default_profile'
-    PROMPT_SIGN = 'chat.prompt_sign'
+    # 1. User Interface & Limits
+    DEFAULT_PROFILE = 'ui.default_profile'
+    PROMPT_SIGN = 'ui.prompt_sign'
+    CHAT_LIMIT = 'ui.chat_limit'
+    HISTORY_LIMIT = 'ui.history_limit'
+    MESSAGES_LIMIT = 'ui.messages_limit'
+
+    # 2. Core Daemon & Network
     MAX_TOR_RETRIES = 'daemon.max_tor_retries'
+    TOR_TIMEOUT = 'daemon.tor_timeout'
     ENABLE_TOR_LOGGING = 'daemon.enable_tor_logging'
     AUTO_ACCEPT_CONTACTS = 'daemon.auto_accept_contacts'
+
+    # 3. Data Persistence
+    RECORD_EVENTS = 'data.record_events'
+    ALLOW_ASYNC = 'data.allow_async'
+
+    # 4. Security & OPSEC
+    REQUIRE_LOCAL_AUTH = 'security.require_local_auth'
+    BURN_AFTER_READ = 'security.burn_after_read'
 
 
 class Settings:
@@ -29,9 +44,17 @@ class Settings:
     _DEFAULTS: Dict[str, Any] = {
         SettingKey.DEFAULT_PROFILE.value: 'default',
         SettingKey.PROMPT_SIGN.value: '$',
+        SettingKey.CHAT_LIMIT.value: 50,
+        SettingKey.HISTORY_LIMIT.value: 50,
+        SettingKey.MESSAGES_LIMIT.value: 50,
         SettingKey.MAX_TOR_RETRIES.value: 3,
+        SettingKey.TOR_TIMEOUT.value: 10.0,
         SettingKey.ENABLE_TOR_LOGGING.value: False,
         SettingKey.AUTO_ACCEPT_CONTACTS.value: True,
+        SettingKey.RECORD_EVENTS.value: True,
+        SettingKey.ALLOW_ASYNC.value: True,
+        SettingKey.REQUIRE_LOCAL_AUTH.value: False,
+        SettingKey.BURN_AFTER_READ.value: False,
     }
 
     @staticmethod
@@ -65,15 +88,15 @@ class Settings:
             try:
                 with path.open('r', encoding='utf-8') as f:
                     data: Dict[str, Dict[str, Any]] = json.load(f)
-                    if 'chat' not in data or 'daemon' not in data:
-                        return {
-                            'daemon': data.get('daemon', {}),
-                            'chat': data.get('chat', {}),
-                        }
+
+                    for domain in ('ui', 'daemon', 'data', 'security'):
+                        if domain not in data:
+                            data[domain] = {}
+
                     return data
             except (json.JSONDecodeError, IOError):
                 pass
-        return {'daemon': {}, 'chat': {}}
+        return {'ui': {}, 'daemon': {}, 'data': {}, 'security': {}}
 
     @classmethod
     def get(cls, key: SettingKey) -> Any:
@@ -87,6 +110,8 @@ class Settings:
             Any: The value of the setting.
         """
         data: Dict[str, Dict[str, Any]] = cls._load_settings()
+        category: str
+        sub_key: str
         category, sub_key = key.value.split('.', 1)
 
         if category in data and sub_key in data[category]:
@@ -110,10 +135,9 @@ class Settings:
 
         with FileLock(path):
             data: Dict[str, Dict[str, Any]] = cls._load_settings()
+            category: str
+            sub_key: str
             category, sub_key = key.value.split('.', 1)
-
-            if category not in data:
-                data[category] = {}
 
             data[category][sub_key] = value
 

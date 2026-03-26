@@ -1,5 +1,6 @@
 """
 Module for managing the local Tor process, hidden services, and local proxies.
+Enforces strict socket timeouts and configurable network resilience.
 """
 
 import os
@@ -179,9 +180,10 @@ class TorManager:
         s.set_proxy(
             proxy_type=socks.SOCKS5, addr=Constants.LOCALHOST, port=self.socks_port
         )
-        s.settimeout(10)
+        timeout: float = Settings.get(SettingKey.TOR_TIMEOUT)
+        s.settimeout(timeout)
         s.connect((onion, 80))
-        s.settimeout(None)
+        # Deliberately leaving the timeout applied to mitigate Slowloris-style attacks on the socket
         return s
 
     def get_address(self) -> Tuple[bool, str]:

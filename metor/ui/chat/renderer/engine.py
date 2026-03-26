@@ -1,12 +1,13 @@
 """
 Module defining the Renderer Engine, orchestrating display, format, and input layers.
+Enforces memory limits (CHAT_LIMIT) on active chat sessions.
 """
 
 import sys
 import shutil
 import signal
 import time
-from typing import Optional, Any, List
+from typing import Optional, Any
 
 from metor.data.settings import SettingKey, Settings
 from metor.ui.chat.models import UIMessageType, UIChatLine
@@ -79,7 +80,7 @@ class Renderer:
         is_pending: bool = True,
     ) -> None:
         """
-        Safely renders a new message to the terminal.
+        Safely renders a new message to the terminal. Constrains buffer size via settings.
 
         Args:
             msg (Any): The message content to render.
@@ -110,6 +111,13 @@ class Renderer:
             )
 
             self._display.all_msgs.append(chat_line)
+
+            limit: int = Settings.get(SettingKey.CHAT_LIMIT)
+            if len(self._display.all_msgs) > limit:
+                self._display.all_msgs = self._display.all_msgs[-limit:]
+                self._full_redraw_locked(cols)
+                return
+
             formatted: str = Formatter.format_msg(
                 chat_line, self._initial_prompt, self._current_focus
             )
@@ -152,12 +160,12 @@ class Renderer:
         if start_idx != -1:
             self._redraw_from_index(start_idx)
 
-    def apply_fallback_to_drop(self, msg_ids: List[str]) -> None:
+    def apply_fallback_to_drop(self, msg_ids: list[str]) -> None:
         """
         Converts hanging un-acked live messages into pending drops.
 
         Args:
-            msg_ids (List[str]): List of message IDs to convert.
+            msg_ids (list[str]): List of message IDs to convert.
 
         Returns:
             None

@@ -136,7 +136,7 @@ class NetworkManager:
     def _handle_incoming(self, conn: socket.socket) -> None:
         """
         Authenticates inbound requests and routes them to Live-Chat or Drop-Box.
-        Safely reconstructs fragmented TCP streams.
+        Safely reconstructs fragmented TCP streams and enforces async network policies.
 
         Args:
             conn (socket.socket): The incoming socket connection.
@@ -180,6 +180,10 @@ class NetworkManager:
             return
 
         if is_async:
+            if not Settings.get(SettingKey.ALLOW_ASYNC):
+                conn.close()
+                return
+
             try:
                 while True:
                     while '\n' in buffer:

@@ -102,7 +102,7 @@ class IpcCommand(IpcMessage):
     new_alias: Optional[str] = None
     is_header: bool = False
     chat_mode: bool = False
-    limit: int = 50
+    limit: Optional[int] = None
     setting_key: Optional[str] = None
     setting_value: Optional[str] = None
     password: Optional[str] = None
@@ -129,7 +129,7 @@ class IpcCommand(IpcMessage):
             new_alias=data.get('new_alias'),
             is_header=data.get('is_header', False),
             chat_mode=data.get('chat_mode', False),
-            limit=data.get('limit', 50),
+            limit=data.get('limit'),
             setting_key=data.get('setting_key'),
             setting_value=data.get('setting_value'),
             password=data.get('password'),

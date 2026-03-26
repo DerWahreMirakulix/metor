@@ -20,6 +20,7 @@ class IpcServer:
         self,
         pm: ProfileManager,
         command_callback: Callable[[IpcCommand, socket.socket], None],
+        disconnect_callback: Optional[Callable[[socket.socket], None]] = None,
     ) -> None:
         """
         Initializes the IPC Server.
@@ -27,6 +28,7 @@ class IpcServer:
         Args:
             pm (ProfileManager): To store and retrieve the active daemon port.
             command_callback (Callable): The function to call when a valid command arrives.
+            disconnect_callback (Optional[Callable]): Hook to clean up socket states externally.
 
         Returns:
             None
@@ -34,6 +36,9 @@ class IpcServer:
         self._pm: ProfileManager = pm
         self._command_callback: Callable[[IpcCommand, socket.socket], None] = (
             command_callback
+        )
+        self._disconnect_callback: Optional[Callable[[socket.socket], None]] = (
+            disconnect_callback
         )
 
         self._clients: List[socket.socket] = []
@@ -186,3 +191,5 @@ class IpcServer:
                 conn.close()
             except Exception:
                 pass
+            if self._disconnect_callback:
+                self._disconnect_callback(conn)

@@ -7,7 +7,7 @@ name = "metor"
 version = "0.2"
 description = "A simple Tor messenger."
 authors = [{ name = "LuRex" }]
-requires-python = ">=3.7"
+requires-python = ">=3.11"
 license = { text = "GPLv3" }
 dependencies = [
     "stem",
@@ -26,6 +26,7 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["metor", "metor.*"]
 
 [tool.ruff.format]
 quote-style = "single"

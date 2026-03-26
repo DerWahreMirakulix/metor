@@ -1,6 +1,6 @@
 """
 Module for managing asynchronous offline messages via SQLite.
-Uses strict Enums to represent message states and types.
+Enforces Ephemeral Messaging policies (Burn-After-Read) and strict Enums.
 """
 
 from enum import Enum
@@ -15,6 +15,7 @@ from metor.utils.helper import get_divider_string, get_header_string
 from metor.data.profile import ProfileManager
 from metor.data.sql import SqlManager
 from metor.data.contact import ContactManager
+from metor.data.settings import Settings, SettingKey
 
 
 class MessageStatus(str, Enum):
@@ -44,19 +45,20 @@ class MessageType(str, Enum):
 class MessageManager:
     """Manages the persistence of asynchronous messages (inbox and outbox)."""
 
-    def __init__(self, pm: ProfileManager) -> None:
+    def __init__(self, pm: ProfileManager, password: Optional[str] = None) -> None:
         """
         Initializes the MessageManager and ensures the database table exists.
 
         Args:
             pm (ProfileManager): The profile manager instance for context.
+            password (Optional[str]): The master password for SQLCipher encryption.
 
         Returns:
             None
         """
         self._pm: ProfileManager = pm
         self._db_path: Path = Path(self._pm.get_config_dir()) / Constants.DB_FILE
-        self._sql: SqlManager = SqlManager(self._db_path)
+        self._sql: SqlManager = SqlManager(self._db_path, password)
         self._initialize_table()
 
     def _initialize_table(self) -> None:
@@ -169,7 +171,8 @@ class MessageManager:
 
     def get_and_read_inbox(self, contact_onion: str) -> List[Tuple[int, str, str, str]]:
         """
-        Retrieves all unread messages for a specific contact and marks them as read.
+        Retrieves all unread messages for a specific contact and executes the read policy.
+        If BURN_AFTER_READ is active, data is permanently erased instead of flagged as read.
 
         Args:
             contact_onion (str): The target onion address.
@@ -188,29 +191,43 @@ class MessageManager:
         )
 
         if messages:
-            update_query: str = (
-                'UPDATE messages SET status = ? WHERE contact_onion = ? AND status = ?'
-            )
-            self._sql.execute(
-                update_query,
-                (MessageStatus.READ.value, contact_onion, MessageStatus.UNREAD.value),
-            )
+            if Settings.get(SettingKey.BURN_AFTER_READ):
+                delete_query: str = (
+                    'DELETE FROM messages WHERE contact_onion = ? AND status = ?'
+                )
+                self._sql.execute(
+                    delete_query,
+                    (contact_onion, MessageStatus.UNREAD.value),
+                )
+            else:
+                update_query: str = 'UPDATE messages SET status = ? WHERE contact_onion = ? AND status = ?'
+                self._sql.execute(
+                    update_query,
+                    (
+                        MessageStatus.READ.value,
+                        contact_onion,
+                        MessageStatus.UNREAD.value,
+                    ),
+                )
 
         return messages
 
     def get_chat_history(
-        self, contact_onion: str, limit: int = 50
+        self, contact_onion: str, limit: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
         Retrieves the past message history for a specific contact, ordered chronologically.
 
         Args:
             contact_onion (str): The target onion address.
-            limit (int): The maximum number of past messages to fetch. Defaults to 50.
+            limit (Optional[int]): The maximum number of past messages to fetch. Defaults to None.
 
         Returns:
             List[Dict[str, Any]]: A list of dictionaries containing formatted message data.
         """
+        actual_limit: int = (
+            limit if limit is not None else Settings.get(SettingKey.MESSAGES_LIMIT)
+        )
         query: str = """
             SELECT direction, status, payload, timestamp 
             FROM messages 
@@ -219,7 +236,7 @@ class MessageManager:
             LIMIT ?
         """
         rows: List[Tuple[str, str, str, str]] = self._sql.fetchall(
-            query, (contact_onion, limit)
+            query, (contact_onion, actual_limit)
         )
         rows.reverse()
 
@@ -257,7 +274,6 @@ class MessageManager:
                 self._sql.execute('DELETE FROM messages')
                 msg = f"All messages in profile '{self._pm.profile_name}' cleared."
 
-            # Cleanup orphaned discovered peers that have no history and no messages left
             cleanup_query: str = """
                 DELETE FROM contacts 
                 WHERE is_saved = 0 
@@ -325,14 +341,16 @@ class MessageManager:
         out += get_divider_string()
         return out
 
-    def show_history(self, target: str, cm: ContactManager, limit: int = 50) -> str:
+    def show_history(
+        self, target: str, cm: ContactManager, limit: Optional[int] = None
+    ) -> str:
         """
         Fetches and formats the historical message record mimicking the Chat UI colors.
 
         Args:
             target (str): The target string from the CLI (alias or onion).
             cm (ContactManager): Contact manager to resolve the target.
-            limit (int): The number of recent messages to retrieve.
+            limit (Optional[int]): The number of recent messages to retrieve.
 
         Returns:
             str: The formatted terminal output of the chat history.

@@ -148,9 +148,9 @@ class CliProxy:
         except ValueError:
             return f"Unknown setting key '{key}'."
 
-        if setting_enum.value.startswith('chat.'):
+        if setting_enum.value.startswith('ui.'):
             Settings.set(setting_enum, value)
-            return f"Local chat setting '{key}' updated."
+            return f"Local setting '{key}' updated."
 
         return self._request_ipc(
             IpcCommand(action=Action.SET_SETTING, setting_key=key, setting_value=value)
@@ -195,13 +195,16 @@ class CliProxy:
         )
         return self._request_ipc(cmd, wait_for_response=False)
 
-    def handle_history(self, action: str, target: Optional[str] = None) -> str:
+    def handle_history(
+        self, action: str, target: Optional[str] = None, limit: Optional[int] = None
+    ) -> str:
         """
         Views or clears the event history.
 
         Args:
             action (str): The action to perform ('show' or 'clear').
             target (Optional[str]): The specific alias to filter by, if any.
+            limit (Optional[int]): Maximum number of events to fetch.
 
         Returns:
             str: The formatted history output or a status message.
@@ -210,7 +213,7 @@ class CliProxy:
             act: Action = (
                 Action.CLEAR_HISTORY if action == 'clear' else Action.GET_HISTORY
             )
-            return self._request_ipc(IpcCommand(action=act, target=target))
+            return self._request_ipc(IpcCommand(action=act, target=target, limit=limit))
 
         if self._hm and self._cm:
             if action == 'clear':
@@ -223,11 +226,11 @@ class CliProxy:
                     return msg
                 _, msg = self._hm.clear_history()
                 return msg
-            return self._hm.show(self._cm, target)
+            return self._hm.show(self._cm, target, limit)
         return 'Initialization error.'
 
     def handle_messages(
-        self, action: str, target: Optional[str] = None, limit: int = 50
+        self, action: str, target: Optional[str] = None, limit: Optional[int] = None
     ) -> str:
         """
         Views or clears past messages.
@@ -235,7 +238,7 @@ class CliProxy:
         Args:
             action (str): The action to perform ('show' or 'clear').
             target (Optional[str]): The specific alias to target.
-            limit (int): Maximum number of messages to fetch.
+            limit (Optional[int]): Maximum number of messages to fetch.
 
         Returns:
             str: The formatted message output or a status message.

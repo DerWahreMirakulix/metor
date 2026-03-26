@@ -1,7 +1,7 @@
 """
 Module defining the primary background daemon engine.
 Orchestrates Network, IPC API, and Outbox routing seamlessly.
-Handles Unlock operations and Nuke/Purge protocols.
+Handles Unlock operations, Nuke/Purge protocols, and Local Authentication constraints.
 """
 
 import socket
@@ -11,7 +11,7 @@ import atexit
 import sys
 import os
 import signal
-from typing import Any, Optional
+from typing import Any, Optional, Set
 
 from metor.core.key import KeyManager
 from metor.core.tor import TorManager
@@ -25,6 +25,7 @@ from metor.data.message import (
     MessageType,
     MessageStatus,
 )
+from metor.data.settings import Settings, SettingKey
 from metor.ui.theme import Theme
 from metor.utils.constants import Constants
 from metor.utils.helper import clean_onion
@@ -71,9 +72,12 @@ class Daemon:
 
         self._stop_flag: threading.Event = threading.Event()
         self._is_locked: bool = False
+        self._authenticated_clients: Set[socket.socket] = set()
 
         self._crypto: Crypto = Crypto(km)
-        self._ipc: IpcServer = IpcServer(pm, self._process_ui_command)
+        self._ipc: IpcServer = IpcServer(
+            pm, self._process_ui_command, self._on_ipc_disconnect
+        )
         self._outbox: OutboxWorker = OutboxWorker(
             tm, mm, hm, self._crypto, self._stop_flag
         )
@@ -236,9 +240,23 @@ class Daemon:
 
         return False
 
+    def _on_ipc_disconnect(self, conn: socket.socket) -> None:
+        """
+        Callback fired when an IPC client disconnects. Cleans up authentication states.
+
+        Args:
+            conn (socket.socket): The disconnected client socket.
+
+        Returns:
+            None
+        """
+        if conn in self._authenticated_clients:
+            self._authenticated_clients.remove(conn)
+
     def _process_ui_command(self, cmd: IpcCommand, conn: socket.socket) -> None:
         """
         Routes IPC commands from the Chat UI or CLI Proxy to the internal managers.
+        Enforces local authentication requirements prior to parsing state commands.
 
         Args:
             cmd (IpcCommand): The parsed command object.
@@ -247,6 +265,18 @@ class Daemon:
         Returns:
             None
         """
+        if Settings.get(SettingKey.REQUIRE_LOCAL_AUTH):
+            if cmd.action not in (Action.INIT, Action.UNLOCK):
+                if conn not in self._authenticated_clients:
+                    self._ipc.send_to(
+                        conn,
+                        IpcEvent(
+                            type=EventType.SYSTEM,
+                            text='Authentication required. Please unlock the session first.',
+                        ),
+                    )
+                    return
+
         if cmd.action == Action.SELF_DESTRUCT:
             self._ipc.send_to(
                 conn,
@@ -260,6 +290,31 @@ class Daemon:
 
         if cmd.action == Action.UNLOCK:
             if not self._is_locked:
+                if (
+                    Settings.get(SettingKey.REQUIRE_LOCAL_AUTH)
+                    and conn not in self._authenticated_clients
+                ):
+                    try:
+                        temp_km: KeyManager = KeyManager(self._pm, cmd.password)
+                        temp_km.get_metor_key()
+                        self._authenticated_clients.add(conn)
+                        self._ipc.send_to(
+                            conn,
+                            IpcEvent(
+                                type=EventType.CLI_RESPONSE,
+                                text='Session authenticated successfully.',
+                            ),
+                        )
+                    except Exception:
+                        self._ipc.send_to(
+                            conn,
+                            IpcEvent(
+                                type=EventType.CLI_RESPONSE,
+                                text='Invalid master password.',
+                            ),
+                        )
+                    return
+
                 self._ipc.send_to(
                     conn,
                     IpcEvent(
@@ -268,7 +323,18 @@ class Daemon:
                 )
                 return
 
-            self._km = KeyManager(self._pm, cmd.password)
+            try:
+                self._km = KeyManager(self._pm, cmd.password)
+                self._km.get_metor_key()
+            except Exception:
+                self._ipc.send_to(
+                    conn,
+                    IpcEvent(
+                        type=EventType.CLI_RESPONSE, text='Invalid master password.'
+                    ),
+                )
+                return
+
             self._tm = TorManager(self._pm, self._km)
             self._cm = ContactManager(self._pm, cmd.password)
             self._hm = HistoryManager(self._pm, cmd.password)
@@ -289,6 +355,7 @@ class Daemon:
             )
 
             self._is_locked = False
+            self._authenticated_clients.add(conn)
             self._start_subsystems()
             self._ipc.send_to(
                 conn,
@@ -302,8 +369,6 @@ class Daemon:
         if cmd.action == Action.SET_SETTING:
             if cmd.setting_key and cmd.setting_value:
                 try:
-                    from metor.data.settings import Settings, SettingKey
-
                     Settings.set(SettingKey(cmd.setting_key), cmd.setting_value)
                     self._ipc.send_to(
                         conn,
@@ -409,6 +474,16 @@ class Daemon:
                 self._network.send_message(cmd.target, cmd.text, cmd.msg_id)
 
         elif cmd.action == Action.SEND_DROP:
+            if not Settings.get(SettingKey.ALLOW_ASYNC):
+                self._ipc.send_to(
+                    conn,
+                    IpcEvent(
+                        type=EventType.SYSTEM,
+                        text='Async offline messages are disabled by security policy.',
+                    ),
+                )
+                return
+
             if cmd.target and cmd.text:
                 if self._is_self_target(cmd.target):
                     self._ipc.send_to(
@@ -496,7 +571,7 @@ class Daemon:
                 )
 
         elif cmd.action == Action.GET_HISTORY:
-            text: str = self._hm.show(self._cm, cmd.target)
+            text: str = self._hm.show(self._cm, cmd.target, cmd.limit)
             self._ipc.send_to(conn, IpcEvent(type=EventType.CLI_RESPONSE, text=text))
 
         elif cmd.action == Action.CLEAR_HISTORY:

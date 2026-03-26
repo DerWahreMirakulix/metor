@@ -1,7 +1,7 @@
 import json
 from enum import Enum
 from typing import Any, Dict, Union
-from zipfile import Path
+from pathlib import Path
 
 from metor.data.settings import SettingKey, Settings
 from metor.utils.lock import FileLock
@@ -65,19 +65,19 @@ class Config:
             return data[key_str]
 
         try:
-            global_key = SettingKey(key_str)
+            global_key: SettingKey = SettingKey(key_str)
             return Settings.get(global_key)
         except ValueError:
             pass
 
         return default
 
-    def set(self, key: Union[ProfileConfigKey, str], value: Any) -> None:
+    def set(self, key: Union[ProfileConfigKey, SettingKey, str], value: Any) -> None:
         """
         Writes a setting safely using a file lock.
 
         Args:
-            key (Union[ProfileConfigKey, str]): The setting to save.
+            key (Union[ProfileConfigKey, SettingKey, str]): The setting to save.
             value (Any): The value to persist.
 
         Returns:

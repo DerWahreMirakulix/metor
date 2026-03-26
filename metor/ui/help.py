@@ -172,8 +172,8 @@ class Help:
             )
             + Help._format_line(
                 sub_ind,
-                'metor settings set <key> <val>',
-                'Configure specific chat or daemon settings.',
+                'metor settings set <domain.key> <val>',
+                'Configure specific domain settings (ui, daemon, data, security).',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
@@ -252,7 +252,7 @@ class Help:
             )
             + Help._format_line(
                 sub_ind,
-                'metor history [show|clear] [alias]',
+                'metor history [show|clear] [alias] [limit]',
                 'View or wipe the connection event log.\n',
                 Help.DESC_COLUMN,
             )

@@ -1,5 +1,6 @@
 """
-Main entry point for the Metor application. Handles command-line arguments and dispatches commands.
+Module serving as the main entry point for the Metor application.
+Handles command-line arguments, orchestrates startup, and dispatches CLI commands.
 """
 
 import argparse
@@ -181,7 +182,7 @@ class MetorApp:
             if sub == 'set' and len(ext) >= 2:
                 print(self.proxy.handle_settings(ext[0], ext[1]))
             else:
-                print('Usage: metor settings set <daemon.key|chat.key> <value>')
+                print('Usage: metor settings set <domain.key> <value>')
 
         elif cmd == 'chat':
             if not self._pm.is_daemon_running():
@@ -250,14 +251,25 @@ class MetorApp:
                 if len(ext) > 1
                 else (ext[0] if ext and action == 'show' and sub != 'show' else None)
             )
-            limit: int = int(limit_str) if limit_str and limit_str.isdigit() else 50
+            limit: Optional[int] = (
+                int(limit_str) if limit_str and limit_str.isdigit() else None
+            )
 
             print(self.proxy.handle_messages(action, target, limit))
 
         elif cmd == 'history':
             action = 'clear' if sub == 'clear' else 'show'
             target = ext[0] if ext else (sub if sub not in ('show', 'clear') else None)
-            print(self.proxy.handle_history(action, target))
+            limit_str: Optional[str] = (
+                ext[1]
+                if len(ext) > 1
+                else (ext[0] if ext and action == 'show' and sub != 'show' else None)
+            )
+            limit: Optional[int] = (
+                int(limit_str) if limit_str and limit_str.isdigit() else None
+            )
+
+            print(self.proxy.handle_history(action, target, limit))
 
         elif cmd == 'address':
             print(self.proxy.get_address(generate=(sub == 'generate')))

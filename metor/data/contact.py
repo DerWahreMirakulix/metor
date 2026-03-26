@@ -17,19 +17,20 @@ from metor.data.sql import SqlManager
 class ContactManager:
     """Manages the database mapping between aliases and .onion addresses."""
 
-    def __init__(self, pm: ProfileManager) -> None:
+    def __init__(self, pm: ProfileManager, password: Optional[str] = None) -> None:
         """
         Initializes the ContactManager connected to the SQLite database.
 
         Args:
             pm (ProfileManager): The profile manager instance.
+            password (Optional[str]): The master password for SQLCipher encryption.
 
         Returns:
             None
         """
         self._pm: ProfileManager = pm
         self._db_path: Path = Path(self._pm.get_config_dir()) / Constants.DB_FILE
-        self._sql: SqlManager = SqlManager(self._db_path)
+        self._sql: SqlManager = SqlManager(self._db_path, password)
 
     def get_all_contacts(self) -> List[str]:
         """
