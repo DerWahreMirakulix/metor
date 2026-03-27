@@ -100,8 +100,6 @@ class SqlManager:
             if path_str in SqlManager._connections:
                 return SqlManager._connections[path_str]
 
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-
             conn = sqlite3.connect(path_str, check_same_thread=False)
             if self._password:
                 safe_password: str = self._password.replace("'", "''")

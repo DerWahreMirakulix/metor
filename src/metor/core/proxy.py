@@ -49,6 +49,7 @@ class CliProxy:
     def __init__(self, pm: ProfileManager) -> None:
         """
         Initializes the CLI Proxy.
+        Only initializes database managers if the profile physically exists on disk.
 
         Args:
             pm (ProfileManager): The active profile configuration.
@@ -59,13 +60,31 @@ class CliProxy:
         self._pm: ProfileManager = pm
         self.is_remote: bool = self._pm.is_remote()
 
-        if not self.is_remote and not self._pm.is_daemon_running():
+        if (
+            not self.is_remote
+            and not self._pm.is_daemon_running()
+            and self._pm.exists()
+        ):
             self._km: Optional[KeyManager] = KeyManager(self._pm, None)
             self._hm: Optional[HistoryManager] = HistoryManager(self._pm, None)
             self._cm: Optional[ContactManager] = ContactManager(self._pm, None)
             self._mm: Optional[MessageManager] = MessageManager(self._pm, None)
         else:
             self._km = self._hm = self._cm = self._mm = None
+
+    def _ensure_profile_exists(self) -> Optional[str]:
+        """
+        Guards against implicit directory creation for CLI operations.
+
+        Args:
+            None
+
+        Returns:
+            Optional[str]: Error message if profile doesn't exist, None otherwise.
+        """
+        if not self._pm.exists():
+            return f"Profile '{self._pm.profile_name}' does not exist."
+        return None
 
     def _prefix_remote(self, text: str) -> str:
         """
@@ -144,6 +163,9 @@ class CliProxy:
         Returns:
             str: Status message.
         """
+        err: Optional[str] = self._ensure_profile_exists()
+        if err:
+            return err
         return self._request_ipc(UnlockCommand(password=password))
 
     def nuke_daemon(self) -> str:
@@ -156,6 +178,9 @@ class CliProxy:
         Returns:
             str: Status message.
         """
+        err: Optional[str] = self._ensure_profile_exists()
+        if err:
+            return err
         return self._request_ipc(SelfDestructCommand(), wait_for_response=True)
 
     def _parse_setting_value(self, value: str) -> Union[str, int, float, bool]:
@@ -231,6 +256,10 @@ class CliProxy:
         Returns:
             str: The formatted onion address or an error message.
         """
+        err: Optional[str] = self._ensure_profile_exists()
+        if err:
+            return err
+
         if self.is_remote or self._pm.is_daemon_running():
             cmd: IpcCommand = (
                 GenerateAddressCommand() if generate else GetAddressCommand()
@@ -245,7 +274,7 @@ class CliProxy:
 
     def send_drop(self, target_alias: str, text: str) -> str:
         """
-        Queues an asynchronous offline message.
+        Queues an asynchronous offline message. Awaits the IPC response to provide non-generic status feedback.
 
         Args:
             target_alias (str): The destination alias.
@@ -254,11 +283,16 @@ class CliProxy:
         Returns:
             str: Status message.
         """
+        err: Optional[str] = self._ensure_profile_exists()
+        if err:
+            return err
+
         if not self.is_remote and not self._pm.is_daemon_running():
             return 'The daemon must be running to send drops.'
 
         return self._request_ipc(
-            SendDropCommand(target=target_alias, text=text), wait_for_response=False
+            SendDropCommand(target=target_alias, text=text, cli_mode=True),
+            wait_for_response=True,
         )
 
     def handle_history(
@@ -275,6 +309,10 @@ class CliProxy:
         Returns:
             str: The formatted history output or a status message.
         """
+        err: Optional[str] = self._ensure_profile_exists()
+        if err:
+            return err
+
         if self.is_remote or self._pm.is_daemon_running():
             cmd: IpcCommand = (
                 ClearHistoryCommand(target=target)
@@ -317,6 +355,10 @@ class CliProxy:
         Returns:
             str: The formatted message output or a status message.
         """
+        err: Optional[str] = self._ensure_profile_exists()
+        if err:
+            return err
+
         if self.is_remote or self._pm.is_daemon_running():
             cmd: IpcCommand = (
                 ClearMessagesCommand(target=target, non_contacts_only=non_contacts_only)
@@ -350,6 +392,10 @@ class CliProxy:
         Returns:
             str: The formatted inbox or message strings.
         """
+        err: Optional[str] = self._ensure_profile_exists()
+        if err:
+            return err
+
         if self.is_remote or self._pm.is_daemon_running():
             cmd: IpcCommand = (
                 MarkReadCommand(target=target, cli_mode=True)
@@ -374,6 +420,10 @@ class CliProxy:
         Returns:
             str: Formatted list of contacts.
         """
+        err: Optional[str] = self._ensure_profile_exists()
+        if err:
+            return err
+
         if self.is_remote or self._pm.is_daemon_running():
             return self._request_ipc(GetContactsListCommand(chat_mode=False))
         if self._cm:
@@ -391,6 +441,10 @@ class CliProxy:
         Returns:
             str: Status message.
         """
+        err: Optional[str] = self._ensure_profile_exists()
+        if err:
+            return err
+
         if self.is_remote or self._pm.is_daemon_running():
             return self._request_ipc(AddContactCommand(alias=alias, onion=onion))
         if not onion:
@@ -412,6 +466,10 @@ class CliProxy:
         Returns:
             str: Status message.
         """
+        err: Optional[str] = self._ensure_profile_exists()
+        if err:
+            return err
+
         if self.is_remote or self._pm.is_daemon_running():
             return self._request_ipc(RemoveContactCommand(alias=alias))
         if self._cm:
@@ -431,6 +489,10 @@ class CliProxy:
         Returns:
             str: Status message.
         """
+        err: Optional[str] = self._ensure_profile_exists()
+        if err:
+            return err
+
         if self.is_remote or self._pm.is_daemon_running():
             return self._request_ipc(RenameContactCommand(old_alias=old, new_alias=new))
         if self._cm and self._hm:
@@ -448,6 +510,10 @@ class CliProxy:
         Returns:
             str: Status message.
         """
+        err: Optional[str] = self._ensure_profile_exists()
+        if err:
+            return err
+
         if self.is_remote or self._pm.is_daemon_running():
             return self._request_ipc(ClearContactsCommand())
         if self._cm:
@@ -466,6 +532,10 @@ class CliProxy:
         Returns:
             str: Status message.
         """
+        err: Optional[str] = self._ensure_profile_exists()
+        if err:
+            return err
+
         if self.is_remote or self._pm.is_daemon_running():
             return self._request_ipc(ClearProfileDbCommand())
 

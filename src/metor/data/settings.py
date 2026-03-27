@@ -26,6 +26,7 @@ class SettingKey(str, Enum):
 
     # 2. Core Daemon (Server - Network, Persistence & Security)
     MAX_TOR_RETRIES = 'daemon.max_tor_retries'
+    MAX_CONNECT_RETRIES = 'daemon.max_connect_retries'
     TOR_TIMEOUT = 'daemon.tor_timeout'
     ENABLE_TOR_LOGGING = 'daemon.enable_tor_logging'
     ENABLE_SQL_LOGGING = 'daemon.enable_sql_logging'
@@ -50,6 +51,7 @@ class Settings:
         SettingKey.MESSAGES_LIMIT.value: 50,
         SettingKey.CHAT_BUFFER_PADDING.value: 20,
         SettingKey.MAX_TOR_RETRIES.value: 3,
+        SettingKey.MAX_CONNECT_RETRIES.value: 3,
         SettingKey.TOR_TIMEOUT.value: 10.0,
         SettingKey.ENABLE_TOR_LOGGING.value: False,
         SettingKey.ENABLE_SQL_LOGGING.value: False,

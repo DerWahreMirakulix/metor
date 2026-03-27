@@ -21,6 +21,7 @@ from metor.core.api import (
 )
 
 # Local Package Imports
+from metor.ui.help import Help
 from metor.ui.chat.renderer import Renderer
 from metor.ui.chat.ipc import IpcClient
 from metor.ui.chat.session import Session
@@ -49,6 +50,7 @@ class CommandDispatcher:
     def dispatch(self, input_str: str) -> bool:
         """
         Analyzes a user string, extracts parameters, and triggers daemon actions.
+        Dynamically fetches usage strings from the centralized Help registry if arguments are missing.
 
         Args:
             input_str (str): The raw string typed by the user.
@@ -82,7 +84,7 @@ class CommandDispatcher:
                 self._ipc.send_command(ConnectCommand(target=arg))
             else:
                 self._renderer.print_message(
-                    'Usage: /connect <onion|alias>', msg_type=UIMessageType.SYSTEM
+                    Help.show_command_help(cmd).strip(), msg_type=UIMessageType.SYSTEM
                 )
 
         elif cmd == '/accept':
@@ -92,7 +94,7 @@ class CommandDispatcher:
                 self._ipc.send_command(AcceptCommand(target=arg))
             else:
                 self._renderer.print_message(
-                    'Usage: /accept [alias]', msg_type=UIMessageType.SYSTEM
+                    Help.show_command_help(cmd).strip(), msg_type=UIMessageType.SYSTEM
                 )
 
         elif cmd == '/reject':
@@ -100,7 +102,7 @@ class CommandDispatcher:
                 self._ipc.send_command(RejectCommand(target=arg))
             else:
                 self._renderer.print_message(
-                    'Usage: /reject [alias]', msg_type=UIMessageType.SYSTEM
+                    Help.show_command_help(cmd).strip(), msg_type=UIMessageType.SYSTEM
                 )
 
         elif cmd == '/switch':
@@ -111,7 +113,7 @@ class CommandDispatcher:
                     self._ipc.send_command(SwitchCommand(target=arg))
             else:
                 self._renderer.print_message(
-                    'Usage: /switch [..|<onion|alias>]', msg_type=UIMessageType.SYSTEM
+                    Help.show_command_help(cmd).strip(), msg_type=UIMessageType.SYSTEM
                 )
 
         elif cmd == '/fallback':
@@ -120,7 +122,7 @@ class CommandDispatcher:
                 self._ipc.send_command(FallbackCommand(target=target))
             else:
                 self._renderer.print_message(
-                    'Usage: /fallback [alias]', msg_type=UIMessageType.SYSTEM
+                    Help.show_command_help(cmd).strip(), msg_type=UIMessageType.SYSTEM
                 )
 
         elif cmd == '/inbox':
@@ -133,18 +135,20 @@ class CommandDispatcher:
             self._ipc.send_command(GetConnectionsCommand())
 
         elif cmd.startswith('/contacts'):
-            self._dispatch_contacts(parts)
+            self._dispatch_contacts(cmd, parts)
 
         else:
             return False
 
         return True
 
-    def _dispatch_contacts(self, parts: List[str]) -> None:
+    def _dispatch_contacts(self, cmd: str, parts: List[str]) -> None:
         """
         Helper routing specifically for /contacts subcommands.
+        Dynamically fetches usage strings from the centralized Help registry if arguments are missing.
 
         Args:
+            cmd (str): The base command invoked (e.g. '/contacts').
             parts (List[str]): The space-separated components of the typed command.
 
         Returns:
@@ -167,7 +171,7 @@ class CommandDispatcher:
                 )
             else:
                 self._renderer.print_message(
-                    'Usage: /contacts add <alias> [onion]',
+                    Help.show_command_help(cmd).strip(),
                     msg_type=UIMessageType.SYSTEM,
                 )
         elif subcmd in ('rm', 'remove'):
@@ -179,7 +183,7 @@ class CommandDispatcher:
                 self._ipc.send_command(RemoveContactCommand(alias=parts[2].lower()))
             else:
                 self._renderer.print_message(
-                    'Usage: /contacts rm <alias>', msg_type=UIMessageType.SYSTEM
+                    Help.show_command_help(cmd).strip(), msg_type=UIMessageType.SYSTEM
                 )
         elif subcmd == 'rename':
             if len(parts) == 3 and self._session.focused_alias:
@@ -188,7 +192,7 @@ class CommandDispatcher:
                 old_alias, new_alias = parts[2].lower(), parts[3].lower()
             else:
                 self._renderer.print_message(
-                    'Usage: /contacts rename <old> <new>', msg_type=UIMessageType.SYSTEM
+                    Help.show_command_help(cmd).strip(), msg_type=UIMessageType.SYSTEM
                 )
                 return
             self._ipc.send_command(
@@ -196,5 +200,5 @@ class CommandDispatcher:
             )
         else:
             self._renderer.print_message(
-                'Usage: /contacts [list|add|rm|rename]', msg_type=UIMessageType.SYSTEM
+                Help.show_command_help(cmd).strip(), msg_type=UIMessageType.SYSTEM
             )

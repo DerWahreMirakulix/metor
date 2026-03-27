@@ -36,6 +36,30 @@ class ProfileManager:
         self.paths: Paths = Paths(self.profile_name)
         self.config: Config = Config(self.paths)
 
+    def exists(self) -> bool:
+        """
+        Checks if the profile physically exists on disk.
+
+        Args:
+            None
+
+        Returns:
+            bool: True if it exists, False otherwise.
+        """
+        return self.paths.exists()
+
+    def initialize(self) -> None:
+        """
+        Explicitly creates the profile filesystem structure with strict permissions.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self.paths.create_directories()
+
     # --- Directory Compatibility Proxies for existing architecture ---
     def get_config_dir(self) -> str:
         """
@@ -108,6 +132,8 @@ class ProfileManager:
         Returns:
             None
         """
+        if not self.exists():
+            self.initialize()
         with self.paths.get_daemon_port_file().open('w') as f:
             f.write(str(port))
 
@@ -243,10 +269,10 @@ class ProfileManager:
         if target_dir.exists():
             return False, f"Profile '{safe_name}' already exists."
 
-        target_dir.mkdir(parents=True)
+        pm: 'ProfileManager' = ProfileManager(safe_name)
+        pm.initialize()
 
         if is_remote or port:
-            pm: 'ProfileManager' = ProfileManager(safe_name)
             if is_remote:
                 pm.config.set(ProfileConfigKey.IS_REMOTE, True)
             if port:
@@ -352,6 +378,9 @@ class ProfileManager:
             return False, 'Invalid profile name.'
 
         pm: 'ProfileManager' = cls(safe_name)
+        if not pm.exists():
+            return False, f"Profile '{safe_name}' does not exist."
+
         if pm.is_daemon_running() and not pm.is_remote():
             return (
                 False,

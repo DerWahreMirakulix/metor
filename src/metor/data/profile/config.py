@@ -55,9 +55,14 @@ class Config:
             ProfileConfigKey.DAEMON_PORT.value: None,
         }
 
-        with FileLock(config_file):
-            with config_file.open('w', encoding='utf-8') as f:
-                json.dump(default_data, f, indent=4)
+        # ONLY create the file if the profile folder physically exists
+        if self._paths.exists():
+            try:
+                with FileLock(config_file):
+                    with config_file.open('w', encoding='utf-8') as f:
+                        json.dump(default_data, f, indent=4)
+            except IOError:
+                pass
 
         return default_data
 
@@ -91,6 +96,7 @@ class Config:
     def set(self, key: Union[ProfileConfigKey, SettingKey, str], value: Any) -> None:
         """
         Writes a setting safely using a file lock.
+        Implies directory creation if a setting is deliberately saved.
 
         Args:
             key (Union[ProfileConfigKey, SettingKey, str]): The setting to save.
@@ -99,6 +105,9 @@ class Config:
         Returns:
             None
         """
+        if not self._paths.exists():
+            self._paths.create_directories()
+
         key_str: str = key.value if isinstance(key, Enum) else key
         config_file: Path = self._paths.get_config_file()
 

@@ -47,7 +47,7 @@ class MetorApp:
         )
         self.parser.add_argument('--port', type=int, help='Set static daemon port')
 
-        self.parser.add_argument('command', nargs='?', default='help')
+        self.parser.add_argument('command', nargs='?', default='quickstart')
         self.parser.add_argument('subcommand', nargs='?')
         self.parser.add_argument('extra', nargs='*')
 
@@ -132,6 +132,8 @@ class MetorApp:
     def execute(self) -> None:
         """
         Parses the CLI arguments and executes the corresponding application logic.
+        Implements a pre-routing Help Interceptor to handle specific usage requests cleanly.
+        Dynamically fetches error usage strings adhering to the DRY principle.
 
         Args:
             None
@@ -143,7 +145,28 @@ class MetorApp:
         sub: Optional[str] = self.args.subcommand
         ext: List[str] = self.args.extra
 
-        if cmd == 'help':
+        # --- Pre-Routing Help Interceptor ---
+        is_help_request: bool = False
+        if cmd in ('-h', '--help'):
+            is_help_request = True
+            cmd = 'help'
+        elif sub in ('-h', '--help'):
+            is_help_request = True
+        elif '-h' in ext or '--help' in ext:
+            is_help_request = True
+
+        if is_help_request:
+            if cmd and cmd not in ('help', 'quickstart', '-h', '--help'):
+                print(Help.show_command_help(cmd, sub))
+            else:
+                print(Help.show_main_help())
+            return
+
+        # --- Standard Routing ---
+        if cmd == 'quickstart':
+            print(Help.show_quick_start())
+
+        elif cmd == 'help':
             print(Help.show_main_help())
 
         elif cmd == 'daemon':
@@ -184,7 +207,7 @@ class MetorApp:
 
         elif cmd == 'unlock':
             if not sub:
-                print('Usage: metor unlock <password>')
+                print(Help.show_command_help(cmd))
             else:
                 print(self.proxy.unlock_daemon(sub))
 
@@ -192,9 +215,13 @@ class MetorApp:
             if sub == 'set' and len(ext) >= 2:
                 print(self.proxy.handle_settings(ext[0], ext[1]))
             else:
-                print('Usage: metor settings set <domain.key> <value>')
+                print(Help.show_command_help(cmd))
 
         elif cmd == 'chat':
+            if not self._pm.exists():
+                print(f"Profile '{self._pm.profile_name}' does not exist.")
+                return
+
             if not self._pm.is_daemon_running():
                 print('The background daemon is not running or unreachable.')
                 return
@@ -238,7 +265,7 @@ class MetorApp:
 
         elif cmd == 'send':
             if not sub or not ext:
-                print('Usage: metor send <alias> "msg"')
+                print(Help.show_command_help(cmd))
             else:
                 print(self.proxy.send_drop(sub, ' '.join(ext)))
 
@@ -290,29 +317,31 @@ class MetorApp:
         elif cmd == 'contacts':
             if sub == 'add':
                 if len(ext) < 1:
-                    print('Usage: metor contacts add <alias> [onion]')
+                    print(Help.show_command_help(cmd))
                 else:
                     onion: Optional[str] = ext[1] if len(ext) > 1 else None
                     print(self.proxy.contacts_add(ext[0], onion))
             elif sub in ('rm', 'remove'):
                 if len(ext) < 1:
-                    print('Usage: metor contacts rm <alias>')
+                    print(Help.show_command_help(cmd))
                 else:
                     print(self.proxy.contacts_rm(ext[0]))
             elif sub == 'rename':
                 if len(ext) < 2:
-                    print('Usage: metor contacts rename <old> <new>')
+                    print(Help.show_command_help(cmd))
                 else:
                     print(self.proxy.contacts_rename(ext[0], ext[1]))
             elif sub == 'clear':
                 print(self.proxy.contacts_clear())
-            else:
+            elif sub in ('list', None):
                 print(self.proxy.contacts_list())
+            else:
+                print(Help.show_command_help(cmd))
 
         elif cmd == 'profiles':
             if sub == 'add':
                 if len(ext) < 1:
-                    print('Usage: metor profiles add <name> [--remote] [--port <int>]')
+                    print(Help.show_command_help(cmd))
                 else:
                     _, msg = ProfileManager.add_profile_folder(
                         ext[0], is_remote=self.args.remote, port=self.args.port
@@ -320,7 +349,7 @@ class MetorApp:
                     print(msg)
             elif sub in ('rm', 'remove'):
                 if len(ext) < 1:
-                    print('Usage: metor profiles rm <name> [--nuke-remote]')
+                    print(Help.show_command_help(cmd))
                 else:
                     target_profile: str = ext[0]
                     is_nuke_remote = '--nuke-remote' in ext
@@ -336,25 +365,27 @@ class MetorApp:
                     print(msg)
             elif sub == 'rename':
                 if len(ext) < 2:
-                    print('Usage: metor profiles rename <old> <new>')
+                    print(Help.show_command_help(cmd))
                 else:
                     _, msg = ProfileManager.rename_profile_folder(ext[0], ext[1])
                     print(msg)
             elif sub == 'set-default':
                 if len(ext) < 1:
-                    print('Usage: metor profiles set-default <name>')
+                    print(Help.show_command_help(cmd))
                 else:
                     _, msg = ProfileManager.set_default_profile(ext[0])
                     print(msg)
             elif sub == 'clear':
                 if len(ext) < 1:
-                    print('Usage: metor profiles clear <name>')
+                    print(Help.show_command_help(cmd))
                 else:
                     target_pm: ProfileManager = ProfileManager(ext[0])
                     target_proxy: CliProxy = CliProxy(target_pm)
                     print(target_proxy.clear_profile_db())
-            else:
+            elif sub in ('list', None):
                 print(ProfileManager.show(self._pm.profile_name))
+            else:
+                print(Help.show_command_help(cmd))
 
         else:
             print("Unknown command. Use 'metor help' to see available commands.")

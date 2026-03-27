@@ -7,7 +7,7 @@ import json
 import dataclasses
 from dataclasses import dataclass, asdict, field
 from enum import Enum
-from typing import Optional, List, Dict, Any, Type, Union
+from typing import Optional, List, Dict, Any, Type, Union, Set
 
 
 class Action(str, Enum):
@@ -95,10 +95,18 @@ class IpcCommand(IpcMessage):
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'IpcCommand':
-        """Factory method to instantiate the correct strict subclass."""
+        """
+        Factory method to instantiate the correct strict subclass based on the Action enum.
+
+        Args:
+            data (Dict[str, Any]): The deserialized JSON payload from the IPC socket.
+
+        Returns:
+            IpcCommand: The instantiated strictly-typed command.
+        """
         action: Action = Action(data['action'])
         target_cls: Type['IpcCommand'] = _CMD_MAP[action]
-        valid_keys: set[str] = {f.name for f in dataclasses.fields(target_cls)}
+        valid_keys: Set[str] = {f.name for f in dataclasses.fields(target_cls)}
         kwargs: Dict[str, Any] = {
             k: v for k, v in data.items() if k in valid_keys and k != 'action'
         }
@@ -111,10 +119,18 @@ class IpcEvent(IpcMessage):
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'IpcEvent':
-        """Factory method to instantiate the correct strict subclass."""
+        """
+        Factory method to instantiate the correct strict subclass based on the EventType enum.
+
+        Args:
+            data (Dict[str, Any]): The deserialized JSON payload from the IPC socket.
+
+        Returns:
+            IpcEvent: The instantiated strictly-typed event.
+        """
         event_type: EventType = EventType(data['type'])
         target_cls: Type['IpcEvent'] = _EVENT_MAP[event_type]
-        valid_keys: set[str] = {f.name for f in dataclasses.fields(target_cls)}
+        valid_keys: Set[str] = {f.name for f in dataclasses.fields(target_cls)}
         kwargs: Dict[str, Any] = {
             k: v for k, v in data.items() if k in valid_keys and k != 'type'
         }
@@ -208,6 +224,7 @@ class SwitchCommand(IpcCommand):
 class SendDropCommand(IpcCommand):
     target: str
     text: str
+    cli_mode: bool = False
     action: Action = field(default=Action.SEND_DROP, init=False)
 
 

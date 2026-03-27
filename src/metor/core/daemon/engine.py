@@ -186,6 +186,8 @@ class Daemon:
         Returns:
             None
         """
+        self._pm.initialize()
+
         success, msg = self._tm.start()
         if not success:
             print(f'{Theme.RED}{msg}{Theme.RESET}')
@@ -237,12 +239,13 @@ class Daemon:
         secure_shred_file(db_path)
 
         hs_dir: Path = Path(self._pm.get_hidden_service_dir())
-        for key_file in [
+        key_files: List[str] = [
             Constants.METOR_SECRET_KEY,
             Constants.TOR_SECRET_KEY,
             f'{Constants.TOR_SECRET_KEY}.enc',
             Constants.TOR_PUBLIC_KEY,
-        ]:
+        ]
+        for key_file in key_files:
             secure_shred_file(hs_dir / key_file)
 
         self._ipc.broadcast(
@@ -513,6 +516,24 @@ class Daemon:
                     self._hm.log_event(
                         HistoryEvent.ASYNC_QUEUED,
                         onion,
+                    )
+
+                if cmd.cli_mode:
+                    self._ipc.send_to(
+                        conn,
+                        CliResponseEvent(
+                            text=f"Message successfully queued for '{alias}'.",
+                            alias=alias,
+                        ),
+                    )
+            else:
+                if cmd.cli_mode:
+                    self._ipc.send_to(
+                        conn,
+                        CliResponseEvent(
+                            text=f"Invalid target: '{cmd.target}'.",
+                            success=False,
+                        ),
                     )
 
         elif isinstance(cmd, GetInboxCommand):

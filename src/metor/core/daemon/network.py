@@ -9,7 +9,7 @@ import threading
 import time
 import base64
 import secrets
-from typing import Dict, List, Optional, Callable, Tuple, Any
+from typing import Dict, List, Optional, Callable, Tuple, Any, Set
 
 from metor.core.tor import TorManager
 from metor.core.api import (
@@ -86,6 +86,7 @@ class NetworkManager:
         # This prevents any desync bugs if the user renames an active alias in the UI.
         self._connections: Dict[str, socket.socket] = {}
         self._pending_connections: Dict[str, socket.socket] = {}
+        self._outbound_attempts: Set[str] = set()
         self._initial_buffers: Dict[str, str] = {}
         self._unacked_messages: Dict[str, Dict[str, str]] = {}
         self._ram_buffers: Dict[str, List[Tuple[str, str]]] = {}
@@ -295,6 +296,21 @@ class NetworkManager:
             conn.close()
             return
 
+        if not is_async:
+            with self._lock:
+                if onion in self._outbound_attempts:
+                    if self._tm.onion and self._tm.onion < onion:
+                        try:
+                            conn.sendall(
+                                f'{TorCommand.REJECT.value} {self._tm.onion}\n'.encode(
+                                    'utf-8'
+                                )
+                            )
+                        except Exception:
+                            pass
+                        conn.close()
+                        return
+
         if is_async:
             if not Settings.get(SettingKey.ALLOW_DROPS):
                 conn.close()
@@ -408,6 +424,7 @@ class NetworkManager:
     def connect_to(self, target: str) -> None:
         """
         Initiates an outbound Tor connection and parses the handshake response safely.
+        Implements rigorous retry mechanisms to handle network instability.
 
         Args:
             target (str): The alias or onion address to connect to.
@@ -423,49 +440,79 @@ class NetworkManager:
         with self._lock:
             if onion in self._connections:
                 return
+            self._outbound_attempts.add(onion)
 
         try:
-            conn: socket.socket = self._tm.connect(onion)
-            conn.settimeout(10.0)
-
-            buffer: str = ''
-            while '\n' not in buffer:
-                chunk: bytes = conn.recv(4096)
-                if not chunk:
+            max_retries: int = Settings.get(SettingKey.MAX_CONNECT_RETRIES)
+            for attempt in range(1, max_retries + 1):
+                if self._stop_flag.is_set():
                     break
-                buffer += chunk.decode('utf-8')
+                try:
+                    conn: socket.socket = self._tm.connect(onion)
+                    conn.settimeout(10.0)
 
-            if '\n' in buffer:
-                challenge_line, buffer = buffer.split('\n', 1)
-                challenge: str = challenge_line.strip().split(' ')[1]
-                signature: Optional[str] = self._crypto.sign_challenge(challenge)
-                conn.sendall(
-                    f'{TorCommand.AUTH.value} {self._tm.onion} {signature}\n'.encode(
-                        'utf-8'
-                    )
-                )
-                conn.settimeout(None)
+                    buffer: str = ''
+                    while '\n' not in buffer:
+                        chunk: bytes = conn.recv(4096)
+                        if not chunk:
+                            break
+                        buffer += chunk.decode('utf-8')
 
-                self._hm.log_event(HistoryEvent.REQUESTED, onion)
+                    if '\n' in buffer:
+                        challenge_line, buffer = buffer.split('\n', 1)
+                        challenge: str = challenge_line.strip().split(' ')[1]
+                        signature: Optional[str] = self._crypto.sign_challenge(
+                            challenge
+                        )
+                        conn.sendall(
+                            f'{TorCommand.AUTH.value} {self._tm.onion} {signature}\n'.encode(
+                                'utf-8'
+                            )
+                        )
+                        conn.settimeout(None)
 
-                self._broadcast(
-                    InfoEvent(
-                        alias=alias,
-                        # We intentionally don't resolve the alias since it is dynamically inserted in the UI
-                        text="Request sent to '{alias}'. Waiting for acceptance...",
-                    )
-                )
-                self._start_receiving(onion, conn, buffer)
-            else:
-                raise ConnectionError('Handshake incomplete.')
-        except Exception:
-            self._broadcast(
-                InfoEvent(
-                    alias=alias,
-                    # We intentionally don't resolve the alias since it is dynamically inserted in the UI
-                    text="Failed to connect to '{alias}'.",
-                )
-            )
+                        self._hm.log_event(HistoryEvent.REQUESTED, onion)
+
+                        self._broadcast(
+                            InfoEvent(
+                                alias=alias,
+                                # We intentionally don't resolve the alias since it is dynamically inserted in the UI
+                                text="Request sent to '{alias}'. Waiting for acceptance...",
+                            )
+                        )
+                        self._start_receiving(onion, conn, buffer)
+                        return
+                    else:
+                        raise ConnectionError('Handshake incomplete.')
+                except Exception:
+                    if attempt < max_retries:
+                        self._broadcast(
+                            InfoEvent(
+                                alias=alias,
+                                # We intentionally don't resolve the alias since it is dynamically inserted in the UI
+                                text=f"Connecting to '{{alias}}' failed. Retrying ({attempt}/{max_retries})...",
+                            )
+                        )
+                        for _ in range(3):
+                            if self._stop_flag.is_set():
+                                break
+                            time.sleep(1.0)
+                    else:
+                        self._hm.log_event(
+                            HistoryEvent.ASYNC_FAILED,
+                            onion,
+                            'Connection timeout/exhausted',
+                        )
+                        self._broadcast(
+                            InfoEvent(
+                                alias=alias,
+                                # We intentionally don't resolve the alias since it is dynamically inserted in the UI
+                                text="Failed to connect to '{alias}'.",
+                            )
+                        )
+        finally:
+            with self._lock:
+                self._outbound_attempts.discard(onion)
 
     def accept(self, target: str) -> None:
         """

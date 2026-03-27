@@ -21,19 +21,32 @@ from metor.data.settings import Settings, SettingKey
 class HistoryEvent(str, Enum):
     """Predefined event types for the history log."""
 
-    ASYNC_QUEUED = 'async_queued'
-    ASYNC_SENT = 'async_sent'
-    ASYNC_RECEIVED = 'async_received'
-    ASYNC_FAILED = 'async_failed'
+    ASYNC_QUEUED = 'drop_queued'
+    ASYNC_SENT = 'drop_sent'
+    ASYNC_RECEIVED = 'drop_received'
+    ASYNC_FAILED = 'drop_failed'
 
-    REQUESTED = 'requested'
-    REQUESTED_BY_REMOTE = 'requested_by_remote'
-    CONNECTED = 'connected'
-    REJECTED = 'rejected'
-    REJECTED_BY_REMOTE = 'rejected_by_remote'
-    DISCONNECTED = 'disconnected'
-    DISCONNECTED_BY_REMOTE = 'disconnected_by_remote'
-    CONNECTION_LOST = 'connection_lost'
+    REQUESTED = 'live_requested'
+    REQUESTED_BY_REMOTE = 'live_requested_by_remote'
+    CONNECTED = 'live_connected'
+    REJECTED = 'live_rejected'
+    REJECTED_BY_REMOTE = 'live_rejected_by_remote'
+    DISCONNECTED = 'live_disconnected'
+    DISCONNECTED_BY_REMOTE = 'live_disconnected_by_remote'
+    CONNECTION_LOST = 'live_connection_lost'
+
+    @property
+    def is_drop(self) -> bool:
+        """
+        Determines if the event is related to asynchronous messaging drops.
+
+        Args:
+            None
+
+        Returns:
+            bool: True if the event is a drop type, False otherwise.
+        """
+        return self.value.startswith('drop_')
 
 
 class HistoryManager:
@@ -69,14 +82,7 @@ class HistoryManager:
         Returns:
             None
         """
-        is_drop_event: bool = status in (
-            HistoryEvent.ASYNC_QUEUED,
-            HistoryEvent.ASYNC_SENT,
-            HistoryEvent.ASYNC_RECEIVED,
-            HistoryEvent.ASYNC_FAILED,
-        )
-
-        if is_drop_event:
+        if status.is_drop:
             if not Settings.get(SettingKey.RECORD_DROP_EVENTS):
                 return
         else:

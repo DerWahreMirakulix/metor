@@ -25,9 +25,41 @@ class Paths:
         self.profile_name: str = profile_name
         self.base_dir: Path = Constants.DATA / self.profile_name
 
+    def exists(self) -> bool:
+        """
+        Checks if the base profile directory physically exists on disk.
+
+        Args:
+            None
+
+        Returns:
+            bool: True if the directory exists, False otherwise.
+        """
+        return self.base_dir.is_dir()
+
+    def create_directories(self) -> None:
+        """
+        Explicitly creates the profile directories and sets strict OPSEC permissions.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+
+        hs_dir: Path = self.base_dir / Constants.HIDDEN_SERVICE_DIR
+        hs_dir.mkdir(mode=0o700, exist_ok=True)
+        hs_dir.chmod(0o700)
+
+        data_dir: Path = self.base_dir / Constants.TOR_DATA_DIR
+        data_dir.mkdir(mode=0o700, exist_ok=True)
+        data_dir.chmod(0o700)
+
     def get_config_dir(self) -> Path:
         """
-        Retrieves and ensures the configuration directory exists.
+        Retrieves the configuration directory path without auto-creating it.
 
         Args:
             None
@@ -35,7 +67,6 @@ class Paths:
         Returns:
             Path: The path object to the config directory.
         """
-        self.base_dir.mkdir(parents=True, exist_ok=True)
         return self.base_dir
 
     def get_config_file(self) -> Path:
@@ -64,7 +95,7 @@ class Paths:
 
     def get_hidden_service_dir(self) -> Path:
         """
-        Retrieves and ensures correct permissions for the Tor hidden service directory.
+        Retrieves the Tor hidden service directory path without auto-creating it.
 
         Args:
             None
@@ -72,14 +103,11 @@ class Paths:
         Returns:
             Path: The hidden service directory path.
         """
-        hs_dir: Path = self.get_config_dir() / Constants.HIDDEN_SERVICE_DIR
-        hs_dir.mkdir(mode=0o700, exist_ok=True)
-        hs_dir.chmod(0o700)
-        return hs_dir
+        return self.get_config_dir() / Constants.HIDDEN_SERVICE_DIR
 
     def get_tor_data_dir(self) -> Path:
         """
-        Retrieves and ensures correct permissions for the Tor data directory.
+        Retrieves the Tor data directory path without auto-creating it.
 
         Args:
             None
@@ -87,10 +115,7 @@ class Paths:
         Returns:
             Path: The Tor data directory path.
         """
-        data_dir: Path = self.get_config_dir() / Constants.TOR_DATA_DIR
-        data_dir.mkdir(mode=0o700, exist_ok=True)
-        data_dir.chmod(0o700)
-        return data_dir
+        return self.get_config_dir() / Constants.TOR_DATA_DIR
 
     def get_db_file(self) -> Path:
         """
