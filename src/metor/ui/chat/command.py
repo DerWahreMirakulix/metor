@@ -72,7 +72,7 @@ class CommandDispatcher:
                     self._renderer.set_focus(None)
             else:
                 self._renderer.print_message(
-                    'No active connection to end.', msg_type=UIMessageType.SYSTEM
+                    'No focused session to end.', msg_type=UIMessageType.SYSTEM
                 )
 
         elif cmd == '/connect':
