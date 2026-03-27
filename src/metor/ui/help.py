@@ -2,6 +2,8 @@
 Module providing static help texts and CLI command documentation.
 """
 
+from metor.utils.helper import get_divider_string
+
 # Local Package Imports
 from metor.ui.theme import Theme
 
@@ -314,6 +316,6 @@ class Help:
                 'Wipe ALL profiles, keys, and databases.\n',
                 Help.DESC_COLUMN,
             )
-            + f'{ind}- - -\n\n'
+            + f'{ind}{get_divider_string(3, add_spaces=True)}\n\n'
             + Help.show_chat_help(start, intend)
         )

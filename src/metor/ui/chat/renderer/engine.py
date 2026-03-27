@@ -279,17 +279,25 @@ class Renderer:
         """
         self.print_message(' ', msg_type=UIMessageType.RAW, skip_prompt=True)
 
-    def print_divider(self, msg_type: UIMessageType = UIMessageType.RAW) -> None:
+    def print_divider(
+        self, msg_type: UIMessageType = UIMessageType.RAW, compact: bool = False
+    ) -> None:
         """
         Prints a visual divider line.
 
         Args:
             msg_type (UIMessageType): The message type for the divider.
+            compact (bool): Whether to use a compact divider.
 
         Returns:
             None
         """
-        self.print_message(get_divider_string(), msg_type=msg_type)
+        self.print_message(
+            get_divider_string()
+            if not compact
+            else get_divider_string(3, add_spaces=True),
+            msg_type=msg_type,
+        )
 
     def clear_input_area(self) -> None:
         """

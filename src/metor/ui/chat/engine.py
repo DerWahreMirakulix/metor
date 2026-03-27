@@ -249,11 +249,13 @@ class Chat:
 
         self._conn_event.wait(timeout=1.0)
 
+        self._renderer.print_divider(compact=True)
+
         if self._session.header_active or self._session.header_pending:
+            self._renderer.print_empty_line()
             self._renderer.print_message(
                 self._session.show(is_header_mode=True), msg_type=UIMessageType.RAW
             )
-            self._renderer.print_empty_line()
 
         self._renderer.print_empty_line()
         self._renderer.print_prompt()

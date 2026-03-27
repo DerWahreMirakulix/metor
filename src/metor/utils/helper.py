@@ -50,17 +50,21 @@ def get_header_string(text: str) -> str:
     return f'--- {text} ---'
 
 
-def get_divider_string(length: int = 30) -> str:
+def get_divider_string(length: int = 30, add_spaces: bool = False) -> str:
     """
     Generates a divider string consisting of dashes.
 
     Args:
         length (int): The number of dashes in the divider.
+        add_space (bool): Whether to add a space between the dashes.
 
     Returns:
         str: The divider string.
     """
-    return '-' * length
+    divider = '-' * length
+    if add_spaces:
+        divider = ' '.join(divider)
+    return divider
 
 
 def secure_shred_file(file_path: Path) -> None:
