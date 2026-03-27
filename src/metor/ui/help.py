@@ -161,7 +161,7 @@ class Help:
 
         return (
             '\n'
-            + f'{ind}{Theme.GREEN}Metor - Secure Tor Messenger{Theme.RESET}\n\n'
+            + f'{ind}{Theme.GREEN}Metor - A Tor Messenger Framework{Theme.RESET}\n\n'
             + f'{ind}Usage: metor [-p PROFILE] <command> [subcommand] [args...]\n\n'
             + f'{ind}{Theme.YELLOW}Global Options:{Theme.RESET}\n'
             + Help._format_line(
