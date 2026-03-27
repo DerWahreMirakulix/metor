@@ -170,15 +170,15 @@ class HistoryManager:
         if target:
             alias, onion, exists = cm.resolve_target(target)
             if not exists:
-                return f"Contact '{target}' not found."
-            disp_name = f'contact {Theme.CYAN}{alias}{Theme.RESET}'
+                return f"Peer '{target}' not found."
+            disp_name = f'peer {Theme.CYAN}{alias}{Theme.RESET}'
 
         rows: List[Tuple[str, str, Optional[str], str]] = self.get_history(onion, limit)
 
         if not rows:
             return f'No event history available for {disp_name}.'
 
-        out: str = f'{get_header_string(f"Event history for {disp_name}")}\n'
+        out: str = f'{get_header_string(f"Event history for {disp_name} (Last {len(rows)})")}\n'
 
         for row in rows:
             timestamp, status, row_onion, reason = row
@@ -186,7 +186,7 @@ class HistoryManager:
                 cm.get_alias_by_onion(row_onion) if row_onion else 'Unknown'
             )
 
-            line: str = f'[{timestamp}] {Theme.CYAN}{status}{Theme.RESET} | remote alias: {Theme.CYAN}{display_alias}{Theme.RESET} | remote identity: {Theme.YELLOW}{row_onion}{Theme.RESET}'
+            line: str = f'[{timestamp}] {Theme.CYAN}{status}{Theme.RESET} | remote alias: {Theme.PURPLE}{display_alias}{Theme.RESET} | remote identity: {Theme.YELLOW}{row_onion}{Theme.RESET}'
             if reason:
                 line += f' | reason: {Theme.CYAN}{reason}{Theme.RESET}'
 

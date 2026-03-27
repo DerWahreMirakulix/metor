@@ -63,13 +63,13 @@ class Help:
             )
             + Help._format_line(
                 sub_sub_ind,
-                '/accept [alias]',
+                '/accept [onion|alias]',
                 'Accept a background connection request.',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
                 sub_sub_ind,
-                '/reject [alias]',
+                '/reject [onion|alias]',
                 'Reject a background connection request.',
                 Help.DESC_COLUMN,
             )
@@ -81,13 +81,13 @@ class Help:
             )
             + Help._format_line(
                 sub_sub_ind,
-                '/end [alias]',
+                '/end [onion|alias]',
                 'Terminate an active or pending connection.',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
                 sub_sub_ind,
-                '/fallback [alias]',
+                '/fallback [onion|alias]',
                 'Force pending live messages into offline drops.',
                 Help.DESC_COLUMN,
             )
@@ -100,7 +100,7 @@ class Help:
             + f'{sub_ind}{Theme.PURPLE}Messaging & Display:{Theme.RESET}\n'
             + Help._format_line(
                 sub_sub_ind,
-                '/inbox [alias]',
+                '/inbox [onion|alias]',
                 'Check inbox counts or read drops from an alias.',
                 Help.DESC_COLUMN,
             )
@@ -119,19 +119,19 @@ class Help:
             )
             + Help._format_line(
                 sub_sub_ind,
-                '/contacts add [alias] [onion]',
+                '/contacts add <alias> [onion]',
                 'Save a RAM alias or add a new manual contact.',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
                 sub_sub_ind,
-                '/contacts rm [alias]',
+                '/contacts rm <onion|alias>',
                 'Remove from disk (active chat reverts to RAM).',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
                 sub_sub_ind,
-                '/contacts rename [old] <new>',
+                '/contacts rename <onion|alias> <new>',
                 'Change the name of any RAM or Disk alias.\n',
                 Help.DESC_COLUMN,
             )
@@ -195,31 +195,31 @@ class Help:
             + f'{ind}{Theme.YELLOW}Messaging & History:{Theme.RESET}\n'
             + Help._format_line(
                 sub_ind,
-                'metor send <alias> "msg"',
+                'metor send <onion|alias> "msg"',
                 'Drop an offline message to a contact.',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
                 sub_ind,
-                'metor inbox [alias]',
+                'metor inbox [onion|alias]',
                 'Check for unread offline messages or read them.',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
                 sub_ind,
-                'metor messages [show] <alias> [limit]',
+                'metor messages [show] <onion|alias> [limit]',
                 'View past chat history with a contact.',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
                 sub_ind,
-                'metor messages clear [alias] [--non-contacts]',
+                'metor messages clear [onion|alias] [--non-contacts]',
                 'Delete message history (or only from unsaved peers).',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
                 sub_ind,
-                'metor history [show|clear] [alias] [limit]',
+                'metor history [show|clear] [onion|alias] [limit]',
                 'View or wipe the connection event log.\n',
                 Help.DESC_COLUMN,
             )
@@ -238,13 +238,13 @@ class Help:
             )
             + Help._format_line(
                 sub_ind,
-                'metor contacts rm <alias>',
+                'metor contacts rm <onion|alias>',
                 'Remove from disk (active chat reverts to RAM).',
                 Help.DESC_COLUMN,
             )
             + Help._format_line(
                 sub_ind,
-                'metor contacts rename <old> <new>',
+                'metor contacts rename <onion|alias> <new>',
                 'Rename a saved contact or active session.',
                 Help.DESC_COLUMN,
             )

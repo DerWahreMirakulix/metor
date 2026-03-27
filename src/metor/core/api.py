@@ -402,6 +402,7 @@ class MsgFallbackToDropEvent(IpcEvent):
 class CliResponseEvent(IpcEvent):
     text: str
     success: bool = True
+    alias: Optional[str] = None
     type: EventType = field(default=EventType.CLI_RESPONSE, init=False)
 
 

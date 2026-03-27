@@ -1,3 +1,8 @@
+"""
+Module defining data models and enumerations for profile configurations.
+Enforces strict typing for profile-level settings to prevent key collisions.
+"""
+
 from enum import Enum
 
 

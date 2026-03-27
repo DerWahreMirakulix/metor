@@ -185,7 +185,7 @@ class NetworkManager:
             except Exception:
                 pass
 
-    def force_fallback(self, target: str) -> None:
+    def force_fallback(self, target: str) -> Tuple[bool, str]:
         """
         Forces all unacknowledged outgoing live messages to the drop queue.
 
@@ -193,19 +193,20 @@ class NetworkManager:
             target (str): The target alias or onion address.
 
         Returns:
-            None
+            Tuple[bool, str]: A success flag and context-specific status message.
         """
         alias, onion, exists = self._cm.resolve_target(target)
         if not exists:
-            return
+            return False, f"Peer '{target}' not found."
 
         with self._lock:
             unacked: Dict[str, str] = self._unacked_messages.pop(onion, {})
 
         if not unacked:
-            return
+            # We intentionally don't resolve the alias since it is dynamically inserted in the UI
+            return False, "No pending live messages found for '{alias}'."
 
-        for msg_id, content in unacked.items():
+        for _, content in unacked.items():
             self._mm.queue_message(
                 onion,
                 MessageDirection.OUT,
@@ -213,9 +214,17 @@ class NetworkManager:
                 content,
                 MessageStatus.PENDING,
             )
+            self._hm.log_event(
+                HistoryEvent.ASYNC_QUEUED, onion, 'Manual fallback to drop'
+            )
 
-        self._hm.log_event(HistoryEvent.ASYNC_QUEUED, onion, 'Manual fallback to drop')
         self._broadcast(MsgFallbackToDropEvent(msg_ids=list(unacked.keys())))
+
+        # We intentionally don't resolve the alias since it is dynamically inserted in the UI
+        return (
+            True,
+            f"Successfully converted {len(unacked)} unacked message(s) to '{{alias}}' into drops.",
+        )
 
     def _listener_target(self) -> None:
         """
@@ -590,7 +599,8 @@ class NetworkManager:
             if initiated_by_self:
                 self._broadcast(
                     SystemEvent(
-                        text=f"No active connection with '{alias}' to disconnect."
+                        # We intentionally don't resolve the alias since it is dynamically inserted in the UI
+                        text="No active connection with '{alias}' to disconnect."
                     )
                 )
             return
@@ -604,9 +614,9 @@ class NetworkManager:
                     content,
                     MessageStatus.PENDING,
                 )
-            self._hm.log_event(
-                HistoryEvent.ASYNC_QUEUED, onion, 'Unacked msgs converted to drop'
-            )
+                self._hm.log_event(
+                    HistoryEvent.ASYNC_QUEUED, onion, 'Unacked msgs converted to drop'
+                )
             self._broadcast(MsgFallbackToDropEvent(msg_ids=list(unacked.keys())))
 
         if conn:
@@ -640,7 +650,8 @@ class NetworkManager:
         self._broadcast(
             DisconnectedEvent(
                 alias=alias,
-                text=f"Disconnected from '{alias}'.",
+                # We intentionally don't resolve the alias since it is dynamically inserted in the UI
+                text="Disconnected from '{alias}'.",
             )
         )
 
@@ -670,6 +681,7 @@ class NetworkManager:
     def send_message(self, target: str, msg: str, msg_id: str) -> None:
         """
         Sends a live chat message and buffers it for ACK verification.
+        Implements auto-fallback to drops if the connection is lost.
 
         Args:
             target (str): The target alias or onion.
@@ -686,6 +698,18 @@ class NetworkManager:
 
         with self._lock:
             if onion not in self._connections:
+                if Settings.get(SettingKey.FALLBACK_TO_DROP):
+                    self._mm.queue_message(
+                        onion,
+                        MessageDirection.OUT,
+                        MessageType.TEXT,
+                        msg,
+                        MessageStatus.PENDING,
+                    )
+                    self._hm.log_event(
+                        HistoryEvent.ASYNC_QUEUED, onion, 'Auto fallback to drop'
+                    )
+                    self._broadcast(MsgFallbackToDropEvent(msg_ids=[msg_id]))
                 return
             conn: socket.socket = self._connections[onion]
             self._unacked_messages.setdefault(onion, {})[msg_id] = msg

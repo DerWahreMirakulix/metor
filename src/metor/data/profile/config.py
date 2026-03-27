@@ -1,3 +1,9 @@
+"""
+Module managing the profile-specific JSON configuration file.
+Provides thread-safe read/write operations and cascading lookups
+falling back to global application settings.
+"""
+
 import json
 from enum import Enum
 from typing import Any, Dict, Union

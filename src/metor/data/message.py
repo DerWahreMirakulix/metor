@@ -173,7 +173,7 @@ class MessageManager:
     def get_and_read_inbox(self, contact_onion: str) -> List[Tuple[int, str, str, str]]:
         """
         Retrieves all unread messages for a specific contact and executes the read policy.
-        If BURN_AFTER_READ is active, data is permanently erased instead of flagged as read.
+        If EPHEMERAL_MESSAGES is active, data is permanently erased instead of flagged as read.
 
         Args:
             contact_onion (str): The target onion address.
@@ -192,7 +192,7 @@ class MessageManager:
         )
 
         if messages:
-            if Settings.get(SettingKey.BURN_AFTER_READ):
+            if Settings.get(SettingKey.EPHEMERAL_MESSAGES):
                 delete_query: str = (
                     'DELETE FROM messages WHERE contact_onion = ? AND status = ?'
                 )
@@ -333,7 +333,7 @@ class MessageManager:
         """
         alias, onion, exists = cm.resolve_target(target)
         if not exists:
-            return f"Contact '{target}' not found in address book."
+            return f"Peer '{target}' not found in address book."
 
         disp_name: str = alias or str(onion)
         raw_messages: List[Tuple[int, str, str, str]] = self.get_and_read_inbox(
@@ -370,7 +370,7 @@ class MessageManager:
         """
         alias, onion, exists = cm.resolve_target(target)
         if not exists:
-            return f"Contact '{target}' not found in address book."
+            return f"Peer '{target}' not found in address book."
 
         disp_name: str = alias or str(onion)
         messages: List[Dict[str, Any]] = self.get_chat_history(str(onion), limit)

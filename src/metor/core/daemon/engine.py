@@ -442,7 +442,7 @@ class Daemon:
                 )
                 return
 
-            alias, _, exists = self._cm.resolve_target(cmd.target)
+            alias, _, exists = self._cm.resolve_target(cmd.target, auto_create=True)
 
             if not exists:
                 self._ipc.send_to(
@@ -456,6 +456,7 @@ class Daemon:
             self._ipc.broadcast(
                 InfoEvent(
                     alias=alias,
+                    # We intentionally don't resolve the alias since it is dynamically inserted in the UI
                     text="Connecting to '{alias}'...",
                 )
             )
@@ -476,9 +477,10 @@ class Daemon:
             self._network.send_message(cmd.target, cmd.text, cmd.msg_id)
 
         elif isinstance(cmd, FallbackCommand):
-            self._network.force_fallback(cmd.target)
+            success, msg = self._network.force_fallback(cmd.target)
+            alias, _, _ = self._cm.resolve_target(cmd.target, default_value=cmd.target)
             self._ipc.send_to(
-                conn, CliResponseEvent(text=f"Forced drop fallback for '{cmd.target}'.")
+                conn, CliResponseEvent(text=msg, success=success, alias=alias)
             )
 
         elif isinstance(cmd, SendDropCommand):
@@ -497,7 +499,7 @@ class Daemon:
                 )
                 return
 
-            _, onion, exists = self._cm.resolve_target(cmd.target)
+            alias, onion, exists = self._cm.resolve_target(cmd.target, auto_create=True)
 
             if exists:
                 self._mm.queue_message(
@@ -525,7 +527,10 @@ class Daemon:
         elif isinstance(cmd, MarkReadCommand):
             if cmd.cli_mode:
                 text: str = self._mm.show_read(cmd.target, self._cm)
-                self._ipc.send_to(conn, CliResponseEvent(text=text))
+                alias, _, _ = self._cm.resolve_target(
+                    cmd.target, default_value=cmd.target
+                )
+                self._ipc.send_to(conn, CliResponseEvent(text=text, alias=alias))
             else:
                 alias, onion, exists = self._cm.resolve_target(cmd.target)
                 if exists:
@@ -560,54 +565,60 @@ class Daemon:
                 self._ipc.send_to(conn, SwitchSuccessEvent(alias=alias))
 
         elif isinstance(cmd, GetHistoryCommand):
+            alias, _, _ = self._cm.resolve_target(cmd.target, default_value=cmd.target)
             text: str = self._hm.show(self._cm, cmd.target, cmd.limit)
-            self._ipc.send_to(conn, CliResponseEvent(text=text))
+            self._ipc.send_to(conn, CliResponseEvent(text=text, alias=alias))
 
         elif isinstance(cmd, ClearHistoryCommand):
             active_onions = self._network.get_active_onions()
-            if cmd.target:
-                _, onion, exists = self._cm.resolve_target(cmd.target)
-                if exists:
-                    success, msg = self._hm.clear_history(onion)
-                else:
-                    success, msg = False, 'Contact not found.'
+            alias, onion, exists = self._cm.resolve_target(
+                cmd.target, default_value=cmd.target
+            )
+
+            if cmd.target and not exists:
+                success, msg = False, 'Contact not found.'
             else:
-                success, msg = self._hm.clear_history()
+                success, msg = self._hm.clear_history(onion)
 
             deleted_aliases: List[str] = self._cm.cleanup_orphans(active_onions)
             for a in deleted_aliases:
                 self._ipc.broadcast(ContactRemovedEvent(alias=a))
 
-            self._ipc.send_to(conn, CliResponseEvent(text=msg, success=success))
+            self._ipc.send_to(
+                conn, CliResponseEvent(text=msg, success=success, alias=alias)
+            )
 
         elif isinstance(cmd, GetMessagesCommand):
+            alias, _, _ = self._cm.resolve_target(cmd.target, default_value=cmd.target)
             if cmd.target:
                 text = self._mm.show_history(cmd.target, self._cm, cmd.limit)
             else:
                 text = 'No target specified.'
-            self._ipc.send_to(conn, CliResponseEvent(text=text))
+            self._ipc.send_to(conn, CliResponseEvent(text=text, alias=alias))
 
         elif isinstance(cmd, ClearMessagesCommand):
             active_onions = self._network.get_active_onions()
-            if cmd.target:
-                _, onion, exists = self._cm.resolve_target(cmd.target)
-                if exists:
-                    success, msg = self._mm.clear_messages(onion, cmd.non_contacts_only)
-                else:
-                    success, msg = False, 'Contact not found.'
+            alias, onion, exists = self._cm.resolve_target(
+                cmd.target, default_value=cmd.target
+            )
+
+            if cmd.target and not exists:
+                success, msg = False, 'Contact not found.'
             else:
-                success, msg = self._mm.clear_messages(None, cmd.non_contacts_only)
+                success, msg = self._mm.clear_messages(onion, cmd.non_contacts_only)
 
             deleted_aliases = self._cm.cleanup_orphans(active_onions)
             for a in deleted_aliases:
                 self._ipc.broadcast(ContactRemovedEvent(alias=a))
 
-            self._ipc.send_to(conn, CliResponseEvent(text=msg, success=success))
+            self._ipc.send_to(
+                conn, CliResponseEvent(text=msg, success=success, alias=alias)
+            )
 
         elif isinstance(cmd, ClearContactsCommand):
             active_onions = self._network.get_active_onions()
-            success, msg, renames, removed = self._cm.clear_contacts(active_onions)
-            if success:
+            success_c, msg, renames, removed = self._cm.clear_contacts(active_onions)
+            if success_c:
                 for old, new, was_saved in renames:
                     self._ipc.broadcast(
                         RenameSuccessEvent(
@@ -619,7 +630,7 @@ class Daemon:
                     )
                 for a in removed:
                     self._ipc.broadcast(ContactRemovedEvent(alias=a))
-            self._ipc.send_to(conn, CliResponseEvent(text=msg, success=success))
+            self._ipc.send_to(conn, CliResponseEvent(text=msg, success=success_c))
 
         elif isinstance(cmd, ClearProfileDbCommand):
             active_onions = self._network.get_active_onions()
@@ -660,7 +671,7 @@ class Daemon:
                 _, msg = self._cm.add_contact(cmd.alias, cmd.onion)
             else:
                 _, msg = self._cm.promote_discovered_peer(cmd.alias)
-            self._ipc.send_to(conn, CliResponseEvent(text=msg))
+            self._ipc.send_to(conn, CliResponseEvent(text=msg, alias=cmd.alias))
 
         elif isinstance(cmd, RemoveContactCommand):
             active_onions = self._network.get_active_onions()
@@ -679,7 +690,9 @@ class Daemon:
                     )
                 for a in removed:
                     self._ipc.broadcast(ContactRemovedEvent(alias=a))
-            self._ipc.send_to(conn, CliResponseEvent(text=msg, success=success))
+            self._ipc.send_to(
+                conn, CliResponseEvent(text=msg, success=success, alias=cmd.alias)
+            )
 
         elif isinstance(cmd, RenameContactCommand):
             success, msg = self._cm.rename_contact(cmd.old_alias, cmd.new_alias)
@@ -687,4 +700,6 @@ class Daemon:
                 self._ipc.broadcast(
                     RenameSuccessEvent(old_alias=cmd.old_alias, new_alias=cmd.new_alias)
                 )
-            self._ipc.send_to(conn, CliResponseEvent(text=msg, success=success))
+            self._ipc.send_to(
+                conn, CliResponseEvent(text=msg, success=success, alias=cmd.new_alias)
+            )

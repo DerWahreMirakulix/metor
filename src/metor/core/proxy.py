@@ -122,10 +122,12 @@ class CliProxy:
                     resp_dict: Dict[str, Any] = json.loads(buffer.split('\n')[0])
                     event: IpcEvent = IpcEvent.from_dict(resp_dict)
 
-                    if isinstance(event, CliResponseEvent):
-                        return self._prefix_remote(event.text)
-                    elif getattr(event, 'text', None):
-                        return self._prefix_remote(getattr(event, 'text'))
+                    text = getattr(event, 'text', None)
+                    if text:
+                        alias = getattr(event, 'alias', None)
+                        if alias and '{alias}' in text:
+                            text = text.replace('{alias}', alias)
+                        return self._prefix_remote(text)
 
                     return self._prefix_remote('Command executed successfully.')
         except Exception:

@@ -1,3 +1,9 @@
+"""
+Module handling filesystem path resolutions for individual profiles.
+Enforces strict use of pathlib and manages directory permissions (0o700)
+for sensitive cryptographic and Tor data.
+"""
+
 from pathlib import Path
 
 from metor.utils.constants import Constants

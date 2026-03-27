@@ -100,9 +100,10 @@ class ContactManager:
                 (onion, alias),
             )
 
+        # We intentionally don't resolve the alias since it is dynamically inserted in the UI
         return (
             True,
-            f"Contact '{alias}' added successfully to profile '{self._pm.profile_name}'.",
+            f"Contact '{{alias}}' added successfully to profile '{self._pm.profile_name}'.",
         )
 
     def promote_discovered_peer(self, alias: str) -> Tuple[bool, str]:
@@ -126,7 +127,9 @@ class ContactManager:
             return False, f"Alias '{alias}' is already saved."
 
         self._sql.execute('UPDATE contacts SET is_saved = 1 WHERE alias = ?', (alias,))
-        return True, f"Discovered peer '{alias}' saved permanently to address book."
+
+        # We intentionally don't resolve the alias since it is dynamically inserted in the UI
+        return True, "Discovered peer '{alias}' saved permanently to address book."
 
     def rename_contact(self, old_alias: str, new_alias: str) -> Tuple[bool, str]:
         """
@@ -323,22 +326,29 @@ class ContactManager:
         return deleted_aliases
 
     def resolve_target(
-        self, target: Optional[str], default_value: Optional[str] = None
+        self,
+        target: Optional[str],
+        default_value: Optional[str] = None,
+        auto_create: bool = False,
     ) -> Tuple[Optional[str], Optional[str], bool]:
         """
         Resolves a generic target string into an (alias, onion) tuple.
 
         Args:
-            target (Optional[str]): The target to resolve.
+            target (Optional[str]): The target to resolve (alias or onion).
             default_value (Optional[str]): The fallback value if resolution fails.
+            auto_create (bool): If True, automatically creates a discovered peer RAM alias if
+                                the target is a valid, unknown onion address.
 
         Returns:
-            Tuple[Optional[str], Optional[str], bool]: A tuple containing the resolved alias, clean onion, and existence flag.
+            Tuple[Optional[str], Optional[str], bool]: A tuple containing the resolved alias,
+            clean onion, and existence flag. If exists is True, both alias and onion are
+            guaranteed to be non-None valid strings.
         """
         onion: Optional[str] = self.get_onion_by_alias(target)
         if not onion and target:
             onion = clean_onion(target)
-        alias: Optional[str] = self.get_alias_by_onion(onion)
+        alias: Optional[str] = self.get_alias_by_onion(onion, auto_create=auto_create)
         return (
             (alias, onion, True)
             if alias and onion
@@ -386,12 +396,15 @@ class ContactManager:
             alias = f'{base_alias}{counter}'
         return alias
 
-    def get_alias_by_onion(self, onion: Optional[str]) -> Optional[str]:
+    def get_alias_by_onion(
+        self, onion: Optional[str], auto_create: bool = True
+    ) -> Optional[str]:
         """
         Returns the alias for an onion, or auto-generates a discovered peer if unknown.
 
         Args:
             onion (Optional[str]): The onion address.
+            auto_create (bool): Whether to generate a temporary alias if it doesn't exist.
 
         Returns:
             Optional[str]: The mapped or generated alias.
@@ -406,7 +419,7 @@ class ContactManager:
         if res:
             return res[0][0]
 
-        if len(onion) == 56:
+        if len(onion) == 56 and auto_create:
             alias: str = self._generate_ram_alias(onion)
             self._sql.execute(
                 'INSERT INTO contacts (onion, alias, is_saved) VALUES (?, ?, 0)',

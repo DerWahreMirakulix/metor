@@ -116,7 +116,7 @@ class EventHandler:
                 if self._session.pending_focus_target and (
                     self._session.pending_focus_target == event.alias
                     or self._session.pending_focus_target == event.onion
-                    or self._session.pending_focus_target
+                    or clean_onion(self._session.pending_focus_target)
                     == clean_onion(event.onion or '')
                 ):
                     self._switch_focus(event.alias)
@@ -200,7 +200,10 @@ class EventHandler:
                 self._switch_focus(event.alias)
 
             elif isinstance(event, CliResponseEvent):
-                self._renderer.print_message(event.text, msg_type=UIMessageType.SYSTEM)
+                msg_type = UIMessageType.INFO if event.alias else UIMessageType.SYSTEM
+                self._renderer.print_message(
+                    event.text, msg_type=msg_type, alias=event.alias
+                )
 
         except Exception:
             pass
