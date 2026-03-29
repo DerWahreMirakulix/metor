@@ -721,6 +721,4 @@ class Daemon:
                 self._ipc.broadcast(
                     RenameSuccessEvent(old_alias=cmd.old_alias, new_alias=cmd.new_alias)
                 )
-            self._ipc.send_to(
-                conn, CliResponseEvent(text=msg, success=success, alias=cmd.new_alias)
-            )
+            self._ipc.send_to(conn, CliResponseEvent(text=msg, success=success))

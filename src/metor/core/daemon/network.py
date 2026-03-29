@@ -254,6 +254,7 @@ class NetworkManager:
         """
         Authenticates inbound requests and routes them to Live-Chat or Drop-Box.
         Safely reconstructs fragmented TCP streams and enforces async network policies.
+        Implements atomic tie-breaker logic to prevent race conditions during mutual connects.
 
         Args:
             conn (socket.socket): The incoming socket connection.
@@ -295,21 +296,6 @@ class NetworkManager:
         if not auth_successful or not onion:
             conn.close()
             return
-
-        if not is_async:
-            with self._lock:
-                if onion in self._outbound_attempts:
-                    if self._tm.onion and self._tm.onion < onion:
-                        try:
-                            conn.sendall(
-                                f'{TorCommand.REJECT.value} {self._tm.onion}\n'.encode(
-                                    'utf-8'
-                                )
-                            )
-                        except Exception:
-                            pass
-                        conn.close()
-                        return
 
         if is_async:
             if not Settings.get(SettingKey.ALLOW_DROPS):
@@ -377,14 +363,27 @@ class NetworkManager:
                 conn.close()
             return
 
+        # --- Live Connection Atomic Handshake & Tie-Breaker ---
         conn.settimeout(None)
         alias = self._cm.get_alias_by_onion(onion)
         if not alias:
             conn.close()
             return
 
+        should_reject: bool = False
+        is_mutual_winner: bool = False
+        accepted_now: bool = False
+
         with self._lock:
             if onion in self._connections or onion in self._pending_connections:
+                should_reject = True
+            elif onion in self._outbound_attempts:
+                if self._tm.onion and self._tm.onion < onion:
+                    should_reject = True
+                else:
+                    is_mutual_winner = True
+
+            if should_reject:
                 try:
                     conn.sendall(
                         f'{TorCommand.REJECT.value} {self._tm.onion}\n'.encode('utf-8')
@@ -394,37 +393,42 @@ class NetworkManager:
                 conn.close()
                 return
 
-            if (alias in self._cm.get_all_contacts()) and Settings.get(
-                SettingKey.AUTO_ACCEPT_CONTACTS
+            if is_mutual_winner or (
+                (alias in self._cm.get_all_contacts())
+                and Settings.get(SettingKey.AUTO_ACCEPT_CONTACTS)
             ):
                 self._connections[onion] = conn
-                try:
-                    conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8'))
-                except Exception:
-                    pass
+                self._outbound_attempts.discard(onion)
+                accepted_now = True
+            else:
+                self._pending_connections[onion] = conn
+                self._initial_buffers[onion] = buffer
 
-                self._hm.log_event(HistoryEvent.CONNECTED, onion)
-                self._broadcast(ConnectedEvent(alias=alias, onion=onion))
-                self._start_receiving(onion, conn, buffer)
-                return
+        # Execute network logic outside the critical section
+        if accepted_now:
+            try:
+                conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8'))
+            except Exception:
+                pass
 
-            self._pending_connections[onion] = conn
-            self._initial_buffers[onion] = buffer
-
-        self._hm.log_event(HistoryEvent.REQUESTED_BY_REMOTE, onion)
-
-        self._broadcast(
-            InfoEvent(
-                alias=alias,
-                # We intentionally don't resolve the alias since it is dynamically inserted in the UI
-                text=f"Incoming connection from '{{alias}}'. Type '{Theme.GREEN}/accept {{alias}}{Theme.RESET}' or '{Theme.RED}/reject {{alias}}{Theme.RESET}'.",
+            self._hm.log_event(HistoryEvent.CONNECTED, onion)
+            self._broadcast(ConnectedEvent(alias=alias, onion=onion))
+            self._start_receiving(onion, conn, buffer)
+        else:
+            self._hm.log_event(HistoryEvent.REQUESTED_BY_REMOTE, onion)
+            self._broadcast(
+                InfoEvent(
+                    alias=alias,
+                    # We intentionally don't resolve the alias since it is dynamically inserted in the UI
+                    text=f"Incoming connection from '{{alias}}'. Type '{Theme.GREEN}/accept {{alias}}{Theme.RESET}' or '{Theme.RED}/reject {{alias}}{Theme.RESET}'.",
+                )
             )
-        )
 
     def connect_to(self, target: str) -> None:
         """
         Initiates an outbound Tor connection and parses the handshake response safely.
         Implements rigorous retry mechanisms to handle network instability.
+        Features 'Implicit Accept' to gracefully auto-resolve UX race conditions.
 
         Args:
             target (str): The alias or onion address to connect to.
@@ -437,11 +441,30 @@ class NetworkManager:
         if not exists or onion == self._tm.onion:
             return
 
+        implicit_accept: bool = False
+
         with self._lock:
             if onion in self._connections:
                 return
-            self._outbound_attempts.add(onion)
 
+            # Implicit Accept Guard: If they already requested us, just accept it cleanly.
+            if onion in self._pending_connections:
+                implicit_accept = True
+            else:
+                self._outbound_attempts.add(onion)
+
+        if implicit_accept:
+            self._broadcast(
+                InfoEvent(
+                    alias=alias,
+                    # We intentionally don't resolve the alias since it is dynamically inserted in the UI
+                    text="Pending request found. Auto-accepting connection with '{alias}'...",
+                )
+            )
+            self.accept(target)
+            return
+
+        handshake_success: bool = False
         try:
             max_retries: int = Settings.get(SettingKey.MAX_CONNECT_RETRIES)
             for attempt in range(1, max_retries + 1):
@@ -481,6 +504,7 @@ class NetworkManager:
                             )
                         )
                         self._start_receiving(onion, conn, buffer)
+                        handshake_success = True
                         return
                     else:
                         raise ConnectionError('Handshake incomplete.')
@@ -511,8 +535,9 @@ class NetworkManager:
                             )
                         )
         finally:
-            with self._lock:
-                self._outbound_attempts.discard(onion)
+            if not handshake_success:
+                with self._lock:
+                    self._outbound_attempts.discard(onion)
 
     def accept(self, target: str) -> None:
         """
@@ -539,6 +564,7 @@ class NetworkManager:
             conn: socket.socket = self._pending_connections.pop(onion)
             initial_buffer: str = self._initial_buffers.pop(onion, '')
             self._connections[onion] = conn
+            self._outbound_attempts.discard(onion)
 
         try:
             conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8'))
@@ -550,13 +576,20 @@ class NetworkManager:
         self._broadcast(ConnectedEvent(alias=alias, onion=onion))
         self._start_receiving(onion, conn, initial_buffer)
 
-    def reject(self, target: str, initiated_by_self: bool = True) -> None:
+    def reject(
+        self,
+        target: str,
+        initiated_by_self: bool = True,
+        socket_to_close: Optional[socket.socket] = None,
+    ) -> None:
         """
         Rejects a pending connection request and cleans up isolated resources.
+        Drops the socket silently if it does not match the active session.
 
         Args:
             target (str): The target alias or onion.
             initiated_by_self (bool): Whether the local user initiated the rejection.
+            socket_to_close (Optional[socket.socket]): Specific duplicate socket to safely terminate.
 
         Returns:
             None
@@ -571,6 +604,19 @@ class NetworkManager:
             return
 
         with self._lock:
+            if initiated_by_self:
+                self._outbound_attempts.discard(onion)
+
+            active_conn: Optional[socket.socket] = self._connections.get(onion)
+            pending_conn: Optional[socket.socket] = self._pending_connections.get(onion)
+
+            if socket_to_close and socket_to_close not in (active_conn, pending_conn):
+                try:
+                    socket_to_close.close()
+                except Exception:
+                    pass
+                return
+
             conn = self._connections.pop(onion, None) or self._pending_connections.pop(
                 onion, None
             )
@@ -608,15 +654,21 @@ class NetworkManager:
         )
 
     def disconnect(
-        self, target: str, initiated_by_self: bool = True, is_fallback: bool = False
+        self,
+        target: str,
+        initiated_by_self: bool = True,
+        is_fallback: bool = False,
+        socket_to_close: Optional[socket.socket] = None,
     ) -> None:
         """
         Terminates a connection and converts un-ACKed messages to offline drops.
+        Drops the socket silently if it does not match the active session.
 
         Args:
             target (str): The target alias or onion.
             initiated_by_self (bool): Whether the local user initiated the disconnect.
             is_fallback (bool): Whether this is an unexpected network drop.
+            socket_to_close (Optional[socket.socket]): Specific duplicate socket to safely terminate.
 
         Returns:
             None
@@ -631,6 +683,19 @@ class NetworkManager:
             return
 
         with self._lock:
+            if initiated_by_self:
+                self._outbound_attempts.discard(onion)
+
+            active_conn: Optional[socket.socket] = self._connections.get(onion)
+            pending_conn: Optional[socket.socket] = self._pending_connections.get(onion)
+
+            if socket_to_close and socket_to_close not in (active_conn, pending_conn):
+                try:
+                    socket_to_close.close()
+                except Exception:
+                    pass
+                return
+
             conn = self._connections.pop(onion, None) or self._pending_connections.pop(
                 onion, None
             )
@@ -819,6 +884,7 @@ class NetworkManager:
                             if onion in self._pending_connections:
                                 self._pending_connections.pop(onion)
                             self._connections[onion] = conn
+                            self._outbound_attempts.discard(onion)
                         # alias is defined since onion can't be None and has to be valid
                         alias: str = self._cm.get_alias_by_onion(onion)
 
@@ -897,8 +963,13 @@ class NetworkManager:
             pass
         finally:
             if remote_rejected:
-                self.reject(onion, initiated_by_self=False)
+                self.reject(onion, initiated_by_self=False, socket_to_close=conn)
             elif remote_disconnected:
-                self.disconnect(onion, initiated_by_self=False)
+                self.disconnect(onion, initiated_by_self=False, socket_to_close=conn)
             else:
-                self.disconnect(onion, initiated_by_self=False, is_fallback=True)
+                self.disconnect(
+                    onion,
+                    initiated_by_self=False,
+                    is_fallback=True,
+                    socket_to_close=conn,
+                )

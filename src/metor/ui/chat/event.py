@@ -162,18 +162,6 @@ class EventHandler:
                 if self._session.focused_alias == event.old_alias:
                     self._switch_focus(event.new_alias, hide_message=True)
 
-                if event.is_demotion:
-                    if getattr(event, 'was_saved', True):
-                        self._renderer.print_message(
-                            f"Contact '{event.old_alias}' removed. Session downgraded to '{event.new_alias}'.",
-                            msg_type=UIMessageType.SYSTEM,
-                        )
-                    else:
-                        self._renderer.print_message(
-                            f"Discovered peer '{event.old_alias}' anonymized to '{event.new_alias}'.",
-                            msg_type=UIMessageType.SYSTEM,
-                        )
-
             elif isinstance(event, ContactRemovedEvent):
                 if event.alias in self._session.active_connections:
                     self._session.active_connections.remove(event.alias)
