@@ -85,6 +85,23 @@ class TransCode(str, Enum):
     SETTING_UPDATED = 'setting_updated'
     SETTING_UPDATE_FAILED = 'setting_update_failed'
 
+    # CLI & Proxy Specific
+    ENTER_MASTER_PASSWORD = 'enter_master_password'
+    DAEMON_STARTING = 'daemon_starting'
+    DAEMON_ACTIVE = 'daemon_active'
+    DAEMON_LOCKED_MODE = 'daemon_locked_mode'
+    PURGE_WARNING = 'purge_warning'
+    PURGE_WARNING_REMOTE = 'purge_warning_remote'
+    PURGE_PROMPT = 'purge_prompt'
+    PURGE_ABORTED = 'purge_aborted'
+    PURGE_COMPLETE = 'purge_complete'
+    CLEANUP_START = 'cleanup_start'
+    CLEANUP_COMPLETE = 'cleanup_complete'
+    REMOTE_NUKE_WARNING = 'remote_nuke_warning'
+    REMOTE_NUKE_SUCCESS = 'remote_nuke_success'
+    REMOTE_NUKE_FAILED = 'remote_nuke_failed'
+    REMOTE_NUKE_OVERRIDE = 'remote_nuke_override'
+
     # IPC & Communication
     DAEMON_UNREACHABLE = 'daemon_unreachable'
     DAEMON_OFFLINE = 'daemon_offline'

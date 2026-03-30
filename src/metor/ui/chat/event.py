@@ -1,11 +1,11 @@
 """
 Module providing the handler for incoming Daemon IPC events.
 Updates Session state and triggers Renderer UI updates via the central Translator and Presenter.
-Maps generic UISeverity types to domain-specific ChatMessageTypes.
+Maps generic UISeverity types to domain-specific ChatMessageTypes using a DRY architecture.
 """
 
 import threading
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 
 from metor.core.api import (
     IpcEvent,
@@ -80,6 +80,27 @@ class EventHandler:
         self._init_event: threading.Event = init_event
         self._conn_event: threading.Event = conn_event
 
+    def _print_translated(
+        self,
+        code: TransCode,
+        params: Optional[Dict[str, Any]] = None,
+        alias: Optional[str] = None,
+    ) -> None:
+        """
+        Resolves a translation code and renders it directly to the UI, applying the correct severity routing.
+
+        Args:
+            code (TransCode): The strict domain code for translation.
+            params (Optional[Dict[str, Any]]): Dynamic parameters to inject.
+            alias (Optional[str]): The associated remote alias to attach to the UI line.
+
+        Returns:
+            None
+        """
+        text, severity = Translator.get(code, params)
+        msg_type: ChatMessageType = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
+        self._renderer.print_message(text, msg_type=msg_type, alias=alias)
+
     def handle(self, event: IpcEvent) -> None:
         """
         Routes a single IPC event to the appropriate state-change or rendering logic.
@@ -96,10 +117,8 @@ class EventHandler:
                 self._init_event.set()
 
             elif isinstance(event, NotificationEvent):
-                text, severity = Translator.get(event.code, event.params)
-                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
-                self._renderer.print_message(
-                    text, msg_type=msg_type, alias=event.params.get('alias')
+                self._print_translated(
+                    event.code, event.params, event.params.get('alias')
                 )
 
             elif isinstance(event, CommandResponseEvent):
@@ -109,14 +128,12 @@ class EventHandler:
                     )
                     self._renderer.print_message(
                         text_fmt,
-                        msg_type=ChatMessageType.RAW,
+                        msg_type=ChatMessageType.SYSTEM,
                         alias=event.params.get('alias'),
                     )
                 else:
-                    text, severity = Translator.get(event.code, event.params)
-                    msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
-                    self._renderer.print_message(
-                        text, msg_type=msg_type, alias=event.params.get('alias')
+                    self._print_translated(
+                        event.code, event.params, event.params.get('alias')
                     )
 
             elif isinstance(event, RemoteMsgEvent):
@@ -131,43 +148,34 @@ class EventHandler:
                 self._renderer.mark_acked(msg_id=event.msg_id, text=event.text)
 
             elif isinstance(event, IncomingConnectionEvent):
-                text, severity = Translator.get(TransCode.INCOMING_CONNECTION)
-                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
-                self._renderer.print_message(text, msg_type=msg_type, alias=event.alias)
+                self._print_translated(TransCode.INCOMING_CONNECTION, alias=event.alias)
 
             elif isinstance(event, ConnectionPendingEvent):
-                text, severity = Translator.get(TransCode.CONNECTION_PENDING)
-                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
-                self._renderer.print_message(text, msg_type=msg_type, alias=event.alias)
+                self._print_translated(TransCode.CONNECTION_PENDING, alias=event.alias)
 
             elif isinstance(event, ConnectionAutoAcceptedEvent):
-                text, severity = Translator.get(TransCode.CONNECTION_AUTO_ACCEPTED)
-                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
-                self._renderer.print_message(text, msg_type=msg_type, alias=event.alias)
+                self._print_translated(
+                    TransCode.CONNECTION_AUTO_ACCEPTED, alias=event.alias
+                )
 
             elif isinstance(event, ConnectionRetryEvent):
-                params = {'attempt': event.attempt, 'max_retries': event.max_retries}
-                text, severity = Translator.get(TransCode.CONNECTION_RETRY, params)
-                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
-                self._renderer.print_message(text, msg_type=msg_type, alias=event.alias)
+                self._print_translated(
+                    TransCode.CONNECTION_RETRY,
+                    {'attempt': event.attempt, 'max_retries': event.max_retries},
+                    alias=event.alias,
+                )
 
             elif isinstance(event, ConnectionFailedEvent):
-                text, severity = Translator.get(TransCode.CONNECTION_FAILED)
-                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
-                self._renderer.print_message(text, msg_type=msg_type, alias=event.alias)
+                self._print_translated(TransCode.CONNECTION_FAILED, alias=event.alias)
 
             elif isinstance(event, ConnectionRejectedEvent):
-                text, severity = Translator.get(TransCode.CONNECTION_REJECTED)
-                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
-                self._renderer.print_message(text, msg_type=msg_type, alias=event.alias)
+                self._print_translated(TransCode.CONNECTION_REJECTED, alias=event.alias)
 
             elif isinstance(event, ConnectedEvent):
                 if event.alias not in self._session.active_connections:
                     self._session.active_connections.append(event.alias)
 
-                text, severity = Translator.get(TransCode.CONNECTED)
-                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
-                self._renderer.print_message(text, msg_type=msg_type, alias=event.alias)
+                self._print_translated(TransCode.CONNECTED, alias=event.alias)
 
                 if self._session.focused_alias == event.alias:
                     self._renderer.set_focus(event.alias, is_live=True)
@@ -182,9 +190,7 @@ class EventHandler:
                     self._session.pending_focus_target = None
 
             elif isinstance(event, DisconnectedEvent):
-                text, severity = Translator.get(TransCode.DISCONNECTED)
-                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
-                self._renderer.print_message(text, msg_type=msg_type, alias=event.alias)
+                self._print_translated(TransCode.DISCONNECTED, alias=event.alias)
 
                 if event.alias in self._session.active_connections:
                     self._session.active_connections.remove(event.alias)
@@ -199,12 +205,10 @@ class EventHandler:
                 if event.alias and event.alias == self._session.focused_alias:
                     self._ipc.send_command(MarkReadCommand(target=event.alias))
                 else:
-                    text, severity = Translator.get(
-                        TransCode.INBOX_NOTIFICATION, {'count': event.count}
-                    )
-                    msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
-                    self._renderer.print_message(
-                        text, msg_type=msg_type, alias=event.alias
+                    self._print_translated(
+                        TransCode.INBOX_NOTIFICATION,
+                        {'count': event.count},
+                        alias=event.alias,
                     )
 
             elif isinstance(event, InboxDataEvent):
@@ -270,13 +274,9 @@ class EventHandler:
 
         if old_alias == alias:
             if alias:
-                text, severity = Translator.get(TransCode.ALREADY_FOCUSED)
-                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
-                self._renderer.print_message(text, msg_type=msg_type, alias=alias)
+                self._print_translated(TransCode.ALREADY_FOCUSED, alias=alias)
             else:
-                text, severity = Translator.get(TransCode.NO_ACTIVE_FOCUS)
-                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
-                self._renderer.print_message(text, msg_type=msg_type)
+                self._print_translated(TransCode.NO_ACTIVE_FOCUS)
             return
 
         self._session.focused_alias = alias
@@ -286,11 +286,7 @@ class EventHandler:
 
         if not hide_message:
             if alias:
-                text, severity = Translator.get(TransCode.FOCUS_SWITCHED)
-                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
-                self._renderer.print_message(text, msg_type=msg_type, alias=alias)
+                self._print_translated(TransCode.FOCUS_SWITCHED, alias=alias)
                 self._ipc.send_command(MarkReadCommand(target=alias))
             elif old_alias:
-                text, severity = Translator.get(TransCode.FOCUS_REMOVED)
-                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
-                self._renderer.print_message(text, msg_type=msg_type, alias=old_alias)
+                self._print_translated(TransCode.FOCUS_REMOVED, alias=old_alias)

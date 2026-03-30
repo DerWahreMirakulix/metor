@@ -7,7 +7,7 @@ the complex interactions between the Listener, Receiver, Controller, and Router.
 import threading
 from typing import List, Callable, Tuple
 
-from metor.core.tor import TorManager
+from metor.core import TorManager
 from metor.core.api import IpcEvent
 from metor.core.daemon.crypto import Crypto
 from metor.data import HistoryManager, ContactManager, MessageManager

@@ -8,7 +8,7 @@ import threading
 import secrets
 from typing import Optional, Callable, List, TYPE_CHECKING
 
-from metor.core.tor import TorManager
+from metor.core import TorManager
 from metor.core.api import IpcEvent, ConnectedEvent, IncomingConnectionEvent
 from metor.core.daemon.models import TorCommand
 from metor.core.daemon.crypto import Crypto

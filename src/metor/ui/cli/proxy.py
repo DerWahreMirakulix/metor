@@ -7,6 +7,7 @@ Enforces Domain-Driven Design by removing direct SQLite database access from the
 
 import socket
 import json
+import getpass
 from typing import Optional, Dict, Any, Union
 
 from metor.core.api import (
@@ -33,9 +34,10 @@ from metor.core.api import (
     ClearContactsCommand,
     ClearProfileDbCommand,
 )
-from metor.data.profile import ProfileManager
+from metor.core.daemon import HeadlessDaemon
 from metor.data import Settings, SettingKey
-from metor.ui import Theme, UIPresenter
+from metor.data.profile import ProfileManager
+from metor.ui import Theme, UIPresenter, Translator
 from metor.utils import Constants
 
 
@@ -85,8 +87,6 @@ class CliProxy:
         Returns:
             str: The fully formatted output string.
         """
-        from metor.ui.translations import Translator
-
         text, _ = Translator.get(code, params)
 
         if params and 'alias' in params and '{alias}' in text:
@@ -113,6 +113,7 @@ class CliProxy:
     def _request_ipc(self, cmd: IpcCommand, wait_for_response: bool = True) -> str:
         """
         Helper to safely route IPC commands to the active Tor daemon or a temporary headless instance.
+        Prompts for a password interactively if a headless database connection is required.
 
         Args:
             cmd (IpcCommand): The command to send.
@@ -133,9 +134,12 @@ class CliProxy:
                 )
 
             # Offline local state: Route through ephemeral HeadlessDaemon to enforce DDD
-            from metor.core.daemon.headless import HeadlessDaemon
+            password: Optional[str] = None
+            if not isinstance(cmd, (GetAddressCommand, GenerateAddressCommand)):
+                prompt, _ = Translator.get(TransCode.ENTER_MASTER_PASSWORD)
+                password = getpass.getpass(prompt)
 
-            with HeadlessDaemon(self._pm) as hd:
+            with HeadlessDaemon(self._pm, password) as hd:
                 return self._send_to_port(hd.port, cmd, wait_for_response)
 
         # Active local or SSH remote tunnel

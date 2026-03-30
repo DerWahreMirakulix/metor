@@ -9,7 +9,7 @@ import time
 import base64
 from typing import List, Optional, Tuple, Callable
 
-from metor.core.tor import TorManager
+from metor.core import TorManager
 from metor.core.api import IpcEvent, AckEvent
 from metor.data import MessageManager, MessageStatus, HistoryManager, HistoryEvent
 

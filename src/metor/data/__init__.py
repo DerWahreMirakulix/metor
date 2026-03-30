@@ -3,11 +3,11 @@ Package initializer for the Data layer.
 Exposes core data managers, settings, and domain enums via a unified Facade.
 """
 
-# 1. Base Data Layer (No external/child dependencies)
+# 1. Base Data Layer
 from metor.data.settings import Settings, SettingKey
 from metor.data.sql import SqlManager
 
-# 2. Application Data Layer (Depends on Base Layer and Profile)
+# 2. Application Data Layer (Depends on Base Layer)
 from metor.data.contact import ContactManager
 from metor.data.history import HistoryManager, HistoryEvent
 from metor.data.message import (

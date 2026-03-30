@@ -7,7 +7,7 @@ import base64
 import nacl.bindings
 from typing import Optional
 
-from metor.core.key import KeyManager
+from metor.core import KeyManager
 from metor.utils import clean_onion
 
 

@@ -9,6 +9,7 @@ import threading
 import json
 from typing import Dict, Any, Optional
 
+from metor.core import KeyManager, TorManager
 from metor.core.api import (
     IpcCommand,
     IpcEvent,
@@ -29,10 +30,8 @@ from metor.core.api import (
     GetAddressCommand,
     GenerateAddressCommand,
 )
-from metor.core.key import KeyManager
-from metor.core.tor import TorManager
-from metor.data.profile import ProfileManager
 from metor.data import ContactManager, HistoryManager, MessageManager
+from metor.data.profile import ProfileManager
 from metor.utils import Constants
 
 # Local Package Imports
@@ -42,22 +41,23 @@ from metor.core.daemon.handlers import DatabaseCommandHandler, SystemCommandHand
 class HeadlessDaemon:
     """Lightweight daemon for executing single offline database operations via IPC."""
 
-    def __init__(self, pm: ProfileManager) -> None:
+    def __init__(self, pm: ProfileManager, password: Optional[str] = None) -> None:
         """
-        Initializes the HeadlessDaemon safely without encryption keys.
+        Initializes the HeadlessDaemon safely, accepting a password for offline SQLite encryption.
 
         Args:
             pm (ProfileManager): The active profile configuration.
+            password (Optional[str]): The master password required to decrypt local data.
 
         Returns:
             None
         """
         self._pm: ProfileManager = pm
-        self._cm: ContactManager = ContactManager(pm, None)
-        self._hm: HistoryManager = HistoryManager(pm, None)
-        self._mm: MessageManager = MessageManager(pm, None)
+        self._cm: ContactManager = ContactManager(pm, password)
+        self._hm: HistoryManager = HistoryManager(pm, password)
+        self._mm: MessageManager = MessageManager(pm, password)
 
-        self._km: KeyManager = KeyManager(pm, None)
+        self._km: KeyManager = KeyManager(pm, password)
         self._tm: TorManager = TorManager(pm, self._km)
 
         self._db_handler: DatabaseCommandHandler = DatabaseCommandHandler(

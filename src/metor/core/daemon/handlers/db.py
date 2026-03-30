@@ -26,8 +26,8 @@ from metor.core.api import (
     RenameSuccessEvent,
     ContactRemovedEvent,
 )
-from metor.data.profile import ProfileManager
 from metor.data import ContactManager, HistoryManager, MessageManager
+from metor.data.profile import ProfileManager
 
 
 class DatabaseCommandHandler:

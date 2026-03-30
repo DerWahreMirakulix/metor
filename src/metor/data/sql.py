@@ -100,6 +100,7 @@ class SqlManager:
         """
         Establishes and returns a persistent connection from the pool.
         Applies SQLCipher encryption pragmas if a password is provided.
+        Proactively creates parent directories to prevent missing path crashes.
 
         Args:
             None
@@ -112,6 +113,8 @@ class SqlManager:
         with SqlManager._pool_lock:
             if path_str in SqlManager._connections:
                 return SqlManager._connections[path_str]
+
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
             conn = sqlite3.connect(path_str, check_same_thread=False)
             if self._password:

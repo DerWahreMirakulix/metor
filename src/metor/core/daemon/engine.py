@@ -13,11 +13,10 @@ import atexit
 import sys
 import os
 import signal
-from typing import Any, List, Set
+from typing import Any, List, Set, Optional, Callable
 from pathlib import Path
 
-from metor.core.key import KeyManager
-from metor.core.tor import TorManager
+from metor.core import KeyManager, TorManager
 from metor.core.api import (
     IpcCommand,
     InitCommand,
@@ -58,7 +57,7 @@ from metor.data import (
     Settings,
     SettingKey,
 )
-from metor.ui import Theme
+from metor.ui import Translator
 from metor.utils import Constants, clean_onion, secure_shred_file
 
 # Local Package Imports
@@ -84,6 +83,7 @@ class Daemon:
         cm: ContactManager,
         hm: HistoryManager,
         mm: MessageManager,
+        status_callback: Optional[Callable[[str], None]] = None,
     ) -> None:
         """
         Initializes the DaemonEngine.
@@ -95,6 +95,7 @@ class Daemon:
             cm (ContactManager): Address book manager.
             hm (HistoryManager): Event logging.
             mm (MessageManager): Offline messages storage.
+            status_callback (Optional[Callable]): Hook for UI-agnostic startup logging.
 
         Returns:
             None
@@ -105,6 +106,7 @@ class Daemon:
         self._hm: HistoryManager = hm
         self._mm: MessageManager = mm
         self._km: KeyManager = km
+        self._status_cb: Optional[Callable[[str], None]] = status_callback
 
         self._stop_flag: threading.Event = threading.Event()
         self._is_locked: bool = False
@@ -182,7 +184,9 @@ class Daemon:
             if getattr(self._km, '_password', None) is None and self._pm.is_remote():
                 self._is_locked = True
                 self._ipc.start()
-                print('Daemon running in LOCKED mode... Waiting for IPC unlock.')
+                if self._status_cb:
+                    msg, _ = Translator.get(TransCode.DAEMON_LOCKED_MODE)
+                    self._status_cb(msg)
             else:
                 self._start_subsystems()
 
@@ -205,9 +209,10 @@ class Daemon:
         """
         self._pm.initialize()
 
-        success, msg = self._tm.start()
+        success, msg_err = self._tm.start()
         if not success:
-            print(f'{Theme.RED}{msg}{Theme.RESET}')
+            if self._status_cb:
+                self._status_cb(msg_err)
             self._stop_flag.set()
             return
 
@@ -218,10 +223,12 @@ class Daemon:
 
         self._outbox.start()
 
-        print(
-            f'Daemon active. Onion: {Theme.YELLOW}{clean_onion(self._tm.onion or "")}{Theme.RESET}.onion '
-            f'| IPC Port: {Theme.YELLOW}{self._ipc.port}{Theme.RESET}'
-        )
+        if self._status_cb:
+            msg, _ = Translator.get(
+                TransCode.DAEMON_ACTIVE,
+                {'onion': clean_onion(self._tm.onion or ''), 'port': self._ipc.port},
+            )
+            self._status_cb(msg)
 
     def stop(self) -> None:
         """

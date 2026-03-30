@@ -8,7 +8,7 @@ import socket
 import threading
 from typing import Callable, Optional
 
-from metor.core.tor import TorManager
+from metor.core import TorManager
 from metor.core.api import (
     IpcCommand,
     IpcEvent,

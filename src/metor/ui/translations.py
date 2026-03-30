@@ -44,6 +44,54 @@ TRANSLATIONS: Dict[TransCode, TranslationDef] = {
     TransCode.SETTING_UPDATE_FAILED: TranslationDef(
         'Failed to update setting.', UISeverity.ERROR
     ),
+    # CLI & Proxy Specific
+    TransCode.ENTER_MASTER_PASSWORD: TranslationDef(
+        f'{Theme.CYAN}Enter Master Password: {Theme.RESET}', UISeverity.INFO
+    ),
+    TransCode.DAEMON_STARTING: TranslationDef(
+        "Starting daemon for profile '{profile}'...", UISeverity.INFO
+    ),
+    TransCode.DAEMON_ACTIVE: TranslationDef(
+        f'Daemon active. Onion: {Theme.YELLOW}{{onion}}{Theme.RESET}.onion | IPC Port: {Theme.YELLOW}{{port}}{Theme.RESET}',
+        UISeverity.INFO,
+    ),
+    TransCode.DAEMON_LOCKED_MODE: TranslationDef(
+        'Daemon running in LOCKED mode... Waiting for IPC unlock.', UISeverity.INFO
+    ),
+    TransCode.PURGE_WARNING: TranslationDef(
+        f'{Theme.RED}You are about to PERMANENTLY wipe the entire Metor directory!{Theme.RESET}',
+        UISeverity.SYSTEM,
+    ),
+    TransCode.PURGE_WARNING_REMOTE: TranslationDef(
+        f'{Theme.RED}This includes all remote profiles and their data!{Theme.RESET}',
+        UISeverity.SYSTEM,
+    ),
+    TransCode.PURGE_PROMPT: TranslationDef("Type 'yes' to proceed: ", UISeverity.INFO),
+    TransCode.PURGE_ABORTED: TranslationDef('Purge aborted.', UISeverity.INFO),
+    TransCode.PURGE_COMPLETE: TranslationDef(
+        'Purge complete. All data destroyed.', UISeverity.INFO
+    ),
+    TransCode.CLEANUP_START: TranslationDef(
+        'Cleaning up Metor processes and locks...', UISeverity.INFO
+    ),
+    TransCode.CLEANUP_COMPLETE: TranslationDef(
+        'Killed {killed} Tor process(es) and cleared locks.', UISeverity.INFO
+    ),
+    TransCode.REMOTE_NUKE_WARNING: TranslationDef(
+        f'{Theme.YELLOW}Data shredding may be ineffective on modern SSDs due to wear-leveling.{Theme.RESET}\n',
+        UISeverity.INFO,
+    ),
+    TransCode.REMOTE_NUKE_SUCCESS: TranslationDef(
+        "Remote daemon for profile '{profile}' nuked successfully.", UISeverity.INFO
+    ),
+    TransCode.REMOTE_NUKE_FAILED: TranslationDef(
+        f'Failed to reach remote daemons for profiles: {Theme.CYAN}{{failed_remotes}}{Theme.RESET}',
+        UISeverity.ERROR,
+    ),
+    TransCode.REMOTE_NUKE_OVERRIDE: TranslationDef(
+        'You will lock yourself out of these remotes! Proceed with local wipe anyway? y/N: ',
+        UISeverity.INFO,
+    ),
     # IPC & Communication
     TransCode.DAEMON_UNREACHABLE: TranslationDef(
         'Cannot reach remote Daemon on port {port}. Did you forget the SSH tunnel?',

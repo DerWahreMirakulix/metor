@@ -8,7 +8,7 @@ import threading
 import time
 from typing import List, Optional, Callable, Dict, TYPE_CHECKING
 
-from metor.core.tor import TorManager
+from metor.core import TorManager
 from metor.core.api import (
     IpcEvent,
     NotificationEvent,

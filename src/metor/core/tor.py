@@ -12,8 +12,8 @@ import nacl.exceptions
 from pathlib import Path
 from typing import Tuple, Optional, Any, Dict, Callable
 
-from metor.data.profile import ProfileManager
 from metor.data import SettingKey, Settings
+from metor.data.profile import ProfileManager
 from metor.utils import Constants, clean_onion, secure_shred_file, ensure_onion_format
 
 # Local Package Imports

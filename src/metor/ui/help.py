@@ -34,7 +34,7 @@ class CommandDef:
 class Help:
     """Static help generator utilizing a DRY data-driven command registry."""
 
-    DESC_COLUMN: int = 50
+    DESC_COLUMN: int = 45
 
     CLI_CATEGORIES: List[str] = [
         'Global Options',
