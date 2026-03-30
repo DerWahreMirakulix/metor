@@ -1,19 +1,20 @@
 """
 Module providing a transparent proxy for all CLI commands.
 Routes requests to the Daemon via IPC automatically, launching a HeadlessDaemon if offline.
-Formats responses securely via the centralized Translator and Presenter for UI-agnostic operations.
+Formats responses securely via the centralized Translator and Presenter using strict DTOs.
 Enforces Domain-Driven Design by removing direct SQLite database access from the UI Layer.
 """
 
 import socket
 import json
 import getpass
-from typing import Optional, Dict, Any, Union
+import dataclasses
+from typing import Any, Optional, Dict, Union
 
 from metor.core.api import (
+    JsonValue,
     IpcCommand,
     IpcEvent,
-    CommandResponseEvent,
     TransCode,
     UnlockCommand,
     SelfDestructCommand,
@@ -33,6 +34,12 @@ from metor.core.api import (
     RenameContactCommand,
     ClearContactsCommand,
     ClearProfileDbCommand,
+    ContactsDataEvent,
+    HistoryDataEvent,
+    MessagesDataEvent,
+    InboxCountsEvent,
+    UnreadMessagesEvent,
+    ProfilesDataEvent,
 )
 from metor.core.daemon import HeadlessDaemon
 from metor.data import Settings, SettingKey
@@ -42,7 +49,7 @@ from metor.utils import Constants
 
 
 class CliProxy:
-    """Facade for CLI operations, strictly interacting via IPC events only."""
+    """Facade for CLI operations, strictly interacting via IPC events and DTOs only."""
 
     def __init__(self, pm: ProfileManager) -> None:
         """
@@ -74,7 +81,7 @@ class CliProxy:
         return None
 
     def _translate_local(
-        self, code: TransCode, params: Optional[Dict[str, Any]] = None
+        self, code: TransCode, params: Optional[Dict[str, JsonValue]] = None
     ) -> str:
         """
         Translates a TransCode to a fully formatted string specifically for the CLI.
@@ -82,7 +89,7 @@ class CliProxy:
 
         Args:
             code (TransCode): The strict domain code.
-            params (Optional[Dict[str, Any]]): The parameters.
+            params (Optional[Dict[str, JsonValue]]): The parameters.
 
         Returns:
             str: The fully formatted output string.
@@ -90,7 +97,7 @@ class CliProxy:
         text, _ = Translator.get(code, params)
 
         if params and 'alias' in params and '{alias}' in text:
-            text = text.replace('{alias}', params['alias'])
+            text = text.replace('{alias}', str(params['alias']))
         elif '{alias}' in text:
             text = text.replace('{alias}', 'unknown')
 
@@ -120,7 +127,7 @@ class CliProxy:
             wait_for_response (bool): Whether to block and wait for a response.
 
         Returns:
-            str: The translated response text or error message.
+            str: The translated response text or formatted DTO output.
         """
         port: Optional[int] = self._pm.get_daemon_port()
 
@@ -147,7 +154,7 @@ class CliProxy:
 
     def _send_to_port(self, port: int, cmd: IpcCommand, wait_for_response: bool) -> str:
         """
-        Executes the TCP socket transmission and cleanly parses the JSON response.
+        Executes the TCP socket transmission and cleanly parses the strictly-typed JSON response.
 
         Args:
             port (int): The target IPC socket port.
@@ -178,17 +185,32 @@ class CliProxy:
                         break
 
             if buffer:
-                resp_dict: Dict[str, Any] = json.loads(buffer.split('\n')[0])
+                resp_dict: Dict[str, JsonValue] = json.loads(buffer.split('\n')[0])
                 event: IpcEvent = IpcEvent.from_dict(resp_dict)
 
-                if isinstance(event, CommandResponseEvent):
-                    if event.data:
-                        text_fmt: str = UIPresenter.format_response(
-                            event.action, event.data, chat_mode=False
-                        )
-                        return self._prefix_remote(text_fmt)
+                if isinstance(
+                    event,
+                    (
+                        ContactsDataEvent,
+                        HistoryDataEvent,
+                        MessagesDataEvent,
+                        InboxCountsEvent,
+                        UnreadMessagesEvent,
+                        ProfilesDataEvent,
+                    ),
+                ):
+                    text_fmt: str = UIPresenter.format_response(event, chat_mode=False)
+                    return self._prefix_remote(text_fmt)
 
-                text: str = self._translate_local(event.code, event.params)
+                # For generic Success, Error, or Notification DTOs
+                params_raw: Dict[str, Any] = dataclasses.asdict(event)
+                params: Dict[str, JsonValue] = {
+                    k: v
+                    for k, v in params_raw.items()
+                    if isinstance(v, (str, int, float, bool, type(None)))
+                }
+                code: TransCode = getattr(event, 'code', TransCode.COMMAND_SUCCESS)
+                text: str = self._translate_local(code, params)
                 return self._prefix_remote(text)
 
             return self._prefix_remote(self._translate_local(TransCode.COMMAND_SUCCESS))

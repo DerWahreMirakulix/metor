@@ -11,7 +11,7 @@ from typing import List, Tuple, Dict, Any, Callable, Optional
 from metor.core.api import (
     IpcEvent,
     InboxDataEvent,
-    MsgFallbackToDropEvent,
+    FallbackSuccessEvent,
     AckEvent,
     RemoteMsgEvent,
     InboxNotificationEvent,
@@ -133,7 +133,14 @@ class MessageRouter:
                 HistoryEvent.DROP_QUEUED, onion, 'Manual fallback to drop'
             )
 
-        self._broadcast(MsgFallbackToDropEvent(msg_ids=list(unacked.keys())))
+        self._broadcast(
+            FallbackSuccessEvent(
+                code=TransCode.FALLBACK_SUCCESS,
+                alias=str(alias or onion),
+                count=len(unacked),
+                msg_ids=list(unacked.keys()),
+            )
+        )
 
         # We intentionally don't resolve the alias since it is dynamically inserted in the UI
         return True, TransCode.FALLBACK_SUCCESS, {'alias': alias, 'count': len(unacked)}
@@ -169,7 +176,14 @@ class MessageRouter:
                 self._hm.log_event(
                     HistoryEvent.DROP_QUEUED, onion, 'Auto fallback to drop'
                 )
-                self._broadcast(MsgFallbackToDropEvent(msg_ids=[msg_id]))
+                self._broadcast(
+                    FallbackSuccessEvent(
+                        code=TransCode.FALLBACK_SUCCESS,
+                        alias=str(alias or onion),
+                        count=1,
+                        msg_ids=[msg_id],
+                    )
+                )
             return
 
         self._state.add_unacked_message(onion, msg_id, msg)
@@ -224,7 +238,7 @@ class MessageRouter:
         if self._has_clients_callback():
             try:
                 conn.sendall(f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8'))
-                self._broadcast(RemoteMsgEvent(alias=alias, text=content))
+                self._broadcast(RemoteMsgEvent(alias=alias or onion, text=content))
             except Exception:
                 pass
             return False

@@ -12,6 +12,7 @@ class ChatMessageType(str, Enum):
 
     INFO = 'info'
     SYSTEM = 'system'
+    ERROR = 'error'
     RAW = 'raw'
     SELF = 'self'
     REMOTE = 'remote'
@@ -27,3 +28,4 @@ class ChatLine:
     is_pending: bool = False
     msg_id: Optional[str] = None
     is_drop: bool = False
+    is_failed: bool = False

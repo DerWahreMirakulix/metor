@@ -4,14 +4,14 @@ Maintains data integrity without applying UI presentation formatting.
 """
 
 from pathlib import Path
-from typing import Tuple, Optional, List, Dict, Any
+from typing import Tuple, Optional, List, Dict, Union
 
 from metor.core.api import TransCode
 from metor.utils import Constants, clean_onion
 
 # Local Package Imports
 from metor.data.profile import ProfileManager
-from metor.data.sql import SqlManager
+from metor.data.sql import SqlManager, SqlParam
 
 
 class ContactManager:
@@ -43,7 +43,7 @@ class ContactManager:
             List[str]: A list of saved alias names.
         """
         query: str = 'SELECT alias FROM contacts WHERE is_saved = 1'
-        rows: List[Tuple[Any, ...]] = self._sql.fetchall(query)
+        rows: List[Tuple[SqlParam, ...]] = self._sql.fetchall(query)
         return [str(row[0]) for row in rows]
 
     def is_session_alias(self, alias: str) -> bool:
@@ -58,14 +58,14 @@ class ContactManager:
         """
         alias = alias.strip().lower()
         query: str = 'SELECT is_saved FROM contacts WHERE alias = ?'
-        res: List[Tuple[Any, ...]] = self._sql.fetchall(query, (alias,))
+        res: List[Tuple[SqlParam, ...]] = self._sql.fetchall(query, (alias,))
         if res and res[0][0] == 0:
             return True
         return False
 
     def add_contact(
         self, alias: str, onion: str
-    ) -> Tuple[bool, TransCode, Dict[str, Any]]:
+    ) -> Tuple[bool, TransCode, Dict[str, str]]:
         """
         Adds a new contact to the address book.
 
@@ -74,7 +74,7 @@ class ContactManager:
             onion (str): The remote onion identity.
 
         Returns:
-            Tuple[bool, TransCode, Dict[str, Any]]: A success flag, domain state code, and parameters.
+            Tuple[bool, TransCode, Dict[str, str]]: A success flag, domain state code, and parameters.
         """
         alias = alias.strip().lower()
         onion = clean_onion(onion)
@@ -82,7 +82,7 @@ class ContactManager:
         if self._sql.fetchall('SELECT onion FROM contacts WHERE alias = ?', (alias,)):
             return False, TransCode.ALIAS_IN_USE, {'alias': alias}
 
-        res: List[Tuple[Any, ...]] = self._sql.fetchall(
+        res: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
             'SELECT alias FROM contacts WHERE onion = ? AND is_saved = 1', (onion,)
         )
         if res:
@@ -112,7 +112,7 @@ class ContactManager:
 
     def promote_discovered_peer(
         self, alias: str
-    ) -> Tuple[bool, TransCode, Dict[str, Any]]:
+    ) -> Tuple[bool, TransCode, Dict[str, str]]:
         """
         Promotes a discovered peer to a permanent address book contact.
 
@@ -120,10 +120,10 @@ class ContactManager:
             alias (str): The discovered alias to promote.
 
         Returns:
-            Tuple[bool, TransCode, Dict[str, Any]]: A success flag, domain state code, and parameters.
+            Tuple[bool, TransCode, Dict[str, str]]: A success flag, domain state code, and parameters.
         """
         alias = alias.strip().lower()
-        res: List[Tuple[Any, ...]] = self._sql.fetchall(
+        res: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
             'SELECT is_saved FROM contacts WHERE alias = ?', (alias,)
         )
 
@@ -139,7 +139,7 @@ class ContactManager:
 
     def rename_contact(
         self, old_alias: str, new_alias: str
-    ) -> Tuple[bool, TransCode, Dict[str, Any]]:
+    ) -> Tuple[bool, TransCode, Dict[str, str]]:
         """
         Renames a contact or discovered peer dynamically.
 
@@ -148,7 +148,7 @@ class ContactManager:
             new_alias (str): The desired new alias.
 
         Returns:
-            Tuple[bool, TransCode, Dict[str, Any]]: A success flag, domain state code, and parameters.
+            Tuple[bool, TransCode, Dict[str, str]]: A success flag, domain state code, and parameters.
         """
         old_alias = old_alias.strip().lower()
         new_alias = new_alias.strip().lower()
@@ -177,7 +177,7 @@ class ContactManager:
 
     def remove_contact(
         self, alias: str, active_onions: Optional[List[str]] = None
-    ) -> Tuple[bool, TransCode, Dict[str, Any], List[Tuple[str, str, bool]], List[str]]:
+    ) -> Tuple[bool, TransCode, Dict[str, str], List[Tuple[str, str, bool]], List[str]]:
         """
         Removes a saved contact or anonymizes a renamed discovered peer.
         Refuses to physically delete peers tied to active states, demotes instead.
@@ -187,18 +187,19 @@ class ContactManager:
             active_onions (Optional[List[str]]): Currently connected onions functioning as a shield.
 
         Returns:
-            Tuple[bool, TransCode, Dict[str, Any], List[Tuple[str, str, bool]], List[str]]: A success flag, state code, params, UI renames, and UI deletions.
+            Tuple[bool, TransCode, Dict[str, str], List[Tuple[str, str, bool]], List[str]]: A success flag, state code, params, UI renames, and UI deletions.
         """
         active_onions = active_onions or []
         alias = alias.strip().lower()
-        res: List[Tuple[Any, ...]] = self._sql.fetchall(
+        res: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
             'SELECT is_saved, onion FROM contacts WHERE alias = ?', (alias,)
         )
 
         if not res:
             return False, TransCode.PEER_NOT_FOUND, {'target': alias}, [], []
 
-        is_saved, onion = res[0]
+        is_saved, raw_onion = res[0]
+        onion = str(raw_onion)
         was_saved: bool = is_saved == 1
 
         has_hist = self._sql.fetchall(
@@ -209,7 +210,7 @@ class ContactManager:
         )
 
         if onion in active_onions or has_hist or has_msgs:
-            new_alias: str = self._generate_ram_alias(str(onion))
+            new_alias: str = self._generate_ram_alias(onion)
 
             # If the current alias already matches the generated hash alias, it's fully anonymized.
             if new_alias == alias:
@@ -264,7 +265,7 @@ class ContactManager:
 
     def clear_contacts(
         self, active_onions: Optional[List[str]] = None
-    ) -> Tuple[bool, TransCode, Dict[str, Any], List[Tuple[str, str, bool]], List[str]]:
+    ) -> Tuple[bool, TransCode, Dict[str, str], List[Tuple[str, str, bool]], List[str]]:
         """
         Wipes the address book, demoting saved contacts to discovered peers if they
         are still tied to history, messages, or active network connections.
@@ -273,11 +274,11 @@ class ContactManager:
             active_onions (Optional[List[str]]): Currently connected onions functioning as a shield.
 
         Returns:
-            Tuple[bool, TransCode, Dict[str, Any], List[Tuple[str, str, bool]], List[str]]: A success flag, state code, params, UI renames, and UI deletions.
+            Tuple[bool, TransCode, Dict[str, str], List[Tuple[str, str, bool]], List[str]]: A success flag, state code, params, UI renames, and UI deletions.
         """
         active_onions = active_onions or []
         try:
-            saved: List[Tuple[Any, ...]] = self._sql.fetchall(
+            saved: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
                 'SELECT alias, onion FROM contacts WHERE is_saved = 1'
             )
             renames: List[Tuple[str, str, bool]] = []
@@ -343,7 +344,7 @@ class ContactManager:
             AND onion NOT IN (SELECT contact_onion FROM messages)
             {condition}
         """
-        rows: List[Tuple[Any, ...]] = self._sql.fetchall(query_select, params)
+        rows: List[Tuple[SqlParam, ...]] = self._sql.fetchall(query_select, params)
         deleted_aliases: List[str] = [str(r[0]) for r in rows]
 
         if deleted_aliases:
@@ -402,7 +403,7 @@ class ContactManager:
             return None
         alias = alias.strip().lower()
 
-        res: List[Tuple[Any, ...]] = self._sql.fetchall(
+        res: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
             'SELECT onion FROM contacts WHERE alias = ?', (alias,)
         )
         if res:
@@ -446,7 +447,7 @@ class ContactManager:
             return None
         onion = clean_onion(onion)
 
-        res: List[Tuple[Any, ...]] = self._sql.fetchall(
+        res: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
             'SELECT alias FROM contacts WHERE onion = ?', (onion,)
         )
         if res:
@@ -462,7 +463,7 @@ class ContactManager:
 
         return None
 
-    def get_contacts_data(self) -> Dict[str, Any]:
+    def get_contacts_data(self) -> Dict[str, Union[str, List[Tuple[str, str]]]]:
         """
         Retrieves raw contacts data for UI presentation.
 
@@ -470,12 +471,12 @@ class ContactManager:
             None
 
         Returns:
-            Dict[str, Any]: Dictionary containing 'saved', 'discovered', and 'profile' data.
+            Dict[str, Union[str, List[Tuple[str, str]]]]: Dictionary containing 'saved', 'discovered', and 'profile' data.
         """
-        saved: List[Tuple[Any, ...]] = self._sql.fetchall(
+        saved: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
             'SELECT alias, onion FROM contacts WHERE is_saved = 1 ORDER BY alias ASC'
         )
-        discovered: List[Tuple[Any, ...]] = self._sql.fetchall(
+        discovered: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
             'SELECT alias, onion FROM contacts WHERE is_saved = 0 ORDER BY alias ASC'
         )
         return {

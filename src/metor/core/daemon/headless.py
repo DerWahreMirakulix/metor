@@ -7,12 +7,14 @@ enforcing strict Domain-Driven Design by shielding the UI from direct database a
 import socket
 import threading
 import json
-from typing import Dict, Any, Optional
+import types
+from typing import Dict, Optional, Type
 
 from metor.core import KeyManager, TorManager
 from metor.core.api import (
-    IpcCommand,
+    JsonValue,
     IpcEvent,
+    IpcCommand,
     CommandResponseEvent,
     TransCode,
     GetContactsListCommand,
@@ -85,14 +87,19 @@ class HeadlessDaemon:
         self.start()
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[types.TracebackType],
+    ) -> None:
         """
         Context manager exit to ensure safe shutdown and port release.
 
         Args:
-            exc_type (Any): Exception type if raised.
-            exc_val (Any): Exception value if raised.
-            exc_tb (Any): Traceback if raised.
+            exc_type (Optional[Type[BaseException]]): Exception type if raised.
+            exc_val (Optional[BaseException]): Exception value if raised.
+            exc_tb (Optional[types.TracebackType]): Traceback if raised.
 
         Returns:
             None
@@ -180,7 +187,7 @@ class HeadlessDaemon:
                     buffer += data.decode('utf-8', errors='ignore')
                     if '\n' in buffer:
                         line: str = buffer.split('\n')[0].strip()
-                        cmd_dict: Dict[str, Any] = json.loads(line)
+                        cmd_dict: Dict[str, JsonValue] = json.loads(line)
                         cmd: IpcCommand = IpcCommand.from_dict(cmd_dict)
                         self._process_command(cmd, conn)
                         break

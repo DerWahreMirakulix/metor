@@ -1,12 +1,20 @@
 """
 Module providing centralized UI presentation logic.
-Transforms raw domain data into formatted strings for both CLI and Chat interfaces.
+Transforms strictly typed DTOs into formatted strings for both CLI and Chat interfaces.
 Enforces the Zero-Text Policy by offloading formatting from the backend.
 """
 
-from typing import Dict, Any, List, Tuple, Optional
+from typing import List
 
-from metor.core.api import Action
+from metor.core.api import (
+    IpcEvent,
+    ContactsDataEvent,
+    HistoryDataEvent,
+    MessagesDataEvent,
+    InboxCountsEvent,
+    UnreadMessagesEvent,
+    ProfilesDataEvent,
+)
 from metor.data import MessageDirection, MessageStatus
 
 # Local Package Imports
@@ -14,7 +22,7 @@ from metor.ui.theme import Theme
 
 
 class UIPresenter:
-    """Formats raw data dictionaries into standardized UI strings."""
+    """Formats strongly typed DTOs into standardized UI strings."""
 
     @staticmethod
     def get_header_string(text: str) -> str:
@@ -47,227 +55,198 @@ class UIPresenter:
         return divider
 
     @staticmethod
-    def format_response(
-        action: Action, data: Dict[str, Any], chat_mode: bool = False
-    ) -> str:
+    def format_response(event: IpcEvent, chat_mode: bool = False) -> str:
         """
-        Routes the raw data to the appropriate formatting function based on the IPC action.
+        Routes the DTO to the appropriate formatting function based on its concrete type.
 
         Args:
-            action (Action): The executed IPC command action.
-            data (Dict[str, Any]): The raw data payload.
+            event (IpcEvent): The strictly typed IPC response event.
             chat_mode (bool): Flag to apply Chat-specific layout adjustments.
 
         Returns:
             str: The formatted terminal string.
         """
-        if action == Action.GET_CONTACTS_LIST:
-            return UIPresenter.format_contacts(data, chat_mode)
-        if action == Action.GET_HISTORY:
-            return UIPresenter.format_history(data)
-        if action == Action.GET_MESSAGES:
-            return UIPresenter.format_messages(data)
-        if action == Action.GET_INBOX:
-            return UIPresenter.format_inbox(data)
-        if action == Action.MARK_READ:
-            return UIPresenter.format_read_messages(data)
+        if isinstance(event, ContactsDataEvent):
+            return UIPresenter.format_contacts(event, chat_mode)
+        if isinstance(event, HistoryDataEvent):
+            return UIPresenter.format_history(event)
+        if isinstance(event, MessagesDataEvent):
+            return UIPresenter.format_messages(event)
+        if isinstance(event, InboxCountsEvent):
+            return UIPresenter.format_inbox(event)
+        if isinstance(event, UnreadMessagesEvent):
+            return UIPresenter.format_read_messages(event)
+        if isinstance(event, ProfilesDataEvent):
+            return UIPresenter.format_profiles(event)
+
         return 'No formatter available for this data.'
 
     @staticmethod
-    def format_contacts(data: Dict[str, Any], chat_mode: bool) -> str:
+    def format_contacts(event: ContactsDataEvent, chat_mode: bool) -> str:
         """
         Formats the address book and discovered peers.
 
         Args:
-            data (Dict[str, Any]): Raw contacts data.
+            event (ContactsDataEvent): The contacts data DTO.
             chat_mode (bool): Whether to format strictly for the chat UI.
 
         Returns:
             str: The formatted contacts list.
         """
-        profile_suffix: str = (
-            '' if chat_mode else f" for profile '{data.get('profile', '')}'"
-        )
+        profile_suffix: str = '' if chat_mode else f" for profile '{event.profile}'"
         lines: List[str] = []
 
-        saved: List[Tuple[str, str]] = data.get('saved', [])
-        if saved:
+        if event.saved:
             lines.append(f'Available contacts{profile_suffix}:')
-            for row in saved:
-                lines.append(f'   {Theme.GREEN}{row[0]}{Theme.RESET} -> {row[1]}')
+            for entry in event.saved:
+                lines.append(
+                    f'   {Theme.GREEN}{entry.alias}{Theme.RESET} -> {entry.onion}'
+                )
         else:
             lines.append(f'No contacts in address book{profile_suffix}.')
 
-        discovered: List[Tuple[str, str]] = data.get('discovered', [])
-        if discovered:
+        if event.discovered:
             lines.append('\nDiscovered peers:')
-            for row in discovered:
-                lines.append(f'   {Theme.DARK_GREY}{row[0]}{Theme.RESET} -> {row[1]}')
+            for entry in event.discovered:
+                lines.append(
+                    f'   {Theme.DARK_GREY}{entry.alias}{Theme.RESET} -> {entry.onion}'
+                )
 
         return '\n'.join(lines)
 
     @staticmethod
-    def format_history(data: Dict[str, Any]) -> str:
+    def format_history(event: HistoryDataEvent) -> str:
         """
         Formats the historical connection events.
 
         Args:
-            data (Dict[str, Any]): Raw history data.
+            event (HistoryDataEvent): The history data DTO.
 
         Returns:
             str: The formatted event history output.
         """
-        history: List[Dict[str, Any]] = data.get('history', [])
-        target: str = data.get('target', '')
-        profile: str = data.get('profile', '')
-
-        if target:
-            disp_name: str = f'peer {Theme.CYAN}{target}{Theme.RESET}'
+        if event.target:
+            disp_name: str = f'peer {Theme.CYAN}{event.target}{Theme.RESET}'
         else:
-            disp_name = f'profile {Theme.CYAN}{profile}{Theme.RESET}'
+            disp_name = f'profile {Theme.CYAN}{event.profile}{Theme.RESET}'
 
-        if not history:
+        if not event.history:
             return f'No event history available for {disp_name}.'
 
-        out: str = f'{UIPresenter.get_header_string(f"Event history for {disp_name} (Last {len(history)})")}\n'
+        out: str = f'{UIPresenter.get_header_string(f"Event history for {disp_name} (Last {len(event.history)})")}\n'
 
-        for item in history:
-            timestamp: str = item.get('timestamp', '')
-            status: str = item.get('status', '')
-            row_onion: str = item.get('onion') or 'Unknown'
-            reason: str = item.get('reason', '')
-            display_alias: str = item.get('alias', 'Unknown')
-
-            line: str = f'[{timestamp}] {Theme.CYAN}{status}{Theme.RESET} | remote alias: {Theme.PURPLE}{display_alias}{Theme.RESET} | remote identity: {Theme.YELLOW}{row_onion}{Theme.RESET}'
-            if reason:
-                line += f' | reason: {Theme.CYAN}{reason}{Theme.RESET}'
+        for item in event.history:
+            row_onion: str = item.onion or 'Unknown'
+            line: str = f'[{item.timestamp}] {Theme.CYAN}{item.status}{Theme.RESET} | remote alias: {Theme.PURPLE}{item.alias}{Theme.RESET} | remote identity: {Theme.YELLOW}{row_onion}{Theme.RESET}'
+            if item.reason:
+                line += f' | reason: {Theme.CYAN}{item.reason}{Theme.RESET}'
             out += f'{line}\n'
 
         out += UIPresenter.get_divider_string()
         return out
 
     @staticmethod
-    def format_messages(data: Dict[str, Any]) -> str:
+    def format_messages(event: MessagesDataEvent) -> str:
         """
         Formats the historical message record.
 
         Args:
-            data (Dict[str, Any]): Raw message history data.
+            event (MessagesDataEvent): The message history data DTO.
 
         Returns:
             str: The formatted terminal output of the chat history.
         """
-        messages: List[Dict[str, Any]] = data.get('messages', [])
-        target: str = data.get('target', '')
+        if not event.messages:
+            return f"No chat history found for '{event.target}'."
 
-        if not messages:
-            return f"No chat history found for '{target}'."
-
-        out: str = f'{UIPresenter.get_header_string(f"Chat History with {Theme.CYAN}{target}{Theme.RESET} (Last {len(messages)})")}\n'
-        for msg in messages:
-            time_str: str = msg.get('timestamp', '')
-            direction: str = msg.get('direction', '')
-            status: str = msg.get('status', '')
-            payload: str = msg.get('payload', '')
-
-            if direction == MessageDirection.OUT.value:
-                if status == MessageStatus.DELIVERED.value:
-                    prefix: str = f'{Theme.GREEN}To {target}{Theme.RESET}'
+        out: str = f'{UIPresenter.get_header_string(f"Chat History with {Theme.CYAN}{event.target}{Theme.RESET} (Last {len(event.messages)})")}\n'
+        for msg in event.messages:
+            if msg.direction == MessageDirection.OUT.value:
+                if msg.status == MessageStatus.DELIVERED.value:
+                    prefix: str = f'{Theme.GREEN}To {event.target}{Theme.RESET}'
                 else:
-                    prefix = f'To {target}'
+                    prefix = f'To {event.target}'
             else:
-                prefix = f'{Theme.PURPLE}From {target}{Theme.RESET}'
+                prefix = f'{Theme.PURPLE}From {event.target}{Theme.RESET}'
 
-            out += f'[{time_str}] {prefix}: {payload}\n'
+            out += f'[{msg.timestamp}] {prefix}: {msg.payload}\n'
 
         out += UIPresenter.get_divider_string()
         return out
 
     @staticmethod
-    def format_inbox(data: Dict[str, Any]) -> str:
+    def format_inbox(event: InboxCountsEvent) -> str:
         """
         Formats the current unread inbox counts.
 
         Args:
-            data (Dict[str, Any]): Dictionary mapping aliases to their unread message count.
+            event (InboxCountsEvent): The inbox counts DTO.
 
         Returns:
             str: Formatting string output.
         """
-        inbox: Dict[str, int] = data.get('inbox', {})
-        if not inbox:
+        if not event.inbox:
             return 'Inbox is empty.'
 
         out: str = 'Unread Offline Messages:\n'
-        for alias, count in inbox.items():
+        for alias, count in event.inbox.items():
             out += f' - {Theme.CYAN}{alias}{Theme.RESET}: {Theme.YELLOW}{count}{Theme.RESET} new message(s)\n'
 
         return out.strip()
 
     @staticmethod
-    def format_read_messages(data: Dict[str, Any]) -> str:
+    def format_read_messages(event: UnreadMessagesEvent) -> str:
         """
         Formats unread messages fetched from the inbox.
 
         Args:
-            data (Dict[str, Any]): Raw unread messages data.
+            event (UnreadMessagesEvent): The unread messages DTO.
 
         Returns:
             str: The colorized terminal output displaying the messages.
         """
-        messages: List[Dict[str, str]] = data.get('messages', [])
-        target: str = data.get('target', '')
+        if not event.messages:
+            return f"No unread messages from '{event.target}'."
 
-        if not messages:
-            return f"No unread messages from '{target}'."
-
-        out: str = f'{UIPresenter.get_header_string(f"Messages from {Theme.CYAN}{target}{Theme.RESET}")}\n'
-        for msg in messages:
-            timestamp: str = msg.get('timestamp', '')
-            payload: str = msg.get('payload', '')
-            prefix: str = f'{Theme.PURPLE}From {target}{Theme.RESET}'
-            out += f'[{timestamp}] {prefix}: {payload}\n'
+        out: str = f'{UIPresenter.get_header_string(f"Messages from {Theme.CYAN}{event.target}{Theme.RESET}")}\n'
+        for msg in event.messages:
+            prefix: str = f'{Theme.PURPLE}From {event.target}{Theme.RESET}'
+            out += f'[{msg.timestamp}] {prefix}: {msg.payload}\n'
 
         out += UIPresenter.get_divider_string()
         return out
 
     @staticmethod
-    def format_profiles(data: Dict[str, Any]) -> str:
+    def format_profiles(event: ProfilesDataEvent) -> str:
         """
         Formats the list of isolated profiles.
 
         Args:
-            data (Dict[str, Any]): Raw profile metadata.
+            event (ProfilesDataEvent): The profiles data DTO.
 
         Returns:
             str: Formatted terminal string.
         """
-        profiles: List[Dict[str, Any]] = data.get('profiles', [])
-        if not profiles:
+        if not event.profiles:
             return 'No profiles found.'
 
         lines: List[str] = ['Available profiles:']
-        for p in profiles:
-            name: str = p.get('name', '')
-            is_active: bool = p.get('is_active', False)
-            is_remote: bool = p.get('is_remote', False)
-            port: Optional[int] = p.get('port')
-
-            marker: str = '*' if is_active else ' '
+        for p in event.profiles:
+            marker: str = '*' if p.is_active else ' '
             tags: List[str] = []
 
-            if is_remote:
+            if p.is_remote:
                 tags.append('REMOTE')
-            elif port:
-                tags.append(f'PORT:{port}')
+            elif p.port:
+                tags.append(f'PORT:{p.port}')
 
             tag_str: str = (
                 f' [{Theme.YELLOW}{"|".join(tags)}{Theme.RESET}]' if tags else ''
             )
 
-            if is_active:
-                lines.append(f' {Theme.GREEN}{marker} {name}{Theme.RESET}{tag_str}')
+            if p.is_active:
+                lines.append(f' {Theme.GREEN}{marker} {p.name}{Theme.RESET}{tag_str}')
             else:
-                lines.append(f'   {name}{tag_str}')
+                lines.append(f'   {p.name}{tag_str}')
 
         return '\n'.join(lines)

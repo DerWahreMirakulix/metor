@@ -6,14 +6,14 @@ Yields raw domain models without applying CLI format dependencies.
 
 from enum import Enum
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional, Dict
 
 from metor.core.api import TransCode
 from metor.utils import Constants, clean_onion
 
 # Local Package Imports
 from metor.data.profile import ProfileManager
-from metor.data.sql import SqlManager
+from metor.data.sql import SqlManager, SqlParam
 from metor.data.settings import Settings, SettingKey
 
 
@@ -122,11 +122,13 @@ class HistoryManager:
             List[Tuple[str, str, Optional[str], str]]: List of events (timestamp, status, onion, reason).
         """
         actual_limit: int = (
-            limit if limit is not None else Settings.get(SettingKey.HISTORY_LIMIT)
+            limit
+            if limit is not None
+            else int(str(Settings.get(SettingKey.HISTORY_LIMIT)))
         )
         if filter_onion:
             query: str = 'SELECT timestamp, status, onion, reason FROM history WHERE onion = ? ORDER BY timestamp DESC LIMIT ?'
-            rows: List[Tuple[Any, ...]] = self._sql.fetchall(
+            rows: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
                 query, (filter_onion, actual_limit)
             )
         else:
@@ -145,7 +147,7 @@ class HistoryManager:
 
     def clear_history(
         self, filter_onion: Optional[str] = None
-    ) -> Tuple[bool, TransCode, Dict[str, Any]]:
+    ) -> Tuple[bool, TransCode, Dict[str, str]]:
         """
         Wipes event logs from the history table strictly maintaining domain boundaries.
 
@@ -153,7 +155,7 @@ class HistoryManager:
             filter_onion (Optional[str]): The target onion identity. If None, deletes all.
 
         Returns:
-            Tuple[bool, TransCode, Dict[str, Any]]: A success flag, domain state code, and parameters.
+            Tuple[bool, TransCode, Dict[str, str]]: A success flag, domain state code, and parameters.
         """
         try:
             if filter_onion:

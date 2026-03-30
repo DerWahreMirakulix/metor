@@ -9,14 +9,14 @@ import secrets
 from enum import Enum
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Tuple, Dict, Optional
 
 from metor.core.api import TransCode
 from metor.utils import Constants, clean_onion
 
 # Local Package Imports
 from metor.data.profile import ProfileManager
-from metor.data.sql import SqlManager
+from metor.data.sql import SqlManager, SqlParam
 from metor.data.settings import Settings, SettingKey
 
 
@@ -119,12 +119,12 @@ class MessageManager:
 
         # Deduplication check for inbound payloads to prevent At-Least-Once replication faults
         if direction == MessageDirection.IN and actual_msg_id:
-            existing: List[Tuple[Any, ...]] = self._sql.fetchall(
+            existing: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
                 'SELECT id FROM messages WHERE msg_id = ? AND contact_onion = ?',
                 (actual_msg_id, contact_onion),
             )
             if existing:
-                return int(existing[0][0])
+                return int(str(existing[0][0]))
 
         ts: str = timestamp if timestamp else datetime.now(timezone.utc).isoformat()
 
@@ -146,8 +146,8 @@ class MessageManager:
         )
 
         id_query: str = 'SELECT MAX(id) FROM messages'
-        result: List[Tuple[Any, ...]] = self._sql.fetchall(id_query)
-        return int(result[0][0]) if result and result[0][0] else 0
+        result: List[Tuple[SqlParam, ...]] = self._sql.fetchall(id_query)
+        return int(str(result[0][0])) if result and result[0][0] else 0
 
     def get_pending_outbox(self) -> List[Tuple[int, str, str, str, str, str]]:
         """
@@ -164,12 +164,12 @@ class MessageManager:
             'SELECT id, contact_onion, msg_type, payload, msg_id, timestamp '
             'FROM messages WHERE status = ? ORDER BY id ASC'
         )
-        rows: List[Tuple[Any, ...]] = self._sql.fetchall(
+        rows: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
             query, (MessageStatus.PENDING.value,)
         )
         return [
             (
-                int(r[0]),
+                int(str(r[0])),
                 str(r[1]),
                 str(r[2]),
                 str(r[3]),
@@ -204,13 +204,13 @@ class MessageManager:
             Dict[str, int]: A dictionary mapping onion addresses to their unread message count.
         """
         query: str = 'SELECT contact_onion, COUNT(*) FROM messages WHERE status = ? GROUP BY contact_onion'
-        rows: List[Tuple[Any, ...]] = self._sql.fetchall(
+        rows: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
             query, (MessageStatus.UNREAD.value,)
         )
 
         counts: Dict[str, int] = {}
         for row in rows:
-            onion, count = str(row[0]), int(row[1])
+            onion, count = str(row[0]), int(str(row[1]))
             counts[onion] = count
 
         return counts
@@ -232,11 +232,11 @@ class MessageManager:
             WHERE contact_onion = ? AND status = ?
             ORDER BY timestamp ASC
         """
-        raw_messages: List[Tuple[Any, ...]] = self._sql.fetchall(
+        raw_messages: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
             query, (contact_onion, MessageStatus.UNREAD.value)
         )
         messages: List[Tuple[int, str, str, str]] = [
-            (int(r[0]), str(r[1]), str(r[2]), str(r[3])) for r in raw_messages
+            (int(str(r[0])), str(r[1]), str(r[2]), str(r[3])) for r in raw_messages
         ]
 
         if messages:
@@ -263,7 +263,7 @@ class MessageManager:
 
     def get_chat_history(
         self, contact_onion: str, limit: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
+    ) -> List[Dict[str, str]]:
         """
         Retrieves the past message history for a specific contact, ordered chronologically.
 
@@ -272,10 +272,12 @@ class MessageManager:
             limit (Optional[int]): The maximum number of past messages to fetch. Defaults to None.
 
         Returns:
-            List[Dict[str, Any]]: A list of dictionaries containing formatted message data.
+            List[Dict[str, str]]: A list of dictionaries containing formatted message data.
         """
         actual_limit: int = (
-            limit if limit is not None else Settings.get(SettingKey.MESSAGES_LIMIT)
+            limit
+            if limit is not None
+            else int(str(Settings.get(SettingKey.MESSAGES_LIMIT)))
         )
         query: str = """
             SELECT direction, status, payload, timestamp 
@@ -284,12 +286,12 @@ class MessageManager:
             ORDER BY timestamp DESC
             LIMIT ?
         """
-        rows: List[Tuple[Any, ...]] = self._sql.fetchall(
+        rows: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
             query, (contact_onion, actual_limit)
         )
         rows.reverse()
 
-        result: List[Dict[str, Any]] = []
+        result: List[Dict[str, str]] = []
         for row in rows:
             direction, status, payload, timestamp = (
                 str(row[0]),
@@ -309,7 +311,7 @@ class MessageManager:
 
     def clear_messages(
         self, onion: Optional[str] = None, non_contacts_only: bool = False
-    ) -> Tuple[bool, TransCode, Dict[str, Any]]:
+    ) -> Tuple[bool, TransCode, Dict[str, str]]:
         """
         Wipes the message table completely or just for a specific contact.
         Maintains domain boundaries by leaving contact deletion to the Daemon orchestrator.
@@ -319,7 +321,7 @@ class MessageManager:
             non_contacts_only (bool): If True, only deletes messages from unsaved peers.
 
         Returns:
-            Tuple[bool, TransCode, Dict[str, Any]]: A success flag, domain state code, and parameters.
+            Tuple[bool, TransCode, Dict[str, str]]: A success flag, domain state code, and parameters.
         """
         try:
             if non_contacts_only:

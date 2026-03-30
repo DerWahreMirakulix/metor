@@ -10,11 +10,14 @@ import threading
 import tempfile
 from contextlib import contextmanager
 from sqlcipher3 import dbapi2 as sqlite3
-from typing import Any, List, Tuple, Optional, Iterator, Dict, Callable
+from typing import List, Tuple, Optional, Iterator, Dict, Callable, Union
 from pathlib import Path
 
 # Local Package Imports
 from metor.data.settings import Settings, SettingKey
+
+
+SqlParam = Union[str, int, float, bytes, None]
 
 
 @contextmanager
@@ -63,7 +66,6 @@ def _capture_c_stderr(
 class SqlManager:
     """Manages SQLite database connections using a Connection Pool to prevent lock crashes."""
 
-    # Class-level dictionary to reuse identical connections across managers
     _connections: Dict[str, sqlite3.Connection] = {}
     _pool_lock: threading.Lock = threading.Lock()
     _log_callback: Optional[Callable[[str], None]] = None
@@ -170,7 +172,6 @@ class SqlManager:
                     cursor.execute(contacts_query)
                     cursor.execute(history_query)
         except (sqlite3.DatabaseError, sqlite3.OperationalError, MemoryError) as e:
-            # Clean up the corrupted connection from the pool to allow fresh retries
             path_str: str = str(self.db_path.absolute())
             with SqlManager._pool_lock:
                 if path_str in SqlManager._connections:
@@ -180,13 +181,13 @@ class SqlManager:
                 f'Invalid master password or corrupted database. Details: {str(e)}'
             ) from e
 
-    def execute(self, query: str, params: Tuple[Any, ...] = ()) -> None:
+    def execute(self, query: str, params: Tuple[SqlParam, ...] = ()) -> None:
         """
         Executes a database query that does not return rows (INSERT, UPDATE, DELETE).
 
         Args:
             query (str): The SQL query string.
-            params (Tuple[Any, ...]): Parameters to inject into the SQL query safely.
+            params (Tuple[SqlParam, ...]): Parameters to inject into the SQL query safely.
 
         Returns:
             None
@@ -197,17 +198,17 @@ class SqlManager:
             cursor.execute(query, params)
 
     def fetchall(
-        self, query: str, params: Tuple[Any, ...] = ()
-    ) -> List[Tuple[Any, ...]]:
+        self, query: str, params: Tuple[SqlParam, ...] = ()
+    ) -> List[Tuple[SqlParam, ...]]:
         """
         Executes a database query and returns all matching rows.
 
         Args:
             query (str): The SQL SELECT query string.
-            params (Tuple[Any, ...]): Parameters to inject into the SQL query safely.
+            params (Tuple[SqlParam, ...]): Parameters to inject into the SQL query safely.
 
         Returns:
-            List[Tuple[Any, ...]]: A list of tuples representing the rows.
+            List[Tuple[SqlParam, ...]]: A list of tuples representing the rows.
         """
         conn = self._get_connection()
         cursor = conn.cursor()

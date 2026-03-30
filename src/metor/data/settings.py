@@ -7,9 +7,12 @@ Enforces strict typing using Enums for configuration keys.
 import json
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict
+from typing import Dict, Union, Optional
 
 from metor.utils import Constants, FileLock
+
+
+SettingValue = Union[str, int, float, bool]
 
 
 class SettingKey(str, Enum):
@@ -47,7 +50,7 @@ class SettingKey(str, Enum):
 class Settings:
     """Dynamic application settings manager reading from and writing to a nested global JSON file."""
 
-    _DEFAULTS: Dict[str, Any] = {
+    _DEFAULTS: Dict[str, SettingValue] = {
         SettingKey.DEFAULT_PROFILE.value: 'default',
         SettingKey.PROMPT_SIGN.value: '$',
         SettingKey.CHAT_LIMIT.value: 50,
@@ -88,7 +91,7 @@ class Settings:
         return data_dir / Constants.SETTINGS_FILE
 
     @classmethod
-    def _load_settings(cls) -> Dict[str, Dict[str, Any]]:
+    def _load_settings(cls) -> Dict[str, Dict[str, SettingValue]]:
         """
         Loads the settings from the JSON file into a nested structure.
         Creates the default structure and writes it to disk if the file is missing.
@@ -97,13 +100,13 @@ class Settings:
             None
 
         Returns:
-            Dict[str, Dict[str, Any]]: The loaded settings dictionary partitioned by domain.
+            Dict[str, Dict[str, SettingValue]]: The loaded settings dictionary partitioned by domain.
         """
         path: Path = cls.get_global_settings_path()
         if path.exists():
             try:
                 with path.open('r', encoding='utf-8') as f:
-                    data: Dict[str, Dict[str, Any]] = json.load(f)
+                    data: Dict[str, Dict[str, SettingValue]] = json.load(f)
 
                     for domain in ('ui', 'daemon'):
                         if domain not in data:
@@ -127,7 +130,7 @@ class Settings:
         return data
 
     @classmethod
-    def get(cls, key: SettingKey) -> Any:
+    def get(cls, key: SettingKey) -> Optional[SettingValue]:
         """
         Retrieves a setting value by its strongly-typed key. Uses default if not found.
 
@@ -135,9 +138,9 @@ class Settings:
             key (SettingKey): The setting key enum to retrieve.
 
         Returns:
-            Any: The value of the setting.
+            Optional[SettingValue]: The value of the setting, or None if completely missing.
         """
-        data: Dict[str, Dict[str, Any]] = cls._load_settings()
+        data: Dict[str, Dict[str, SettingValue]] = cls._load_settings()
         category: str
         sub_key: str
         category, sub_key = key.value.split('.', 1)
@@ -148,14 +151,14 @@ class Settings:
         return cls._DEFAULTS.get(key.value)
 
     @classmethod
-    def set(cls, key: SettingKey, value: Any) -> None:
+    def set(cls, key: SettingKey, value: SettingValue) -> None:
         """
         Updates a setting value and saves it safely to the nested JSON file using a lock.
         Enforces strict type validation against the default configuration schema.
 
         Args:
             key (SettingKey): The setting key enum to update.
-            value (Any): The new value for the setting.
+            value (SettingValue): The new value for the setting.
 
         Raises:
             TypeError: If the provided value does not match the expected type schema.
@@ -163,7 +166,7 @@ class Settings:
         Returns:
             None
         """
-        default_val: Any = cls._DEFAULTS.get(key.value)
+        default_val: Optional[SettingValue] = cls._DEFAULTS.get(key.value)
         if default_val is not None:
             expected_type: type = type(default_val)
             if (
@@ -180,7 +183,7 @@ class Settings:
         path: Path = cls.get_global_settings_path()
 
         with FileLock(path):
-            data: Dict[str, Dict[str, Any]] = cls._load_settings()
+            data: Dict[str, Dict[str, SettingValue]] = cls._load_settings()
             category: str
             sub_key: str
             category, sub_key = key.value.split('.', 1)

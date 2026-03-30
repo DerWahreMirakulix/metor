@@ -5,20 +5,19 @@ Maps generic UISeverity types to domain-specific ChatMessageTypes using a DRY ar
 """
 
 import threading
-from typing import Optional, Dict, Any
+import dataclasses
+from typing import List, Optional, Dict, Any
 
 from metor.core.api import (
     IpcEvent,
     TransCode,
     MarkReadCommand,
     InitEvent,
-    NotificationEvent,
-    CommandResponseEvent,
     RemoteMsgEvent,
     AckEvent,
+    DropFailedEvent,
     ConnectedEvent,
     DisconnectedEvent,
-    MsgFallbackToDropEvent,
     InboxNotificationEvent,
     InboxDataEvent,
     RenameSuccessEvent,
@@ -32,6 +31,25 @@ from metor.core.api import (
     IncomingConnectionEvent,
     ConnectionRejectedEvent,
     TiebreakerRejectedEvent,
+    AutoReconnectAttemptEvent,
+    ContactsDataEvent,
+    HistoryDataEvent,
+    MessagesDataEvent,
+    InboxCountsEvent,
+    UnreadMessagesEvent,
+    ProfilesDataEvent,
+    ActionSuccessEvent,
+    ActionErrorEvent,
+    ContactActionSuccessEvent,
+    ContactRenamedEvent,
+    ProfileActionSuccessEvent,
+    TargetActionSuccessEvent,
+    SettingUpdatedEvent,
+    FallbackSuccessEvent,
+    MaxConnectionsReachedEvent,
+    PeerNotFoundEvent,
+    RetunnelInitiatedEvent,
+    RetunnelSuccessEvent,
 )
 from metor.ui import Translator, UIPresenter, UISeverity
 from metor.utils import clean_onion
@@ -47,7 +65,7 @@ from metor.ui.chat.models import ChatMessageType
 _SEVERITY_MAP: Dict[UISeverity, ChatMessageType] = {
     UISeverity.INFO: ChatMessageType.INFO,
     UISeverity.SYSTEM: ChatMessageType.SYSTEM,
-    UISeverity.ERROR: ChatMessageType.SYSTEM,  # Chat routes generic errors as system info
+    UISeverity.ERROR: ChatMessageType.ERROR,
 }
 
 
@@ -104,7 +122,7 @@ class EventHandler:
 
     def handle(self, event: IpcEvent) -> None:
         """
-        Routes a single IPC event to the appropriate state-change or rendering logic.
+        Routes a single IPC event DTO to the appropriate state-change or rendering logic.
 
         Args:
             event (IpcEvent): The strongly-typed event received from the Daemon.
@@ -113,30 +131,64 @@ class EventHandler:
             None
         """
         try:
+            # 1. State Initializers
             if isinstance(event, InitEvent):
                 self._session.my_onion = event.onion or 'unknown'
                 self._init_event.set()
 
-            elif isinstance(event, NotificationEvent):
-                self._print_translated(
-                    event.code, event.params, event.params.get('alias')
+            # 2. Query Data Responses (DTOs)
+            elif isinstance(
+                event,
+                (
+                    ContactsDataEvent,
+                    HistoryDataEvent,
+                    MessagesDataEvent,
+                    InboxCountsEvent,
+                    UnreadMessagesEvent,
+                    ProfilesDataEvent,
+                ),
+            ):
+                text_fmt: str = UIPresenter.format_response(event, chat_mode=True)
+                target_alias: Optional[str] = getattr(event, 'target', None) or getattr(
+                    event, 'alias', None
+                )
+                self._renderer.print_message(
+                    text_fmt,
+                    msg_type=ChatMessageType.SYSTEM,
+                    alias=target_alias,
                 )
 
-            elif isinstance(event, CommandResponseEvent):
-                if event.data:
-                    text_fmt: str = UIPresenter.format_response(
-                        event.action, event.data, chat_mode=True
-                    )
-                    self._renderer.print_message(
-                        text_fmt,
-                        msg_type=ChatMessageType.SYSTEM,
-                        alias=event.params.get('alias'),
-                    )
-                else:
-                    self._print_translated(
-                        event.code, event.params, event.params.get('alias')
-                    )
+            # 3. Synchronous/Asynchronous Status DTOs
+            elif isinstance(event, FallbackSuccessEvent):
+                self._renderer.apply_fallback_to_drop(event.msg_ids)
+                params: Dict[str, Any] = dataclasses.asdict(event)
+                self._print_translated(event.code, params, event.alias)
 
+            elif isinstance(
+                event,
+                (
+                    ActionSuccessEvent,
+                    ActionErrorEvent,
+                    ContactActionSuccessEvent,
+                    ContactRenamedEvent,
+                    ProfileActionSuccessEvent,
+                    TargetActionSuccessEvent,
+                    SettingUpdatedEvent,
+                    MaxConnectionsReachedEvent,
+                    PeerNotFoundEvent,
+                    RetunnelInitiatedEvent,
+                    RetunnelSuccessEvent,
+                ),
+            ):
+                params = dataclasses.asdict(event)
+                target_alias = params.get('alias') or params.get('target')
+                self._print_translated(
+                    getattr(event, 'code', TransCode.COMMAND_SUCCESS),
+                    params,
+                    target_alias,
+                )
+
+            # 4. Message & Network Primitives
             elif isinstance(event, RemoteMsgEvent):
                 self._renderer.print_message(
                     event.text,
@@ -147,6 +199,9 @@ class EventHandler:
 
             elif isinstance(event, AckEvent):
                 self._renderer.mark_acked(msg_id=event.msg_id, text=event.text)
+
+            elif isinstance(event, DropFailedEvent):
+                self._renderer.mark_failed(msg_id=event.msg_id)
 
             elif isinstance(event, IncomingConnectionEvent):
                 self._print_translated(TransCode.INCOMING_CONNECTION, alias=event.alias)
@@ -176,6 +231,11 @@ class EventHandler:
                 # UI Usability: The collision event is muted because it functions transparently as a Mutual Connection / Silent Accept for the user in the live chat.
                 pass
 
+            elif isinstance(event, AutoReconnectAttemptEvent):
+                self._print_translated(
+                    TransCode.AUTO_RECONNECT_ATTEMPT, alias=event.alias
+                )
+
             elif isinstance(event, ConnectedEvent):
                 if event.alias not in self._session.active_connections:
                     self._session.active_connections.append(event.alias)
@@ -202,9 +262,6 @@ class EventHandler:
                 if self._session.focused_alias == event.alias:
                     self._renderer.set_focus(event.alias, is_live=False)
 
-            elif isinstance(event, MsgFallbackToDropEvent):
-                self._renderer.apply_fallback_to_drop(event.msg_ids)
-
             elif isinstance(event, InboxNotificationEvent):
                 if event.alias and event.alias == self._session.focused_alias:
                     self._ipc.send_command(MarkReadCommand(target=event.alias))
@@ -217,8 +274,12 @@ class EventHandler:
 
             elif isinstance(event, InboxDataEvent):
                 if event.alias and event.messages:
+                    messages_data: List[Dict[str, Any]] = [
+                        {'timestamp': m.timestamp, 'payload': m.payload}
+                        for m in event.messages
+                    ]
                     self._renderer.print_messages_batch(
-                        event.messages, event.alias, event.is_live_flush
+                        messages_data, event.alias, event.is_live_flush
                     )
 
             elif isinstance(event, RenameSuccessEvent):

@@ -6,10 +6,12 @@ Encapsulates profile-level system operations such as Tor address generation.
 from metor.core import TorManager
 from metor.core.api import (
     IpcCommand,
-    CommandResponseEvent,
+    IpcEvent,
     TransCode,
     GetAddressCommand,
     GenerateAddressCommand,
+    AddressDataEvent,
+    ActionErrorEvent,
 )
 from metor.data.profile import ProfileManager
 
@@ -31,31 +33,47 @@ class SystemCommandHandler:
         self._pm: ProfileManager = pm
         self._tm: TorManager = tm
 
-    def handle(self, cmd: IpcCommand) -> CommandResponseEvent:
+    def handle(self, cmd: IpcCommand) -> IpcEvent:
         """
-        Routes the system command to the TorManager.
+        Routes the system command to the TorManager and generates a DTO response.
 
         Args:
             cmd (IpcCommand): The system-related IPC command.
 
         Returns:
-            CommandResponseEvent: The strictly typed response event.
+            IpcEvent: The strictly typed response event (Success or Error DTO).
         """
         if isinstance(cmd, GetAddressCommand):
             success, code, params = self._tm.get_address()
-            return CommandResponseEvent(
-                action=cmd.action, success=success, code=code, params=params
+            if success:
+                return AddressDataEvent(
+                    action=cmd.action,
+                    code=code,
+                    profile=str(params['profile']),
+                    onion=str(params['onion']),
+                )
+            return ActionErrorEvent(
+                action=cmd.action,
+                code=code,
+                target=str(params.get('profile', '')),
             )
 
         if isinstance(cmd, GenerateAddressCommand):
             success, code, params = self._tm.generate_address()
-            return CommandResponseEvent(
-                action=cmd.action, success=success, code=code, params=params
+            if success:
+                return AddressDataEvent(
+                    action=cmd.action,
+                    code=code,
+                    profile=str(params['profile']),
+                    onion=str(params['onion']),
+                )
+            return ActionErrorEvent(
+                action=cmd.action,
+                code=code,
+                target=str(params.get('profile', '')),
             )
 
-        return CommandResponseEvent(
+        return ActionErrorEvent(
             action=cmd.action,
-            success=False,
             code=TransCode.UNKNOWN_COMMAND,
-            params={},
         )

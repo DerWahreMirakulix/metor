@@ -6,15 +6,25 @@ Utilizes deferred imports for the mapping registry to prevent circular dependenc
 import json
 import dataclasses
 from dataclasses import dataclass, asdict
-from typing import Dict, Any, Type, Set
+from typing import Dict, Type, Set, Union, List, Any
 
 # Local Package Imports
 from metor.core.api.codes import Action, EventType
 
 
+JsonValue = Union[
+    str, int, float, bool, None, Dict[str, 'JsonValue'], List['JsonValue']
+]
+
+
 @dataclass
 class IpcMessage:
-    """Base class providing JSON serialization for all IPC messages."""
+    """
+    Base class providing JSON serialization for all IPC messages.
+
+    Attributes:
+        None
+    """
 
     def to_json(self) -> str:
         """
@@ -32,15 +42,20 @@ class IpcMessage:
 
 @dataclass
 class IpcCommand(IpcMessage):
-    """Base class for all commands sent to the Daemon."""
+    """
+    Base class for all commands sent to the Daemon.
+
+    Attributes:
+        None
+    """
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'IpcCommand':
+    def from_dict(cls, data: Dict[str, JsonValue]) -> 'IpcCommand':
         """
         Factory method to instantiate the correct strict subclass based on the Action enum.
 
         Args:
-            data (Dict[str, Any]): The deserialized JSON payload from the IPC socket.
+            data (Dict[str, JsonValue]): The deserialized JSON payload from the IPC socket.
 
         Returns:
             IpcCommand: The instantiated strictly-typed command.
@@ -48,7 +63,8 @@ class IpcCommand(IpcMessage):
         # Deferred import to avoid circular dependencies with the registry
         from metor.core.api.registry import CMD_MAP
 
-        action: Action = Action(data['action'])
+        action_val = str(data['action'])
+        action: Action = Action(action_val)
         target_cls: Type['IpcCommand'] = CMD_MAP[action]
         valid_keys: Set[str] = {f.name for f in dataclasses.fields(target_cls)}
         kwargs: Dict[str, Any] = {
@@ -59,15 +75,20 @@ class IpcCommand(IpcMessage):
 
 @dataclass
 class IpcEvent(IpcMessage):
-    """Base class for all events emitted by the Daemon."""
+    """
+    Base class for all events emitted by the Daemon.
+
+    Attributes:
+        None
+    """
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'IpcEvent':
+    def from_dict(cls, data: Dict[str, JsonValue]) -> 'IpcEvent':
         """
         Factory method to instantiate the correct strict subclass based on the EventType enum.
 
         Args:
-            data (Dict[str, Any]): The deserialized JSON payload from the IPC socket.
+            data (Dict[str, JsonValue]): The deserialized JSON payload from the IPC socket.
 
         Returns:
             IpcEvent: The instantiated strictly-typed event.
@@ -75,7 +96,8 @@ class IpcEvent(IpcMessage):
         # Deferred import to avoid circular dependencies with the registry
         from metor.core.api.registry import EVENT_MAP
 
-        event_type: EventType = EventType(data['type'])
+        type_val = str(data['type'])
+        event_type: EventType = EventType(type_val)
         target_cls: Type['IpcEvent'] = EVENT_MAP[event_type]
         valid_keys: Set[str] = {f.name for f in dataclasses.fields(target_cls)}
         kwargs: Dict[str, Any] = {

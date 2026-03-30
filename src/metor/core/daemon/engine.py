@@ -13,7 +13,8 @@ import atexit
 import sys
 import os
 import signal
-from typing import Any, List, Set, Optional, Callable
+import types
+from typing import List, Set, Optional, Callable
 from pathlib import Path
 
 from metor.core import KeyManager, TorManager
@@ -171,13 +172,13 @@ class Daemon:
         """
         self._ipc.send_to(conn, event)
 
-    def _sig_handler(self, signum: int, frame: Any) -> None:
+    def _sig_handler(self, signum: int, frame: Optional[types.FrameType]) -> None:
         """
         Handles termination signals gracefully.
 
         Args:
             signum (int): The signal number.
-            frame (Any): The current stack frame.
+            frame (Optional[types.FrameType]): The current stack frame.
 
         Returns:
             None

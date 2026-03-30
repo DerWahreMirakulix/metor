@@ -12,16 +12,21 @@ from typing import List, Optional, Callable, Dict, TYPE_CHECKING
 from metor.core import TorManager
 from metor.core.api import (
     IpcEvent,
-    NotificationEvent,
     ConnectedEvent,
     DisconnectedEvent,
-    MsgFallbackToDropEvent,
+    FallbackSuccessEvent,
     ConnectionPendingEvent,
     ConnectionAutoAcceptedEvent,
     ConnectionRetryEvent,
     ConnectionFailedEvent,
     ConnectionRejectedEvent,
     ContactRemovedEvent,
+    ActionErrorEvent,
+    MaxConnectionsReachedEvent,
+    PeerNotFoundEvent,
+    RetunnelInitiatedEvent,
+    RetunnelSuccessEvent,
+    AutoReconnectAttemptEvent,
     TransCode,
 )
 from metor.core.daemon.models import TorCommand
@@ -130,9 +135,9 @@ class ConnectionController:
         max_conn: int = Settings.get(SettingKey.MAX_CONCURRENT_CONNECTIONS)
         if len(self._state.get_active_onions()) >= max_conn:
             self._broadcast(
-                NotificationEvent(
-                    code=TransCode.MAX_CONNECTIONS_REACHED,
-                    params={'target': alias, 'max_conn': max_conn},
+                MaxConnectionsReachedEvent(
+                    target=str(alias or onion),
+                    max_conn=max_conn,
                 )
             )
             return
@@ -220,18 +225,15 @@ class ConnectionController:
         """
         alias, onion, exists = self._cm.resolve_target(target)
         if not exists or not onion:
-            self._broadcast(
-                NotificationEvent(
-                    code=TransCode.PEER_NOT_FOUND, params={'target': target}
-                )
-            )
+            self._broadcast(PeerNotFoundEvent(target=target))
             return
 
         conn, initial_buffer = self._state.pop_pending_connection(onion)
         if not conn:
             self._broadcast(
-                NotificationEvent(
-                    code=TransCode.NO_PENDING_CONNECTION, params={'alias': alias}
+                ActionErrorEvent(
+                    code=TransCode.NO_PENDING_CONNECTION,
+                    alias=str(alias or onion),
                 )
             )
             return
@@ -243,7 +245,7 @@ class ConnectionController:
             self._hm.log_event(
                 HistoryEvent.LIVE_CONNECTION_LOST, onion, 'Late acceptance timeout'
             )
-            self._broadcast(DisconnectedEvent(alias=alias))
+            self._broadcast(DisconnectedEvent(alias=str(alias or onion)))
             try:
                 conn.close()
             except Exception:
@@ -252,7 +254,7 @@ class ConnectionController:
 
         self._state.add_active_connection(onion, conn)
         self._hm.log_event(HistoryEvent.LIVE_CONNECTED, onion)
-        self._broadcast(ConnectedEvent(alias=alias, onion=onion))
+        self._broadcast(ConnectedEvent(alias=str(alias or onion), onion=onion))
 
         if self._receiver:
             self._receiver.start_receiving(onion, conn, initial_buffer)
@@ -277,11 +279,7 @@ class ConnectionController:
         alias, onion, exists = self._cm.resolve_target(target)
         if not exists or not onion:
             if initiated_by_self:
-                self._broadcast(
-                    NotificationEvent(
-                        code=TransCode.PEER_NOT_FOUND, params={'target': target}
-                    )
-                )
+                self._broadcast(PeerNotFoundEvent(target=target))
             return
 
         if initiated_by_self:
@@ -299,8 +297,9 @@ class ConnectionController:
         if not conn:
             if initiated_by_self:
                 self._broadcast(
-                    NotificationEvent(
-                        code=TransCode.NO_CONNECTION_TO_REJECT, params={'alias': alias}
+                    ActionErrorEvent(
+                        code=TransCode.NO_CONNECTION_TO_REJECT,
+                        alias=str(alias or onion),
                     )
                 )
             return
@@ -326,7 +325,9 @@ class ConnectionController:
         self._hm.log_event(status, onion)
 
         self._broadcast(
-            ConnectionRejectedEvent(alias=alias, by_remote=not initiated_by_self)
+            ConnectionRejectedEvent(
+                alias=str(alias or onion), by_remote=not initiated_by_self
+            )
         )
 
     def disconnect(
@@ -352,11 +353,7 @@ class ConnectionController:
         alias, onion, exists = self._cm.resolve_target(target)
         if not exists or not onion:
             if initiated_by_self:
-                self._broadcast(
-                    NotificationEvent(
-                        code=TransCode.PEER_NOT_FOUND, params={'target': target}
-                    )
-                )
+                self._broadcast(PeerNotFoundEvent(target=target))
             return
 
         if initiated_by_self:
@@ -378,9 +375,9 @@ class ConnectionController:
         if not conn and not unacked:
             if initiated_by_self:
                 self._broadcast(
-                    NotificationEvent(
+                    ActionErrorEvent(
                         code=TransCode.NO_CONNECTION_TO_DISCONNECT,
-                        params={'alias': alias},
+                        alias=str(alias or onion),
                     )
                 )
             return
@@ -397,7 +394,14 @@ class ConnectionController:
                 self._hm.log_event(
                     HistoryEvent.DROP_QUEUED, onion, 'Unacked msgs converted to drop'
                 )
-            self._broadcast(MsgFallbackToDropEvent(msg_ids=list(unacked.keys())))
+            self._broadcast(
+                FallbackSuccessEvent(
+                    code=TransCode.FALLBACK_SUCCESS,
+                    alias=str(alias or onion),
+                    count=len(unacked),
+                    msg_ids=list(unacked.keys()),
+                )
+            )
 
         if conn:
             if initiated_by_self:
@@ -427,7 +431,7 @@ class ConnectionController:
         )
         self._hm.log_event(status, onion)
 
-        self._broadcast(DisconnectedEvent(alias=alias))
+        self._broadcast(DisconnectedEvent(alias=str(alias or onion)))
 
         deleted_aliases: List[str] = self._cm.cleanup_orphans(
             self._state.get_active_onions()
@@ -467,12 +471,7 @@ class ConnectionController:
                 alias: Optional[str] = self._cm.get_alias_by_onion(onion)
 
                 self._hm.log_event(HistoryEvent.LIVE_AUTO_RECONNECT_ATTEMPT, onion)
-                self._broadcast(
-                    NotificationEvent(
-                        code=TransCode.AUTO_RECONNECT_ATTEMPT,
-                        params={'alias': alias},
-                    )
-                )
+                self._broadcast(AutoReconnectAttemptEvent(alias=str(alias or onion)))
 
                 # Check if UI/Daemon has naturally reconnected in the meantime
                 time.sleep(backoff)
@@ -507,18 +506,10 @@ class ConnectionController:
         """
         alias, onion, exists = self._cm.resolve_target(target)
         if not exists or not onion:
-            self._broadcast(
-                NotificationEvent(
-                    code=TransCode.PEER_NOT_FOUND, params={'target': target}
-                )
-            )
+            self._broadcast(PeerNotFoundEvent(target=target))
             return
 
-        self._broadcast(
-            NotificationEvent(
-                code=TransCode.RETUNNEL_INITIATED, params={'alias': alias}
-            )
-        )
+        self._broadcast(RetunnelInitiatedEvent(alias=str(alias or onion)))
         self._hm.log_event(HistoryEvent.LIVE_RETUNNEL_INITIATED, onion)
 
         # Disconnect existing connection forcefully
@@ -527,13 +518,11 @@ class ConnectionController:
         # Rotate circuits
         success, code, params = self._tm.rotate_circuits()
         if not success:
-            self._broadcast(NotificationEvent(code=code, params=params))
+            self._broadcast(ActionErrorEvent(code=code))
             return
 
         self._hm.log_event(HistoryEvent.LIVE_RETUNNEL_SUCCESS, onion)
-        self._broadcast(
-            NotificationEvent(code=TransCode.RETUNNEL_SUCCESS, params={'alias': alias})
-        )
+        self._broadcast(RetunnelSuccessEvent(alias=str(alias or onion)))
 
         # Initiate fresh connection
         self.connect_to(onion)

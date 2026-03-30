@@ -6,15 +6,15 @@ falling back to global application settings.
 
 import json
 from enum import Enum
-from typing import Any, Dict, Union
+from typing import Dict, Union
 from pathlib import Path
 
-from metor.data import SettingKey, Settings
+from metor.data import SettingKey, Settings, SettingValue
 from metor.utils import FileLock
 
 # Local Package Imports
 from metor.data.profile.paths import Paths
-from metor.data.profile.models import ProfileConfigKey
+from metor.data.profile.models import ProfileConfigKey, ProfileConfigValue
 
 
 class Config:
@@ -32,7 +32,7 @@ class Config:
         """
         self._paths: Paths = paths
 
-    def _load(self) -> Dict[str, Any]:
+    def _load(self) -> Dict[str, ProfileConfigValue]:
         """
         Loads the JSON configuration from disk safely. Generates default config if missing.
 
@@ -40,7 +40,7 @@ class Config:
             None
 
         Returns:
-            Dict[str, Any]: The loaded configuration data.
+            Dict[str, ProfileConfigValue]: The loaded configuration data.
         """
         config_file: Path = self._paths.get_config_file()
         if config_file.exists():
@@ -50,7 +50,7 @@ class Config:
             except (json.JSONDecodeError, IOError):
                 pass
 
-        default_data: Dict[str, Any] = {
+        default_data: Dict[str, ProfileConfigValue] = {
             ProfileConfigKey.IS_REMOTE.value: False,
             ProfileConfigKey.DAEMON_PORT.value: None,
         }
@@ -67,20 +67,22 @@ class Config:
         return default_data
 
     def get(
-        self, key: Union[ProfileConfigKey, SettingKey, str], default: Any = None
-    ) -> Any:
+        self,
+        key: Union[ProfileConfigKey, SettingKey, str],
+        default: ProfileConfigValue = None,
+    ) -> Union[ProfileConfigValue, SettingValue]:
         """
         Retrieves a setting, cascading from local config to global defaults.
 
         Args:
             key (Union[ProfileConfigKey, SettingKey, str]): The setting to retrieve.
-            default (Any): Fallback value.
+            default (ProfileConfigValue): Fallback value.
 
         Returns:
-            Any: The resolved configuration value.
+            Union[ProfileConfigValue, SettingValue]: The resolved configuration value.
         """
         key_str: str = key.value if isinstance(key, Enum) else key
-        data: Dict[str, Any] = self._load()
+        data: Dict[str, ProfileConfigValue] = self._load()
 
         if key_str in data:
             return data[key_str]
@@ -93,14 +95,16 @@ class Config:
 
         return default
 
-    def set(self, key: Union[ProfileConfigKey, SettingKey, str], value: Any) -> None:
+    def set(
+        self, key: Union[ProfileConfigKey, SettingKey, str], value: ProfileConfigValue
+    ) -> None:
         """
         Writes a setting safely using a file lock.
         Implies directory creation if a setting is deliberately saved.
 
         Args:
             key (Union[ProfileConfigKey, SettingKey, str]): The setting to save.
-            value (Any): The value to persist.
+            value (ProfileConfigValue): The value to persist.
 
         Returns:
             None
@@ -112,7 +116,7 @@ class Config:
         config_file: Path = self._paths.get_config_file()
 
         with FileLock(config_file):
-            data: Dict[str, Any] = self._load()
+            data: Dict[str, ProfileConfigValue] = self._load()
             data[key_str] = value
             with config_file.open('w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4)

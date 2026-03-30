@@ -13,7 +13,7 @@ import base64
 from typing import List, Optional, Tuple, Callable, Dict, Any
 
 from metor.core import TorManager
-from metor.core.api import IpcEvent, AckEvent
+from metor.core.api import IpcEvent, AckEvent, DropFailedEvent
 from metor.data import (
     MessageManager,
     MessageStatus,
@@ -150,6 +150,9 @@ class OutboxWorker:
             self._hm.log_event(
                 HistoryEvent.DROP_TUNNEL_FAILED, onion, 'Failed to build Tor circuit'
             )
+            # Route failure event to UI to paint message red
+            for row in messages:
+                self._broadcast(DropFailedEvent(msg_id=row[4]))
             return
 
         try:
@@ -187,6 +190,8 @@ class OutboxWorker:
 
         except Exception as e:
             self._hm.log_event(HistoryEvent.DROP_FAILED, onion, str(e))
+            for row in messages:
+                self._broadcast(DropFailedEvent(msg_id=row[4]))
             self._close_tunnel(onion)
 
     def _establish_tunnel(

@@ -76,6 +76,8 @@ class ChatPresenter:
             return 4 + prompt_len
         if msg_type == ChatMessageType.SYSTEM:
             return 6 + prompt_len
+        if msg_type == ChatMessageType.ERROR:
+            return 5 + prompt_len
         if msg_type == ChatMessageType.RAW:
             return 0
         if msg_type == ChatMessageType.SELF:
@@ -118,6 +120,8 @@ class ChatPresenter:
             prefix = f'{Theme.YELLOW}info{initial_prompt}{Theme.RESET}'
         elif msg.msg_type == ChatMessageType.SYSTEM:
             prefix = f'{Theme.CYAN}system{initial_prompt}{Theme.RESET}'
+        elif msg.msg_type == ChatMessageType.ERROR:
+            prefix = f'{Theme.RED}error{initial_prompt}{Theme.RESET}'
         elif msg.msg_type != ChatMessageType.RAW:
             is_focused: bool = (msg.alias == current_focus) if msg.alias else False
 
@@ -131,7 +135,9 @@ class ChatPresenter:
                 if not is_focused:
                     prefix = f'{Theme.DARK_GREY}{prefix_raw}{Theme.RESET}'
                 else:
-                    if msg.is_pending:
+                    if msg.is_failed:
+                        prefix = f'{Theme.RED}{prefix_raw}{Theme.RESET}'
+                    elif msg.is_pending:
                         prefix = prefix_raw
                     else:
                         prefix = f'{Theme.GREEN}{prefix_raw}{Theme.RESET}'

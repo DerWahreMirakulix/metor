@@ -1,7 +1,7 @@
 """
 Module defining the NetworkCommandHandler.
 Encapsulates all logic for initiating and managing Tor connections, Drops, and RAM buffers.
-Enforces SRP by removing complex routing logic from the main Daemon engine.
+Emits strictly typed Domain Transfer Objects via IPC.
 """
 
 import socket
@@ -12,7 +12,6 @@ from metor.core import TorManager
 from metor.core.api import (
     IpcCommand,
     IpcEvent,
-    CommandResponseEvent,
     TransCode,
     InitCommand,
     InitEvent,
@@ -28,6 +27,9 @@ from metor.core.api import (
     SwitchCommand,
     SwitchSuccessEvent,
     RetunnelCommand,
+    ActionErrorEvent,
+    TargetActionSuccessEvent,
+    FallbackSuccessEvent,
 )
 from metor.core.daemon.network import NetworkManager
 from metor.data import (
@@ -45,7 +47,7 @@ from metor.utils import clean_onion
 
 
 class NetworkCommandHandler:
-    """Processes network-related IPC commands from the UI."""
+    """Processes network-related IPC commands from the UI using strict DTOs."""
 
     def __init__(
         self,
@@ -66,8 +68,8 @@ class NetworkCommandHandler:
             hm (HistoryManager): Event logging.
             mm (MessageManager): Offline messages storage.
             network (NetworkManager): The core network orchestrator.
-            broadcast_cb (Callable): Hook to broadcast IPC events.
-            send_to_cb (Callable): Hook to send an IPC event to a specific client.
+            broadcast_cb (Callable[[IpcEvent], None]): Hook to broadcast IPC events.
+            send_to_cb (Callable[[socket.socket, IpcEvent], None]): Hook to send an IPC event to a specific client.
 
         Returns:
             None
@@ -104,7 +106,7 @@ class NetworkCommandHandler:
 
     def handle(self, cmd: IpcCommand, conn: socket.socket) -> None:
         """
-        Routes the network command to the NetworkManager or MessageManager.
+        Routes the network command to the NetworkManager or MessageManager and returns DTOs.
 
         Args:
             cmd (IpcCommand): The network-related IPC command.
@@ -135,9 +137,8 @@ class NetworkCommandHandler:
             if self._is_self_target(cmd.target):
                 self._send_to(
                     conn,
-                    CommandResponseEvent(
+                    ActionErrorEvent(
                         action=cmd.action,
-                        success=False,
                         code=TransCode.CANNOT_CONNECT_SELF,
                     ),
                 )
@@ -147,11 +148,10 @@ class NetworkCommandHandler:
             if not exists:
                 self._send_to(
                     conn,
-                    CommandResponseEvent(
+                    ActionErrorEvent(
                         action=cmd.action,
-                        success=False,
                         code=TransCode.INVALID_TARGET,
-                        params={'target': cmd.target},
+                        target=cmd.target,
                     ),
                 )
                 return
@@ -174,12 +174,26 @@ class NetworkCommandHandler:
 
         elif isinstance(cmd, FallbackCommand):
             success, code, params = self._network.force_fallback(cmd.target)
-            self._send_to(
-                conn,
-                CommandResponseEvent(
-                    action=cmd.action, success=success, code=code, params=params
-                ),
-            )
+            if success:
+                self._send_to(
+                    conn,
+                    FallbackSuccessEvent(
+                        action=cmd.action,
+                        code=code,
+                        alias=str(params.get('alias', '')),
+                        count=int(params.get('count', 0)),
+                    ),
+                )
+            else:
+                self._send_to(
+                    conn,
+                    ActionErrorEvent(
+                        action=cmd.action,
+                        code=code,
+                        alias=str(params.get('alias', '')),
+                        target=str(params.get('target', '')),
+                    ),
+                )
 
         elif isinstance(cmd, RetunnelCommand):
             threading.Thread(
@@ -190,8 +204,9 @@ class NetworkCommandHandler:
             if not Settings.get(SettingKey.ALLOW_DROPS):
                 self._send_to(
                     conn,
-                    CommandResponseEvent(
-                        action=cmd.action, success=False, code=TransCode.DROPS_DISABLED
+                    ActionErrorEvent(
+                        action=cmd.action,
+                        code=TransCode.DROPS_DISABLED,
                     ),
                 )
                 return
@@ -199,9 +214,8 @@ class NetworkCommandHandler:
             if self._is_self_target(cmd.target):
                 self._send_to(
                     conn,
-                    CommandResponseEvent(
+                    ActionErrorEvent(
                         action=cmd.action,
-                        success=False,
                         code=TransCode.CANNOT_DROP_SELF,
                     ),
                 )
@@ -211,11 +225,11 @@ class NetworkCommandHandler:
 
             if exists:
                 self._mm.queue_message(
-                    onion,
-                    MessageDirection.OUT,
-                    MessageType.TEXT,
-                    cmd.text,
-                    MessageStatus.PENDING,
+                    contact_onion=str(onion),
+                    direction=MessageDirection.OUT,
+                    msg_type=MessageType.TEXT,
+                    payload=cmd.text,
+                    status=MessageStatus.PENDING,
                 )
                 if Settings.get(SettingKey.RECORD_DROP_EVENTS):
                     self._hm.log_event(HistoryEvent.DROP_QUEUED, onion)
@@ -223,21 +237,20 @@ class NetworkCommandHandler:
                 if cmd.cli_mode:
                     self._send_to(
                         conn,
-                        CommandResponseEvent(
+                        TargetActionSuccessEvent(
                             action=cmd.action,
                             code=TransCode.DROP_QUEUED,
-                            params={'alias': alias},
+                            target=alias,
                         ),
                     )
             else:
                 if cmd.cli_mode:
                     self._send_to(
                         conn,
-                        CommandResponseEvent(
+                        ActionErrorEvent(
                             action=cmd.action,
-                            success=False,
                             code=TransCode.INVALID_TARGET,
-                            params={'target': cmd.target},
+                            target=cmd.target,
                         ),
                     )
 
@@ -248,9 +261,8 @@ class NetworkCommandHandler:
                 if self._is_self_target(cmd.target):
                     self._send_to(
                         conn,
-                        CommandResponseEvent(
+                        ActionErrorEvent(
                             action=cmd.action,
-                            success=False,
                             code=TransCode.CANNOT_SWITCH_SELF,
                         ),
                     )
@@ -260,11 +272,10 @@ class NetworkCommandHandler:
                 if not exists:
                     self._send_to(
                         conn,
-                        CommandResponseEvent(
+                        ActionErrorEvent(
                             action=cmd.action,
-                            success=False,
                             code=TransCode.INVALID_TARGET,
-                            params={'target': cmd.target},
+                            target=cmd.target,
                         ),
                     )
                     return

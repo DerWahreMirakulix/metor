@@ -45,6 +45,7 @@ class Action(str, Enum):
 class EventType(str, Enum):
     """Enumeration of events broadcasted by the Daemon to the connected UIs."""
 
+    # Core Connection & Chat Events
     INIT = 'init'
     REMOTE_MSG = 'remote_msg'
     ACK = 'ack'
@@ -55,6 +56,7 @@ class EventType(str, Enum):
     CONNECTIONS_STATE = 'connections_state'
     SWITCH_SUCCESS = 'switch_success'
 
+    # Pending & Transient States
     CONNECTION_PENDING = 'connection_pending'
     CONNECTION_AUTO_ACCEPTED = 'connection_auto_accepted'
     CONNECTION_RETRY = 'connection_retry'
@@ -62,12 +64,37 @@ class EventType(str, Enum):
     INCOMING_CONNECTION = 'incoming_connection'
     CONNECTION_REJECTED = 'connection_rejected'
     TIEBREAKER_REJECTED = 'tiebreaker_rejected'
+    AUTO_RECONNECT_ATTEMPT = 'auto_reconnect_attempt'
 
+    # Drops & Inbox
     INBOX_NOTIFICATION = 'inbox_notification'
     INBOX_DATA = 'inbox_data'
-    MSG_FALLBACK_TO_DROP = 'msg_fallback_to_drop'
+    DROP_FAILED = 'drop_failed'
 
-    NOTIFICATION = 'notification'
+    # Query Response DTOs
+    CONTACTS_DATA = 'contacts_data'
+    HISTORY_DATA = 'history_data'
+    MESSAGES_DATA = 'messages_data'
+    INBOX_COUNTS = 'inbox_counts'
+    UNREAD_MESSAGES = 'unread_messages'
+    ADDRESS_DATA = 'address_data'
+    PROFILES_DATA = 'profiles_data'
+
+    # Command Success/Error DTOs
+    ACTION_SUCCESS = 'action_success'
+    ACTION_ERROR = 'action_error'
+    CONTACT_ACTION_SUCCESS = 'contact_action_success'
+    CONTACT_RENAMED = 'contact_renamed'
+    PROFILE_ACTION_SUCCESS = 'profile_action_success'
+    TARGET_ACTION_SUCCESS = 'target_action_success'
+    SETTING_UPDATED = 'setting_updated'
+    FALLBACK_SUCCESS = 'fallback_success'
+
+    # Specific Asynchronous Notification DTOs
+    MAX_CONNECTIONS_REACHED = 'max_connections_reached'
+    PEER_NOT_FOUND = 'peer_not_found'
+    RETUNNEL_INITIATED = 'retunnel_initiated'
+    RETUNNEL_SUCCESS = 'retunnel_success'
     COMMAND_RESPONSE = 'command_response'
 
 

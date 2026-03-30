@@ -4,6 +4,10 @@ Enforces strict typing for profile-level settings to prevent key collisions.
 """
 
 from enum import Enum
+from typing import Union
+
+
+ProfileConfigValue = Union[str, int, float, bool, None]
 
 
 class ProfileConfigKey(str, Enum):

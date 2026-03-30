@@ -7,6 +7,7 @@ import sys
 import shutil
 import signal
 import time
+import types
 from typing import List, Dict, Optional, Any
 
 from metor.data import SettingKey, Settings
@@ -112,7 +113,8 @@ class Renderer:
 
             self._display.all_msgs.append(chat_line)
 
-            limit: int = Settings.get(SettingKey.CHAT_LIMIT)
+            limit_raw: Any = Settings.get(SettingKey.CHAT_LIMIT)
+            limit: int = int(limit_raw) if limit_raw else 50
             # Sliding window: We only pop one to maintain the high-watermark or stay at the limit
             if len(self._display.all_msgs) > limit:
                 self._display.all_msgs.pop(0)
@@ -178,8 +180,10 @@ class Renderer:
                 )
                 self._display.all_msgs.append(chat_line)
 
-            limit: int = Settings.get(SettingKey.CHAT_LIMIT)
-            padding: int = Settings.get(SettingKey.CHAT_BUFFER_PADDING)
+            limit_raw: Any = Settings.get(SettingKey.CHAT_LIMIT)
+            padding_raw: Any = Settings.get(SettingKey.CHAT_BUFFER_PADDING)
+            limit: int = int(limit_raw) if limit_raw else 50
+            padding: int = int(padding_raw) if padding_raw else 20
             total_limit: int = limit + padding
 
             while len(self._display.all_msgs) > total_limit:
@@ -207,6 +211,27 @@ class Renderer:
                 text and msg.text == text and msg.is_drop and msg.is_pending
             ):
                 msg.is_pending = False
+                if start_idx == -1:
+                    start_idx = i
+
+        if start_idx != -1:
+            self._redraw_from_index(start_idx)
+
+    def mark_failed(self, msg_id: str) -> None:
+        """
+        Marks a pending message as failed and redraws it in red.
+
+        Args:
+            msg_id (str): The unique message identifier that failed.
+
+        Returns:
+            None
+        """
+        start_idx: int = -1
+        for i, msg in enumerate(self._display.all_msgs):
+            if msg.msg_id == msg_id:
+                msg.is_pending = False
+                msg.is_failed = True
                 if start_idx == -1:
                     start_idx = i
 
@@ -421,13 +446,13 @@ class Renderer:
                 cols = 80
             self._full_redraw_locked(cols)
 
-    def _on_resize(self, _signum: Any, _frame: Any) -> None:
+    def _on_resize(self, _signum: int, _frame: Optional[types.FrameType]) -> None:
         """
         Signal handler for terminal resize events.
 
         Args:
-            _signum (Any): The signal number.
-            _frame (Any): The current stack frame.
+            _signum (int): The signal number.
+            _frame (Optional[types.FrameType]): The current stack frame.
 
         Returns:
             None

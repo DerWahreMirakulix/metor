@@ -1,7 +1,7 @@
 """
 Module defining the DatabaseCommandHandler.
 Encapsulates all stateless CRUD operations for Contacts, History, and Messages.
-Used by both the active Daemon engine and the HeadlessDaemon to enforce DRY.
+Used by both the active Daemon engine and the HeadlessDaemon. Emits strict DTOs.
 """
 
 from typing import Dict, Any, List, Tuple, Callable, Optional
@@ -9,7 +9,6 @@ from typing import Dict, Any, List, Tuple, Callable, Optional
 from metor.core.api import (
     IpcCommand,
     IpcEvent,
-    CommandResponseEvent,
     TransCode,
     GetContactsListCommand,
     AddContactCommand,
@@ -25,13 +24,27 @@ from metor.core.api import (
     MarkReadCommand,
     RenameSuccessEvent,
     ContactRemovedEvent,
+    ContactEntry,
+    HistoryEntry,
+    MessageEntry,
+    UnreadMessageEntry,
+    ContactsDataEvent,
+    HistoryDataEvent,
+    MessagesDataEvent,
+    InboxCountsEvent,
+    UnreadMessagesEvent,
+    ActionErrorEvent,
+    ContactActionSuccessEvent,
+    ContactRenamedEvent,
+    ProfileActionSuccessEvent,
+    TargetActionSuccessEvent,
 )
 from metor.data import ContactManager, HistoryManager, MessageManager
 from metor.data.profile import ProfileManager
 
 
 class DatabaseCommandHandler:
-    """Processes stateless database commands and generates appropriate IPC responses."""
+    """Processes stateless database commands and generates strict DTO IPC responses."""
 
     def __init__(
         self,
@@ -50,8 +63,8 @@ class DatabaseCommandHandler:
             cm (ContactManager): Address book manager.
             hm (HistoryManager): Event history manager.
             mm (MessageManager): Offline messages manager.
-            get_active_onions (Callable): Hook to retrieve currently connected onions.
-            broadcast (Callable): Hook to broadcast side-effect events to all clients.
+            get_active_onions (Callable[[], List[str]]): Hook to retrieve currently connected onions.
+            broadcast (Callable[[IpcEvent], None]): Hook to broadcast side-effect events to all clients.
 
         Returns:
             None
@@ -63,20 +76,30 @@ class DatabaseCommandHandler:
         self._get_active_onions: Callable[[], List[str]] = get_active_onions
         self._broadcast: Callable[[IpcEvent], None] = broadcast
 
-    def handle(self, cmd: IpcCommand) -> CommandResponseEvent:
+    def handle(self, cmd: IpcCommand) -> IpcEvent:
         """
-        Routes the database command to the respective manager and formats the response.
+        Routes the database command to the respective manager and formats the strict DTO response.
 
         Args:
             cmd (IpcCommand): The database-related IPC command.
 
         Returns:
-            CommandResponseEvent: The strictly typed response event.
+            IpcEvent: The strictly typed response event DTO.
         """
         if isinstance(cmd, GetContactsListCommand):
             data: Dict[str, Any] = self._cm.get_contacts_data()
-            return CommandResponseEvent(
-                action=cmd.action, data=data, code=TransCode.COMMAND_SUCCESS
+            saved_entries: List[ContactEntry] = [
+                ContactEntry(alias=str(r[0]), onion=str(r[1]))
+                for r in data.get('saved', [])
+            ]
+            discovered_entries: List[ContactEntry] = [
+                ContactEntry(alias=str(r[0]), onion=str(r[1]))
+                for r in data.get('discovered', [])
+            ]
+            return ContactsDataEvent(
+                saved=saved_entries,
+                discovered=discovered_entries,
+                profile=str(data.get('profile', '')),
             )
 
         if isinstance(cmd, AddContactCommand):
@@ -85,11 +108,18 @@ class DatabaseCommandHandler:
             else:
                 success, code, params = self._cm.promote_discovered_peer(cmd.alias)
 
-            if 'alias' not in params:
-                params['alias'] = cmd.alias
-
-            return CommandResponseEvent(
-                action=cmd.action, success=success, code=code, params=params
+            alias_res: str = str(params.get('alias', cmd.alias))
+            if success:
+                return ContactActionSuccessEvent(
+                    action=cmd.action,
+                    code=code,
+                    alias=alias_res,
+                    profile=str(params.get('profile', '')),
+                )
+            return ActionErrorEvent(
+                action=cmd.action,
+                code=code,
+                alias=alias_res,
             )
 
         if isinstance(cmd, RemoveContactCommand):
@@ -111,8 +141,19 @@ class DatabaseCommandHandler:
                     self._broadcast(ContactRemovedEvent(alias=a))
 
             self._cm.cleanup_orphans(active_onions)
-            return CommandResponseEvent(
-                action=cmd.action, success=success, code=code, params=params
+            alias_res = str(params.get('alias', cmd.alias))
+
+            if success:
+                return ContactActionSuccessEvent(
+                    action=cmd.action,
+                    code=code,
+                    alias=alias_res,
+                    profile=str(params.get('profile', '')),
+                )
+            return ActionErrorEvent(
+                action=cmd.action,
+                code=code,
+                alias=alias_res,
             )
 
         if isinstance(cmd, RenameContactCommand):
@@ -123,8 +164,16 @@ class DatabaseCommandHandler:
                 self._broadcast(
                     RenameSuccessEvent(old_alias=cmd.old_alias, new_alias=cmd.new_alias)
                 )
-            return CommandResponseEvent(
-                action=cmd.action, success=success, code=code, params=params
+                return ContactRenamedEvent(
+                    action=cmd.action,
+                    code=code,
+                    old_alias=cmd.old_alias,
+                    new_alias=cmd.new_alias,
+                )
+            return ActionErrorEvent(
+                action=cmd.action,
+                code=code,
+                alias=str(params.get('alias', cmd.old_alias)),
             )
 
         if isinstance(cmd, ClearContactsCommand):
@@ -146,9 +195,14 @@ class DatabaseCommandHandler:
                     self._broadcast(ContactRemovedEvent(alias=a))
 
             self._cm.cleanup_orphans(active_onions)
-            return CommandResponseEvent(
-                action=cmd.action, success=success, code=code, params=params
-            )
+
+            if success:
+                return ProfileActionSuccessEvent(
+                    action=cmd.action,
+                    code=code,
+                    profile=str(params.get('profile', self._pm.profile_name)),
+                )
+            return ActionErrorEvent(action=cmd.action, code=code)
 
         if isinstance(cmd, ClearProfileDbCommand):
             active_onions = self._get_active_onions()
@@ -159,9 +213,6 @@ class DatabaseCommandHandler:
             success: bool = success_c and success_h and success_m
             code: TransCode = (
                 TransCode.DB_CLEARED if success else TransCode.DB_CLEAR_FAILED
-            )
-            params: Dict[str, Any] = (
-                {'profile': self._pm.profile_name} if success else {}
             )
 
             if success_c:
@@ -177,8 +228,16 @@ class DatabaseCommandHandler:
                 for a in removed:
                     self._broadcast(ContactRemovedEvent(alias=a))
 
-            return CommandResponseEvent(
-                action=cmd.action, success=success, code=code, params=params
+            if success:
+                return ProfileActionSuccessEvent(
+                    action=cmd.action,
+                    code=code,
+                    profile=self._pm.profile_name,
+                )
+            return ActionErrorEvent(
+                action=cmd.action,
+                code=code,
+                target=self._pm.profile_name,
             )
 
         if isinstance(cmd, GetHistoryCommand):
@@ -188,26 +247,22 @@ class DatabaseCommandHandler:
             rows: List[Tuple[str, str, Optional[str], str]] = self._hm.get_history(
                 onion, cmd.limit
             )
-            history_data: List[Dict[str, Any]] = [
-                {
-                    'timestamp': t,
-                    'status': s,
-                    'onion': o,
-                    'reason': r,
-                    'alias': self._cm.get_alias_by_onion(o) or 'Unknown'
+            history_data: List[HistoryEntry] = [
+                HistoryEntry(
+                    timestamp=t,
+                    status=s,
+                    onion=o,
+                    reason=r,
+                    alias=self._cm.get_alias_by_onion(o) or 'Unknown'
                     if o
                     else 'Unknown',
-                }
+                )
                 for t, s, o, r in rows
             ]
-            return CommandResponseEvent(
-                action=cmd.action,
-                data={
-                    'history': history_data,
-                    'target': alias,
-                    'profile': self._pm.profile_name,
-                },
-                code=TransCode.COMMAND_SUCCESS,
+            return HistoryDataEvent(
+                history=history_data,
+                profile=self._pm.profile_name,
+                target=alias,
             )
 
         if isinstance(cmd, ClearHistoryCommand):
@@ -229,9 +284,22 @@ class DatabaseCommandHandler:
             for a in deleted_aliases:
                 self._broadcast(ContactRemovedEvent(alias=a))
 
-            params['alias'] = alias
-            return CommandResponseEvent(
-                action=cmd.action, success=success, code=code, params=params
+            if success:
+                if cmd.target:
+                    return TargetActionSuccessEvent(
+                        action=cmd.action,
+                        code=code,
+                        target=str(params.get('target') or alias),
+                    )
+                return ProfileActionSuccessEvent(
+                    action=cmd.action,
+                    code=code,
+                    profile=str(params.get('profile', self._pm.profile_name)),
+                )
+            return ActionErrorEvent(
+                action=cmd.action,
+                code=code,
+                target=str(params.get('target', cmd.target)),
             )
 
         if isinstance(cmd, GetMessagesCommand):
@@ -239,19 +307,19 @@ class DatabaseCommandHandler:
                 cmd.target, default_value=cmd.target
             )
             if cmd.target:
-                messages: List[Dict[str, Any]] = self._mm.get_chat_history(
+                messages_raw: List[Dict[str, Any]] = self._mm.get_chat_history(
                     str(onion), cmd.limit
                 )
-                return CommandResponseEvent(
-                    action=cmd.action,
-                    data={'messages': messages, 'target': alias},
-                    code=TransCode.COMMAND_SUCCESS,
+                messages: List[MessageEntry] = [MessageEntry(**m) for m in messages_raw]
+                return MessagesDataEvent(
+                    messages=messages,
+                    target=str(alias),
                 )
-            return CommandResponseEvent(
+            return ActionErrorEvent(
                 action=cmd.action,
-                success=False,
                 code=TransCode.INVALID_TARGET,
-                params={'target': cmd.target, 'alias': alias},
+                target=cmd.target,
+                alias=alias,
             )
 
         if isinstance(cmd, ClearMessagesCommand):
@@ -275,9 +343,22 @@ class DatabaseCommandHandler:
             for a in deleted_aliases:
                 self._broadcast(ContactRemovedEvent(alias=a))
 
-            params['alias'] = alias
-            return CommandResponseEvent(
-                action=cmd.action, success=success, code=code, params=params
+            if success:
+                if cmd.target:
+                    return TargetActionSuccessEvent(
+                        action=cmd.action,
+                        code=code,
+                        target=str(params.get('target') or alias),
+                    )
+                return ProfileActionSuccessEvent(
+                    action=cmd.action,
+                    code=code,
+                    profile=str(params.get('profile', self._pm.profile_name)),
+                )
+            return ActionErrorEvent(
+                action=cmd.action,
+                code=code,
+                target=str(params.get('target', cmd.target)),
             )
 
         if isinstance(cmd, GetInboxCommand):
@@ -285,42 +366,33 @@ class DatabaseCommandHandler:
             inbox_data: Dict[str, int] = {
                 self._cm.get_alias_by_onion(o) or o: c for o, c in counts.items()
             }
-            return CommandResponseEvent(
-                action=cmd.action,
-                data={'inbox': inbox_data},
-                code=TransCode.COMMAND_SUCCESS,
-            )
+            return InboxCountsEvent(inbox=inbox_data)
 
         if isinstance(cmd, MarkReadCommand):
             alias, onion, exists = self._cm.resolve_target(
                 cmd.target, default_value=cmd.target
             )
             if not exists:
-                return CommandResponseEvent(
+                return ActionErrorEvent(
                     action=cmd.action,
-                    success=False,
                     code=TransCode.PEER_NOT_FOUND,
-                    params={
-                        'target': cmd.target,
-                        'alias': alias,
-                    },
+                    target=cmd.target,
+                    alias=alias,
                 )
 
             raw_messages: List[Tuple[int, str, str, str]] = self._mm.get_and_read_inbox(
                 str(onion)
             )
-            messages_list: List[Dict[str, str]] = [
-                {'timestamp': str(m[3]), 'payload': str(m[2])} for m in raw_messages
+            messages_list: List[UnreadMessageEntry] = [
+                UnreadMessageEntry(timestamp=str(m[3]), payload=str(m[2]))
+                for m in raw_messages
             ]
-            return CommandResponseEvent(
-                action=cmd.action,
-                data={'messages': messages_list, 'target': alias},
-                code=TransCode.COMMAND_SUCCESS,
+            return UnreadMessagesEvent(
+                messages=messages_list,
+                target=str(alias),
             )
 
-        return CommandResponseEvent(
+        return ActionErrorEvent(
             action=cmd.action,
-            success=False,
             code=TransCode.UNKNOWN_COMMAND,
-            params={},
         )

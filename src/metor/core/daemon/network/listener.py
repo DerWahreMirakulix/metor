@@ -15,6 +15,7 @@ from metor.core.api import (
     ConnectedEvent,
     IncomingConnectionEvent,
     TiebreakerRejectedEvent,
+    MaxConnectionsReachedEvent,
 )
 from metor.core.daemon.models import TorCommand
 from metor.core.daemon.crypto import Crypto
@@ -118,6 +119,11 @@ class InboundListener:
                         HistoryEvent.LIVE_REJECTED_MAX_CONNECTIONS,
                         None,
                         'Listener drop',
+                    )
+                    self._broadcast(
+                        MaxConnectionsReachedEvent(
+                            target='Unknown (Listener)', max_conn=max_conn
+                        )
                     )
                     try:
                         conn.close()
