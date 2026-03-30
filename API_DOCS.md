@@ -60,7 +60,10 @@ It details the Data Transfer Objects (DTOs) used over the local IPC socket.
 
 ### `InitCommand`
 
-InitCommand()
+Data Transfer Object for initializing the daemon session.
+
+    Attributes:
+        action (Action): The strict IPC action code.
 
 *No additional payload parameters.*
 
@@ -69,7 +72,11 @@ InitCommand()
 ---
 ### `GetConnectionsCommand`
 
-GetConnectionsCommand(is_header: bool = False)
+Data Transfer Object for requesting the current connection state.
+
+    Attributes:
+        is_header (bool): Flag indicating if the request is for the UI header.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -80,7 +87,11 @@ GetConnectionsCommand(is_header: bool = False)
 ---
 ### `GetContactsListCommand`
 
-GetContactsListCommand(chat_mode: bool = False)
+Data Transfer Object for retrieving the address book.
+
+    Attributes:
+        chat_mode (bool): Flag indicating if the data should be formatted for chat mode.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -91,7 +102,11 @@ GetContactsListCommand(chat_mode: bool = False)
 ---
 ### `ConnectCommand`
 
-ConnectCommand(target: str)
+Data Transfer Object for initiating a connection to a remote peer.
+
+    Attributes:
+        target (str): The target alias or onion address.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -102,7 +117,11 @@ ConnectCommand(target: str)
 ---
 ### `DisconnectCommand`
 
-DisconnectCommand(target: str)
+Data Transfer Object for terminating an active connection.
+
+    Attributes:
+        target (str): The target alias or onion address.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -113,7 +132,11 @@ DisconnectCommand(target: str)
 ---
 ### `AcceptCommand`
 
-AcceptCommand(target: str)
+Data Transfer Object for accepting a pending connection request.
+
+    Attributes:
+        target (str): The target alias or onion address.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -124,7 +147,11 @@ AcceptCommand(target: str)
 ---
 ### `RejectCommand`
 
-RejectCommand(target: str)
+Data Transfer Object for rejecting a pending connection request.
+
+    Attributes:
+        target (str): The target alias or onion address.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -135,7 +162,13 @@ RejectCommand(target: str)
 ---
 ### `MsgCommand`
 
-MsgCommand(target: str, text: str, msg_id: str)
+Data Transfer Object for sending a live chat message.
+
+    Attributes:
+        target (str): The target alias or onion address.
+        text (str): The message payload.
+        msg_id (str): The unique message identifier.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -148,7 +181,12 @@ MsgCommand(target: str, text: str, msg_id: str)
 ---
 ### `AddContactCommand`
 
-AddContactCommand(alias: str, onion: Optional[str] = None)
+Data Transfer Object for adding a new contact or saving a RAM alias.
+
+    Attributes:
+        alias (str): The chosen name for the contact.
+        onion (Optional[str]): The remote onion identity.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -160,7 +198,11 @@ AddContactCommand(alias: str, onion: Optional[str] = None)
 ---
 ### `RemoveContactCommand`
 
-RemoveContactCommand(alias: str)
+Data Transfer Object for removing a saved contact.
+
+    Attributes:
+        alias (str): The alias of the contact to remove.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -171,7 +213,12 @@ RemoveContactCommand(alias: str)
 ---
 ### `RenameContactCommand`
 
-RenameContactCommand(old_alias: str, new_alias: str)
+Data Transfer Object for renaming an existing contact.
+
+    Attributes:
+        old_alias (str): The current alias.
+        new_alias (str): The desired new alias.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -183,7 +230,10 @@ RenameContactCommand(old_alias: str, new_alias: str)
 ---
 ### `ClearContactsCommand`
 
-ClearContactsCommand()
+Data Transfer Object for wiping the entire address book.
+
+    Attributes:
+        action (Action): The strict IPC action code.
 
 *No additional payload parameters.*
 
@@ -192,7 +242,11 @@ ClearContactsCommand()
 ---
 ### `SwitchCommand`
 
-SwitchCommand(target: Optional[str] = None)
+Data Transfer Object for changing the active UI focus.
+
+    Attributes:
+        target (Optional[str]): The alias to focus on, or None to clear focus.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -203,7 +257,13 @@ SwitchCommand(target: Optional[str] = None)
 ---
 ### `SendDropCommand`
 
-SendDropCommand(target: str, text: str, cli_mode: bool = False)
+Data Transfer Object for queuing an asynchronous offline message.
+
+    Attributes:
+        target (str): The destination alias or onion address.
+        text (str): The message payload.
+        cli_mode (bool): Flag indicating if the request originated from the CLI.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -216,7 +276,11 @@ SendDropCommand(target: str, text: str, cli_mode: bool = False)
 ---
 ### `GetInboxCommand`
 
-GetInboxCommand(cli_mode: bool = False)
+Data Transfer Object for requesting unread message counts.
+
+    Attributes:
+        cli_mode (bool): Flag indicating if the request originated from the CLI.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -227,7 +291,12 @@ GetInboxCommand(cli_mode: bool = False)
 ---
 ### `MarkReadCommand`
 
-MarkReadCommand(target: str, cli_mode: bool = False)
+Data Transfer Object for reading and clearing messages from the inbox.
+
+    Attributes:
+        target (str): The target alias or onion address.
+        cli_mode (bool): Flag indicating if the request originated from the CLI.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -239,7 +308,11 @@ MarkReadCommand(target: str, cli_mode: bool = False)
 ---
 ### `FallbackCommand`
 
-FallbackCommand(target: str)
+Data Transfer Object for forcing unacknowledged messages into the drop queue.
+
+    Attributes:
+        target (str): The target alias or onion address.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -250,7 +323,12 @@ FallbackCommand(target: str)
 ---
 ### `GetHistoryCommand`
 
-GetHistoryCommand(target: Optional[str] = None, limit: Optional[int] = None)
+Data Transfer Object for retrieving connection event logs.
+
+    Attributes:
+        target (Optional[str]): The specific alias or onion to filter by.
+        limit (Optional[int]): The maximum number of events to retrieve.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -262,7 +340,11 @@ GetHistoryCommand(target: Optional[str] = None, limit: Optional[int] = None)
 ---
 ### `ClearHistoryCommand`
 
-ClearHistoryCommand(target: Optional[str] = None)
+Data Transfer Object for deleting connection event logs.
+
+    Attributes:
+        target (Optional[str]): The specific alias or onion to clear.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -273,7 +355,12 @@ ClearHistoryCommand(target: Optional[str] = None)
 ---
 ### `GetMessagesCommand`
 
-GetMessagesCommand(target: Optional[str] = None, limit: Optional[int] = None)
+Data Transfer Object for retrieving past chat history.
+
+    Attributes:
+        target (Optional[str]): The specific alias or onion to retrieve messages for.
+        limit (Optional[int]): The maximum number of messages to retrieve.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -285,7 +372,12 @@ GetMessagesCommand(target: Optional[str] = None, limit: Optional[int] = None)
 ---
 ### `ClearMessagesCommand`
 
-ClearMessagesCommand(target: Optional[str] = None, non_contacts_only: bool = False)
+Data Transfer Object for deleting past chat history.
+
+    Attributes:
+        target (Optional[str]): The specific alias or onion to clear messages for.
+        non_contacts_only (bool): Restricts deletion to unsaved peers.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -297,7 +389,10 @@ ClearMessagesCommand(target: Optional[str] = None, non_contacts_only: bool = Fal
 ---
 ### `GetAddressCommand`
 
-GetAddressCommand()
+Data Transfer Object for retrieving the current hidden service address.
+
+    Attributes:
+        action (Action): The strict IPC action code.
 
 *No additional payload parameters.*
 
@@ -306,7 +401,10 @@ GetAddressCommand()
 ---
 ### `GenerateAddressCommand`
 
-GenerateAddressCommand()
+Data Transfer Object for generating a new hidden service address.
+
+    Attributes:
+        action (Action): The strict IPC action code.
 
 *No additional payload parameters.*
 
@@ -315,7 +413,10 @@ GenerateAddressCommand()
 ---
 ### `ClearProfileDbCommand`
 
-ClearProfileDbCommand()
+Data Transfer Object for completely wiping a profile's SQLite database.
+
+    Attributes:
+        action (Action): The strict IPC action code.
 
 *No additional payload parameters.*
 
@@ -324,7 +425,12 @@ ClearProfileDbCommand()
 ---
 ### `SetSettingCommand`
 
-SetSettingCommand(setting_key: str, setting_value: Union[str, int, float, bool])
+Data Transfer Object for updating a global or daemon setting.
+
+    Attributes:
+        setting_key (str): The configuration key to modify.
+        setting_value (Union[str, int, float, bool]): The new strictly typed value.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
@@ -336,7 +442,10 @@ SetSettingCommand(setting_key: str, setting_value: Union[str, int, float, bool])
 ---
 ### `SelfDestructCommand`
 
-SelfDestructCommand()
+Data Transfer Object for initiating the daemon self-destruct and data purge protocol.
+
+    Attributes:
+        action (Action): The strict IPC action code.
 
 *No additional payload parameters.*
 
@@ -345,7 +454,11 @@ SelfDestructCommand()
 ---
 ### `UnlockCommand`
 
-UnlockCommand(password: str)
+Data Transfer Object for authenticating and unlocking a remote daemon.
+
+    Attributes:
+        password (str): The master password.
+        action (Action): The strict IPC action code.
 
 | Field | Type | Default |
 |---|---|---|
