@@ -6,7 +6,7 @@ Isolates all raw TCP byte parsing from the Chat Engine logic and thwarts UTF-8 D
 import socket
 import threading
 import json
-from typing import Callable, Dict, Any, Optional, List
+from typing import Callable, Dict, Any, Optional
 
 from metor.core.api import IpcCommand, IpcEvent
 from metor.utils import Constants
@@ -96,6 +96,7 @@ class IpcClient:
     def _listener_thread(self) -> None:
         """
         Background worker that continuously pulls bytes from the IPC stream.
+        Utilizes byte buffering to prevent UTF-8 fragmentation corruption.
 
         Args:
             None
@@ -103,7 +104,7 @@ class IpcClient:
         Returns:
             None
         """
-        buffer: str = ''
+        buffer: bytearray = bytearray()
         try:
             while not self._stop_flag.is_set():
                 if not self._socket:
@@ -114,14 +115,17 @@ class IpcClient:
                     self._on_disconnect()
                     break
 
-                # Critical Fix: Ignore corrupt UTF-8 fragments
-                buffer += data.decode('utf-8', errors='ignore')
+                buffer.extend(data)
 
-                while '\n' in buffer:
-                    parts: List[str] = buffer.split('\n', 1)
-                    line: str = parts[0].strip()
-                    buffer = parts[1]
+                if len(buffer) > Constants.MAX_IPC_BYTES:
+                    self._on_disconnect()
+                    break
 
+                while b'\n' in buffer:
+                    line_bytes, _, rest = buffer.partition(b'\n')
+                    buffer = bytearray(rest)
+
+                    line: str = line_bytes.decode('utf-8', errors='ignore').strip()
                     if not line:
                         continue
 

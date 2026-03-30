@@ -177,6 +177,12 @@ class TorManager:
                     tor_cmd=tor_cmd,
                     init_msg_handler=print_tor_output,
                 )
+
+                # Write PID to file for exact Zombie tracking during process cleanup
+                pid_file: Path = data_dir / 'tor.pid'
+                with pid_file.open('w') as f:
+                    f.write(str(self._tm_proc.pid))
+
                 break
             except OSError as e:
                 if (

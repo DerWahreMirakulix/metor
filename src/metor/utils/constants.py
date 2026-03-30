@@ -15,6 +15,10 @@ class Constants:
 
     LOCALHOST: str = '127.0.0.1'
 
+    # Network Constraints
+    MAX_STREAM_BYTES: int = 1048576  # 1 MB Limit for Tor TCP streams (OOM Protection)
+    MAX_IPC_BYTES: int = 5242880  # 5 MB Limit for local IPC streams (OOM Protection)
+
     # File Names
     DB_FILE: str = 'storage.db'
     CONTACTS_FILE: str = 'contacts.json'

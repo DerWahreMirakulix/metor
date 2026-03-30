@@ -213,12 +213,12 @@ class Renderer:
         if start_idx != -1:
             self._redraw_from_index(start_idx)
 
-    def apply_fallback_to_drop(self, msg_ids: list[str]) -> None:
+    def apply_fallback_to_drop(self, msg_ids: List[str]) -> None:
         """
         Converts hanging un-acked live messages into pending drops.
 
         Args:
-            msg_ids (list[str]): List of message IDs to convert.
+            msg_ids (List[str]): List of message IDs to convert.
 
         Returns:
             None

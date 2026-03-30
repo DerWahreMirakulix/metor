@@ -328,6 +328,10 @@ class ContactManager:
             List[str]: List of cleanly removed aliases for UI sync.
         """
         active_onions = active_onions or []
+
+        # AUDIT EXCEPTION: SQLite IN-clauses with dynamic list sizes do not support static parameterization.
+        # F-Strings are used exclusively to inject the correct amount of '?' placeholders.
+        # Actual values are passed safely via the 'params' tuple to prevent SQL injection.
         placeholders: str = ', '.join(['?'] * len(active_onions))
         condition = f'AND onion NOT IN ({placeholders})' if active_onions else ''
         params = tuple(active_onions) if active_onions else ()

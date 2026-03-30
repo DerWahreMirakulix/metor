@@ -119,6 +119,9 @@ class SqlManager:
             conn = sqlite3.connect(path_str, check_same_thread=False)
             if self._password:
                 safe_password: str = self._password.replace("'", "''")
+                # AUDIT EXCEPTION: SQLite PRAGMA statements do not support parameter binding (?).
+                # F-Strings are required here. The password is mathematically secured by escaping
+                # single quotes above to prevent SQL injection.
                 conn.execute(f"PRAGMA key = '{safe_password}'")
 
             SqlManager._connections[path_str] = conn

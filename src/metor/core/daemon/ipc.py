@@ -170,6 +170,7 @@ class IpcServer:
         """
         Target loop for receiving and parsing commands from a specific UI.
         Enforces read timeouts to prevent hanging threads if the UI crashes abruptly.
+        Utilizes byte buffering to prevent UTF-8 fragmentation DoS.
 
         Args:
             conn (socket.socket): The established client socket connection.
@@ -178,7 +179,7 @@ class IpcServer:
             None
         """
         conn.settimeout(10.0)
-        buffer: str = ''
+        buffer: bytearray = bytearray()
         try:
             while not self._stop_flag.is_set():
                 try:
@@ -186,12 +187,16 @@ class IpcServer:
                     if not data:
                         break
 
-                    # Ignore errors to prevent UnicodeDecodeError DoS via malformed UTF-8 fragments
-                    buffer += data.decode('utf-8', errors='ignore')
+                    buffer.extend(data)
 
-                    while '\n' in buffer:
-                        line, buffer = buffer.split('\n', 1)
-                        line = line.strip()
+                    if len(buffer) > Constants.MAX_IPC_BYTES:
+                        break
+
+                    while b'\n' in buffer:
+                        line_bytes, _, rest = buffer.partition(b'\n')
+                        buffer = bytearray(rest)
+
+                        line: str = line_bytes.decode('utf-8', errors='ignore').strip()
                         if not line:
                             continue
                         try:
