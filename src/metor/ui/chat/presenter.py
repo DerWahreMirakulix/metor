@@ -1,25 +1,68 @@
 """
-Module providing stateless text formatting and ANSI color logic for the terminal.
+Module providing stateless text formatting and ANSI color logic for the interactive chat terminal.
 """
 
 from typing import Optional, List
 
-from metor.ui.theme import Theme
-from metor.ui.chat.models import UIMessageType, UIChatLine
+from metor.ui import Theme
+
+# Local Package Imports
+from metor.ui.chat.models import ChatMessageType, ChatLine
 
 
-class Formatter:
-    """Utility class for formatting chat lines and calculating visible string lengths."""
+class ChatPresenter:
+    """Utility class for formatting chat lines, calculating visible string lengths, and converting raw data dictionaries into standardized UI strings."""
+
+    @staticmethod
+    def format_session_state(
+        active: List[str],
+        pending: List[str],
+        contacts: List[str],
+        focused: Optional[str],
+        is_header_mode: bool = False,
+    ) -> str:
+        """
+        Returns a formatted string representing active and pending connections.
+
+        Args:
+            active (List[str]): List of active connections.
+            pending (List[str]): List of pending connections.
+            contacts (List[str]): List of saved contacts.
+            focused (Optional[str]): The currently focused alias.
+            is_header_mode (bool): If True, formats without UI system decorators.
+
+        Returns:
+            str: The colorized multi-line state string.
+        """
+        if not active and not pending and not is_header_mode:
+            return 'No active or pending sessions.'
+
+        lines: List[str] = []
+        if active:
+            lines.append('Active session:')
+            for alias in active:
+                color: str = Theme.GREEN if alias in contacts else Theme.DARK_GREY
+                marker: str = '*' if alias == focused else ' '
+                lines.append(f' {color}{marker} {alias}{Theme.RESET}')
+            if pending:
+                lines.append('')
+
+        if pending:
+            lines.append('Pending session:')
+            for p in pending:
+                lines.append(f'   {Theme.DARK_GREY}{p}{Theme.RESET}')
+
+        return '\n'.join(lines)
 
     @staticmethod
     def get_visible_prefix_len(
-        msg_type: UIMessageType, alias: Optional[str], is_drop: bool, prompt_len: int
+        msg_type: ChatMessageType, alias: Optional[str], is_drop: bool, prompt_len: int
     ) -> int:
         """
         Calculates the exact visible length of the prefix without invisible ANSI color codes.
 
         Args:
-            msg_type (UIMessageType): The category of the message.
+            msg_type (ChatMessageType): The category of the message.
             alias (Optional[str]): The associated remote alias.
             is_drop (bool): True if the message has the [Drop] suffix.
             prompt_len (int): The length of the base prompt signature.
@@ -29,19 +72,19 @@ class Formatter:
         """
         drop_len: int = len(' [Drop]') if is_drop else 0
 
-        if msg_type == UIMessageType.INFO:
+        if msg_type == ChatMessageType.INFO:
             return 4 + prompt_len
-        if msg_type == UIMessageType.SYSTEM:
+        if msg_type == ChatMessageType.SYSTEM:
             return 6 + prompt_len
-        if msg_type == UIMessageType.RAW:
+        if msg_type == ChatMessageType.RAW:
             return 0
-        if msg_type == UIMessageType.SELF:
+        if msg_type == ChatMessageType.SELF:
             return (
                 len(f'To {alias}') + drop_len + prompt_len
                 if alias
                 else 4 + drop_len + prompt_len
             )
-        if msg_type == UIMessageType.REMOTE:
+        if msg_type == ChatMessageType.REMOTE:
             return (
                 len(f'From {alias}') + drop_len + prompt_len
                 if alias
@@ -51,13 +94,13 @@ class Formatter:
 
     @staticmethod
     def format_msg(
-        msg: UIChatLine, initial_prompt: str, current_focus: Optional[str]
+        msg: ChatLine, initial_prompt: str, current_focus: Optional[str]
     ) -> str:
         """
-        Formats a strictly typed UIChatLine into a colorized CLI string.
+        Formats a strictly typed ChatLine into a colorized CLI string.
 
         Args:
-            msg (UIChatLine): The data object containing message metadata.
+            msg (ChatLine): The data object containing message metadata.
             initial_prompt (str): The base prompt string (e.g., '$ ').
             current_focus (Optional[str]): The alias the user is currently focused on.
 
@@ -71,14 +114,14 @@ class Formatter:
         prefix: str = ''
         drop_tag: str = ' [Drop]' if msg.is_drop else ''
 
-        if msg.msg_type == UIMessageType.INFO:
+        if msg.msg_type == ChatMessageType.INFO:
             prefix = f'{Theme.YELLOW}info{initial_prompt}{Theme.RESET}'
-        elif msg.msg_type == UIMessageType.SYSTEM:
+        elif msg.msg_type == ChatMessageType.SYSTEM:
             prefix = f'{Theme.CYAN}system{initial_prompt}{Theme.RESET}'
-        elif msg.msg_type != UIMessageType.RAW:
+        elif msg.msg_type != ChatMessageType.RAW:
             is_focused: bool = (msg.alias == current_focus) if msg.alias else False
 
-            if msg.msg_type == UIMessageType.SELF:
+            if msg.msg_type == ChatMessageType.SELF:
                 prefix_raw: str = (
                     f'To {msg.alias}{drop_tag}{initial_prompt}'
                     if msg.alias
@@ -93,7 +136,7 @@ class Formatter:
                     else:
                         prefix = f'{Theme.GREEN}{prefix_raw}{Theme.RESET}'
 
-            elif msg.msg_type == UIMessageType.REMOTE:
+            elif msg.msg_type == ChatMessageType.REMOTE:
                 prefix_raw = (
                     f'From {msg.alias}{drop_tag}{initial_prompt}'
                     if msg.alias
@@ -105,8 +148,8 @@ class Formatter:
                     else f'{Theme.DARK_GREY}{prefix_raw}{Theme.RESET}'
                 )
 
-        if '\n' in text and msg.msg_type != UIMessageType.RAW:
-            pad_len: int = Formatter.get_visible_prefix_len(
+        if '\n' in text and msg.msg_type != ChatMessageType.RAW:
+            pad_len: int = ChatPresenter.get_visible_prefix_len(
                 msg.msg_type, msg.alias, msg.is_drop, len(initial_prompt)
             )
             padding: str = ' ' * pad_len

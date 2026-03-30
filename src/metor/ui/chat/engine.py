@@ -18,13 +18,13 @@ from metor.core.api import (
     GetConnectionsCommand,
 )
 from metor.data.profile import ProfileManager
-from metor.ui.help import Help
-from metor.ui.theme import Theme
-from metor.utils.helper import clean_onion
+from metor.ui import Help, Theme
+from metor.utils import clean_onion
 
 # Local Package Imports
-from metor.ui.chat.models import UIMessageType
+from metor.ui.chat.models import ChatMessageType
 from metor.ui.chat.renderer import Renderer
+from metor.ui.chat.presenter import ChatPresenter
 from metor.ui.chat.ipc import IpcClient
 from metor.ui.chat.session import Session
 from metor.ui.chat.command import CommandDispatcher
@@ -69,7 +69,7 @@ class Chat:
         if not ipc_port:
             self._renderer.print_message(
                 "Daemon is not running! Use 'metor daemon' to start it.",
-                msg_type=UIMessageType.SYSTEM,
+                msg_type=ChatMessageType.SYSTEM,
             )
             return
 
@@ -82,7 +82,7 @@ class Chat:
         if not self._ipc.connect():
             self._renderer.print_message(
                 'Could not connect to Daemon. Is it running?',
-                msg_type=UIMessageType.SYSTEM,
+                msg_type=ChatMessageType.SYSTEM,
             )
             return
 
@@ -112,7 +112,7 @@ class Chat:
                         if not command_found:
                             self._renderer.print_message(
                                 f"Unknown command: '{user_input}'",
-                                msg_type=UIMessageType.SYSTEM,
+                                msg_type=ChatMessageType.SYSTEM,
                             )
                 else:
                     self._send_chat_message(user_input)
@@ -153,7 +153,7 @@ class Chat:
         if not self._session.focused_alias or not self._ipc:
             self._renderer.print_message(
                 'No active focus. Use /switch or /connect.',
-                msg_type=UIMessageType.SYSTEM,
+                msg_type=ChatMessageType.SYSTEM,
             )
             return
 
@@ -170,7 +170,7 @@ class Chat:
             )
             self._renderer.print_message(
                 msg_text,
-                msg_type=UIMessageType.SELF,
+                msg_type=ChatMessageType.SELF,
                 alias=self._session.focused_alias,
                 msg_id=msg_id,
                 is_drop=False,
@@ -184,7 +184,7 @@ class Chat:
             )
             self._renderer.print_message(
                 msg_text,
-                msg_type=UIMessageType.SELF,
+                msg_type=ChatMessageType.SELF,
                 alias=self._session.focused_alias,
                 msg_id=msg_id,
                 is_drop=True,
@@ -204,7 +204,7 @@ class Chat:
         self._renderer.print_divider()
         self._renderer.print_message(
             f'{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}',
-            msg_type=UIMessageType.RAW,
+            msg_type=ChatMessageType.RAW,
         )
         self._renderer.clear_input_area()
         self._shutdown()
@@ -253,9 +253,14 @@ class Chat:
 
         if self._session.header_active or self._session.header_pending:
             self._renderer.print_empty_line()
-            self._renderer.print_message(
-                self._session.show(is_header_mode=True), msg_type=UIMessageType.RAW
+            formatted_state: str = ChatPresenter.format_session_state(
+                self._session.header_active,
+                self._session.header_pending,
+                self._session.header_contacts,
+                self._session.focused_alias,
+                is_header_mode=True,
             )
+            self._renderer.print_message(formatted_state, msg_type=ChatMessageType.RAW)
 
         self._renderer.print_empty_line()
         self._renderer.print_prompt()

@@ -1,6 +1,7 @@
 """
 Module managing the local Inter-Process Communication (IPC) server.
 Handles socket connections between the background Daemon and the Chat UI.
+Enforces strict timeouts to prevent socket blockades and uses robust UTF-8 decoding to thwart DoS.
 """
 
 import socket
@@ -10,7 +11,7 @@ from typing import List, Callable, Dict, Any, Optional
 
 from metor.core.api import IpcCommand, IpcEvent
 from metor.data.profile import ProfileManager
-from metor.utils.constants import Constants
+from metor.utils import Constants
 
 
 class IpcServer:
@@ -168,6 +169,7 @@ class IpcServer:
     def _handler(self, conn: socket.socket) -> None:
         """
         Target loop for receiving and parsing commands from a specific UI.
+        Enforces read timeouts to prevent hanging threads if the UI crashes abruptly.
 
         Args:
             conn (socket.socket): The established client socket connection.
@@ -175,25 +177,31 @@ class IpcServer:
         Returns:
             None
         """
+        conn.settimeout(10.0)
         buffer: str = ''
         try:
             while not self._stop_flag.is_set():
-                data: bytes = conn.recv(4096)
-                if not data:
-                    break
-                buffer += data.decode('utf-8')
+                try:
+                    data: bytes = conn.recv(4096)
+                    if not data:
+                        break
 
-                while '\n' in buffer:
-                    line, buffer = buffer.split('\n', 1)
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        cmd_dict: Dict[str, Any] = json.loads(line)
-                        cmd: IpcCommand = IpcCommand.from_dict(cmd_dict)
-                        self._command_callback(cmd, conn)
-                    except Exception:
-                        pass
+                    # Ignore errors to prevent UnicodeDecodeError DoS via malformed UTF-8 fragments
+                    buffer += data.decode('utf-8', errors='ignore')
+
+                    while '\n' in buffer:
+                        line, buffer = buffer.split('\n', 1)
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            cmd_dict: Dict[str, Any] = json.loads(line)
+                            cmd: IpcCommand = IpcCommand.from_dict(cmd_dict)
+                            self._command_callback(cmd, conn)
+                        except Exception:
+                            pass
+                except socket.timeout:
+                    continue
         except Exception:
             pass
         finally:

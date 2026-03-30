@@ -7,10 +7,8 @@ import re
 import threading
 from typing import List
 
-from metor.ui.chat.models import UIChatLine
-
-# Local Package Imports
-from metor.ui.chat.renderer.formatter import Formatter
+from metor.ui.chat.models import ChatLine
+from metor.ui.chat.presenter import ChatPresenter
 
 
 class Display:
@@ -27,19 +25,19 @@ class Display:
             None
         """
         self._initial_prompt: str = initial_prompt
-        self.all_msgs: List[UIChatLine] = []
+        self.all_msgs: List[ChatLine] = []
         self.print_lock: threading.Lock = threading.Lock()
 
         self._ansi_escape: re.Pattern = re.compile(
             r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])'
         )
 
-    def get_visual_lines(self, msg: UIChatLine, cols: int) -> int:
+    def get_visual_lines(self, msg: ChatLine, cols: int) -> int:
         """
         Calculates how many terminal lines a message will occupy considering word wrap.
 
         Args:
-            msg (UIChatLine): The message metadata.
+            msg (ChatLine): The message metadata.
             cols (int): The current column width of the terminal.
 
         Returns:
@@ -50,7 +48,7 @@ class Display:
             text = text.replace('{alias}', msg.alias)
 
         clean_text: str = self._ansi_escape.sub('', text)
-        prefix_len: int = Formatter.get_visible_prefix_len(
+        prefix_len: int = ChatPresenter.get_visible_prefix_len(
             msg.msg_type, msg.alias, msg.is_drop, len(self._initial_prompt)
         )
 

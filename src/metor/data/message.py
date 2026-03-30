@@ -1,20 +1,19 @@
 """
 Module for managing asynchronous offline messages via SQLite.
 Enforces Ephemeral Messaging policies (Burn-After-Read) and strict Enums.
+Yields raw domain models without applying CLI format dependencies.
 """
 
 from enum import Enum
 from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
 
-from metor.ui.theme import Theme
-from metor.utils.constants import Constants
-from metor.utils.helper import get_divider_string, get_header_string, clean_onion
+from metor.core.api import TransCode
+from metor.utils import Constants, clean_onion
 
 # Local Package Imports
 from metor.data.profile import ProfileManager
 from metor.data.sql import SqlManager
-from metor.data.contact import ContactManager
 from metor.data.settings import Settings, SettingKey
 
 
@@ -116,7 +115,7 @@ class MessageManager:
         )
 
         id_query: str = 'SELECT MAX(id) FROM messages'
-        result: List[Tuple[int]] = self._sql.fetchall(id_query)
+        result: List[Tuple[Any, ...]] = self._sql.fetchall(id_query)
         return int(result[0][0]) if result and result[0][0] else 0
 
     def get_pending_outbox(self) -> List[Tuple[int, str, str, str]]:
@@ -132,7 +131,10 @@ class MessageManager:
         query: str = (
             'SELECT id, contact_onion, msg_type, payload FROM messages WHERE status = ?'
         )
-        return self._sql.fetchall(query, (MessageStatus.PENDING.value,))
+        rows: List[Tuple[Any, ...]] = self._sql.fetchall(
+            query, (MessageStatus.PENDING.value,)
+        )
+        return [(int(r[0]), str(r[1]), str(r[2]), str(r[3])) for r in rows]
 
     def update_message_status(self, msg_id: int, new_status: MessageStatus) -> None:
         """
@@ -159,14 +161,14 @@ class MessageManager:
             Dict[str, int]: A dictionary mapping onion addresses to their unread message count.
         """
         query: str = 'SELECT contact_onion, COUNT(*) FROM messages WHERE status = ? GROUP BY contact_onion'
-        rows: List[Tuple[str, int]] = self._sql.fetchall(
+        rows: List[Tuple[Any, ...]] = self._sql.fetchall(
             query, (MessageStatus.UNREAD.value,)
         )
 
         counts: Dict[str, int] = {}
         for row in rows:
-            onion, count = row
-            counts[onion] = int(count)
+            onion, count = str(row[0]), int(row[1])
+            counts[onion] = count
 
         return counts
 
@@ -187,9 +189,12 @@ class MessageManager:
             WHERE contact_onion = ? AND status = ?
             ORDER BY timestamp ASC
         """
-        messages: List[Tuple[int, str, str, str]] = self._sql.fetchall(
+        raw_messages: List[Tuple[Any, ...]] = self._sql.fetchall(
             query, (contact_onion, MessageStatus.UNREAD.value)
         )
+        messages: List[Tuple[int, str, str, str]] = [
+            (int(r[0]), str(r[1]), str(r[2]), str(r[3])) for r in raw_messages
+        ]
 
         if messages:
             if Settings.get(SettingKey.EPHEMERAL_MESSAGES):
@@ -236,14 +241,19 @@ class MessageManager:
             ORDER BY timestamp DESC
             LIMIT ?
         """
-        rows: List[Tuple[str, str, str, str]] = self._sql.fetchall(
+        rows: List[Tuple[Any, ...]] = self._sql.fetchall(
             query, (contact_onion, actual_limit)
         )
         rows.reverse()
 
         result: List[Dict[str, Any]] = []
         for row in rows:
-            direction, status, payload, timestamp = row
+            direction, status, payload, timestamp = (
+                str(row[0]),
+                str(row[1]),
+                str(row[2]),
+                str(row[3]),
+            )
             result.append(
                 {
                     'direction': direction,
@@ -256,7 +266,7 @@ class MessageManager:
 
     def clear_messages(
         self, onion: Optional[str] = None, non_contacts_only: bool = False
-    ) -> Tuple[bool, str]:
+    ) -> Tuple[bool, TransCode, Dict[str, Any]]:
         """
         Wipes the message table completely or just for a specific contact.
         Maintains domain boundaries by leaving contact deletion to the Daemon orchestrator.
@@ -266,7 +276,7 @@ class MessageManager:
             non_contacts_only (bool): If True, only deletes messages from unsaved peers.
 
         Returns:
-            Tuple[bool, str]: A success flag and a status message.
+            Tuple[bool, TransCode, Dict[str, Any]]: A success flag, domain state code, and parameters.
         """
         try:
             if non_contacts_only:
@@ -277,123 +287,35 @@ class MessageManager:
                         AND contact_onion NOT IN (SELECT onion FROM contacts WHERE is_saved = 1)
                     """
                     self._sql.execute(query, (onion,))
-                    msg = f"Messages for non-contact '{onion}' cleared."
+                    return (
+                        True,
+                        TransCode.MESSAGES_CLEARED_NON_CONTACTS,
+                        {'target': onion},
+                    )
                 else:
                     query: str = """
                         DELETE FROM messages 
                         WHERE contact_onion NOT IN (SELECT onion FROM contacts WHERE is_saved = 1)
                     """
                     self._sql.execute(query)
-                    msg = f"All messages from non-contacts in profile '{self._pm.profile_name}' cleared."
+                    return (
+                        True,
+                        TransCode.MESSAGES_CLEARED_NON_CONTACTS,
+                        {'target': self._pm.profile_name},
+                    )
             else:
                 if onion:
                     self._sql.execute(
                         'DELETE FROM messages WHERE contact_onion = ?', (onion,)
                     )
-                    msg = f"All messages for '{onion}' cleared."
+                    return True, TransCode.MESSAGES_CLEARED, {'target': onion}
                 else:
                     self._sql.execute('DELETE FROM messages')
-                    msg = f"All messages in profile '{self._pm.profile_name}' cleared."
+                    return (
+                        True,
+                        TransCode.MESSAGES_CLEARED_ALL,
+                        {'profile': self._pm.profile_name},
+                    )
 
-            return True, msg
         except Exception:
-            return False, 'Failed to clear messages.'
-
-    def show_inbox(self, cm: ContactManager) -> str:
-        """
-        Fetches and formats the current unread inbox counts into a CLI string.
-
-        Args:
-            cm (ContactManager): Contact manager instance.
-
-        Returns:
-            str: Formatting string output.
-        """
-        counts: Dict[str, int] = self.get_unread_counts()
-        if not counts:
-            return 'Inbox is empty.'
-
-        out: str = 'Unread Offline Messages:\n'
-        for onion, count in counts.items():
-            resolved_alias: str = cm.get_alias_by_onion(onion) or onion
-            out += f' - {Theme.CYAN}{resolved_alias}{Theme.RESET}: {Theme.YELLOW}{count}{Theme.RESET} new message(s)\n'
-
-        return out.strip()
-
-    def show_read(self, target: str, cm: ContactManager) -> str:
-        """
-        Fetches, formats, and marks as read all pending inbox messages for an alias.
-
-        Args:
-            target (str): The target string from the CLI (alias or onion).
-            cm (ContactManager): Contact manager to resolve the target.
-
-        Returns:
-            str: The colorized terminal output displaying the unread messages.
-        """
-        alias, onion, exists = cm.resolve_target(target)
-        if not exists:
-            return f"Peer '{target}' not found in address book."
-
-        disp_name: str = alias or str(onion)
-        raw_messages: List[Tuple[int, str, str, str]] = self.get_and_read_inbox(
-            str(onion)
-        )
-
-        if not raw_messages:
-            return f"No unread messages from '{disp_name}'."
-
-        out: str = f'{get_header_string(f"Messages from {Theme.CYAN}{disp_name}{Theme.RESET}")}\n'
-        for msg in raw_messages:
-            timestamp: str = msg[3]
-            payload: str = msg[2]
-
-            prefix: str = f'{Theme.PURPLE}From {disp_name}{Theme.RESET}'
-            out += f'[{timestamp}] {prefix}: {payload}\n'
-
-        out += get_divider_string()
-        return out
-
-    def show_history(
-        self, target: str, cm: ContactManager, limit: Optional[int] = None
-    ) -> str:
-        """
-        Fetches and formats the historical message record mimicking the Chat UI colors.
-
-        Args:
-            target (str): The target string from the CLI (alias or onion).
-            cm (ContactManager): Contact manager to resolve the target.
-            limit (Optional[int]): The number of recent messages to retrieve.
-
-        Returns:
-            str: The formatted terminal output of the chat history.
-        """
-        alias, onion, exists = cm.resolve_target(target)
-        if not exists:
-            return f"Peer '{target}' not found in address book."
-
-        disp_name: str = alias or str(onion)
-        messages: List[Dict[str, Any]] = self.get_chat_history(str(onion), limit)
-
-        if not messages:
-            return f"No chat history found for '{disp_name}'."
-
-        out: str = f'{get_header_string(f"Chat History with {Theme.CYAN}{disp_name}{Theme.RESET} (Last {len(messages)})")}\n'
-        for msg in messages:
-            time_str: str = msg.get('timestamp', '')
-            direction: str = msg.get('direction', '')
-            status: str = msg.get('status', '')
-            payload: str = msg.get('payload', '')
-
-            if direction == MessageDirection.OUT.value:
-                if status == MessageStatus.DELIVERED.value:
-                    prefix = f'{Theme.GREEN}To {disp_name}{Theme.RESET}'
-                else:
-                    prefix = f'To {disp_name}'
-            else:
-                prefix = f'{Theme.PURPLE}From {disp_name}{Theme.RESET}'
-
-            out += f'[{time_str}] {prefix}: {payload}\n'
-
-        out += get_divider_string()
-        return out
+            return False, TransCode.MESSAGES_CLEAR_FAILED, {}

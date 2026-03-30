@@ -7,8 +7,9 @@ supporting nested subcommands for clean terminal alignment.
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from metor.utils.helper import get_divider_string
+# Local Package Imports
 from metor.ui.theme import Theme
+from metor.ui.presenter import UIPresenter
 
 
 @dataclass
@@ -429,6 +430,6 @@ class Help:
                             )
             out += '\n'
 
-        out += f'{ind}{get_divider_string(3, add_spaces=True)}\n\n'
+        out += f'{ind}{UIPresenter.get_divider_string(3, add_spaces=True)}\n\n'
         out += cls.show_chat_help(start, intend)
         return out

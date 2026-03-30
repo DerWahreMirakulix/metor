@@ -11,8 +11,7 @@ from typing import List, Optional, Tuple, Callable
 
 from metor.core.tor import TorManager
 from metor.core.api import IpcEvent, AckEvent
-from metor.data.message import MessageManager, MessageStatus
-from metor.data.history import HistoryManager, HistoryEvent
+from metor.data import MessageManager, MessageStatus, HistoryManager, HistoryEvent
 
 # Local Package Imports
 from metor.core.daemon.crypto import Crypto

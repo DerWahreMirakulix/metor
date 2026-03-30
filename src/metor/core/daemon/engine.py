@@ -2,6 +2,8 @@
 Module defining the primary background daemon engine.
 Orchestrates Network, IPC API, and Outbox routing seamlessly.
 Handles Unlock operations, Nuke/Purge protocols, and Local Authentication constraints.
+Enforces the Zero-Text Policy by emitting structured Domain-Driven payloads directly to the IPC interface.
+Ensures strict SRP by routing incoming commands to dedicated Handlers.
 """
 
 import socket
@@ -11,7 +13,7 @@ import atexit
 import sys
 import os
 import signal
-from typing import Any, List, Optional, Set
+from typing import Any, List, Set
 from pathlib import Path
 
 from metor.core.key import KeyManager
@@ -45,36 +47,30 @@ from metor.core.api import (
     SetSettingCommand,
     SelfDestructCommand,
     UnlockCommand,
-    SystemEvent,
-    CliResponseEvent,
-    InitEvent,
-    ConnectionsStateEvent,
-    ContactListEvent,
-    InfoEvent,
-    InboxDataEvent,
-    SwitchSuccessEvent,
-    RenameSuccessEvent,
-    ContactRemovedEvent,
+    CommandResponseEvent,
+    TransCode,
 )
 from metor.data.profile import ProfileManager
-from metor.data.history import HistoryManager, HistoryEvent
-from metor.data.contact import ContactManager
-from metor.data.message import (
+from metor.data import (
+    HistoryManager,
+    ContactManager,
     MessageManager,
-    MessageDirection,
-    MessageType,
-    MessageStatus,
+    Settings,
+    SettingKey,
 )
-from metor.data.settings import Settings, SettingKey
-from metor.ui.theme import Theme
-from metor.utils.constants import Constants
-from metor.utils.helper import clean_onion, secure_shred_file
+from metor.ui import Theme
+from metor.utils import Constants, clean_onion, secure_shred_file
 
 # Local Package Imports
 from metor.core.daemon.crypto import Crypto
 from metor.core.daemon.ipc import IpcServer
 from metor.core.daemon.outbox import OutboxWorker
 from metor.core.daemon.network import NetworkManager
+from metor.core.daemon.handlers import (
+    DatabaseCommandHandler,
+    SystemCommandHandler,
+    NetworkCommandHandler,
+)
 
 
 class Daemon:
@@ -96,7 +92,7 @@ class Daemon:
             pm (ProfileManager): Profile configurations.
             km (KeyManager): Handles cryptographic keys.
             tm (TorManager): Manages the Tor process.
-            cm (ContactManager): Address book and alias resolver.
+            cm (ContactManager): Address book manager.
             hm (HistoryManager): Event logging.
             mm (MessageManager): Offline messages storage.
 
@@ -130,6 +126,27 @@ class Daemon:
             self._ipc.broadcast,
             self._ipc.has_active_clients,
             self._stop_flag,
+        )
+
+        self._db_handler: DatabaseCommandHandler = DatabaseCommandHandler(
+            self._pm,
+            self._cm,
+            self._hm,
+            self._mm,
+            self._network.get_active_onions,
+            self._ipc.broadcast,
+        )
+        self._sys_handler: SystemCommandHandler = SystemCommandHandler(
+            self._pm, self._tm
+        )
+        self._network_handler: NetworkCommandHandler = NetworkCommandHandler(
+            self._tm,
+            self._cm,
+            self._hm,
+            self._mm,
+            self._network,
+            self._ipc.broadcast,
+            self._ipc.send_to,
         )
 
         atexit.register(self.stop)
@@ -248,35 +265,7 @@ class Daemon:
         for key_file in key_files:
             secure_shred_file(hs_dir / key_file)
 
-        self._ipc.broadcast(
-            SystemEvent(
-                text='Daemon self-destruction initiated. Shutting down immediately...'
-            )
-        )
-
         self.stop()
-
-    def _is_self_target(self, target: str) -> bool:
-        """
-        Safely checks if a target (alias or onion) points to our own identity.
-
-        Args:
-            target (str): The alias or onion to check.
-
-        Returns:
-            bool: True if it matches our own onion, False otherwise.
-        """
-        if not target or not self._tm.onion:
-            return False
-
-        if clean_onion(target) == clean_onion(self._tm.onion):
-            return True
-
-        onion_by_alias: Optional[str] = self._cm.get_onion_by_alias(target)
-        if onion_by_alias and onion_by_alias == self._tm.onion:
-            return True
-
-        return False
 
     def _on_ipc_disconnect(self, conn: socket.socket) -> None:
         """
@@ -293,8 +282,8 @@ class Daemon:
 
     def _process_ui_command(self, cmd: IpcCommand, conn: socket.socket) -> None:
         """
-        Routes typed IPC commands from the Chat UI or CLI Proxy to the internal managers.
-        Enforces local authentication requirements prior to parsing state commands.
+        Routes typed IPC commands from the Chat UI or CLI Proxy to dedicated Handlers.
+        Enforces local authentication and controls daemon state operations (Unlock, Purge, Config).
 
         Args:
             cmd (IpcCommand): The parsed command object.
@@ -308,8 +297,10 @@ class Daemon:
                 if conn not in self._authenticated_clients:
                     self._ipc.send_to(
                         conn,
-                        SystemEvent(
-                            text='Authentication required. Please unlock the session first.'
+                        CommandResponseEvent(
+                            action=cmd.action,
+                            success=False,
+                            code=TransCode.AUTH_REQUIRED,
                         ),
                     )
                     return
@@ -317,8 +308,8 @@ class Daemon:
         if isinstance(cmd, SelfDestructCommand):
             self._ipc.send_to(
                 conn,
-                CliResponseEvent(
-                    text='Self-destruct command accepted. Nuking daemon...'
+                CommandResponseEvent(
+                    action=cmd.action, code=TransCode.SELF_DESTRUCT_INITIATED
                 ),
             )
             threading.Thread(target=self._nuke_data, daemon=True).start()
@@ -336,18 +327,26 @@ class Daemon:
                         self._authenticated_clients.add(conn)
                         self._ipc.send_to(
                             conn,
-                            CliResponseEvent(
-                                text='Session authenticated successfully.'
+                            CommandResponseEvent(
+                                action=cmd.action, code=TransCode.SESSION_AUTHENTICATED
                             ),
                         )
                     except Exception:
                         self._ipc.send_to(
-                            conn, CliResponseEvent(text='Invalid master password.')
+                            conn,
+                            CommandResponseEvent(
+                                action=cmd.action,
+                                success=False,
+                                code=TransCode.INVALID_PASSWORD,
+                            ),
                         )
                     return
 
                 self._ipc.send_to(
-                    conn, CliResponseEvent(text='Daemon is already unlocked.')
+                    conn,
+                    CommandResponseEvent(
+                        action=cmd.action, code=TransCode.ALREADY_UNLOCKED
+                    ),
                 )
                 return
 
@@ -356,7 +355,12 @@ class Daemon:
                 self._km.get_metor_key()
             except Exception:
                 self._ipc.send_to(
-                    conn, CliResponseEvent(text='Invalid master password.')
+                    conn,
+                    CommandResponseEvent(
+                        action=cmd.action,
+                        success=False,
+                        code=TransCode.INVALID_PASSWORD,
+                    ),
                 )
                 return
 
@@ -385,11 +389,31 @@ class Daemon:
                 self._stop_flag,
             )
 
+            self._db_handler = DatabaseCommandHandler(
+                self._pm,
+                self._cm,
+                self._hm,
+                self._mm,
+                self._network.get_active_onions,
+                self._ipc.broadcast,
+            )
+            self._sys_handler = SystemCommandHandler(self._pm, self._tm)
+            self._network_handler = NetworkCommandHandler(
+                self._tm,
+                self._cm,
+                self._hm,
+                self._mm,
+                self._network,
+                self._ipc.broadcast,
+                self._ipc.send_to,
+            )
+
             self._is_locked = False
             self._authenticated_clients.add(conn)
             self._start_subsystems()
             self._ipc.send_to(
-                conn, CliResponseEvent(text='Daemon unlocked successfully.')
+                conn,
+                CommandResponseEvent(action=cmd.action, code=TransCode.DAEMON_UNLOCKED),
             )
             return
 
@@ -398,327 +422,79 @@ class Daemon:
                 Settings.set(SettingKey(cmd.setting_key), cmd.setting_value)
                 self._ipc.send_to(
                     conn,
-                    CliResponseEvent(
-                        text=f"Daemon setting '{cmd.setting_key}' updated."
+                    CommandResponseEvent(
+                        action=cmd.action,
+                        code=TransCode.SETTING_UPDATED,
+                        params={'key': cmd.setting_key},
                     ),
                 )
             except TypeError as e:
-                self._ipc.send_to(conn, CliResponseEvent(text=str(e), success=False))
+                self._ipc.send_to(
+                    conn,
+                    CommandResponseEvent(
+                        action=cmd.action,
+                        success=False,
+                        code=TransCode.GENERIC_MSG,
+                        params={'msg': str(e)},
+                    ),
+                )
             except Exception:
                 self._ipc.send_to(
                     conn,
-                    CliResponseEvent(text='Failed to update setting.', success=False),
+                    CommandResponseEvent(
+                        action=cmd.action,
+                        success=False,
+                        code=TransCode.SETTING_UPDATE_FAILED,
+                    ),
                 )
             return
 
         if self._is_locked:
             self._ipc.send_to(
-                conn, CliResponseEvent(text='Daemon is locked. Please unlock first.')
+                conn,
+                CommandResponseEvent(
+                    action=cmd.action, success=False, code=TransCode.DAEMON_LOCKED
+                ),
             )
             return
 
-        if isinstance(cmd, InitCommand):
-            self._ipc.send_to(conn, InitEvent(onion=self._tm.onion))
-            for active_onion in self._network.get_active_onions():
-                self._network.flush_ram_buffer(active_onion)
+        # --- DELEGATION TO DEDICATED HANDLERS ---
 
-        elif isinstance(cmd, GetConnectionsCommand):
-            self._ipc.send_to(
-                conn,
-                ConnectionsStateEvent(
-                    active=self._network.get_active_aliases(),
-                    pending=self._network.get_pending_aliases(),
-                    contacts=self._cm.get_all_contacts(),
-                    is_header=cmd.is_header,
-                ),
-            )
-            for active_onion in self._network.get_active_onions():
-                self._network.flush_ram_buffer(active_onion)
+        if isinstance(
+            cmd,
+            (
+                InitCommand,
+                GetConnectionsCommand,
+                ConnectCommand,
+                DisconnectCommand,
+                AcceptCommand,
+                RejectCommand,
+                MsgCommand,
+                FallbackCommand,
+                SendDropCommand,
+                SwitchCommand,
+            ),
+        ):
+            self._network_handler.handle(cmd, conn)
 
-        elif isinstance(cmd, GetContactsListCommand):
-            self._ipc.send_to(conn, ContactListEvent(text=self._cm.show(cmd.chat_mode)))
+        elif isinstance(
+            cmd,
+            (
+                GetContactsListCommand,
+                AddContactCommand,
+                RemoveContactCommand,
+                RenameContactCommand,
+                ClearContactsCommand,
+                ClearProfileDbCommand,
+                GetHistoryCommand,
+                ClearHistoryCommand,
+                GetMessagesCommand,
+                ClearMessagesCommand,
+                GetInboxCommand,
+                MarkReadCommand,
+            ),
+        ):
+            self._ipc.send_to(conn, self._db_handler.handle(cmd))
 
-        elif isinstance(cmd, ConnectCommand):
-            if self._is_self_target(cmd.target):
-                self._ipc.send_to(
-                    conn, SystemEvent(text='You cannot connect to yourself.')
-                )
-                return
-
-            alias, _, exists = self._cm.resolve_target(cmd.target, auto_create=True)
-
-            if not exists:
-                self._ipc.send_to(
-                    conn,
-                    SystemEvent(
-                        text=f"Invalid target: '{cmd.target}' is neither a known contact nor a valid onion address."
-                    ),
-                )
-                return
-
-            self._ipc.broadcast(
-                InfoEvent(
-                    alias=alias,
-                    # We intentionally don't resolve the alias since it is dynamically inserted in the UI
-                    text="Connecting to '{alias}'...",
-                )
-            )
-            threading.Thread(
-                target=self._network.connect_to, args=(cmd.target,), daemon=True
-            ).start()
-
-        elif isinstance(cmd, DisconnectCommand):
-            self._network.disconnect(cmd.target, initiated_by_self=True)
-
-        elif isinstance(cmd, AcceptCommand):
-            self._network.accept(cmd.target)
-
-        elif isinstance(cmd, RejectCommand):
-            self._network.reject(cmd.target, initiated_by_self=True)
-
-        elif isinstance(cmd, MsgCommand):
-            self._network.send_message(cmd.target, cmd.text, cmd.msg_id)
-
-        elif isinstance(cmd, FallbackCommand):
-            success, msg = self._network.force_fallback(cmd.target)
-            alias, _, _ = self._cm.resolve_target(cmd.target, default_value=cmd.target)
-            self._ipc.send_to(
-                conn, CliResponseEvent(text=msg, success=success, alias=alias)
-            )
-
-        elif isinstance(cmd, SendDropCommand):
-            if not Settings.get(SettingKey.ALLOW_DROPS):
-                self._ipc.send_to(
-                    conn,
-                    SystemEvent(
-                        text='Async offline messages are disabled by security policy.'
-                    ),
-                )
-                return
-
-            if self._is_self_target(cmd.target):
-                self._ipc.send_to(
-                    conn, SystemEvent(text='You cannot send offline drops to yourself.')
-                )
-                return
-
-            alias, onion, exists = self._cm.resolve_target(cmd.target, auto_create=True)
-
-            if exists:
-                self._mm.queue_message(
-                    onion,
-                    MessageDirection.OUT,
-                    MessageType.TEXT,
-                    cmd.text,
-                    MessageStatus.PENDING,
-                )
-                if Settings.get(SettingKey.RECORD_DROP_EVENTS):
-                    self._hm.log_event(
-                        HistoryEvent.ASYNC_QUEUED,
-                        onion,
-                    )
-
-                if cmd.cli_mode:
-                    self._ipc.send_to(
-                        conn,
-                        CliResponseEvent(
-                            text=f"Message successfully queued for '{alias}'.",
-                            alias=alias,
-                        ),
-                    )
-            else:
-                if cmd.cli_mode:
-                    self._ipc.send_to(
-                        conn,
-                        CliResponseEvent(
-                            text=f"Invalid target: '{cmd.target}'.",
-                            success=False,
-                        ),
-                    )
-
-        elif isinstance(cmd, GetInboxCommand):
-            if cmd.cli_mode:
-                text: str = self._mm.show_inbox(self._cm)
-                self._ipc.send_to(conn, CliResponseEvent(text=text))
-            else:
-                self._ipc.send_to(
-                    conn, InboxDataEvent(inbox_counts=self._mm.get_unread_counts())
-                )
-
-        elif isinstance(cmd, MarkReadCommand):
-            if cmd.cli_mode:
-                text: str = self._mm.show_read(cmd.target, self._cm)
-                alias, _, _ = self._cm.resolve_target(
-                    cmd.target, default_value=cmd.target
-                )
-                self._ipc.send_to(conn, CliResponseEvent(text=text, alias=alias))
-            else:
-                alias, onion, exists = self._cm.resolve_target(cmd.target)
-                if exists:
-                    raw_messages = self._mm.get_and_read_inbox(onion)
-                    messages = [
-                        {'id': r[0], 'type': r[1], 'payload': r[2], 'timestamp': r[3]}
-                        for r in raw_messages
-                    ]
-                    self._ipc.send_to(
-                        conn, InboxDataEvent(alias=alias, messages=messages)
-                    )
-
-        elif isinstance(cmd, SwitchCommand):
-            if cmd.target is None or cmd.target == '..':
-                self._ipc.send_to(conn, SwitchSuccessEvent(alias=None))
-            else:
-                if self._is_self_target(cmd.target):
-                    self._ipc.send_to(
-                        conn, SystemEvent(text='You cannot switch focus to yourself.')
-                    )
-                    return
-
-                alias, _, exists = self._cm.resolve_target(cmd.target)
-
-                if not exists:
-                    self._ipc.send_to(
-                        conn,
-                        SystemEvent(text=f"Invalid target: '{cmd.target}' not found."),
-                    )
-                    return
-
-                self._ipc.send_to(conn, SwitchSuccessEvent(alias=alias))
-
-        elif isinstance(cmd, GetHistoryCommand):
-            alias, _, _ = self._cm.resolve_target(cmd.target, default_value=cmd.target)
-            text: str = self._hm.show(self._cm, cmd.target, cmd.limit)
-            self._ipc.send_to(conn, CliResponseEvent(text=text, alias=alias))
-
-        elif isinstance(cmd, ClearHistoryCommand):
-            active_onions = self._network.get_active_onions()
-            alias, onion, exists = self._cm.resolve_target(
-                cmd.target, default_value=cmd.target
-            )
-
-            if cmd.target and not exists:
-                success, msg = False, 'Contact not found.'
-            else:
-                success, msg = self._hm.clear_history(onion)
-
-            deleted_aliases: List[str] = self._cm.cleanup_orphans(active_onions)
-            for a in deleted_aliases:
-                self._ipc.broadcast(ContactRemovedEvent(alias=a))
-
-            self._ipc.send_to(
-                conn, CliResponseEvent(text=msg, success=success, alias=alias)
-            )
-
-        elif isinstance(cmd, GetMessagesCommand):
-            alias, _, _ = self._cm.resolve_target(cmd.target, default_value=cmd.target)
-            if cmd.target:
-                text = self._mm.show_history(cmd.target, self._cm, cmd.limit)
-            else:
-                text = 'No target specified.'
-            self._ipc.send_to(conn, CliResponseEvent(text=text, alias=alias))
-
-        elif isinstance(cmd, ClearMessagesCommand):
-            active_onions = self._network.get_active_onions()
-            alias, onion, exists = self._cm.resolve_target(
-                cmd.target, default_value=cmd.target
-            )
-
-            if cmd.target and not exists:
-                success, msg = False, 'Contact not found.'
-            else:
-                success, msg = self._mm.clear_messages(onion, cmd.non_contacts_only)
-
-            deleted_aliases = self._cm.cleanup_orphans(active_onions)
-            for a in deleted_aliases:
-                self._ipc.broadcast(ContactRemovedEvent(alias=a))
-
-            self._ipc.send_to(
-                conn, CliResponseEvent(text=msg, success=success, alias=alias)
-            )
-
-        elif isinstance(cmd, ClearContactsCommand):
-            active_onions = self._network.get_active_onions()
-            success_c, msg, renames, removed = self._cm.clear_contacts(active_onions)
-            if success_c:
-                for old, new, was_saved in renames:
-                    self._ipc.broadcast(
-                        RenameSuccessEvent(
-                            old_alias=old,
-                            new_alias=new,
-                            is_demotion=True,
-                            was_saved=was_saved,
-                        )
-                    )
-                for a in removed:
-                    self._ipc.broadcast(ContactRemovedEvent(alias=a))
-            self._ipc.send_to(conn, CliResponseEvent(text=msg, success=success_c))
-
-        elif isinstance(cmd, ClearProfileDbCommand):
-            active_onions = self._network.get_active_onions()
-            success_c, _, renames, removed = self._cm.clear_contacts(active_onions)
-            success_h, _ = self._hm.clear_history()
-            success_m, _ = self._mm.clear_messages()
-
-            success: bool = success_c and success_h and success_m
-            msg: str = (
-                f"Database for profile '{self._pm.profile_name}' successfully cleared."
-                if success
-                else 'Error clearing database.'
-            )
-            if success_c:
-                for old, new, was_saved in renames:
-                    self._ipc.broadcast(
-                        RenameSuccessEvent(
-                            old_alias=old,
-                            new_alias=new,
-                            is_demotion=True,
-                            was_saved=was_saved,
-                        )
-                    )
-                for a in removed:
-                    self._ipc.broadcast(ContactRemovedEvent(alias=a))
-            self._ipc.send_to(conn, CliResponseEvent(text=msg, success=success))
-
-        elif isinstance(cmd, GetAddressCommand):
-            _, msg = self._tm.get_address()
-            self._ipc.send_to(conn, CliResponseEvent(text=msg))
-
-        elif isinstance(cmd, GenerateAddressCommand):
-            _, msg = self._tm.generate_address()
-            self._ipc.send_to(conn, CliResponseEvent(text=msg))
-
-        elif isinstance(cmd, AddContactCommand):
-            if cmd.onion:
-                _, msg = self._cm.add_contact(cmd.alias, cmd.onion)
-            else:
-                _, msg = self._cm.promote_discovered_peer(cmd.alias)
-            self._ipc.send_to(conn, CliResponseEvent(text=msg, alias=cmd.alias))
-
-        elif isinstance(cmd, RemoveContactCommand):
-            active_onions = self._network.get_active_onions()
-            success, msg, renames, removed = self._cm.remove_contact(
-                cmd.alias, active_onions
-            )
-            if success:
-                for old, new, was_saved in renames:
-                    self._ipc.broadcast(
-                        RenameSuccessEvent(
-                            old_alias=old,
-                            new_alias=new,
-                            is_demotion=True,
-                            was_saved=was_saved,
-                        )
-                    )
-                for a in removed:
-                    self._ipc.broadcast(ContactRemovedEvent(alias=a))
-            self._ipc.send_to(
-                conn, CliResponseEvent(text=msg, success=success, alias=cmd.alias)
-            )
-
-        elif isinstance(cmd, RenameContactCommand):
-            success, msg = self._cm.rename_contact(cmd.old_alias, cmd.new_alias)
-            if success:
-                self._ipc.broadcast(
-                    RenameSuccessEvent(old_alias=cmd.old_alias, new_alias=cmd.new_alias)
-                )
-            self._ipc.send_to(conn, CliResponseEvent(text=msg, success=success))
+        elif isinstance(cmd, (GetAddressCommand, GenerateAddressCommand)):
+            self._ipc.send_to(conn, self._sys_handler.handle(cmd))

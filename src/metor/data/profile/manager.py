@@ -4,12 +4,11 @@ Module for managing user profiles, their directories, and daemon lock states.
 
 import shutil
 from pathlib import Path
-from typing import List, Tuple, Optional, Set
+from typing import List, Tuple, Optional, Set, Dict, Any
 
-from metor.data.settings import SettingKey, Settings
-from metor.data.sql import SqlManager
-from metor.ui.theme import Theme
-from metor.utils.constants import Constants
+from metor.core.api import TransCode
+from metor.data import SettingKey, Settings, SqlManager
+from metor.utils import Constants
 
 # Local Package Imports
 from metor.data.profile.config import Config
@@ -200,7 +199,9 @@ class ProfileManager:
         return Settings.get(SettingKey.DEFAULT_PROFILE)
 
     @classmethod
-    def set_default_profile(cls, profile_name: str) -> Tuple[bool, str]:
+    def set_default_profile(
+        cls, profile_name: str
+    ) -> Tuple[bool, TransCode, Dict[str, Any]]:
         """
         Sets a new default profile.
 
@@ -208,15 +209,15 @@ class ProfileManager:
             profile_name (str): New profile name.
 
         Returns:
-            Tuple[bool, str]: Status.
+            Tuple[bool, TransCode, Dict[str, Any]]: A success flag, domain state code, and parameters.
         """
         safe_name: str = ''.join(
             c for c in profile_name if c.isalnum() or c in ('-', '_')
         )
         if not safe_name:
-            return False, 'Invalid profile name.'
+            return False, TransCode.INVALID_PROFILE_NAME, {}
         Settings.set(SettingKey.DEFAULT_PROFILE, safe_name)
-        return True, f"Default profile permanently set to '{safe_name}'."
+        return True, TransCode.PROFILE_SET_DEFAULT, {'profile': safe_name}
 
     @staticmethod
     def get_all_profiles() -> List[str]:
@@ -243,10 +244,38 @@ class ProfileManager:
             if d.is_dir() and d.name not in ignored_folders
         ]
 
+    @classmethod
+    def get_profiles_data(cls, active_profile: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Retrieves raw metadata for all profiles.
+
+        Args:
+            active_profile (Optional[str]): Current active profile.
+
+        Returns:
+            Dict[str, Any]: Profile data dictionary.
+        """
+        active: str = active_profile if active_profile else cls.load_default_profile()
+        profiles: List[str] = cls.get_all_profiles()
+        profile_list: List[Dict[str, Any]] = []
+
+        for p in profiles:
+            pm: 'ProfileManager' = cls(p)
+            profile_list.append(
+                {
+                    'name': p,
+                    'is_active': p == active,
+                    'is_remote': pm.is_remote(),
+                    'port': pm.get_static_port(),
+                }
+            )
+
+        return {'profiles': profile_list}
+
     @staticmethod
     def add_profile_folder(
         name: str, is_remote: bool = False, port: Optional[int] = None
-    ) -> Tuple[bool, str]:
+    ) -> Tuple[bool, TransCode, Dict[str, Any]]:
         """
         Creates a new profile directory safely.
 
@@ -256,18 +285,18 @@ class ProfileManager:
             port (Optional[int]): Static port.
 
         Returns:
-            Tuple[bool, str]: Success flag and message.
+            Tuple[bool, TransCode, Dict[str, Any]]: A success flag, domain state code, and parameters.
         """
         safe_name: str = ''.join(c for c in name if c.isalnum() or c in ('-', '_'))
         if not safe_name:
-            return False, 'Invalid profile name.'
+            return False, TransCode.INVALID_PROFILE_NAME, {}
 
         if is_remote and not port:
-            return False, 'A remote profile requires a static port (--port <int>).'
+            return False, TransCode.REMOTE_REQUIRES_PORT, {}
 
         target_dir: Path = Constants.DATA / safe_name
         if target_dir.exists():
-            return False, f"Profile '{safe_name}' already exists."
+            return False, TransCode.PROFILE_EXISTS, {'profile': safe_name}
 
         pm: 'ProfileManager' = ProfileManager(safe_name)
         pm.initialize()
@@ -281,15 +310,16 @@ class ProfileManager:
             remote_tag: str = 'Remote ' if is_remote else 'Static '
             return (
                 True,
-                f"{remote_tag}profile '{safe_name}' successfully created (Port {port}).",
+                TransCode.PROFILE_CREATED_PORT,
+                {'remote_tag': remote_tag, 'profile': safe_name, 'port': port},
             )
 
-        return True, f"Profile '{safe_name}' successfully created."
+        return True, TransCode.PROFILE_CREATED, {'profile': safe_name}
 
     @classmethod
     def remove_profile_folder(
         cls, name: str, active_profile: Optional[str] = None
-    ) -> Tuple[bool, str]:
+    ) -> Tuple[bool, TransCode, Dict[str, Any]]:
         """
         Removes a profile completely.
 
@@ -298,39 +328,43 @@ class ProfileManager:
             active_profile (Optional[str]): The currently running profile to prevent deletion.
 
         Returns:
-            Tuple[bool, str]: Success flag and message.
+            Tuple[bool, TransCode, Dict[str, Any]]: A success flag, domain state code, and parameters.
         """
         default: str = cls.load_default_profile()
         active: str = active_profile if active_profile else default
         safe_name: str = ''.join(c for c in name if c.isalnum() or c in ('-', '_'))
 
         if not safe_name:
-            return False, 'Invalid profile name.'
+            return False, TransCode.INVALID_PROFILE_NAME, {}
 
         target_dir: Path = Constants.DATA / safe_name
 
         if active == safe_name:
             return (
                 False,
-                'Cannot remove active profile! Switch to another profile first.',
+                TransCode.CANT_REMOVE_ACTIVE_PROFILE,
+                {},
             )
         if default == safe_name:
-            return False, 'Cannot remove default profile! Change default first.'
+            return False, TransCode.CANT_REMOVE_DEFAULT_PROFILE, {}
         if not target_dir.exists():
-            return False, f"Profile '{safe_name}' does not exist."
+            return False, TransCode.PROFILE_NOT_FOUND, {'profile': safe_name}
 
         pm: 'ProfileManager' = cls(safe_name)
         if pm.is_daemon_running() and not pm.is_remote():
             return (
                 False,
-                f"Cannot remove profile '{safe_name}' while its daemon is running!",
+                TransCode.DAEMON_RUNNING_CANT_REMOVE,
+                {'profile': safe_name},
             )
 
         shutil.rmtree(target_dir)
-        return True, f"Profile '{safe_name}' successfully removed."
+        return True, TransCode.PROFILE_REMOVED, {'profile': safe_name}
 
     @classmethod
-    def rename_profile_folder(cls, old_name: str, new_name: str) -> Tuple[bool, str]:
+    def rename_profile_folder(
+        cls, old_name: str, new_name: str
+    ) -> Tuple[bool, TransCode, Dict[str, Any]]:
         """
         Renames an existing profile directory.
 
@@ -339,7 +373,7 @@ class ProfileManager:
             new_name (str): New name.
 
         Returns:
-            Tuple[bool, str]: Status.
+            Tuple[bool, TransCode, Dict[str, Any]]: A success flag, domain state code, and parameters.
         """
         safe_old: str = ''.join(c for c in old_name if c.isalnum() or c in ('-', '_'))
         safe_new: str = ''.join(c for c in new_name if c.isalnum() or c in ('-', '_'))
@@ -348,22 +382,27 @@ class ProfileManager:
         new_dir: Path = Constants.DATA / safe_new
 
         if not old_dir.exists():
-            return False, f"Profile '{safe_old}' does not exist."
+            return False, TransCode.PROFILE_NOT_FOUND, {'profile': safe_old}
         if new_dir.exists():
-            return False, f"Profile '{safe_new}' already exists."
+            return False, TransCode.PROFILE_EXISTS, {'profile': safe_new}
 
         pm: 'ProfileManager' = cls(safe_old)
         if pm.is_daemon_running() and not pm.is_remote():
             return (
                 False,
-                f"Cannot rename profile '{safe_old}' while its daemon is running!",
+                TransCode.DAEMON_RUNNING_CANT_RENAME,
+                {'old_profile': safe_old},
             )
 
         old_dir.rename(new_dir)
-        return True, f"Profile '{safe_old}' successfully renamed to '{safe_new}'."
+        return (
+            True,
+            TransCode.PROFILE_RENAMED,
+            {'old_profile': safe_old, 'new_profile': safe_new},
+        )
 
     @classmethod
-    def clear_profile_db(cls, name: str) -> Tuple[bool, str]:
+    def clear_profile_db(cls, name: str) -> Tuple[bool, TransCode, Dict[str, Any]]:
         """
         Clears the SQLite database for a profile.
 
@@ -371,69 +410,32 @@ class ProfileManager:
             name (str): The profile name.
 
         Returns:
-            Tuple[bool, str]: Success flag and message.
+            Tuple[bool, TransCode, Dict[str, Any]]: A success flag, domain state code, and parameters.
         """
         safe_name: str = ''.join(c for c in name if c.isalnum() or c in ('-', '_'))
         if not safe_name:
-            return False, 'Invalid profile name.'
+            return False, TransCode.INVALID_PROFILE_NAME, {}
 
         pm: 'ProfileManager' = cls(safe_name)
         if not pm.exists():
-            return False, f"Profile '{safe_name}' does not exist."
+            return False, TransCode.PROFILE_NOT_FOUND, {'profile': safe_name}
 
         if pm.is_daemon_running() and not pm.is_remote():
             return (
                 False,
-                f"Cannot clear database for '{safe_name}' while daemon is running.",
+                TransCode.DAEMON_RUNNING_CANT_CLEAR_DB,
+                {'profile': safe_name},
             )
 
         db_path: Path = pm.paths.get_db_file()
         if not db_path.exists():
-            return False, f"No database found for profile '{safe_name}'."
+            return False, TransCode.NO_DB_FOUND, {'profile': safe_name}
 
         try:
             sql: SqlManager = SqlManager(db_path)
             sql.execute('DELETE FROM history')
             sql.execute('DELETE FROM messages')
             sql.execute('DELETE FROM contacts')
-            return True, f"Database for profile '{safe_name}' successfully cleared."
+            return True, TransCode.DB_CLEARED, {'profile': safe_name}
         except Exception:
-            return False, 'Error clearing database.'
-
-    @classmethod
-    def show(cls, active_profile: Optional[str] = None) -> str:
-        """
-        Returns a formatted string representing all profiles.
-
-        Args:
-            active_profile (Optional[str]): Current profile.
-
-        Returns:
-            str: Formatted string.
-        """
-        active: str = active_profile if active_profile else cls.load_default_profile()
-        profiles: List[str] = cls.get_all_profiles()
-        if not profiles:
-            return 'No profiles found.'
-
-        lines: List[str] = ['Available profiles:']
-        for p in profiles:
-            pm: 'ProfileManager' = ProfileManager(p)
-            marker: str = '*' if p == active else ' '
-            tags: List[str] = []
-
-            if pm.is_remote():
-                tags.append('REMOTE')
-            elif pm.get_static_port():
-                tags.append(f'PORT:{pm.get_static_port()}')
-
-            tag_str: str = (
-                f' [{Theme.YELLOW}{"|".join(tags)}{Theme.RESET}]' if tags else ''
-            )
-
-            if p == active:
-                lines.append(f' {Theme.GREEN}{marker} {p}{Theme.RESET}{tag_str}')
-            else:
-                lines.append(f'   {p}{tag_str}')
-
-        return '\n'.join(lines)
+            return False, TransCode.DB_CLEAR_FAILED, {}

@@ -8,16 +8,13 @@ import socket
 import time
 import socks
 import stem.process
-import sys
 import nacl.exceptions
 from pathlib import Path
-from typing import Tuple, Optional, Any, Dict
+from typing import Tuple, Optional, Any, Dict, Callable
 
 from metor.data.profile import ProfileManager
-from metor.data.settings import SettingKey, Settings
-from metor.ui.theme import Theme
-from metor.utils.constants import Constants
-from metor.utils.helper import clean_onion, secure_shred_file, ensure_onion_format
+from metor.data import SettingKey, Settings
+from metor.utils import Constants, clean_onion, secure_shred_file, ensure_onion_format
 
 # Local Package Imports
 from metor.core.key import KeyManager
@@ -25,6 +22,21 @@ from metor.core.key import KeyManager
 
 class TorManager:
     """Manages the lifecycle of the Tor process and its related hidden service configuration."""
+
+    _log_callback: Optional[Callable[[str], None]] = None
+
+    @classmethod
+    def set_log_callback(cls, callback: Callable[[str], None]) -> None:
+        """
+        Sets a global callback for Tor logging to keep the Core layer UI-agnostic.
+
+        Args:
+            callback (Callable[[str], None]): The logging function.
+
+        Returns:
+            None
+        """
+        cls._log_callback = callback
 
     def __init__(self, pm: ProfileManager, km: KeyManager) -> None:
         """
@@ -151,9 +163,8 @@ class TorManager:
             Returns:
                 None
             """
-            if Settings.get(SettingKey.ENABLE_TOR_LOGGING):
-                sys.stdout.write(f'\r\033[K{Theme.CYAN}[TOR-LOG]{Theme.RESET} {line}\n')
-                sys.stdout.flush()
+            if Settings.get(SettingKey.ENABLE_TOR_LOGGING) and TorManager._log_callback:
+                TorManager._log_callback(line)
 
         max_retries: int = Settings.get(SettingKey.MAX_TOR_RETRIES)
 
@@ -168,8 +179,11 @@ class TorManager:
                 )
                 break
             except OSError as e:
-                if Settings.get(SettingKey.ENABLE_TOR_LOGGING):
-                    print(f'Error starting Tor: {e}')
+                if (
+                    Settings.get(SettingKey.ENABLE_TOR_LOGGING)
+                    and TorManager._log_callback
+                ):
+                    TorManager._log_callback(f'Error starting Tor: {e}')
                 if attempt < max_retries - 1:
                     time.sleep(2)
                     continue
@@ -253,9 +267,11 @@ class TorManager:
         if hostname_file.exists():
             with hostname_file.open('r') as f:
                 onion: str = f.read().strip()
+                # Relying on the UI/CLI layer to add colors in the response event later.
+                # Returning clean text to keep Core UI-agnostic.
                 return (
                     True,
-                    f"Current onion address for profile '{self._pm.profile_name}': {Theme.YELLOW}{clean_onion(onion)}{Theme.RESET}.onion",
+                    f"Current onion address for profile '{self._pm.profile_name}': {clean_onion(onion)}.onion",
                 )
         return (
             False,
@@ -288,5 +304,5 @@ class TorManager:
 
         return (
             True,
-            f"New onion address generated for profile '{self._pm.profile_name}': {Theme.YELLOW}{clean_onion(self.onion or '')}{Theme.RESET}.onion",
+            f"New onion address generated for profile '{self._pm.profile_name}': {clean_onion(self.onion or '')}.onion",
         )

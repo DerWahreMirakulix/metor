@@ -9,8 +9,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict
 
-from metor.utils.constants import Constants
-from metor.utils.lock import FileLock
+from metor.utils import Constants, FileLock
 
 
 class SettingKey(str, Enum):

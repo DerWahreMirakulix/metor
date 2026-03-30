@@ -19,13 +19,13 @@ from metor.core.api import (
     MarkReadCommand,
     FallbackCommand,
 )
+from metor.ui import Help
 
 # Local Package Imports
-from metor.ui.help import Help
 from metor.ui.chat.renderer import Renderer
 from metor.ui.chat.ipc import IpcClient
 from metor.ui.chat.session import Session
-from metor.ui.chat.models import UIMessageType
+from metor.ui.chat.models import ChatMessageType
 
 
 class CommandDispatcher:
@@ -74,7 +74,7 @@ class CommandDispatcher:
                     self._renderer.set_focus(None)
             else:
                 self._renderer.print_message(
-                    'No focused session to end.', msg_type=UIMessageType.SYSTEM
+                    'No focused session to end.', msg_type=ChatMessageType.SYSTEM
                 )
 
         elif cmd == '/connect':
@@ -84,7 +84,7 @@ class CommandDispatcher:
                 self._ipc.send_command(ConnectCommand(target=arg))
             else:
                 self._renderer.print_message(
-                    Help.show_command_help(cmd).strip(), msg_type=UIMessageType.SYSTEM
+                    Help.show_command_help(cmd).strip(), msg_type=ChatMessageType.SYSTEM
                 )
 
         elif cmd == '/accept':
@@ -94,7 +94,7 @@ class CommandDispatcher:
                 self._ipc.send_command(AcceptCommand(target=arg))
             else:
                 self._renderer.print_message(
-                    Help.show_command_help(cmd).strip(), msg_type=UIMessageType.SYSTEM
+                    Help.show_command_help(cmd).strip(), msg_type=ChatMessageType.SYSTEM
                 )
 
         elif cmd == '/reject':
@@ -102,7 +102,7 @@ class CommandDispatcher:
                 self._ipc.send_command(RejectCommand(target=arg))
             else:
                 self._renderer.print_message(
-                    Help.show_command_help(cmd).strip(), msg_type=UIMessageType.SYSTEM
+                    Help.show_command_help(cmd).strip(), msg_type=ChatMessageType.SYSTEM
                 )
 
         elif cmd == '/switch':
@@ -113,7 +113,7 @@ class CommandDispatcher:
                     self._ipc.send_command(SwitchCommand(target=arg))
             else:
                 self._renderer.print_message(
-                    Help.show_command_help(cmd).strip(), msg_type=UIMessageType.SYSTEM
+                    Help.show_command_help(cmd).strip(), msg_type=ChatMessageType.SYSTEM
                 )
 
         elif cmd == '/fallback':
@@ -122,7 +122,7 @@ class CommandDispatcher:
                 self._ipc.send_command(FallbackCommand(target=target))
             else:
                 self._renderer.print_message(
-                    Help.show_command_help(cmd).strip(), msg_type=UIMessageType.SYSTEM
+                    Help.show_command_help(cmd).strip(), msg_type=ChatMessageType.SYSTEM
                 )
 
         elif cmd == '/inbox':
@@ -172,7 +172,7 @@ class CommandDispatcher:
             else:
                 self._renderer.print_message(
                     Help.show_command_help(cmd).strip(),
-                    msg_type=UIMessageType.SYSTEM,
+                    msg_type=ChatMessageType.SYSTEM,
                 )
         elif subcmd in ('rm', 'remove'):
             if len(parts) == 2 and self._session.focused_alias:
@@ -183,7 +183,7 @@ class CommandDispatcher:
                 self._ipc.send_command(RemoveContactCommand(alias=parts[2].lower()))
             else:
                 self._renderer.print_message(
-                    Help.show_command_help(cmd).strip(), msg_type=UIMessageType.SYSTEM
+                    Help.show_command_help(cmd).strip(), msg_type=ChatMessageType.SYSTEM
                 )
         elif subcmd == 'rename':
             if len(parts) == 3 and self._session.focused_alias:
@@ -192,7 +192,7 @@ class CommandDispatcher:
                 old_alias, new_alias = parts[2].lower(), parts[3].lower()
             else:
                 self._renderer.print_message(
-                    Help.show_command_help(cmd).strip(), msg_type=UIMessageType.SYSTEM
+                    Help.show_command_help(cmd).strip(), msg_type=ChatMessageType.SYSTEM
                 )
                 return
             self._ipc.send_command(
@@ -200,5 +200,5 @@ class CommandDispatcher:
             )
         else:
             self._renderer.print_message(
-                Help.show_command_help(cmd).strip(), msg_type=UIMessageType.SYSTEM
+                Help.show_command_help(cmd).strip(), msg_type=ChatMessageType.SYSTEM
             )

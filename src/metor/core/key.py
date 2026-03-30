@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from metor.data.profile import ProfileManager
-from metor.utils.constants import Constants
+from metor.utils import Constants
 
 
 class KeyManager:

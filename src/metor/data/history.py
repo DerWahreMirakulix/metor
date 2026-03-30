@@ -1,19 +1,18 @@
 """
 Module for managing chat and connection history logs via SQLite.
 Enforces Data-at-Rest policies and Zero-Trace architecture.
+Yields raw domain models without applying CLI format dependencies.
 """
 
 from enum import Enum
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 
-from metor.ui.theme import Theme
-from metor.utils.constants import Constants
-from metor.utils.helper import get_divider_string, get_header_string, clean_onion
+from metor.core.api import TransCode
+from metor.utils import Constants, clean_onion
 
 # Local Package Imports
 from metor.data.profile import ProfileManager
-from metor.data.contact import ContactManager
 from metor.data.sql import SqlManager
 from metor.data.settings import Settings, SettingKey
 
@@ -111,12 +110,26 @@ class HistoryManager:
         )
         if filter_onion:
             query: str = 'SELECT timestamp, status, onion, reason FROM history WHERE onion = ? ORDER BY timestamp DESC LIMIT ?'
-            return self._sql.fetchall(query, (filter_onion, actual_limit))
+            rows: List[Tuple[Any, ...]] = self._sql.fetchall(
+                query, (filter_onion, actual_limit)
+            )
         else:
             query: str = 'SELECT timestamp, status, onion, reason FROM history ORDER BY timestamp DESC LIMIT ?'
-            return self._sql.fetchall(query, (actual_limit,))
+            rows = self._sql.fetchall(query, (actual_limit,))
 
-    def clear_history(self, filter_onion: Optional[str] = None) -> Tuple[bool, str]:
+        return [
+            (
+                str(r[0]),
+                str(r[1]),
+                str(r[2]) if r[2] is not None else None,
+                str(r[3] or ''),
+            )
+            for r in rows
+        ]
+
+    def clear_history(
+        self, filter_onion: Optional[str] = None
+    ) -> Tuple[bool, TransCode, Dict[str, Any]]:
         """
         Wipes event logs from the history table strictly maintaining domain boundaries.
 
@@ -124,21 +137,24 @@ class HistoryManager:
             filter_onion (Optional[str]): The target onion identity. If None, deletes all.
 
         Returns:
-            Tuple[bool, str]: A success flag and a status message.
+            Tuple[bool, TransCode, Dict[str, Any]]: A success flag, domain state code, and parameters.
         """
         try:
             if filter_onion:
                 self._sql.execute(
                     'DELETE FROM history WHERE onion = ?', (filter_onion,)
                 )
-                msg = f"History for '{filter_onion}' cleared."
+                return True, TransCode.HISTORY_CLEARED, {'target': filter_onion}
             else:
                 self._sql.execute('DELETE FROM history')
-                msg = f"History for profile '{self._pm.profile_name}' cleared."
+                return (
+                    True,
+                    TransCode.HISTORY_CLEARED_ALL,
+                    {'profile': self._pm.profile_name},
+                )
 
-            return True, msg
         except Exception:
-            return False, 'Failed to clear history.'
+            return False, TransCode.HISTORY_CLEAR_FAILED, {}
 
     def update_alias(self, old_alias: str, new_alias: str) -> None:
         """
@@ -152,51 +168,3 @@ class HistoryManager:
             None
         """
         pass
-
-    def show(
-        self,
-        cm: ContactManager,
-        target: Optional[str] = None,
-        limit: Optional[int] = None,
-    ) -> str:
-        """
-        Fetches history and constructs a human-readable string for terminal display.
-
-        Args:
-            cm (ContactManager): The contact manager for resolving aliases.
-            target (Optional[str]): The target CLI argument (alias or onion).
-            limit (Optional[int]): The maximum number of events to fetch.
-
-        Returns:
-            str: The formatted event history output.
-        """
-        onion = None
-        disp_name = f'profile {Theme.CYAN}{self._pm.profile_name}{Theme.RESET}'
-
-        if target:
-            alias, onion, exists = cm.resolve_target(target)
-            if not exists:
-                return f"Peer '{target}' not found."
-            disp_name = f'peer {Theme.CYAN}{alias}{Theme.RESET}'
-
-        rows: List[Tuple[str, str, Optional[str], str]] = self.get_history(onion, limit)
-
-        if not rows:
-            return f'No event history available for {disp_name}.'
-
-        out: str = f'{get_header_string(f"Event history for {disp_name} (Last {len(rows)})")}\n'
-
-        for row in rows:
-            timestamp, status, row_onion, reason = row
-            display_alias: str = (
-                cm.get_alias_by_onion(row_onion) if row_onion else 'Unknown'
-            )
-
-            line: str = f'[{timestamp}] {Theme.CYAN}{status}{Theme.RESET} | remote alias: {Theme.PURPLE}{display_alias}{Theme.RESET} | remote identity: {Theme.YELLOW}{row_onion}{Theme.RESET}'
-            if reason:
-                line += f' | reason: {Theme.CYAN}{reason}{Theme.RESET}'
-
-            out += f'{line}\n'
-
-        out += get_divider_string()
-        return out

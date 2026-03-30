@@ -9,8 +9,8 @@ from enum import Enum
 from typing import Any, Dict, Union
 from pathlib import Path
 
-from metor.data.settings import SettingKey, Settings
-from metor.utils.lock import FileLock
+from metor.data import SettingKey, Settings
+from metor.utils import FileLock
 
 # Local Package Imports
 from metor.data.profile.paths import Paths

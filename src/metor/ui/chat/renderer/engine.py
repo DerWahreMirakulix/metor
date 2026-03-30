@@ -9,14 +9,14 @@ import signal
 import time
 from typing import List, Dict, Optional, Any
 
-from metor.data.settings import SettingKey, Settings
-from metor.ui.chat.models import UIMessageType, UIChatLine
-from metor.utils.helper import get_divider_string
+from metor.data import SettingKey, Settings
+from metor.ui import UIPresenter
+from metor.ui.chat.models import ChatMessageType, ChatLine
+from metor.ui.chat.presenter import ChatPresenter
 
 # Local Package Imports
 from metor.ui.chat.renderer.display import Display
 from metor.ui.chat.renderer.input import InputHandler
-from metor.ui.chat.renderer.formatter import Formatter
 
 
 class Renderer:
@@ -72,7 +72,7 @@ class Renderer:
     def print_message(
         self,
         msg: Any,
-        msg_type: UIMessageType = UIMessageType.RAW,
+        msg_type: ChatMessageType = ChatMessageType.RAW,
         alias: Optional[str] = None,
         skip_prompt: bool = False,
         msg_id: Optional[str] = None,
@@ -84,7 +84,7 @@ class Renderer:
 
         Args:
             msg (Any): The message content to render.
-            msg_type (UIMessageType): The visual routing type of the message.
+            msg_type (ChatMessageType): The visual routing type of the message.
             alias (Optional[str]): The associated remote alias.
             skip_prompt (bool): Flag to skip rendering the prompt after the message.
             msg_id (Optional[str]): Unique identifier for the message.
@@ -101,7 +101,7 @@ class Renderer:
 
             self._display.clear_input_area(self._last_visual_lines)
 
-            chat_line: UIChatLine = UIChatLine(
+            chat_line: ChatLine = ChatLine(
                 text=str(msg),
                 msg_type=msg_type,
                 alias=alias,
@@ -117,7 +117,7 @@ class Renderer:
             if len(self._display.all_msgs) > limit:
                 self._display.all_msgs.pop(0)
 
-            formatted: str = Formatter.format_msg(
+            formatted: str = ChatPresenter.format_msg(
                 chat_line, self._initial_prompt, self._current_focus
             )
             sys.stdout.write(formatted + '\n')
@@ -168,9 +168,9 @@ class Renderer:
             self._display.clear_input_area(self._last_visual_lines)
 
             for msg_dict in messages_data:
-                chat_line: UIChatLine = UIChatLine(
+                chat_line: ChatLine = ChatLine(
                     text=str(msg_dict['payload']),
-                    msg_type=UIMessageType.REMOTE,
+                    msg_type=ChatMessageType.REMOTE,
                     alias=alias,
                     is_pending=False,
                     msg_id=str(msg_dict.get('id', '')),
@@ -277,25 +277,25 @@ class Renderer:
         Returns:
             None
         """
-        self.print_message(' ', msg_type=UIMessageType.RAW, skip_prompt=True)
+        self.print_message(' ', msg_type=ChatMessageType.RAW, skip_prompt=True)
 
     def print_divider(
-        self, msg_type: UIMessageType = UIMessageType.RAW, compact: bool = False
+        self, msg_type: ChatMessageType = ChatMessageType.RAW, compact: bool = False
     ) -> None:
         """
         Prints a visual divider line.
 
         Args:
-            msg_type (UIMessageType): The message type for the divider.
+            msg_type (ChatMessageType): The message type for the divider.
             compact (bool): Whether to use a compact divider.
 
         Returns:
             None
         """
         self.print_message(
-            get_divider_string()
+            UIPresenter.get_divider_string()
             if not compact
-            else get_divider_string(3, add_spaces=True),
+            else UIPresenter.get_divider_string(3, add_spaces=True),
             msg_type=msg_type,
         )
 
@@ -358,7 +358,7 @@ class Renderer:
                 sys.stdout.write(f'\033[{lines_up}A\r\033[J')
 
             for i in range(start_idx, len(self._display.all_msgs)):
-                formatted: str = Formatter.format_msg(
+                formatted: str = ChatPresenter.format_msg(
                     self._display.all_msgs[i], self._initial_prompt, self._current_focus
                 )
                 sys.stdout.write(formatted + '\n')
@@ -387,7 +387,7 @@ class Renderer:
         """
         sys.stdout.write('\033[2J\033[H')
         for msg in self._display.all_msgs:
-            formatted: str = Formatter.format_msg(
+            formatted: str = ChatPresenter.format_msg(
                 msg, self._initial_prompt, self._current_focus
             )
             sys.stdout.write(formatted + '\n')

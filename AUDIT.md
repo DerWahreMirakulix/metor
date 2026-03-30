@@ -31,6 +31,7 @@ Every Pull Request, AI code generation, or architectural change MUST be audited 
 ## 5. Code Quality & Standards (DDD)
 
 - [ ] **Domain Isolation:** Does the UI directly access the database? (It shouldn't. UI must go through the IPC API).
+- [ ] **Import Architecture:** Do vertical cross-domain imports strictly use the Facade (`__init__.py`), while horizontal sibling imports explicitly bypass it to prevent circular dependencies? Is the `# Local Package Imports` comment correctly placed?
 - [ ] **Legacy Modules:** Are there any remnants of `os.path`? (Must be `pathlib.Path`).
 - [ ] **Typing:** Are all generic types explicitly defined? (e.g., `Dict[str, Any]`, not just `Dict`).
 - [ ] **Docstrings:** Does every method have a complete Google-style docstring with `Args:` and `Returns:` blocks?

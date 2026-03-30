@@ -1,25 +1,19 @@
 """
 Module providing a transparent proxy for all CLI commands.
-Routes requests to local SQLite managers or the Daemon via IPC automatically.
+Routes requests to the Daemon via IPC automatically, launching a HeadlessDaemon if offline.
+Formats responses securely via the centralized Translator and Presenter for UI-agnostic operations.
+Enforces Domain-Driven Design by removing direct SQLite database access from the UI Layer.
 """
 
 import socket
 import json
 from typing import Optional, Dict, Any, Union
 
-from metor.data.profile import ProfileManager
-from metor.data.settings import Settings, SettingKey
-from metor.data.history import HistoryManager
-from metor.data.contact import ContactManager
-from metor.data.message import MessageManager
-from metor.ui.theme import Theme
-from metor.utils.constants import Constants
-
-# Local Package Imports
 from metor.core.api import (
     IpcCommand,
     IpcEvent,
-    CliResponseEvent,
+    CommandResponseEvent,
+    TransCode,
     UnlockCommand,
     SelfDestructCommand,
     SetSettingCommand,
@@ -39,17 +33,18 @@ from metor.core.api import (
     ClearContactsCommand,
     ClearProfileDbCommand,
 )
-from metor.core.key import KeyManager
-from metor.core.tor import TorManager
+from metor.data.profile import ProfileManager
+from metor.data import Settings, SettingKey
+from metor.ui import Theme, UIPresenter
+from metor.utils import Constants
 
 
 class CliProxy:
-    """Facade for CLI operations, handling local vs. remote routing transparently."""
+    """Facade for CLI operations, strictly interacting via IPC events only."""
 
     def __init__(self, pm: ProfileManager) -> None:
         """
-        Initializes the CLI Proxy.
-        Only initializes database managers if the profile physically exists on disk.
+        Initializes the CLI Proxy cleanly without instantiating any Database domains.
 
         Args:
             pm (ProfileManager): The active profile configuration.
@@ -59,18 +54,6 @@ class CliProxy:
         """
         self._pm: ProfileManager = pm
         self.is_remote: bool = self._pm.is_remote()
-
-        if (
-            not self.is_remote
-            and not self._pm.is_daemon_running()
-            and self._pm.exists()
-        ):
-            self._km: Optional[KeyManager] = KeyManager(self._pm, None)
-            self._hm: Optional[HistoryManager] = HistoryManager(self._pm, None)
-            self._cm: Optional[ContactManager] = ContactManager(self._pm, None)
-            self._mm: Optional[MessageManager] = MessageManager(self._pm, None)
-        else:
-            self._km = self._hm = self._cm = self._mm = None
 
     def _ensure_profile_exists(self) -> Optional[str]:
         """
@@ -83,8 +66,35 @@ class CliProxy:
             Optional[str]: Error message if profile doesn't exist, None otherwise.
         """
         if not self._pm.exists():
-            return f"Profile '{self._pm.profile_name}' does not exist."
+            return self._translate_local(
+                TransCode.PROFILE_NOT_FOUND, {'profile': self._pm.profile_name}
+            )
         return None
+
+    def _translate_local(
+        self, code: TransCode, params: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Translates a TransCode to a fully formatted string specifically for the CLI.
+        Forces the resolution of {alias} since we are not in the dynamic rendering chat engine.
+
+        Args:
+            code (TransCode): The strict domain code.
+            params (Optional[Dict[str, Any]]): The parameters.
+
+        Returns:
+            str: The fully formatted output string.
+        """
+        from metor.ui.translations import Translator
+
+        text, _ = Translator.get(code, params)
+
+        if params and 'alias' in params and '{alias}' in text:
+            text = text.replace('{alias}', params['alias'])
+        elif '{alias}' in text:
+            text = text.replace('{alias}', 'unknown')
+
+        return text
 
     def _prefix_remote(self, text: str) -> str:
         """
@@ -102,23 +112,47 @@ class CliProxy:
 
     def _request_ipc(self, cmd: IpcCommand, wait_for_response: bool = True) -> str:
         """
-        Helper to send IPC commands (Local or via SSH Tunnel).
+        Helper to safely route IPC commands to the active Tor daemon or a temporary headless instance.
 
         Args:
             cmd (IpcCommand): The command to send.
             wait_for_response (bool): Whether to block and wait for a response.
 
         Returns:
-            str: The response text or error message.
+            str: The translated response text or error message.
         """
         port: Optional[int] = self._pm.get_daemon_port()
+
         if not port:
             if self.is_remote:
                 return self._prefix_remote(
-                    f'Cannot reach remote Daemon on port {self._pm.get_static_port()}. Did you forget the SSH tunnel?'
+                    self._translate_local(
+                        TransCode.DAEMON_UNREACHABLE,
+                        {'port': str(self._pm.get_static_port())},
+                    )
                 )
-            return 'Local daemon is not running.'
 
+            # Offline local state: Route through ephemeral HeadlessDaemon to enforce DDD
+            from metor.core.daemon.headless import HeadlessDaemon
+
+            with HeadlessDaemon(self._pm) as hd:
+                return self._send_to_port(hd.port, cmd, wait_for_response)
+
+        # Active local or SSH remote tunnel
+        return self._send_to_port(port, cmd, wait_for_response)
+
+    def _send_to_port(self, port: int, cmd: IpcCommand, wait_for_response: bool) -> str:
+        """
+        Executes the TCP socket transmission and cleanly parses the JSON response.
+
+        Args:
+            port (int): The target IPC socket port.
+            cmd (IpcCommand): The outbound DTO.
+            wait_for_response (bool): Waiting flag.
+
+        Returns:
+            str: Formatting terminal string output.
+        """
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.settimeout(2.0)
@@ -126,7 +160,9 @@ class CliProxy:
                 s.sendall((cmd.to_json() + '\n').encode('utf-8'))
 
                 if not wait_for_response:
-                    return self._prefix_remote('Command successfully sent to daemon.')
+                    return self._prefix_remote(
+                        self._translate_local(TransCode.COMMAND_SUCCESS)
+                    )
 
                 buffer: str = ''
                 while True:
@@ -137,21 +173,25 @@ class CliProxy:
                     if '\n' in buffer:
                         break
 
-                if buffer:
-                    resp_dict: Dict[str, Any] = json.loads(buffer.split('\n')[0])
-                    event: IpcEvent = IpcEvent.from_dict(resp_dict)
+            if buffer:
+                resp_dict: Dict[str, Any] = json.loads(buffer.split('\n')[0])
+                event: IpcEvent = IpcEvent.from_dict(resp_dict)
 
-                    text = getattr(event, 'text', None)
-                    if text:
-                        alias = getattr(event, 'alias', None)
-                        if alias and '{alias}' in text:
-                            text = text.replace('{alias}', alias)
-                        return self._prefix_remote(text)
+                if isinstance(event, CommandResponseEvent):
+                    if event.data:
+                        text_fmt: str = UIPresenter.format_response(
+                            event.action, event.data, chat_mode=False
+                        )
+                        return self._prefix_remote(text_fmt)
 
-                    return self._prefix_remote('Command executed successfully.')
+                text: str = self._translate_local(event.code, event.params)
+                return self._prefix_remote(text)
+
+            return self._prefix_remote(self._translate_local(TransCode.COMMAND_SUCCESS))
         except Exception:
-            pass
-        return self._prefix_remote('Failed to communicate with the daemon.')
+            return self._prefix_remote(
+                self._translate_local(TransCode.COMMUNICATION_FAILED)
+            )
 
     def unlock_daemon(self, password: str) -> str:
         """
@@ -230,7 +270,7 @@ class CliProxy:
         if setting_enum.value.startswith('ui.'):
             try:
                 Settings.set(setting_enum, parsed_value)
-                return f"Local UI setting '{key}' updated."
+                return self._translate_local(TransCode.SETTING_UPDATED, {'key': key})
             except TypeError as e:
                 return str(e)
 
@@ -239,10 +279,9 @@ class CliProxy:
                 SetSettingCommand(setting_key=key, setting_value=parsed_value)
             )
 
-        # Local daemon is offline, write directly to file
         try:
             Settings.set(setting_enum, parsed_value)
-            return f"Offline daemon setting '{key}' updated locally."
+            return self._translate_local(TransCode.SETTING_UPDATED, {'key': key})
         except TypeError as e:
             return str(e)
 
@@ -260,17 +299,8 @@ class CliProxy:
         if err:
             return err
 
-        if self.is_remote or self._pm.is_daemon_running():
-            cmd: IpcCommand = (
-                GenerateAddressCommand() if generate else GetAddressCommand()
-            )
-            return self._request_ipc(cmd)
-
-        if self._km:
-            tm: TorManager = TorManager(self._pm, self._km)
-            _, msg = tm.generate_address() if generate else tm.get_address()
-            return msg
-        return 'Initialization error.'
+        cmd: IpcCommand = GenerateAddressCommand() if generate else GetAddressCommand()
+        return self._request_ipc(cmd)
 
     def send_drop(self, target_alias: str, text: str) -> str:
         """
@@ -288,7 +318,7 @@ class CliProxy:
             return err
 
         if not self.is_remote and not self._pm.is_daemon_running():
-            return 'The daemon must be running to send drops.'
+            return self._translate_local(TransCode.DAEMON_NOT_RUNNING_DROPS)
 
         return self._request_ipc(
             SendDropCommand(target=target_alias, text=text, cli_mode=True),
@@ -313,28 +343,12 @@ class CliProxy:
         if err:
             return err
 
-        if self.is_remote or self._pm.is_daemon_running():
-            cmd: IpcCommand = (
-                ClearHistoryCommand(target=target)
-                if action == 'clear'
-                else GetHistoryCommand(target=target, limit=limit)
-            )
-            return self._request_ipc(cmd)
-
-        if self._hm and self._cm:
-            if action == 'clear':
-                if target:
-                    _, onion, exists = self._cm.resolve_target(target)
-                    if not exists:
-                        return f"Contact '{target}' not found."
-                    _, msg = self._hm.clear_history(onion)
-                    self._cm.cleanup_orphans([])
-                    return msg
-                _, msg = self._hm.clear_history()
-                self._cm.cleanup_orphans([])
-                return msg
-            return self._hm.show(self._cm, target, limit)
-        return 'Initialization error.'
+        cmd: IpcCommand = (
+            ClearHistoryCommand(target=target)
+            if action == 'clear'
+            else GetHistoryCommand(target=target, limit=limit)
+        )
+        return self._request_ipc(cmd)
 
     def handle_messages(
         self,
@@ -359,32 +373,16 @@ class CliProxy:
         if err:
             return err
 
-        if self.is_remote or self._pm.is_daemon_running():
-            cmd: IpcCommand = (
-                ClearMessagesCommand(target=target, non_contacts_only=non_contacts_only)
-                if action == 'clear'
-                else GetMessagesCommand(target=target, limit=limit)
-            )
-            return self._request_ipc(cmd)
-
-        if self._mm and self._cm:
-            if action == 'clear':
-                if target:
-                    _, onion, exists = self._cm.resolve_target(target)
-                    if not exists:
-                        return f"Contact '{target}' not found."
-                    _, msg = self._mm.clear_messages(onion, non_contacts_only)
-                    self._cm.cleanup_orphans([])
-                    return msg
-                _, msg = self._mm.clear_messages(None, non_contacts_only)
-                self._cm.cleanup_orphans([])
-                return msg
-            return self._mm.show_history(target, self._cm, limit)
-        return 'Initialization error.'
+        cmd: IpcCommand = (
+            ClearMessagesCommand(target=target, non_contacts_only=non_contacts_only)
+            if action == 'clear'
+            else GetMessagesCommand(target=target, limit=limit)
+        )
+        return self._request_ipc(cmd)
 
     def handle_inbox(self, target: Optional[str] = None) -> str:
         """
-        Views the inbox or reads unread messages. Forces the Daemon to format locally for CLI.
+        Views the inbox or reads unread messages locally.
 
         Args:
             target (Optional[str]): The specific alias to read from, if applicable.
@@ -396,19 +394,12 @@ class CliProxy:
         if err:
             return err
 
-        if self.is_remote or self._pm.is_daemon_running():
-            cmd: IpcCommand = (
-                MarkReadCommand(target=target, cli_mode=True)
-                if target
-                else GetInboxCommand(cli_mode=True)
-            )
-            return self._request_ipc(cmd)
-
-        if self._mm and self._cm:
-            if target:
-                return self._mm.show_read(target, self._cm)
-            return self._mm.show_inbox(self._cm)
-        return 'Initialization error.'
+        cmd: IpcCommand = (
+            MarkReadCommand(target=target, cli_mode=True)
+            if target
+            else GetInboxCommand(cli_mode=True)
+        )
+        return self._request_ipc(cmd)
 
     def contacts_list(self) -> str:
         """
@@ -424,11 +415,7 @@ class CliProxy:
         if err:
             return err
 
-        if self.is_remote or self._pm.is_daemon_running():
-            return self._request_ipc(GetContactsListCommand(chat_mode=False))
-        if self._cm:
-            return self._cm.show(chat_mode=False)
-        return 'Initialization error.'
+        return self._request_ipc(GetContactsListCommand(chat_mode=False))
 
     def contacts_add(self, alias: str, onion: Optional[str] = None) -> str:
         """
@@ -445,16 +432,10 @@ class CliProxy:
         if err:
             return err
 
-        if self.is_remote or self._pm.is_daemon_running():
-            return self._request_ipc(AddContactCommand(alias=alias, onion=onion))
-        if not onion:
-            return (
-                'Daemon not running. Cannot save a RAM alias without an active session.'
-            )
-        if self._cm:
-            _, msg = self._cm.add_contact(alias, onion)
-            return msg
-        return 'Initialization error.'
+        if not self.is_remote and not self._pm.is_daemon_running() and not onion:
+            return self._translate_local(TransCode.RAM_ALIAS_REQUIRES_DAEMON)
+
+        return self._request_ipc(AddContactCommand(alias=alias, onion=onion))
 
     def contacts_rm(self, alias: str) -> str:
         """
@@ -470,13 +451,7 @@ class CliProxy:
         if err:
             return err
 
-        if self.is_remote or self._pm.is_daemon_running():
-            return self._request_ipc(RemoveContactCommand(alias=alias))
-        if self._cm:
-            _, msg, _, _ = self._cm.remove_contact(alias, active_onions=[])
-            self._cm.cleanup_orphans([])
-            return msg
-        return 'Initialization error.'
+        return self._request_ipc(RemoveContactCommand(alias=alias))
 
     def contacts_rename(self, old: str, new: str) -> str:
         """
@@ -493,12 +468,7 @@ class CliProxy:
         if err:
             return err
 
-        if self.is_remote or self._pm.is_daemon_running():
-            return self._request_ipc(RenameContactCommand(old_alias=old, new_alias=new))
-        if self._cm and self._hm:
-            success, msg = self._cm.rename_contact(old, new)
-            return msg
-        return 'Initialization error.'
+        return self._request_ipc(RenameContactCommand(old_alias=old, new_alias=new))
 
     def contacts_clear(self) -> str:
         """
@@ -514,17 +484,11 @@ class CliProxy:
         if err:
             return err
 
-        if self.is_remote or self._pm.is_daemon_running():
-            return self._request_ipc(ClearContactsCommand())
-        if self._cm:
-            _, msg, _, _ = self._cm.clear_contacts(active_onions=[])
-            self._cm.cleanup_orphans([])
-            return msg
-        return 'Initialization error.'
+        return self._request_ipc(ClearContactsCommand())
 
     def clear_profile_db(self) -> str:
         """
-        Clears the SQLite database for the profile (routes via IPC if remote or running).
+        Clears the SQLite database for the profile.
 
         Args:
             None
@@ -536,8 +500,4 @@ class CliProxy:
         if err:
             return err
 
-        if self.is_remote or self._pm.is_daemon_running():
-            return self._request_ipc(ClearProfileDbCommand())
-
-        _, msg = ProfileManager.clear_profile_db(self._pm.profile_name)
-        return msg
+        return self._request_ipc(ClearProfileDbCommand())

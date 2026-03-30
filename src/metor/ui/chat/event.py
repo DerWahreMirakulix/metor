@@ -1,17 +1,19 @@
 """
 Module providing the handler for incoming Daemon IPC events.
-Updates Session state and triggers Renderer UI updates.
+Updates Session state and triggers Renderer UI updates via the central Translator and Presenter.
+Maps generic UISeverity types to domain-specific ChatMessageTypes.
 """
 
 import threading
-from typing import Optional
+from typing import Optional, Dict
 
 from metor.core.api import (
     IpcEvent,
+    TransCode,
     MarkReadCommand,
     InitEvent,
-    InfoEvent,
-    SystemEvent,
+    NotificationEvent,
+    CommandResponseEvent,
     RemoteMsgEvent,
     AckEvent,
     ConnectedEvent,
@@ -22,17 +24,30 @@ from metor.core.api import (
     RenameSuccessEvent,
     ContactRemovedEvent,
     ConnectionsStateEvent,
-    ContactListEvent,
     SwitchSuccessEvent,
-    CliResponseEvent,
+    ConnectionPendingEvent,
+    ConnectionAutoAcceptedEvent,
+    ConnectionRetryEvent,
+    ConnectionFailedEvent,
+    IncomingConnectionEvent,
+    ConnectionRejectedEvent,
 )
-from metor.utils.helper import clean_onion
+from metor.ui import Translator, UIPresenter, UISeverity
+from metor.utils import clean_onion
 
 # Local Package Imports
 from metor.ui.chat.renderer import Renderer
+from metor.ui.chat.presenter import ChatPresenter
 from metor.ui.chat.ipc import IpcClient
 from metor.ui.chat.session import Session
-from metor.ui.chat.models import UIMessageType
+from metor.ui.chat.models import ChatMessageType
+
+
+_SEVERITY_MAP: Dict[UISeverity, ChatMessageType] = {
+    UISeverity.INFO: ChatMessageType.INFO,
+    UISeverity.SYSTEM: ChatMessageType.SYSTEM,
+    UISeverity.ERROR: ChatMessageType.SYSTEM,  # Chat routes generic errors as system info
+}
 
 
 class EventHandler:
@@ -80,18 +95,34 @@ class EventHandler:
                 self._session.my_onion = event.onion or 'unknown'
                 self._init_event.set()
 
-            elif isinstance(event, InfoEvent):
+            elif isinstance(event, NotificationEvent):
+                text, severity = Translator.get(event.code, event.params)
+                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
                 self._renderer.print_message(
-                    event.text, msg_type=UIMessageType.INFO, alias=event.alias
+                    text, msg_type=msg_type, alias=event.params.get('alias')
                 )
 
-            elif isinstance(event, SystemEvent):
-                self._renderer.print_message(event.text, msg_type=UIMessageType.SYSTEM)
+            elif isinstance(event, CommandResponseEvent):
+                if event.data:
+                    text_fmt: str = UIPresenter.format_response(
+                        event.action, event.data, chat_mode=True
+                    )
+                    self._renderer.print_message(
+                        text_fmt,
+                        msg_type=ChatMessageType.RAW,
+                        alias=event.params.get('alias'),
+                    )
+                else:
+                    text, severity = Translator.get(event.code, event.params)
+                    msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
+                    self._renderer.print_message(
+                        text, msg_type=msg_type, alias=event.params.get('alias')
+                    )
 
             elif isinstance(event, RemoteMsgEvent):
                 self._renderer.print_message(
                     event.text,
-                    msg_type=UIMessageType.REMOTE,
+                    msg_type=ChatMessageType.REMOTE,
                     alias=event.alias,
                     is_drop=False,
                 )
@@ -99,16 +130,44 @@ class EventHandler:
             elif isinstance(event, AckEvent):
                 self._renderer.mark_acked(msg_id=event.msg_id, text=event.text)
 
+            elif isinstance(event, IncomingConnectionEvent):
+                text, severity = Translator.get(TransCode.INCOMING_CONNECTION)
+                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
+                self._renderer.print_message(text, msg_type=msg_type, alias=event.alias)
+
+            elif isinstance(event, ConnectionPendingEvent):
+                text, severity = Translator.get(TransCode.CONNECTION_PENDING)
+                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
+                self._renderer.print_message(text, msg_type=msg_type, alias=event.alias)
+
+            elif isinstance(event, ConnectionAutoAcceptedEvent):
+                text, severity = Translator.get(TransCode.CONNECTION_AUTO_ACCEPTED)
+                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
+                self._renderer.print_message(text, msg_type=msg_type, alias=event.alias)
+
+            elif isinstance(event, ConnectionRetryEvent):
+                params = {'attempt': event.attempt, 'max_retries': event.max_retries}
+                text, severity = Translator.get(TransCode.CONNECTION_RETRY, params)
+                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
+                self._renderer.print_message(text, msg_type=msg_type, alias=event.alias)
+
+            elif isinstance(event, ConnectionFailedEvent):
+                text, severity = Translator.get(TransCode.CONNECTION_FAILED)
+                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
+                self._renderer.print_message(text, msg_type=msg_type, alias=event.alias)
+
+            elif isinstance(event, ConnectionRejectedEvent):
+                text, severity = Translator.get(TransCode.CONNECTION_REJECTED)
+                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
+                self._renderer.print_message(text, msg_type=msg_type, alias=event.alias)
+
             elif isinstance(event, ConnectedEvent):
                 if event.alias not in self._session.active_connections:
                     self._session.active_connections.append(event.alias)
 
-                self._renderer.print_message(
-                    # We intentionally don't resolve the alias since it is dynamically inserted in the UI
-                    "Connected to '{alias}'.",
-                    msg_type=UIMessageType.INFO,
-                    alias=event.alias,
-                )
+                text, severity = Translator.get(TransCode.CONNECTED)
+                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
+                self._renderer.print_message(text, msg_type=msg_type, alias=event.alias)
 
                 if self._session.focused_alias == event.alias:
                     self._renderer.set_focus(event.alias, is_live=True)
@@ -123,9 +182,10 @@ class EventHandler:
                     self._session.pending_focus_target = None
 
             elif isinstance(event, DisconnectedEvent):
-                self._renderer.print_message(
-                    event.text, msg_type=UIMessageType.INFO, alias=event.alias
-                )
+                text, severity = Translator.get(TransCode.DISCONNECTED)
+                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
+                self._renderer.print_message(text, msg_type=msg_type, alias=event.alias)
+
                 if event.alias in self._session.active_connections:
                     self._session.active_connections.remove(event.alias)
 
@@ -137,13 +197,14 @@ class EventHandler:
 
             elif isinstance(event, InboxNotificationEvent):
                 if event.alias and event.alias == self._session.focused_alias:
-                    # Auto-read drops if we are already focused on this peer
                     self._ipc.send_command(MarkReadCommand(target=event.alias))
                 else:
+                    text, severity = Translator.get(
+                        TransCode.INBOX_NOTIFICATION, {'count': event.count}
+                    )
+                    msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
                     self._renderer.print_message(
-                        event.text,
-                        msg_type=UIMessageType.INFO,
-                        alias=event.alias,
+                        text, msg_type=msg_type, alias=event.alias
                     )
 
             elif isinstance(event, InboxDataEvent):
@@ -176,22 +237,20 @@ class EventHandler:
                     self._session.header_contacts = event.contacts
                     self._conn_event.set()
                 else:
-                    self._renderer.print_message(
-                        self._session.show(is_header_mode=False),
-                        msg_type=UIMessageType.SYSTEM,
+                    formatted_state: str = ChatPresenter.format_session_state(
+                        self._session.active_connections,
+                        [],
+                        self._session.header_contacts,
+                        self._session.focused_alias,
+                        is_header_mode=False,
                     )
-
-            elif isinstance(event, ContactListEvent):
-                self._renderer.print_message(event.text, msg_type=UIMessageType.SYSTEM)
+                    self._renderer.print_message(
+                        formatted_state,
+                        msg_type=ChatMessageType.SYSTEM,
+                    )
 
             elif isinstance(event, SwitchSuccessEvent):
                 self._switch_focus(event.alias)
-
-            elif isinstance(event, CliResponseEvent):
-                msg_type = UIMessageType.INFO if event.alias else UIMessageType.SYSTEM
-                self._renderer.print_message(
-                    event.text, msg_type=msg_type, alias=event.alias
-                )
 
         except Exception:
             pass
@@ -211,17 +270,13 @@ class EventHandler:
 
         if old_alias == alias:
             if alias:
-                self._renderer.print_message(
-                    # We intentionally don't resolve the alias since it is dynamically inserted in the UI
-                    "Already focused on '{alias}'.",
-                    alias=alias,
-                    msg_type=UIMessageType.INFO,
-                )
+                text, severity = Translator.get(TransCode.ALREADY_FOCUSED)
+                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
+                self._renderer.print_message(text, msg_type=msg_type, alias=alias)
             else:
-                self._renderer.print_message(
-                    'No active focus.',
-                    msg_type=UIMessageType.SYSTEM,
-                )
+                text, severity = Translator.get(TransCode.NO_ACTIVE_FOCUS)
+                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
+                self._renderer.print_message(text, msg_type=msg_type)
             return
 
         self._session.focused_alias = alias
@@ -231,17 +286,11 @@ class EventHandler:
 
         if not hide_message:
             if alias:
-                self._renderer.print_message(
-                    # We intentionally don't resolve the alias since it is dynamically inserted in the UI
-                    "Switched focus to '{alias}'.",
-                    alias=alias,
-                    msg_type=UIMessageType.INFO,
-                )
+                text, severity = Translator.get(TransCode.FOCUS_SWITCHED)
+                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
+                self._renderer.print_message(text, msg_type=msg_type, alias=alias)
                 self._ipc.send_command(MarkReadCommand(target=alias))
             elif old_alias:
-                self._renderer.print_message(
-                    # We intentionally don't resolve the alias since it is dynamically inserted in the UI
-                    "Removed focus from '{alias}'.",
-                    alias=old_alias,
-                    msg_type=UIMessageType.INFO,
-                )
+                text, severity = Translator.get(TransCode.FOCUS_REMOVED)
+                msg_type = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
+                self._renderer.print_message(text, msg_type=msg_type, alias=old_alias)

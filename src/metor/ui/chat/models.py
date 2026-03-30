@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 
-class UIMessageType(str, Enum):
+class ChatMessageType(str, Enum):
     """Enumeration for the different visual routing types of chat messages."""
 
     INFO = 'info'
@@ -18,11 +18,11 @@ class UIMessageType(str, Enum):
 
 
 @dataclass
-class UIChatLine:
+class ChatLine:
     """Strongly typed data object representing a single rendered line in the UI."""
 
     text: str
-    msg_type: UIMessageType
+    msg_type: ChatMessageType
     alias: Optional[str] = None
     is_pending: bool = False
     msg_id: Optional[str] = None

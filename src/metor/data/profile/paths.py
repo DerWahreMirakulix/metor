@@ -6,7 +6,7 @@ for sensitive cryptographic and Tor data.
 
 from pathlib import Path
 
-from metor.utils.constants import Constants
+from metor.utils import Constants
 
 
 class Paths:

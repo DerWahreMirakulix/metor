@@ -1,6 +1,6 @@
 """
 Module managing the outbound IPC socket connection to the local Daemon.
-Isolates all raw TCP byte parsing from the Chat Engine logic.
+Isolates all raw TCP byte parsing from the Chat Engine logic and thwarts UTF-8 DoS attacks.
 """
 
 import socket
@@ -9,7 +9,7 @@ import json
 from typing import Callable, Dict, Any, Optional, List
 
 from metor.core.api import IpcCommand, IpcEvent
-from metor.utils.constants import Constants
+from metor.utils import Constants
 
 
 class IpcClient:
@@ -114,7 +114,8 @@ class IpcClient:
                     self._on_disconnect()
                     break
 
-                buffer += data.decode('utf-8')
+                # Critical Fix: Ignore corrupt UTF-8 fragments
+                buffer += data.decode('utf-8', errors='ignore')
 
                 while '\n' in buffer:
                     parts: List[str] = buffer.split('\n', 1)

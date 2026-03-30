@@ -26,6 +26,7 @@ When contributing to this repository, you MUST strictly adhere to the following 
 ## 4. Architecture & Design Principles
 
 - **Domain-Driven Design (DDD):** Respect the domain boundaries (`core`, `data`, `ui`, `utils`). Extract repeated logic into helper functions or base classes.
+- **Import Architecture (Facade Pattern):** When importing from an _external_ or _parent_ domain, you MUST use the package's `__init__.py` Facade (e.g., `from metor.core.api import Action`). When importing from a sibling module within the _same_ domain/directory (horizontal imports), you MUST explicitly bypass the Facade and import directly from the file (e.g., `from metor.ui.theme import Theme`) to prevent circular dependencies.
 - **Context Managers:** Always use `with` statements for file operations, databases, sockets, and locks to ensure proper resource cleanup.
 - **Modern Path Handling:** Use Python's `pathlib.Path` strictly over the legacy `os.path` module for all filesystem operations.
 
@@ -38,4 +39,5 @@ When contributing to this repository, you MUST strictly adhere to the following 
 ## 6. Code Formatting (Ruff)
 
 - **Imports First:** All `import` statements MUST be located at the very top of the file (immediately following the module docstring).
+- **Import Delimiters:** Standard library and external domain imports MUST be separated from same-domain internal imports using exactly the `# Local Package Imports` comment. This comment MUST NOT be placed above imports from higher-level Metor domains (e.g., `metor.core` is external to `metor.core.daemon`).
 - **Single Quotes:** Always use single quotes (`'`) for strings unless the string itself contains a single quote. Double quotes are strictly for docstrings (`"""`).

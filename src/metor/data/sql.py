@@ -10,21 +10,23 @@ import threading
 import tempfile
 from contextlib import contextmanager
 from sqlcipher3 import dbapi2 as sqlite3
-from typing import Any, List, Tuple, Optional, Iterator, Dict
+from typing import Any, List, Tuple, Optional, Iterator, Dict, Callable
 from pathlib import Path
 
+# Local Package Imports
 from metor.data.settings import Settings, SettingKey
-from metor.ui.theme import Theme
 
 
 @contextmanager
-def _capture_c_stderr() -> Iterator[None]:
+def _capture_c_stderr(
+    log_callback: Optional[Callable[[str], None]] = None,
+) -> Iterator[None]:
     """
     Temporarily redirects OS-level stderr to a temporary file to capture C-library logs.
     Outputs them formatted if SQL logging is enabled. Ensures execution even on exceptions.
 
     Args:
-        None
+        log_callback (Optional[Callable[[str], None]]): UI-injected logging function.
 
     Yields:
         None
@@ -44,15 +46,12 @@ def _capture_c_stderr() -> Iterator[None]:
         finally:
             os.dup2(old_fd, fd)
 
-            if Settings.get(SettingKey.ENABLE_SQL_LOGGING):
+            if Settings.get(SettingKey.ENABLE_SQL_LOGGING) and log_callback:
                 temp_file.seek(0)
                 for line in temp_file:
                     clean_line: str = line.strip()
                     if clean_line:
-                        sys.stdout.write(
-                            f'\r\033[K{Theme.CYAN}[SQL-LOG]{Theme.RESET} {clean_line}\n'
-                        )
-                sys.stdout.flush()
+                        log_callback(clean_line)
     finally:
         temp_file.close()
         try:
@@ -67,6 +66,20 @@ class SqlManager:
     # Class-level dictionary to reuse identical connections across managers
     _connections: Dict[str, sqlite3.Connection] = {}
     _pool_lock: threading.Lock = threading.Lock()
+    _log_callback: Optional[Callable[[str], None]] = None
+
+    @classmethod
+    def set_log_callback(cls, callback: Callable[[str], None]) -> None:
+        """
+        Sets a global callback for SQL logging to keep the Data layer UI-agnostic.
+
+        Args:
+            callback (Callable[[str], None]): The logging function.
+
+        Returns:
+            None
+        """
+        cls._log_callback = callback
 
     def __init__(self, db_path: str | Path, password: Optional[str] = None) -> None:
         """
@@ -141,7 +154,7 @@ class SqlManager:
         """
 
         try:
-            with _capture_c_stderr():
+            with _capture_c_stderr(SqlManager._log_callback):
                 conn = self._get_connection()
                 with conn:
                     cursor = conn.cursor()

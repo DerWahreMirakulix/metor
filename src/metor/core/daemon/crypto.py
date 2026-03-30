@@ -8,7 +8,7 @@ import nacl.bindings
 from typing import Optional
 
 from metor.core.key import KeyManager
-from metor.utils.helper import clean_onion
+from metor.utils import clean_onion
 
 
 class Crypto:
