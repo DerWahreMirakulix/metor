@@ -16,6 +16,7 @@ from metor.core.api import (
     MsgCommand,
     SendDropCommand,
     GetConnectionsCommand,
+    SwitchCommand,
 )
 from metor.data.profile import ProfileManager
 from metor.ui import Help, Theme
@@ -125,6 +126,7 @@ class Chat:
     def _shutdown(self) -> None:
         """
         Safely shuts down the IPC client and exits the UI process.
+        Propagates focus removal to ensure Daemon TTL Keep-Alives update correctly.
 
         Args:
             None
@@ -133,6 +135,8 @@ class Chat:
             None
         """
         if self._ipc:
+            if self._session.focused_alias:
+                self._ipc.send_command(SwitchCommand(target=None))
             self._ipc.stop()
 
         if threading.current_thread() is threading.main_thread():

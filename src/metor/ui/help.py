@@ -14,7 +14,13 @@ from metor.ui.presenter import UIPresenter
 
 @dataclass
 class SubCommandDef:
-    """Strongly typed definition of a nested subcommand."""
+    """
+    Strongly typed definition of a nested subcommand.
+
+    Args:
+        usage (str): The CLI usage pattern.
+        description (str): A brief description of the command.
+    """
 
     usage: str
     description: str
@@ -22,7 +28,16 @@ class SubCommandDef:
 
 @dataclass
 class CommandDef:
-    """Strongly typed definition of a CLI or Chat command."""
+    """
+    Strongly typed definition of a CLI or Chat command.
+
+    Args:
+        name (str): The primary command invocation.
+        usage (str): The detailed usage syntax.
+        description (str): Explains the command behavior.
+        category (str): The help menu category group.
+        subcommands (List[SubCommandDef]): Optional list of sub-operations.
+    """
 
     name: str
     usage: str
@@ -228,6 +243,12 @@ class Help:
             name='sessions',
             usage='/sessions',
             description='List all active and pending sessions.',
+            category='Session & Connection',
+        ),
+        'retunnel': CommandDef(
+            name='retunnel',
+            usage='/retunnel [onion|alias]',
+            description='Force Tor circuit rotation (NEWNYM) and reconnect.',
             category='Session & Connection',
         ),
         'inbox': CommandDef(

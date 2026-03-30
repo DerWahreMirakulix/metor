@@ -1,11 +1,12 @@
 """
 Module orchestrating active connection states initiated by the user.
-Manages explicit connect, accept, reject, and disconnect operations.
+Manages explicit connect, accept, reject, disconnect operations, the Auto-Reconnect logic, and Retunneling.
 """
 
 import socket
 import threading
 import time
+import secrets
 from typing import List, Optional, Callable, Dict, TYPE_CHECKING
 
 from metor.core import TorManager
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
 
 
 class ConnectionController:
-    """Orchestrates outbound connections and intentional socket teardowns."""
+    """Orchestrates outbound connections, intentional socket teardowns, auto-reconnects, and retunneling."""
 
     def __init__(
         self,
@@ -69,7 +70,7 @@ class ConnectionController:
             cm (ContactManager): Address book manager.
             hm (HistoryManager): Event history manager.
             mm (MessageManager): Offline messages manager.
-            crypto (Crypto): Cryptographic challenge/response engine.
+            crypto (Crypto): Cryptographic engine.
             state (StateTracker): The thread-safe state container.
             router (MessageRouter): The application-layer message router.
             broadcast_callback (Callable): IPC broadcaster.
@@ -90,6 +91,11 @@ class ConnectionController:
 
         self._receiver: Optional['StreamReceiver'] = None
 
+        # Reconnect Queue Management
+        self._reconnect_queue: List[str] = []
+        self._reconnect_lock: threading.Lock = threading.Lock()
+        threading.Thread(target=self._reconnect_worker, daemon=True).start()
+
     def set_receiver(self, receiver: 'StreamReceiver') -> None:
         """
         Injects the StreamReceiver dependency to avoid circular imports.
@@ -105,6 +111,7 @@ class ConnectionController:
     def connect_to(self, target: str) -> None:
         """
         Initiates an outbound Tor connection securely utilizing the explicit Stream Reader.
+        Receiver handles the Late Acceptance timeout. Protects against outbound FD/RAM exhaustion.
 
         Args:
             target (str): The alias or onion address to connect to.
@@ -117,6 +124,17 @@ class ConnectionController:
             return
 
         if self._state.get_connection(onion):
+            return
+
+        # OPSEC: Guard against outbound RAM/FD resource exhaustion attacks
+        max_conn: int = Settings.get(SettingKey.MAX_CONCURRENT_CONNECTIONS)
+        if len(self._state.get_active_onions()) >= max_conn:
+            self._broadcast(
+                NotificationEvent(
+                    code=TransCode.MAX_CONNECTIONS_REACHED,
+                    params={'target': alias, 'max_conn': max_conn},
+                )
+            )
             return
 
         implicit_accept: bool = False
@@ -138,7 +156,7 @@ class ConnectionController:
                     break
                 try:
                     conn: socket.socket = self._tm.connect(onion)
-                    conn.settimeout(10.0)
+                    conn.settimeout(15.0)
 
                     stream = TcpStreamReader(conn)
                     challenge_line: Optional[str] = stream.read_line()
@@ -154,9 +172,12 @@ class ConnectionController:
                             'utf-8'
                         )
                     )
-                    conn.settimeout(None)
 
-                    self._hm.log_event(HistoryEvent.REQUESTED, onion)
+                    # Do not set blocking to None yet. The receiver will enforce the Late Acceptance
+                    # Timeout natively via its read operations on the Pending socket.
+                    conn.settimeout(60.0)
+
+                    self._hm.log_event(HistoryEvent.LIVE_REQUESTED, onion)
                     self._broadcast(ConnectionPendingEvent(alias=alias))
                     if self._receiver:
                         self._receiver.start_receiving(onion, conn, stream.get_buffer())
@@ -175,7 +196,7 @@ class ConnectionController:
                             time.sleep(1.0)
                     else:
                         self._hm.log_event(
-                            HistoryEvent.ASYNC_FAILED,
+                            HistoryEvent.DROP_FAILED,
                             onion,
                             'Connection timeout/exhausted',
                         )
@@ -188,7 +209,8 @@ class ConnectionController:
 
     def accept(self, target: str) -> None:
         """
-        Approves a pending incoming connection from the state tracker.
+        Approves a pending incoming connection. Safely handles if the socket has
+        died in the meantime due to Late Acceptance Timeout.
 
         Args:
             target (str): The target alias or onion.
@@ -214,14 +236,22 @@ class ConnectionController:
             )
             return
 
-        self._state.add_active_connection(onion, conn)
-
         try:
             conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8'))
         except Exception:
-            pass
+            # Late Acceptance failure: Remote dropped before we accepted.
+            self._hm.log_event(
+                HistoryEvent.LIVE_CONNECTION_LOST, onion, 'Late acceptance timeout'
+            )
+            self._broadcast(DisconnectedEvent(alias=alias))
+            try:
+                conn.close()
+            except Exception:
+                pass
+            return
 
-        self._hm.log_event(HistoryEvent.CONNECTED, onion)
+        self._state.add_active_connection(onion, conn)
+        self._hm.log_event(HistoryEvent.LIVE_CONNECTED, onion)
         self._broadcast(ConnectedEvent(alias=alias, onion=onion))
 
         if self._receiver:
@@ -289,9 +319,9 @@ class ConnectionController:
             pass
 
         status: HistoryEvent = (
-            HistoryEvent.REJECTED
+            HistoryEvent.LIVE_REJECTED
             if initiated_by_self
-            else HistoryEvent.REJECTED_BY_REMOTE
+            else HistoryEvent.LIVE_REJECTED_BY_REMOTE
         )
         self._hm.log_event(status, onion)
 
@@ -308,6 +338,7 @@ class ConnectionController:
     ) -> None:
         """
         Terminates a connection safely and processes unacked fallbacks.
+        Queues the peer for an auto-reconnect if it was an unexpected failure.
 
         Args:
             target (str): The target alias or onion.
@@ -357,14 +388,14 @@ class ConnectionController:
         if unacked:
             for content in unacked.values():
                 self._mm.queue_message(
-                    onion,
-                    MessageDirection.OUT,
-                    MessageType.TEXT,
-                    content,
-                    MessageStatus.PENDING,
+                    contact_onion=onion,
+                    direction=MessageDirection.OUT,
+                    msg_type=MessageType.TEXT,
+                    payload=content,
+                    status=MessageStatus.PENDING,
                 )
                 self._hm.log_event(
-                    HistoryEvent.ASYNC_QUEUED, onion, 'Unacked msgs converted to drop'
+                    HistoryEvent.DROP_QUEUED, onion, 'Unacked msgs converted to drop'
                 )
             self._broadcast(MsgFallbackToDropEvent(msg_ids=list(unacked.keys())))
 
@@ -386,12 +417,12 @@ class ConnectionController:
                 pass
 
         status: HistoryEvent = (
-            HistoryEvent.CONNECTION_LOST
+            HistoryEvent.LIVE_CONNECTION_LOST
             if is_fallback
             else (
-                HistoryEvent.DISCONNECTED
+                HistoryEvent.LIVE_DISCONNECTED
                 if initiated_by_self
-                else HistoryEvent.DISCONNECTED_BY_REMOTE
+                else HistoryEvent.LIVE_DISCONNECTED_BY_REMOTE
             )
         )
         self._hm.log_event(status, onion)
@@ -403,6 +434,53 @@ class ConnectionController:
         )
         for a in deleted_aliases:
             self._broadcast(ContactRemovedEvent(alias=a))
+
+        # Enqueue for Auto-Reconnect if unexpected failure
+        if is_fallback and Settings.get(SettingKey.AUTO_RECONNECT_LIVE):
+            with self._reconnect_lock:
+                if onion not in self._reconnect_queue:
+                    self._reconnect_queue.append(onion)
+
+    def _reconnect_worker(self) -> None:
+        """
+        Background thread handling failure-only reconnect attempts with randomized backoff.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        while not self._stop_flag.is_set():
+            time.sleep(2.0)
+            onion: Optional[str] = None
+
+            with self._reconnect_lock:
+                if self._reconnect_queue:
+                    onion = self._reconnect_queue.pop(0)
+
+            if onion:
+                # OPSEC: Randomized backoff using cryptographically secure PRNG to prevent fingerprinting
+                backoff: float = 10.0 + (
+                    secrets.randbelow(2001) / 100.0
+                )  # Generates 10.00 to 30.00
+                alias: Optional[str] = self._cm.get_alias_by_onion(onion)
+
+                self._hm.log_event(HistoryEvent.LIVE_AUTO_RECONNECT_ATTEMPT, onion)
+                self._broadcast(
+                    NotificationEvent(
+                        code=TransCode.AUTO_RECONNECT_ATTEMPT,
+                        params={'alias': alias},
+                    )
+                )
+
+                # Check if UI/Daemon has naturally reconnected in the meantime
+                time.sleep(backoff)
+                if (
+                    not self._state.is_connected_or_pending(onion)
+                    and not self._stop_flag.is_set()
+                ):
+                    self.connect_to(onion)
 
     def disconnect_all(self) -> None:
         """
@@ -416,3 +494,46 @@ class ConnectionController:
         """
         for onion in self._state.get_active_onions():
             self.disconnect(onion, initiated_by_self=True)
+
+    def retunnel(self, target: str) -> None:
+        """
+        Forces a Tor circuit rotation and reconnects to the target.
+
+        Args:
+            target (str): The target alias or onion address.
+
+        Returns:
+            None
+        """
+        alias, onion, exists = self._cm.resolve_target(target)
+        if not exists or not onion:
+            self._broadcast(
+                NotificationEvent(
+                    code=TransCode.PEER_NOT_FOUND, params={'target': target}
+                )
+            )
+            return
+
+        self._broadcast(
+            NotificationEvent(
+                code=TransCode.RETUNNEL_INITIATED, params={'alias': alias}
+            )
+        )
+        self._hm.log_event(HistoryEvent.LIVE_RETUNNEL_INITIATED, onion)
+
+        # Disconnect existing connection forcefully
+        self.disconnect(onion, initiated_by_self=True)
+
+        # Rotate circuits
+        success, code, params = self._tm.rotate_circuits()
+        if not success:
+            self._broadcast(NotificationEvent(code=code, params=params))
+            return
+
+        self._hm.log_event(HistoryEvent.LIVE_RETUNNEL_SUCCESS, onion)
+        self._broadcast(
+            NotificationEvent(code=TransCode.RETUNNEL_SUCCESS, params={'alias': alias})
+        )
+
+        # Initiate fresh connection
+        self.connect_to(onion)

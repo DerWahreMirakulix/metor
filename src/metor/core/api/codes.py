@@ -39,6 +39,7 @@ class Action(str, Enum):
     SET_SETTING = 'set_setting'
     SELF_DESTRUCT = 'self_destruct'
     UNLOCK = 'unlock'
+    RETUNNEL = 'retunnel'
 
 
 class EventType(str, Enum):
@@ -50,9 +51,9 @@ class EventType(str, Enum):
     CONNECTED = 'connected'
     DISCONNECTED = 'disconnected'
     RENAME_SUCCESS = 'rename_success'
+    CONTACT_REMOVED = 'contact_removed'
     CONNECTIONS_STATE = 'connections_state'
     SWITCH_SUCCESS = 'switch_success'
-    CONTACT_REMOVED = 'contact_removed'
 
     CONNECTION_PENDING = 'connection_pending'
     CONNECTION_AUTO_ACCEPTED = 'connection_auto_accepted'
@@ -60,6 +61,7 @@ class EventType(str, Enum):
     CONNECTION_FAILED = 'connection_failed'
     INCOMING_CONNECTION = 'incoming_connection'
     CONNECTION_REJECTED = 'connection_rejected'
+    TIEBREAKER_REJECTED = 'tiebreaker_rejected'
 
     INBOX_NOTIFICATION = 'inbox_notification'
     INBOX_DATA = 'inbox_data'
@@ -72,8 +74,6 @@ class EventType(str, Enum):
 class TransCode(str, Enum):
     """Strict Domain Codes mapping generic backend events to local UI Translations."""
 
-    GENERIC_MSG = 'generic_msg'
-
     # System / General
     DAEMON_LOCKED = 'daemon_locked'
     DAEMON_UNLOCKED = 'daemon_unlocked'
@@ -84,12 +84,16 @@ class TransCode(str, Enum):
     SELF_DESTRUCT_INITIATED = 'self_destruct_initiated'
     SETTING_UPDATED = 'setting_updated'
     SETTING_UPDATE_FAILED = 'setting_update_failed'
+    SETTING_TYPE_ERROR = 'setting_type_error'
 
     # CLI & Proxy Specific
     ENTER_MASTER_PASSWORD = 'enter_master_password'
     DAEMON_STARTING = 'daemon_starting'
     DAEMON_ACTIVE = 'daemon_active'
     DAEMON_LOCKED_MODE = 'daemon_locked_mode'
+    DAEMON_REMOTE_NO_START = 'daemon_remote_no_start'
+    DAEMON_ALREADY_RUNNING = 'daemon_already_running'
+    DAEMON_EMPTY_PASSWORD = 'daemon_empty_password'
     PURGE_WARNING = 'purge_warning'
     PURGE_WARNING_REMOTE = 'purge_warning_remote'
     PURGE_PROMPT = 'purge_prompt'
@@ -101,6 +105,17 @@ class TransCode(str, Enum):
     REMOTE_NUKE_SUCCESS = 'remote_nuke_success'
     REMOTE_NUKE_FAILED = 'remote_nuke_failed'
     REMOTE_NUKE_OVERRIDE = 'remote_nuke_override'
+    UNKNOWN_COMMAND = 'unknown_command'
+
+    # Tor Subsystem
+    TOR_KEY_ERROR = 'tor_key_error'
+    TOR_START_FAILED = 'tor_start_failed'
+    TOR_PROCESS_TERMINATED = 'tor_process_terminated'
+    ADDRESS_CURRENT = 'address_current'
+    ADDRESS_GENERATED = 'address_generated'
+    ADDRESS_CANT_GENERATE_RUNNING = 'address_cant_generate_running'
+    ADDRESS_NOT_GENERATED = 'address_not_generated'
+    RETUNNEL_FAILED = 'retunnel_failed'
 
     # IPC & Communication
     DAEMON_UNREACHABLE = 'daemon_unreachable'
@@ -115,6 +130,7 @@ class TransCode(str, Enum):
     NO_CONNECTION_TO_REJECT = 'no_connection_to_reject'
     NO_CONNECTION_TO_DISCONNECT = 'no_connection_to_disconnect'
     NO_PENDING_CONNECTION = 'no_pending_connection'
+    MAX_CONNECTIONS_REACHED = 'max_connections_reached'
 
     # Drops
     DROPS_DISABLED = 'drops_disabled'
@@ -133,6 +149,13 @@ class TransCode(str, Enum):
     CONNECTION_FAILED = 'connection_failed'
     CONNECTION_REJECTED = 'connection_rejected'
     INBOX_NOTIFICATION = 'inbox_notification'
+
+    # Advanced Network Resilience
+    CONNECTION_TIMEOUT = 'connection_timeout'
+    AUTO_RECONNECT_ATTEMPT = 'auto_reconnect_attempt'
+    AUTO_RECONNECT_FAILED = 'auto_reconnect_failed'
+    RETUNNEL_INITIATED = 'retunnel_initiated'
+    RETUNNEL_SUCCESS = 'retunnel_success'
 
     # Session
     ALREADY_FOCUSED = 'already_focused'

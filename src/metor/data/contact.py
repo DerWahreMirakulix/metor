@@ -379,7 +379,6 @@ class ContactManager:
             guaranteed to be non-None valid strings.
         """
         onion: Optional[str] = self.get_onion_by_alias(target)
-        # We only need to check exists here since get_onion_by_alias returns None if alias or onion doesn't exist
         if not onion and target:
             onion = clean_onion(target)
         alias: Optional[str] = self.get_alias_by_onion(onion, auto_create=auto_create)

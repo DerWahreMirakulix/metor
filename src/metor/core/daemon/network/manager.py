@@ -176,6 +176,18 @@ class NetworkManager:
         """
         self._controller.disconnect_all()
 
+    def retunnel(self, target: str) -> None:
+        """
+        Forces a Tor circuit rotation and reconnects.
+
+        Args:
+            target (str): The target alias or onion address.
+
+        Returns:
+            None
+        """
+        self._controller.retunnel(target)
+
     # --- ROUTER DELEGATION ---
 
     def flush_ram_buffer(self, onion: str) -> None:

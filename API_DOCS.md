@@ -33,6 +33,7 @@ It details the Data Transfer Objects (DTOs) used over the local IPC socket.
 - [SetSettingCommand](#setsettingcommand)
 - [SelfDestructCommand](#selfdestructcommand)
 - [UnlockCommand](#unlockcommand)
+- [RetunnelCommand](#retunnelcommand)
 
 **Events (Daemon -> UI)**
 - [InitEvent](#initevent)
@@ -50,6 +51,7 @@ It details the Data Transfer Objects (DTOs) used over the local IPC socket.
 - [ConnectionFailedEvent](#connectionfailedevent)
 - [IncomingConnectionEvent](#incomingconnectionevent)
 - [ConnectionRejectedEvent](#connectionrejectedevent)
+- [TiebreakerRejectedEvent](#tiebreakerrejectedevent)
 - [InboxNotificationEvent](#inboxnotificationevent)
 - [InboxDataEvent](#inboxdataevent)
 - [MsgFallbackToDropEvent](#msgfallbacktodropevent)
@@ -167,7 +169,7 @@ Data Transfer Object for sending a live chat message.
     Attributes:
         target (str): The target alias or onion address.
         text (str): The message payload.
-        msg_id (str): The unique message identifier.
+        msg_id (str): The unique message identifier (UUID).
         action (Action): The strict IPC action code.
 
 | Field | Type | Default |
@@ -466,6 +468,21 @@ Data Transfer Object for authenticating and unlocking a remote daemon.
 
 **Action Code:** `unlock`
 
+---
+### `RetunnelCommand`
+
+Data Transfer Object for forcing a Tor circuit rotation and reconnecting.
+
+    Attributes:
+        target (str): The alias or onion address to retunnel.
+        action (Action): The strict IPC action code.
+
+| Field | Type | Default |
+|---|---|---|
+| `target` | `str` | Required |
+
+**Action Code:** `retunnel`
+
 ## 2. Events (Daemon -> UI)
 
 ### `InitEvent`
@@ -481,12 +498,13 @@ InitEvent(onion: Optional[str] = None)
 ---
 ### `RemoteMsgEvent`
 
-RemoteMsgEvent(alias: str, text: str)
+RemoteMsgEvent(alias: str, text: str, timestamp: Optional[str] = None)
 
 | Field | Type | Default |
 |---|---|---|
 | `alias` | `str` | Required |
 | `text` | `str` | Required |
+| `timestamp` | `Optional[str]` | `None` |
 
 **Event Type Code:** `remote_msg`
 
@@ -646,6 +664,17 @@ ConnectionRejectedEvent(alias: Optional[str] = None, by_remote: bool = False)
 **Event Type Code:** `connection_rejected`
 
 ---
+### `TiebreakerRejectedEvent`
+
+TiebreakerRejectedEvent(alias: Optional[str] = None)
+
+| Field | Type | Default |
+|---|---|---|
+| `alias` | `Optional[str]` | `None` |
+
+**Event Type Code:** `tiebreaker_rejected`
+
+---
 ### `InboxNotificationEvent`
 
 InboxNotificationEvent(alias: Optional[str] = None, count: int = 1)
@@ -702,7 +731,7 @@ Standardized response to CLI/UI synchronous commands.
 | Field | Type | Default |
 |---|---|---|
 | `success` | `bool` | `True` |
-| `code` | `TransCode` | `TransCode.GENERIC_MSG` |
+| `code` | `TransCode` | `TransCode.COMMAND_SUCCESS` |
 | `data` | `Dict[str, Any]` | `Factory()` |
 | `params` | `Dict[str, Any]` | `Factory()` |
 

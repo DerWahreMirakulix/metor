@@ -17,7 +17,13 @@ class UISeverity(str, Enum):
 
 @dataclass
 class TranslationDef:
-    """Strongly typed definition for a UI translation string."""
+    """
+    Strongly typed definition for a UI translation string.
+
+    Attributes:
+        text (str): The raw translation string with optional formatting placeholders.
+        severity (UISeverity): The severity routing level for the presenter.
+    """
 
     text: str
     severity: UISeverity

@@ -37,16 +37,12 @@ class CommandHandlers:
             None
         """
         if pm.is_remote():
-            msg, _ = Translator.get(
-                TransCode.GENERIC_MSG,
-                {'msg': 'Cannot start a daemon on a remote profile!'},
-            )
+            msg, _ = Translator.get(TransCode.DAEMON_REMOTE_NO_START)
             print(msg)
             return
         if pm.is_daemon_running():
             msg, _ = Translator.get(
-                TransCode.GENERIC_MSG,
-                {'msg': f"Daemon for profile '{pm.profile_name}' is already running!"},
+                TransCode.DAEMON_ALREADY_RUNNING, {'profile': pm.profile_name}
             )
             print(msg)
             return
@@ -60,9 +56,7 @@ class CommandHandlers:
         password: str = getpass.getpass(prompt)
 
         if not password:
-            msg, _ = Translator.get(
-                TransCode.GENERIC_MSG, {'msg': 'Master password cannot be empty.'}
-            )
+            msg, _ = Translator.get(TransCode.DAEMON_EMPTY_PASSWORD)
             print(msg)
             return
 

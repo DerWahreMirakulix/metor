@@ -1,6 +1,7 @@
 """
 Module for thread-safe network state tracking.
 Enforces strict locking during dictionary mutations and iteration to prevent race conditions.
+Implements Reference Counting to track IPC clients focusing on specific peers for Tunnel Keep-Alive logic.
 """
 
 import socket
@@ -9,7 +10,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 
 class StateTracker:
-    """Tracks active sockets, pending connections, and offline queues safely."""
+    """Tracks active sockets, pending connections, offline queues, and UI focus states safely."""
 
     def __init__(self) -> None:
         """
@@ -28,6 +29,9 @@ class StateTracker:
         self._initial_buffers: Dict[str, str] = {}
         self._unacked_messages: Dict[str, Dict[str, str]] = {}
         self._ram_buffers: Dict[str, List[Tuple[str, str]]] = {}
+
+        # Reference counting for UI clients currently focusing an onion
+        self._ui_focus_counts: Dict[str, int] = {}
 
     def get_active_onions(self) -> List[str]:
         """
@@ -294,3 +298,47 @@ class StateTracker:
                 self._connections.get(onion) == sock
                 or self._pending_connections.get(onion) == sock
             )
+
+    # --- UI Focus Management for Persistent Drop Tunnels ---
+
+    def add_ui_focus(self, onion: str) -> None:
+        """
+        Increments the reference count of UI clients focusing on a specific peer.
+
+        Args:
+            onion (str): The focused onion identity.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            self._ui_focus_counts[onion] = self._ui_focus_counts.get(onion, 0) + 1
+
+    def remove_ui_focus(self, onion: str) -> None:
+        """
+        Decrements the reference count of UI clients focusing on a specific peer.
+
+        Args:
+            onion (str): The unfocused onion identity.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            if onion in self._ui_focus_counts:
+                self._ui_focus_counts[onion] -= 1
+                if self._ui_focus_counts[onion] <= 0:
+                    del self._ui_focus_counts[onion]
+
+    def is_focused_by_ui(self, onion: str) -> bool:
+        """
+        Checks if any connected UI client currently has focus on the specified peer.
+
+        Args:
+            onion (str): The target onion identity.
+
+        Returns:
+            bool: True if at least one client is focusing the peer.
+        """
+        with self._lock:
+            return self._ui_focus_counts.get(onion, 0) > 0

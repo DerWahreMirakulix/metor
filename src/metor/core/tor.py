@@ -1,6 +1,6 @@
 """
 Module for managing the local Tor process, hidden services, and local proxies.
-Enforces strict socket timeouts and configurable network resilience.
+Enforces strict socket timeouts, configurable network resilience, and Tor circuit rotations.
 """
 
 import os
@@ -8,10 +8,12 @@ import socket
 import time
 import socks
 import stem.process
+import stem.control
 import nacl.exceptions
 from pathlib import Path
 from typing import Tuple, Optional, Any, Dict, Callable
 
+from metor.core.api import TransCode
 from metor.data import SettingKey, Settings
 from metor.data.profile import ProfileManager
 from metor.utils import Constants, clean_onion, secure_shred_file, ensure_onion_format
@@ -74,7 +76,7 @@ class TorManager:
         s.close()
         return port
 
-    def _provision_runtime_keys(self) -> Tuple[bool, str]:
+    def _provision_runtime_keys(self) -> Tuple[bool, TransCode, Dict[str, Any]]:
         """
         Injects the plaintext Ed25519 key exclusively for the Tor C-Process runtime.
         This file is shredded upon termination to maintain Data-At-Rest encryption.
@@ -83,7 +85,7 @@ class TorManager:
             None
 
         Returns:
-            Tuple[bool, str]: Success flag and an explicit error message if failed.
+            Tuple[bool, TransCode, Dict[str, Any]]: Success flag, domain code, and params.
         """
         hs_dir: Path = Path(self._pm.get_hidden_service_dir())
         try:
@@ -92,11 +94,15 @@ class TorManager:
             with tor_sec_path.open('wb') as f:
                 f.write(decrypted_tor_key)
             tor_sec_path.chmod(0o600)
-            return True, ''
+            return True, TransCode.COMMAND_SUCCESS, {}
         except nacl.exceptions.CryptoError:
-            return False, 'Invalid master password.'
+            return False, TransCode.TOR_KEY_ERROR, {'error': 'Invalid master password.'}
         except Exception:
-            return False, 'Filesystem error during key injection.'
+            return (
+                False,
+                TransCode.TOR_KEY_ERROR,
+                {'error': 'Filesystem error during key injection.'},
+            )
 
     def _shred_runtime_keys(self) -> None:
         """
@@ -113,7 +119,7 @@ class TorManager:
         # We only shred the secret key. Tor requires the public key to exist.
         secure_shred_file(hs_dir / Constants.TOR_SECRET_KEY)
 
-    def start(self) -> Tuple[bool, str]:
+    def start(self) -> Tuple[bool, TransCode, Dict[str, Any]]:
         """
         Starts the Tor process and sets up ports and the onion address.
         Centralizes the startup error message reporting.
@@ -122,16 +128,16 @@ class TorManager:
             None
 
         Returns:
-            Tuple[bool, str]: Success flag and specific reason for failure.
+            Tuple[bool, TransCode, Dict[str, Any]]: Success flag, domain code, and params.
         """
         hs_dir: Path = Path(self._pm.get_hidden_service_dir())
         data_dir: Path = Path(self._pm.get_tor_data_dir())
 
         self._km.generate_keys()
 
-        success, msg = self._provision_runtime_keys()
+        success, code, params = self._provision_runtime_keys()
         if not success:
-            return False, msg
+            return False, code, params
 
         self.socks_port = self._get_free_port()
         self.control_port = self._get_free_port()
@@ -194,7 +200,7 @@ class TorManager:
                     time.sleep(2)
                     continue
                 else:
-                    return False, 'Tor process terminated'
+                    return False, TransCode.TOR_PROCESS_TERMINATED, {}
 
         hostname_file: Path = hs_dir / Constants.HOSTNAME_FILE
         for _ in range(10):
@@ -209,9 +215,13 @@ class TorManager:
             self.onion = 'unknown'
 
         if self._tm_proc is None:
-            return False, 'Failed to launch the Tor binary.'
+            return (
+                False,
+                TransCode.TOR_START_FAILED,
+                {'error': 'Failed to launch the Tor binary.'},
+            )
 
-        return True, 'Success'
+        return True, TransCode.COMMAND_SUCCESS, {}
 
     def stop(self) -> None:
         """
@@ -258,7 +268,34 @@ class TorManager:
         s.connect((onion_formatted, 80))
         return s
 
-    def get_address(self) -> Tuple[bool, str]:
+    def rotate_circuits(self) -> Tuple[bool, TransCode, Dict[str, Any]]:
+        """
+        Sends the NEWNYM signal to the Tor Control Port to rotate circuits.
+        Enforces new network hops for subsequent connection attempts.
+
+        Args:
+            None
+
+        Returns:
+            Tuple[bool, TransCode, Dict[str, Any]]: Success flag, domain code, and params.
+        """
+        if not self._tm_proc or not self.control_port:
+            return (
+                False,
+                TransCode.RETUNNEL_FAILED,
+                {'error': 'Tor process not actively running.'},
+            )
+        try:
+            with stem.control.Controller.from_port(
+                port=self.control_port
+            ) as controller:
+                controller.authenticate()
+                controller.signal(stem.Signal.NEWNYM)
+            return True, TransCode.COMMAND_SUCCESS, {}
+        except Exception as e:
+            return False, TransCode.RETUNNEL_FAILED, {'error': str(e)}
+
+    def get_address(self) -> Tuple[bool, TransCode, Dict[str, Any]]:
         """
         Retrieves the current hidden service address for the active profile.
 
@@ -266,25 +303,25 @@ class TorManager:
             None
 
         Returns:
-            Tuple[bool, str]: A success flag and a status message.
+            Tuple[bool, TransCode, Dict[str, Any]]: A success flag, domain code, and params.
         """
         hs_dir: Path = Path(self._pm.get_hidden_service_dir())
         hostname_file: Path = hs_dir / Constants.HOSTNAME_FILE
         if hostname_file.exists():
             with hostname_file.open('r') as f:
                 onion: str = f.read().strip()
-                # Relying on the UI/CLI layer to add colors in the response event later.
-                # Returning clean text to keep Core UI-agnostic.
                 return (
                     True,
-                    f"Current onion address for profile '{self._pm.profile_name}': {clean_onion(onion)}.onion",
+                    TransCode.ADDRESS_CURRENT,
+                    {'profile': self._pm.profile_name, 'onion': clean_onion(onion)},
                 )
         return (
             False,
-            f"No onion address generated for profile '{self._pm.profile_name}' yet. Simply start the daemon or use 'metor address generate'.",
+            TransCode.ADDRESS_NOT_GENERATED,
+            {'profile': self._pm.profile_name},
         )
 
-    def generate_address(self) -> Tuple[bool, str]:
+    def generate_address(self) -> Tuple[bool, TransCode, Dict[str, Any]]:
         """
         Forces the generation of a new Tor hidden service address by restarting the process.
 
@@ -292,23 +329,22 @@ class TorManager:
             None
 
         Returns:
-            Tuple[bool, str]: A success flag and a status message.
+            Tuple[bool, TransCode, Dict[str, Any]]: A success flag, domain code, and params.
         """
         if self._pm.is_daemon_running():
             return (
                 False,
-                f"Changing the address for profile '{self._pm.profile_name}' is not possible while a daemon is running.",
+                TransCode.ADDRESS_CANT_GENERATE_RUNNING,
+                {'profile': self._pm.profile_name},
             )
 
-        success, msg = self.start()
+        success, code, params = self.start()
         if not success:
-            return (
-                False,
-                f"Failed to start Tor for profile '{self._pm.profile_name}'. Reason: {msg}",
-            )
+            return False, code, params
         self.stop()
 
         return (
             True,
-            f"New onion address generated for profile '{self._pm.profile_name}': {clean_onion(self.onion or '')}.onion",
+            TransCode.ADDRESS_GENERATED,
+            {'profile': self._pm.profile_name, 'onion': clean_onion(self.onion or '')},
         )

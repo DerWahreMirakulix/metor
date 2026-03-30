@@ -31,6 +31,7 @@ from metor.core.api import (
     ConnectionFailedEvent,
     IncomingConnectionEvent,
     ConnectionRejectedEvent,
+    TiebreakerRejectedEvent,
 )
 from metor.ui import Translator, UIPresenter, UISeverity
 from metor.utils import clean_onion
@@ -171,6 +172,10 @@ class EventHandler:
             elif isinstance(event, ConnectionRejectedEvent):
                 self._print_translated(TransCode.CONNECTION_REJECTED, alias=event.alias)
 
+            elif isinstance(event, TiebreakerRejectedEvent):
+                # UI Usability: The collision event is muted because it functions transparently as a Mutual Connection / Silent Accept for the user in the live chat.
+                pass
+
             elif isinstance(event, ConnectedEvent):
                 if event.alias not in self._session.active_connections:
                     self._session.active_connections.append(event.alias)
@@ -182,7 +187,6 @@ class EventHandler:
 
                 if self._session.pending_focus_target and (
                     self._session.pending_focus_target == event.alias
-                    or self._session.pending_focus_target == event.onion
                     or clean_onion(self._session.pending_focus_target)
                     == clean_onion(event.onion or '')
                 ):

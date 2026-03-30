@@ -10,6 +10,8 @@ Built on a robust **Client-Daemon Architecture** and structured via **Domain-Dri
   The heavy lifting (Tor process management, cryptography, network sockets, outbox routing) runs in the background as a headless daemon. The Chat UI merely acts as a client communicating via a strictly typed IPC interface. You can close the UI at any time without dropping active Tor connections.
 - **Asynchronous Offline Messaging ("Drops"):**
   Send messages even when your contact is offline. The daemon safely queues outgoing messages in a local SQLite Outbox and automatically delivers them in the background as soon as the peer comes online (Drop & Go).
+- **Network Resilience & Retunneling:**
+  Built-in auto-reconnect logic handles intermittent network drops. If a route stalls completely, you can manually force a Tor circuit rotation (`NEWNYM`) and seamlessly retunnel the active connection to your peer on the fly.
 - **Zero-Trace & Ephemeral Messages:**
   Configurable "Burn-After-Read" policies. Read messages can be permanently destroyed using cryptographic file shredding to meet strict OPSEC requirements.
 - **Cryptographic Peer Authentication:**
@@ -90,30 +92,31 @@ metor chat
 
 Inside the Chat UI, you have access to the following slash commands:
 
-| Command                         | Description                                                      |
-| :------------------------------ | :--------------------------------------------------------------- |
-| `/connect <onion\|alias>`       | Establishes a new secure Tor connection to a peer.               |
-| `/accept [alias]`               | Accepts an incoming background connection request.               |
-| `/reject [alias]`               | Rejects an incoming connection request.                          |
-| `/switch [..\|alias]`           | Switches focus between active chats (use `..` to unfocus).       |
-| `/end [alias]`                  | Terminates the connection to the specified peer.                 |
-| `/fallback [alias]`             | Forces unacknowledged live messages into the offline drop queue. |
-| `/contacts list`                | Displays the address book and temporary discovered peers.        |
-| `/contacts add <alias> [onion]` | Saves a temporary RAM peer permanently to disk.                  |
-| `/exit`                         | Closes the UI (the daemon remains active in the background).     |
+| Command                         | Description                                                          |
+| :------------------------------ | :------------------------------------------------------------------- |
+| `/connect <onion\|alias>`       | Establishes a new secure Tor connection to a peer.                   |
+| `/accept [onion\|alias]`        | Accepts an incoming background connection request.                   |
+| `/reject [onion\|alias]`        | Rejects an incoming connection request.                              |
+| `/switch [..\|<onion\|alias>]`  | Switches focus between active chats (use `..` to unfocus).           |
+| `/end [onion\|alias]`           | Terminates the connection to the specified peer.                     |
+| `/fallback [onion\|alias]`      | Forces unacknowledged live messages into the offline drop queue.     |
+| `/retunnel [onion\|alias]`      | Forces a Tor circuit rotation (`NEWNYM`) and reconnects to the peer. |
+| `/contacts list`                | Displays the address book and temporary discovered peers.            |
+| `/contacts add <alias> [onion]` | Saves a temporary RAM peer permanently to disk.                      |
+| `/exit`                         | Closes the UI (the daemon remains active in the background).         |
 
 ### 3. Headless CLI Commands
 
 You don't need to enter the Chat UI to use Metor. It can act as an asynchronous CLI messenger (similar to email).
 
-| Command                        | Description                                                                  |
-| :----------------------------- | :--------------------------------------------------------------------------- |
-| `metor send <alias> "Message"` | Queues a message in the outbox (sent automatically when the peer is online). |
-| `metor inbox`                  | Checks for new unread offline messages.                                      |
-| `metor address show`           | Displays your current `.onion` hidden service address.                       |
-| `metor contacts list`          | Lists your saved contacts.                                                   |
-| `metor history show <alias>`   | Shows the connection event log for a specific peer.                          |
-| `metor messages show <alias>`  | Prints the chat history with a contact directly to the console.              |
+| Command                               | Description                                                                  |
+| :------------------------------------ | :--------------------------------------------------------------------------- |
+| `metor send <onion\|alias> "Message"` | Queues a message in the outbox (sent automatically when the peer is online). |
+| `metor inbox [onion\|alias]`          | Checks for new unread offline messages or reads them for a specific peer.    |
+| `metor address show`                  | Displays your current `.onion` hidden service address.                       |
+| `metor contacts list`                 | Lists your saved contacts.                                                   |
+| `metor history show [onion\|alias]`   | Shows the connection event log globally or for a specific peer.              |
+| `metor messages show <onion\|alias>`  | Prints the chat history with a contact directly to the console.              |
 
 ### 4. Profile Management & Remote Setup
 

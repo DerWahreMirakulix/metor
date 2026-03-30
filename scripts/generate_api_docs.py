@@ -9,6 +9,10 @@ import dataclasses
 from pathlib import Path
 from typing import Any, List, Type
 
+# Local Package Imports
+from metor.core.api.registry import CMD_MAP, EVENT_MAP
+
+
 # Dynamically resolve paths to support execution from any directory
 SCRIPT_DIR: Path = Path(__file__).parent.resolve()
 PROJECT_ROOT: Path = SCRIPT_DIR.parent
@@ -16,9 +20,6 @@ SRC_DIR: Path = PROJECT_ROOT / 'src'
 
 # Inject the src directory into the module search path
 sys.path.insert(0, str(SRC_DIR))
-
-# Local Package Imports
-from metor.core.api.registry import CMD_MAP, EVENT_MAP
 
 
 class ApiDocGenerator:

@@ -27,6 +27,7 @@ from metor.core.api import (
     SendDropCommand,
     SwitchCommand,
     SwitchSuccessEvent,
+    RetunnelCommand,
 )
 from metor.core.daemon.network import NetworkManager
 from metor.data import (
@@ -180,6 +181,11 @@ class NetworkCommandHandler:
                 ),
             )
 
+        elif isinstance(cmd, RetunnelCommand):
+            threading.Thread(
+                target=self._network.retunnel, args=(cmd.target,), daemon=True
+            ).start()
+
         elif isinstance(cmd, SendDropCommand):
             if not Settings.get(SettingKey.ALLOW_DROPS):
                 self._send_to(
@@ -212,7 +218,7 @@ class NetworkCommandHandler:
                     MessageStatus.PENDING,
                 )
                 if Settings.get(SettingKey.RECORD_DROP_EVENTS):
-                    self._hm.log_event(HistoryEvent.ASYNC_QUEUED, onion)
+                    self._hm.log_event(HistoryEvent.DROP_QUEUED, onion)
 
                 if cmd.cli_mode:
                     self._send_to(

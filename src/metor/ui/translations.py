@@ -15,7 +15,6 @@ from metor.ui.models import UISeverity, TranslationDef
 
 
 TRANSLATIONS: Dict[TransCode, TranslationDef] = {
-    TransCode.GENERIC_MSG: TranslationDef('{msg}', UISeverity.SYSTEM),
     # System / General
     TransCode.DAEMON_LOCKED: TranslationDef(
         'Daemon is locked. Please unlock first.', UISeverity.SYSTEM
@@ -42,7 +41,10 @@ TRANSLATIONS: Dict[TransCode, TranslationDef] = {
         "Daemon setting '{key}' updated.", UISeverity.SYSTEM
     ),
     TransCode.SETTING_UPDATE_FAILED: TranslationDef(
-        'Failed to update setting.', UISeverity.ERROR
+        'Failed to update setting: {error}', UISeverity.ERROR
+    ),
+    TransCode.SETTING_TYPE_ERROR: TranslationDef(
+        'Setting type error: {error}', UISeverity.ERROR
     ),
     # CLI & Proxy Specific
     TransCode.ENTER_MASTER_PASSWORD: TranslationDef(
@@ -57,6 +59,15 @@ TRANSLATIONS: Dict[TransCode, TranslationDef] = {
     ),
     TransCode.DAEMON_LOCKED_MODE: TranslationDef(
         'Daemon running in LOCKED mode... Waiting for IPC unlock.', UISeverity.INFO
+    ),
+    TransCode.DAEMON_REMOTE_NO_START: TranslationDef(
+        'Cannot start a daemon on a remote profile!', UISeverity.ERROR
+    ),
+    TransCode.DAEMON_ALREADY_RUNNING: TranslationDef(
+        "Daemon for profile '{profile}' is already running!", UISeverity.SYSTEM
+    ),
+    TransCode.DAEMON_EMPTY_PASSWORD: TranslationDef(
+        'Master password cannot be empty.', UISeverity.ERROR
     ),
     TransCode.PURGE_WARNING: TranslationDef(
         f'{Theme.RED}You are about to PERMANENTLY wipe the entire Metor directory!{Theme.RESET}',
@@ -92,6 +103,33 @@ TRANSLATIONS: Dict[TransCode, TranslationDef] = {
         'You will lock yourself out of these remotes! Proceed with local wipe anyway? y/N: ',
         UISeverity.INFO,
     ),
+    TransCode.UNKNOWN_COMMAND: TranslationDef('Unknown command.', UISeverity.ERROR),
+    # Tor Subsystem
+    TransCode.TOR_KEY_ERROR: TranslationDef('Tor key error: {error}', UISeverity.ERROR),
+    TransCode.TOR_START_FAILED: TranslationDef(
+        'Tor failed to start: {error}', UISeverity.ERROR
+    ),
+    TransCode.TOR_PROCESS_TERMINATED: TranslationDef(
+        'Tor process terminated unexpectedly.', UISeverity.ERROR
+    ),
+    TransCode.ADDRESS_CURRENT: TranslationDef(
+        "Current onion address for profile '{profile}': {onion}.onion", UISeverity.INFO
+    ),
+    TransCode.ADDRESS_GENERATED: TranslationDef(
+        "New onion address generated for profile '{profile}': {onion}.onion",
+        UISeverity.INFO,
+    ),
+    TransCode.ADDRESS_CANT_GENERATE_RUNNING: TranslationDef(
+        "Changing the address for profile '{profile}' is not possible while a daemon is running.",
+        UISeverity.ERROR,
+    ),
+    TransCode.ADDRESS_NOT_GENERATED: TranslationDef(
+        "No onion address generated for profile '{profile}' yet. Simply start the daemon or use 'metor address generate'.",
+        UISeverity.INFO,
+    ),
+    TransCode.RETUNNEL_FAILED: TranslationDef(
+        'Failed to rotate Tor circuits: {error}', UISeverity.ERROR
+    ),
     # IPC & Communication
     TransCode.DAEMON_UNREACHABLE: TranslationDef(
         'Cannot reach remote Daemon on port {port}. Did you forget the SSH tunnel?',
@@ -124,6 +162,10 @@ TRANSLATIONS: Dict[TransCode, TranslationDef] = {
     ),
     TransCode.NO_PENDING_CONNECTION: TranslationDef(
         "No pending connection from '{alias}' to accept.", UISeverity.SYSTEM
+    ),
+    TransCode.MAX_CONNECTIONS_REACHED: TranslationDef(
+        "Cannot connect to '{target}'. Maximum concurrent connections ({max_conn}) reached.",
+        UISeverity.ERROR,
     ),
     # Drops & Fallback
     TransCode.DROPS_DISABLED: TranslationDef(
@@ -169,7 +211,24 @@ TRANSLATIONS: Dict[TransCode, TranslationDef] = {
         "Connection with '{alias}' rejected.", UISeverity.INFO
     ),
     TransCode.INBOX_NOTIFICATION: TranslationDef(
-        "📬 {count} new offline message(s) from '{alias}'.", UISeverity.INFO
+        "Received {count} new offline message(s) from '{alias}'.", UISeverity.INFO
+    ),
+    # Advanced Network Resilience
+    TransCode.CONNECTION_TIMEOUT: TranslationDef(
+        "Connection with '{alias}' timed out.", UISeverity.SYSTEM
+    ),
+    TransCode.AUTO_RECONNECT_ATTEMPT: TranslationDef(
+        "Attempting automatic reconnect to '{alias}'...", UISeverity.INFO
+    ),
+    TransCode.AUTO_RECONNECT_FAILED: TranslationDef(
+        "Auto-reconnect to '{alias}' failed permanently.", UISeverity.ERROR
+    ),
+    TransCode.RETUNNEL_INITIATED: TranslationDef(
+        "Initiating Tor circuit rotation and retunneling for '{alias}'...",
+        UISeverity.SYSTEM,
+    ),
+    TransCode.RETUNNEL_SUCCESS: TranslationDef(
+        "Successfully retunneled connection to '{alias}'.", UISeverity.INFO
     ),
     # Session
     TransCode.ALREADY_FOCUSED: TranslationDef(

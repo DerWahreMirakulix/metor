@@ -42,20 +42,20 @@ class SystemCommandHandler:
             CommandResponseEvent: The strictly typed response event.
         """
         if isinstance(cmd, GetAddressCommand):
-            _, msg = self._tm.get_address()
+            success, code, params = self._tm.get_address()
             return CommandResponseEvent(
-                action=cmd.action, code=TransCode.GENERIC_MSG, params={'msg': msg}
+                action=cmd.action, success=success, code=code, params=params
             )
 
         if isinstance(cmd, GenerateAddressCommand):
-            _, msg = self._tm.generate_address()
+            success, code, params = self._tm.generate_address()
             return CommandResponseEvent(
-                action=cmd.action, code=TransCode.GENERIC_MSG, params={'msg': msg}
+                action=cmd.action, success=success, code=code, params=params
             )
 
         return CommandResponseEvent(
             action=cmd.action,
             success=False,
-            code=TransCode.GENERIC_MSG,
-            params={'msg': 'Unknown command.'},
+            code=TransCode.UNKNOWN_COMMAND,
+            params={},
         )

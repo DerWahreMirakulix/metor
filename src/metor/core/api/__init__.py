@@ -34,6 +34,7 @@ from metor.core.api.commands import (
     SetSettingCommand,
     SelfDestructCommand,
     UnlockCommand,
+    RetunnelCommand,
 )
 from metor.core.api.events import (
     InitEvent,
@@ -51,6 +52,7 @@ from metor.core.api.events import (
     ConnectionFailedEvent,
     IncomingConnectionEvent,
     ConnectionRejectedEvent,
+    TiebreakerRejectedEvent,
     InboxNotificationEvent,
     InboxDataEvent,
     MsgFallbackToDropEvent,
@@ -93,6 +95,7 @@ __all__ = [
     'SetSettingCommand',
     'SelfDestructCommand',
     'UnlockCommand',
+    'RetunnelCommand',
     'InitEvent',
     'RemoteMsgEvent',
     'AckEvent',
@@ -108,6 +111,7 @@ __all__ = [
     'ConnectionFailedEvent',
     'IncomingConnectionEvent',
     'ConnectionRejectedEvent',
+    'TiebreakerRejectedEvent',
     'InboxNotificationEvent',
     'InboxDataEvent',
     'MsgFallbackToDropEvent',

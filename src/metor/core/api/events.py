@@ -20,6 +20,7 @@ class InitEvent(IpcEvent):
 class RemoteMsgEvent(IpcEvent):
     alias: str
     text: str
+    timestamp: Optional[str] = None
     type: EventType = field(default=EventType.REMOTE_MSG, init=False)
 
 
@@ -114,6 +115,12 @@ class ConnectionRejectedEvent(IpcEvent):
 
 
 @dataclass
+class TiebreakerRejectedEvent(IpcEvent):
+    alias: Optional[str] = None
+    type: EventType = field(default=EventType.TIEBREAKER_REJECTED, init=False)
+
+
+@dataclass
 class InboxNotificationEvent(IpcEvent):
     alias: Optional[str] = None
     count: int = 1
@@ -150,7 +157,7 @@ class CommandResponseEvent(IpcEvent):
 
     action: Action
     success: bool = True
-    code: TransCode = TransCode.GENERIC_MSG
+    code: TransCode = TransCode.COMMAND_SUCCESS
     data: Dict[str, Any] = field(default_factory=dict)
     params: Dict[str, Any] = field(default_factory=dict)
     type: EventType = field(default=EventType.COMMAND_RESPONSE, init=False)

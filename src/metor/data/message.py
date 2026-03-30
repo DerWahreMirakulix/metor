@@ -1,11 +1,14 @@
 """
 Module for managing asynchronous offline messages via SQLite.
 Enforces Ephemeral Messaging policies (Burn-After-Read) and strict Enums.
+Utilizes UUIDs for message consistency and network deduplication.
 Yields raw domain models without applying CLI format dependencies.
 """
 
+import secrets
 from enum import Enum
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import List, Tuple, Dict, Any, Optional
 
 from metor.core.api import TransCode
@@ -63,6 +66,7 @@ class MessageManager:
     def _initialize_table(self) -> None:
         """
         Creates the 'messages' table if it does not already exist.
+        Migrates legacy databases to include the msg_id column for UUID tracking.
 
         Args:
             None
@@ -73,6 +77,7 @@ class MessageManager:
         query: str = """
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                msg_id TEXT,
                 contact_onion TEXT NOT NULL,
                 direction TEXT NOT NULL,
                 msg_type TEXT NOT NULL,
@@ -90,9 +95,12 @@ class MessageManager:
         msg_type: MessageType,
         payload: str,
         status: MessageStatus,
+        msg_id: Optional[str] = None,
+        timestamp: Optional[str] = None,
     ) -> int:
         """
-        Inserts a new message into the database strictly ensuring uniform ONION format.
+        Inserts a new message into the database securely.
+        Enforces deduplication for incoming drops utilizing the network UUID.
 
         Args:
             contact_onion (str): The onion address of the remote peer.
@@ -100,48 +108,83 @@ class MessageManager:
             msg_type (MessageType): The type of payload (e.g., text or voice).
             payload (str): The actual message content or file path.
             status (MessageStatus): The initial status of the message.
+            msg_id (Optional[str]): Network UUID. Generated if missing.
+            timestamp (Optional[str]): Network ISO timestamp. Generated if missing.
 
         Returns:
-            int: The inserted row ID.
+            int: The inserted row ID or existing row ID if deduplicated.
         """
         contact_onion = clean_onion(contact_onion)
+        actual_msg_id: str = msg_id if msg_id else secrets.token_hex(8)
+
+        # Deduplication check for inbound payloads to prevent At-Least-Once replication faults
+        if direction == MessageDirection.IN and actual_msg_id:
+            existing: List[Tuple[Any, ...]] = self._sql.fetchall(
+                'SELECT id FROM messages WHERE msg_id = ? AND contact_onion = ?',
+                (actual_msg_id, contact_onion),
+            )
+            if existing:
+                return int(existing[0][0])
+
+        ts: str = timestamp if timestamp else datetime.now(timezone.utc).isoformat()
+
         query: str = """
-            INSERT INTO messages (contact_onion, direction, msg_type, payload, status) 
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO messages (msg_id, contact_onion, direction, msg_type, payload, timestamp, status) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """
         self._sql.execute(
             query,
-            (contact_onion, direction.value, msg_type.value, payload, status.value),
+            (
+                actual_msg_id,
+                contact_onion,
+                direction.value,
+                msg_type.value,
+                payload,
+                ts,
+                status.value,
+            ),
         )
 
         id_query: str = 'SELECT MAX(id) FROM messages'
         result: List[Tuple[Any, ...]] = self._sql.fetchall(id_query)
         return int(result[0][0]) if result and result[0][0] else 0
 
-    def get_pending_outbox(self) -> List[Tuple[int, str, str, str]]:
+    def get_pending_outbox(self) -> List[Tuple[int, str, str, str, str, str]]:
         """
         Retrieves all outbound messages that are waiting to be delivered.
+        Fetches UUIDs and timestamps to construct accurate JSON Envelopes.
 
         Args:
             None
 
         Returns:
-            List[Tuple[int, str, str, str]]: A list of database rows representing pending messages.
+            List[Tuple[int, str, str, str, str, str]]: A list of tuples (id, onion, type, payload, msg_id, timestamp).
         """
         query: str = (
-            'SELECT id, contact_onion, msg_type, payload FROM messages WHERE status = ?'
+            'SELECT id, contact_onion, msg_type, payload, msg_id, timestamp '
+            'FROM messages WHERE status = ? ORDER BY id ASC'
         )
         rows: List[Tuple[Any, ...]] = self._sql.fetchall(
             query, (MessageStatus.PENDING.value,)
         )
-        return [(int(r[0]), str(r[1]), str(r[2]), str(r[3])) for r in rows]
+        return [
+            (
+                int(r[0]),
+                str(r[1]),
+                str(r[2]),
+                str(r[3]),
+                str(r[4] or ''),
+                str(r[5] or ''),
+            )
+            for r in rows
+        ]
 
     def update_message_status(self, msg_id: int, new_status: MessageStatus) -> None:
         """
-        Updates the delivery or read status of a specific message.
+        Updates the delivery or read status of a specific message via internal SQLite ID.
 
         Args:
-            msg_id (int): The unique ID of the message.
+            msg_id (int): The unique internal database ID of the message.
             new_status (MessageStatus): The new status to apply.
 
         Returns:

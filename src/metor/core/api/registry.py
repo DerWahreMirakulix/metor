@@ -36,6 +36,7 @@ from metor.core.api.commands import (
     SetSettingCommand,
     SelfDestructCommand,
     UnlockCommand,
+    RetunnelCommand,
 )
 from metor.core.api.events import (
     InitEvent,
@@ -53,6 +54,7 @@ from metor.core.api.events import (
     ConnectionFailedEvent,
     IncomingConnectionEvent,
     ConnectionRejectedEvent,
+    TiebreakerRejectedEvent,
     InboxNotificationEvent,
     InboxDataEvent,
     MsgFallbackToDropEvent,
@@ -89,6 +91,7 @@ CMD_MAP: Dict[Action, Type[IpcCommand]] = {
     Action.SET_SETTING: SetSettingCommand,
     Action.SELF_DESTRUCT: SelfDestructCommand,
     Action.UNLOCK: UnlockCommand,
+    Action.RETUNNEL: RetunnelCommand,
 }
 
 EVENT_MAP: Dict[EventType, Type[IpcEvent]] = {
@@ -107,6 +110,7 @@ EVENT_MAP: Dict[EventType, Type[IpcEvent]] = {
     EventType.CONNECTION_FAILED: ConnectionFailedEvent,
     EventType.INCOMING_CONNECTION: IncomingConnectionEvent,
     EventType.CONNECTION_REJECTED: ConnectionRejectedEvent,
+    EventType.TIEBREAKER_REJECTED: TiebreakerRejectedEvent,
     EventType.INBOX_NOTIFICATION: InboxNotificationEvent,
     EventType.INBOX_DATA: InboxDataEvent,
     EventType.MSG_FALLBACK_TO_DROP: MsgFallbackToDropEvent,

@@ -75,7 +75,9 @@ class DatabaseCommandHandler:
         """
         if isinstance(cmd, GetContactsListCommand):
             data: Dict[str, Any] = self._cm.get_contacts_data()
-            return CommandResponseEvent(action=cmd.action, data=data)
+            return CommandResponseEvent(
+                action=cmd.action, data=data, code=TransCode.COMMAND_SUCCESS
+            )
 
         if isinstance(cmd, AddContactCommand):
             if cmd.onion:
@@ -205,6 +207,7 @@ class DatabaseCommandHandler:
                     'target': alias,
                     'profile': self._pm.profile_name,
                 },
+                code=TransCode.COMMAND_SUCCESS,
             )
 
         if isinstance(cmd, ClearHistoryCommand):
@@ -240,13 +243,15 @@ class DatabaseCommandHandler:
                     str(onion), cmd.limit
                 )
                 return CommandResponseEvent(
-                    action=cmd.action, data={'messages': messages, 'target': alias}
+                    action=cmd.action,
+                    data={'messages': messages, 'target': alias},
+                    code=TransCode.COMMAND_SUCCESS,
                 )
             return CommandResponseEvent(
                 action=cmd.action,
                 success=False,
-                code=TransCode.GENERIC_MSG,
-                params={'msg': 'No target specified.', 'alias': alias},
+                code=TransCode.INVALID_TARGET,
+                params={'target': cmd.target, 'alias': alias},
             )
 
         if isinstance(cmd, ClearMessagesCommand):
@@ -280,7 +285,11 @@ class DatabaseCommandHandler:
             inbox_data: Dict[str, int] = {
                 self._cm.get_alias_by_onion(o) or o: c for o, c in counts.items()
             }
-            return CommandResponseEvent(action=cmd.action, data={'inbox': inbox_data})
+            return CommandResponseEvent(
+                action=cmd.action,
+                data={'inbox': inbox_data},
+                code=TransCode.COMMAND_SUCCESS,
+            )
 
         if isinstance(cmd, MarkReadCommand):
             alias, onion, exists = self._cm.resolve_target(
@@ -290,9 +299,9 @@ class DatabaseCommandHandler:
                 return CommandResponseEvent(
                     action=cmd.action,
                     success=False,
-                    code=TransCode.GENERIC_MSG,
+                    code=TransCode.PEER_NOT_FOUND,
                     params={
-                        'msg': f"Peer '{cmd.target}' not found in address book.",
+                        'target': cmd.target,
                         'alias': alias,
                     },
                 )
@@ -304,12 +313,14 @@ class DatabaseCommandHandler:
                 {'timestamp': str(m[3]), 'payload': str(m[2])} for m in raw_messages
             ]
             return CommandResponseEvent(
-                action=cmd.action, data={'messages': messages_list, 'target': alias}
+                action=cmd.action,
+                data={'messages': messages_list, 'target': alias},
+                code=TransCode.COMMAND_SUCCESS,
             )
 
         return CommandResponseEvent(
             action=cmd.action,
             success=False,
-            code=TransCode.GENERIC_MSG,
-            params={'msg': 'Unknown command.'},
+            code=TransCode.UNKNOWN_COMMAND,
+            params={},
         )

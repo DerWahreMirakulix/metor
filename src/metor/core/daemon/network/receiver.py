@@ -112,8 +112,8 @@ class StreamReceiver:
                 if msg == TorCommand.ACCEPTED.value:
                     self._state.add_active_connection(onion, conn)
                     alias: Optional[str] = self._cm.get_alias_by_onion(onion)
-                    self._hm.log_event(HistoryEvent.CONNECTED, onion)
-                    self._broadcast(ConnectedEvent(alias=alias or onion, onion=onion))
+                    self._hm.log_event(HistoryEvent.LIVE_CONNECTED, onion)
+                    self._broadcast(ConnectedEvent(alias=alias, onion=onion))
 
                 elif msg.startswith(f'{TorCommand.DISCONNECT.value} '):
                     remote_disconnected = True

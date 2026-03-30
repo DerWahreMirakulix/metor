@@ -1,6 +1,7 @@
 """
 Module wrapping the server socket binding and authentication validation.
 Routes inbound connections to the application drops or the live connection state pool.
+Enforces Max Concurrent Connection Limits to mitigate RAM/FD Exhaustion attacks.
 """
 
 import socket
@@ -9,7 +10,12 @@ import secrets
 from typing import Optional, Callable, List, TYPE_CHECKING
 
 from metor.core import TorManager
-from metor.core.api import IpcEvent, ConnectedEvent, IncomingConnectionEvent
+from metor.core.api import (
+    IpcEvent,
+    ConnectedEvent,
+    IncomingConnectionEvent,
+    TiebreakerRejectedEvent,
+)
 from metor.core.daemon.models import TorCommand
 from metor.core.daemon.crypto import Crypto
 from metor.data import (
@@ -26,10 +32,6 @@ from metor.core.daemon.network.state import StateTracker
 from metor.core.daemon.network.stream import TcpStreamReader
 from metor.core.daemon.network.handshake import HandshakeProtocol
 from metor.core.daemon.network.router import MessageRouter
-
-if TYPE_CHECKING:
-    from metor.core.daemon.network.receiver import StreamReceiver
-
 
 if TYPE_CHECKING:
     from metor.core.daemon.network.receiver import StreamReceiver
@@ -92,6 +94,7 @@ class InboundListener:
     def _listener_target(self) -> None:
         """
         Background loop accepting raw incoming Tor sockets.
+        Enforces maximum connection limits to prevent DoS.
 
         Args:
             None
@@ -107,9 +110,26 @@ class InboundListener:
             try:
                 listener.settimeout(1.0)
                 conn, _ = listener.accept()
+
+                # OPSEC: Guard against RAM/FD resource exhaustion attacks
+                max_conn: int = Settings.get(SettingKey.MAX_CONCURRENT_CONNECTIONS)
+                if len(self._state.get_active_onions()) >= max_conn:
+                    self._hm.log_event(
+                        HistoryEvent.LIVE_REJECTED_MAX_CONNECTIONS,
+                        None,
+                        'Listener drop',
+                    )
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    continue
+
                 threading.Thread(
                     target=self._handle_incoming, args=(conn,), daemon=True
                 ).start()
+            except MemoryError as e:
+                self._hm.log_event(HistoryEvent.LIVE_STREAM_CORRUPTED, None, str(e))
             except Exception:
                 continue
 
@@ -145,6 +165,8 @@ class InboundListener:
                     auth_successful = True
                     if len(parts) >= 4 and parts[3] == 'ASYNC':
                         is_async = True
+        except MemoryError as e:
+            self._hm.log_event(HistoryEvent.LIVE_STREAM_CORRUPTED, onion, str(e))
         except Exception:
             pass
 
@@ -197,6 +219,13 @@ class InboundListener:
             except Exception:
                 pass
             conn.close()
+
+            self._hm.log_event(
+                HistoryEvent.TIEBREAKER_REJECTED,
+                onion,
+                'Mutual connection collision resolved',
+            )
+            self._broadcast(TiebreakerRejectedEvent(alias=alias))
             return
 
         accepted_now: bool = False
@@ -215,11 +244,11 @@ class InboundListener:
             except Exception:
                 pass
 
-            self._hm.log_event(HistoryEvent.CONNECTED, onion)
+            self._hm.log_event(HistoryEvent.LIVE_CONNECTED, onion)
             self._broadcast(ConnectedEvent(alias=alias, onion=onion))
 
             if self._receiver:
                 self._receiver.start_receiving(onion, conn, stream.get_buffer())
         else:
-            self._hm.log_event(HistoryEvent.REQUESTED_BY_REMOTE, onion)
+            self._hm.log_event(HistoryEvent.LIVE_REQUESTED_BY_REMOTE, onion)
             self._broadcast(IncomingConnectionEvent(alias=alias))

@@ -18,6 +18,7 @@ from metor.core.api import (
     GetInboxCommand,
     MarkReadCommand,
     FallbackCommand,
+    RetunnelCommand,
 )
 from metor.ui import Help
 
@@ -120,6 +121,15 @@ class CommandDispatcher:
             target = arg if arg else self._session.focused_alias
             if target:
                 self._ipc.send_command(FallbackCommand(target=target))
+            else:
+                self._renderer.print_message(
+                    Help.show_command_help(cmd).strip(), msg_type=ChatMessageType.SYSTEM
+                )
+
+        elif cmd == '/retunnel':
+            target = arg if arg else self._session.focused_alias
+            if target:
+                self._ipc.send_command(RetunnelCommand(target=target))
             else:
                 self._renderer.print_message(
                     Help.show_command_help(cmd).strip(), msg_type=ChatMessageType.SYSTEM

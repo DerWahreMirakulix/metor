@@ -18,6 +18,7 @@ from pathlib import Path
 
 from metor.core import KeyManager, TorManager
 from metor.core.api import (
+    IpcEvent,
     IpcCommand,
     InitCommand,
     GetConnectionsCommand,
@@ -46,6 +47,7 @@ from metor.core.api import (
     SetSettingCommand,
     SelfDestructCommand,
     UnlockCommand,
+    RetunnelCommand,
     CommandResponseEvent,
     TransCode,
 )
@@ -148,13 +150,26 @@ class Daemon:
             self._mm,
             self._network,
             self._ipc.broadcast,
-            self._ipc.send_to,
+            self._send_to_client,
         )
 
         atexit.register(self.stop)
         if os.name != 'nt':
             signal.signal(signal.SIGTERM, self._sig_handler)
             signal.signal(signal.SIGHUP, self._sig_handler)
+
+    def _send_to_client(self, conn: socket.socket, event: IpcEvent) -> None:
+        """
+        Helper to inject the IPC send function natively into Handlers.
+
+        Args:
+            conn (socket.socket): Connection.
+            event (IpcEvent): The event to push.
+
+        Returns:
+            None
+        """
+        self._ipc.send_to(conn, event)
 
     def _sig_handler(self, signum: int, frame: Any) -> None:
         """
@@ -209,10 +224,11 @@ class Daemon:
         """
         self._pm.initialize()
 
-        success, msg_err = self._tm.start()
+        success, code, params = self._tm.start()
         if not success:
             if self._status_cb:
-                self._status_cb(msg_err)
+                msg, _ = Translator.get(code, params)
+                self._status_cb(msg)
             self._stop_flag.set()
             return
 
@@ -412,7 +428,7 @@ class Daemon:
                 self._mm,
                 self._network,
                 self._ipc.broadcast,
-                self._ipc.send_to,
+                self._send_to_client,
             )
 
             self._is_locked = False
@@ -441,17 +457,18 @@ class Daemon:
                     CommandResponseEvent(
                         action=cmd.action,
                         success=False,
-                        code=TransCode.GENERIC_MSG,
-                        params={'msg': str(e)},
+                        code=TransCode.SETTING_TYPE_ERROR,
+                        params={'error': str(e)},
                     ),
                 )
-            except Exception:
+            except Exception as e:
                 self._ipc.send_to(
                     conn,
                     CommandResponseEvent(
                         action=cmd.action,
                         success=False,
                         code=TransCode.SETTING_UPDATE_FAILED,
+                        params={'error': str(e)},
                     ),
                 )
             return
@@ -480,6 +497,7 @@ class Daemon:
                 FallbackCommand,
                 SendDropCommand,
                 SwitchCommand,
+                RetunnelCommand,
             ),
         ):
             self._network_handler.handle(cmd, conn)

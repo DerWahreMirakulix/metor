@@ -20,19 +20,35 @@ from metor.data.settings import Settings, SettingKey
 class HistoryEvent(str, Enum):
     """Predefined event types for the history log."""
 
-    ASYNC_QUEUED = 'drop_queued'
-    ASYNC_SENT = 'drop_sent'
-    ASYNC_RECEIVED = 'drop_received'
-    ASYNC_FAILED = 'drop_failed'
+    # Async / Drops
+    DROP_QUEUED = 'drop_queued'
+    DROP_SENT = 'drop_sent'
+    DROP_RECEIVED = 'drop_received'
+    DROP_FAILED = 'drop_failed'
 
-    REQUESTED = 'live_requested'
-    REQUESTED_BY_REMOTE = 'live_requested_by_remote'
-    CONNECTED = 'live_connected'
-    REJECTED = 'live_rejected'
-    REJECTED_BY_REMOTE = 'live_rejected_by_remote'
-    DISCONNECTED = 'live_disconnected'
-    DISCONNECTED_BY_REMOTE = 'live_disconnected_by_remote'
-    CONNECTION_LOST = 'live_connection_lost'
+    # Drop Tunneling
+    DROP_TUNNEL_CONNECTED = 'drop_tunnel_connected'
+    DROP_TUNNEL_FAILED = 'drop_tunnel_failed'
+    DROP_TUNNEL_CLOSED = 'drop_tunnel_closed'
+
+    # Live Connections
+    LIVE_REQUESTED = 'live_requested'
+    LIVE_REQUESTED_BY_REMOTE = 'live_requested_by_remote'
+    LIVE_CONNECTED = 'live_connected'
+    LIVE_REJECTED = 'live_rejected'
+    LIVE_REJECTED_BY_REMOTE = 'live_rejected_by_remote'
+    LIVE_DISCONNECTED = 'live_disconnected'
+    LIVE_DISCONNECTED_BY_REMOTE = 'live_disconnected_by_remote'
+    LIVE_CONNECTION_LOST = 'live_connection_lost'
+
+    # Network Resilience
+    LIVE_CONNECTION_TIMEOUT = 'live_connection_timeout'
+    LIVE_AUTO_RECONNECT_ATTEMPT = 'live_auto_reconnect_attempt'
+    LIVE_AUTO_RECONNECT_FAILED = 'live_auto_reconnect_failed'
+    LIVE_RETUNNEL_INITIATED = 'live_retunnel_initiated'
+    LIVE_RETUNNEL_SUCCESS = 'live_retunnel_success'
+    LIVE_REJECTED_MAX_CONNECTIONS = 'live_rejected_max_connections'
+    LIVE_STREAM_CORRUPTED = 'live_stream_corrupted'
 
     @property
     def is_drop(self) -> bool:

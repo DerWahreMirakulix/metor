@@ -114,7 +114,7 @@ class MsgCommand(IpcCommand):
     Attributes:
         target (str): The target alias or onion address.
         text (str): The message payload.
-        msg_id (str): The unique message identifier.
+        msg_id (str): The unique message identifier (UUID).
         action (Action): The strict IPC action code.
     """
 
@@ -396,3 +396,17 @@ class UnlockCommand(IpcCommand):
 
     password: str
     action: Action = field(default=Action.UNLOCK, init=False)
+
+
+@dataclass
+class RetunnelCommand(IpcCommand):
+    """
+    Data Transfer Object for forcing a Tor circuit rotation and reconnecting.
+
+    Attributes:
+        target (str): The alias or onion address to retunnel.
+        action (Action): The strict IPC action code.
+    """
+
+    target: str
+    action: Action = field(default=Action.RETUNNEL, init=False)

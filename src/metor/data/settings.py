@@ -38,6 +38,11 @@ class SettingKey(str, Enum):
     FALLBACK_TO_DROP = 'daemon.fallback_to_drop'
     MAX_UNSEEN_LIVE_MSGS = 'daemon.max_unseen_live_msgs'
 
+    # 3. Advanced Network Resilience & Constraints
+    MAX_CONCURRENT_CONNECTIONS = 'daemon.max_concurrent_connections'
+    DROP_TUNNEL_TTL = 'daemon.drop_tunnel_ttl'
+    AUTO_RECONNECT_LIVE = 'daemon.auto_reconnect_live'
+
 
 class Settings:
     """Dynamic application settings manager reading from and writing to a nested global JSON file."""
@@ -62,6 +67,9 @@ class Settings:
         SettingKey.RECORD_DROP_EVENTS.value: True,
         SettingKey.FALLBACK_TO_DROP.value: True,
         SettingKey.MAX_UNSEEN_LIVE_MSGS.value: 20,
+        SettingKey.MAX_CONCURRENT_CONNECTIONS.value: 50,
+        SettingKey.DROP_TUNNEL_TTL.value: 30.0,
+        SettingKey.AUTO_RECONNECT_LIVE.value: True,
     }
 
     @staticmethod
