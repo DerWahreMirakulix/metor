@@ -132,6 +132,7 @@ class CommandHandlers:
     def handle_cleanup() -> None:
         """
         Executes OS-level process cleanup, clears daemon locks, and reports the result.
+        Strictly ignores remote profiles as cleanup is a host-local OS operation.
 
         Args:
             None
@@ -145,7 +146,8 @@ class CommandHandlers:
 
         for profile_name in ProfileManager.get_all_profiles():
             temp_pm: ProfileManager = ProfileManager(profile_name)
-            temp_pm.clear_daemon_port()
+            if not temp_pm.is_remote():
+                temp_pm.clear_daemon_port()
 
         result_msg, _ = Translator.get(TransCode.CLEANUP_COMPLETE, {'killed': killed})
         print(result_msg)
