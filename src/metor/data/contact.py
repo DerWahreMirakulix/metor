@@ -30,7 +30,7 @@ class ContactManager:
         """
         self._pm: ProfileManager = pm
         self._db_path: Path = Path(self._pm.get_config_dir()) / Constants.DB_FILE
-        self._sql: SqlManager = SqlManager(self._db_path, password)
+        self._sql: SqlManager = SqlManager(self._db_path, self._pm.config, password)
 
     def get_all_contacts(self) -> List[str]:
         """

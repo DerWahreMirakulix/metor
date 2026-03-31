@@ -10,7 +10,7 @@ import socket
 import threading
 import time
 import base64
-from typing import List, Optional, Tuple, Callable, Dict
+from typing import List, Optional, Tuple, Callable, Dict, TYPE_CHECKING
 
 from metor.core import TorManager
 from metor.core.api import IpcEvent, AckEvent, DropFailedEvent, JsonValue
@@ -19,7 +19,6 @@ from metor.data import (
     MessageStatus,
     HistoryManager,
     HistoryEvent,
-    Settings,
     SettingKey,
 )
 
@@ -27,6 +26,9 @@ from metor.data import (
 from metor.core.daemon.crypto import Crypto
 from metor.core.daemon.models import TorCommand
 from metor.core.daemon.network import StateTracker, TcpStreamReader
+
+if TYPE_CHECKING:
+    from metor.data.profile.config import Config
 
 
 class OutboxWorker:
@@ -40,6 +42,7 @@ class OutboxWorker:
         crypto: Crypto,
         broadcast_callback: Callable[[IpcEvent], None],
         stop_flag: threading.Event,
+        config: 'Config',
         state: Optional[StateTracker] = None,
     ) -> None:
         """
@@ -52,6 +55,7 @@ class OutboxWorker:
             crypto (Crypto): The cryptographic service for handshakes.
             broadcast_callback (Callable): Callback to broadcast IPC events.
             stop_flag (threading.Event): Event to gracefully shutdown the worker loop.
+            config (Config): The profile configuration instance.
             state (Optional[StateTracker]): State tracker to read UI focus reference counts.
 
         Returns:
@@ -63,6 +67,7 @@ class OutboxWorker:
         self._crypto: Crypto = crypto
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
         self._stop_flag: threading.Event = stop_flag
+        self._config: 'Config' = config
         self._state: Optional[StateTracker] = state
 
         # Cache for persistent tunnels: onion -> (socket, stream_reader, last_used_timestamp)
@@ -150,18 +155,17 @@ class OutboxWorker:
             self._hm.log_event(
                 HistoryEvent.DROP_TUNNEL_FAILED, onion, 'Failed to build Tor circuit'
             )
-            # Route failure event to UI to paint message red
             for row in messages:
                 self._broadcast(DropFailedEvent(msg_id=row[4]))
             return
 
         try:
-            conn.settimeout(15.0)
+            idle_timeout: float = self._config.get_float(SettingKey.STREAM_IDLE_TIMEOUT)
+            conn.settimeout(idle_timeout)
 
             for row in messages:
                 db_id, _, _, payload, msg_id, timestamp = row
 
-                # Envelop payload in JSON for consistency and deduplication
                 envelope: Dict[str, JsonValue] = {
                     'id': msg_id,
                     'timestamp': timestamp,
@@ -175,7 +179,6 @@ class OutboxWorker:
                 drop_msg: str = f'{TorCommand.DROP.value} {msg_id} {b64_payload}\n'
                 conn.sendall(drop_msg.encode('utf-8'))
 
-                # Wait for ACK stream using the memory-safe and UTF-8-safe TcpStreamReader
                 ack_line: Optional[str] = stream.read_line()
                 if not ack_line:
                     raise ConnectionError('Tunnel dropped while awaiting ACK.')
@@ -185,7 +188,6 @@ class OutboxWorker:
                     self._hm.log_event(HistoryEvent.DROP_SENT, onion)
                     self._broadcast(AckEvent(msg_id=msg_id, text=payload))
 
-            # Update last used timestamp to refresh TTL
             self._tunnels[onion] = (conn, stream, time.time())
 
         except Exception as e:
@@ -208,7 +210,8 @@ class OutboxWorker:
         """
         try:
             conn: socket.socket = self._tm.connect(onion)
-            conn.settimeout(15.0)
+            tor_timeout: float = self._config.get_float(SettingKey.TOR_TIMEOUT)
+            conn.settimeout(tor_timeout)
 
             stream: TcpStreamReader = TcpStreamReader(conn)
             challenge_line: Optional[str] = stream.read_line()
@@ -243,9 +246,7 @@ class OutboxWorker:
         Returns:
             None
         """
-        ttl_setting: float = float(
-            str(Settings.get(SettingKey.DROP_TUNNEL_TTL) or 30.0)
-        )
+        ttl_setting: float = self._config.get_float(SettingKey.DROP_TUNNEL_TTL)
         now: float = time.time()
         expired_onions: List[str] = []
 
@@ -254,13 +255,11 @@ class OutboxWorker:
                 self._state.is_focused_by_ui(onion) if self._state else False
             )
 
-            # If TTL is 0, tunnel lives forever AS LONG AS it is focused
             if ttl_setting == 0.0:
                 if not is_focused:
                     expired_onions.append(onion)
                 continue
 
-            # Standard TTL check
             if (now - last_used) > ttl_setting and not is_focused:
                 expired_onions.append(onion)
 

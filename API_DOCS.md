@@ -32,6 +32,10 @@ It details the strict Data Transfer Objects (DTOs) used over the local IPC socke
 - [GenerateAddressCommand](#generateaddresscommand)
 - [ClearProfileDbCommand](#clearprofiledbcommand)
 - [SetSettingCommand](#setsettingcommand)
+- [GetSettingCommand](#getsettingcommand)
+- [SetConfigCommand](#setconfigcommand)
+- [GetConfigCommand](#getconfigcommand)
+- [SyncConfigCommand](#syncconfigcommand)
 - [SelfDestructCommand](#selfdestructcommand)
 - [UnlockCommand](#unlockcommand)
 - [RetunnelCommand](#retunnelcommand)
@@ -72,6 +76,10 @@ It details the strict Data Transfer Objects (DTOs) used over the local IPC socke
 - [ProfileActionSuccessEvent](#profileactionsuccessevent)
 - [TargetActionSuccessEvent](#targetactionsuccessevent)
 - [SettingUpdatedEvent](#settingupdatedevent)
+- [SettingDataEvent](#settingdataevent)
+- [ConfigUpdatedEvent](#configupdatedevent)
+- [ConfigDataEvent](#configdataevent)
+- [ConfigSyncedEvent](#configsyncedevent)
 - [FallbackSuccessEvent](#fallbacksuccessevent)
 - [MaxConnectionsReachedEvent](#maxconnectionsreachedevent)
 - [PeerNotFoundEvent](#peernotfoundevent)
@@ -471,7 +479,7 @@ _No additional payload parameters._
 
 ### `SetSettingCommand`
 
-Data Transfer Object for updating a global or daemon setting.
+Data Transfer Object for updating a global setting.
 
     Attributes:
         setting_key (str): The configuration key to modify.
@@ -484,6 +492,69 @@ Data Transfer Object for updating a global or daemon setting.
 | `setting_value` | `Union[str, int, float, bool]` | Required |
 
 **Action Code:** `set_setting`
+
+---
+
+### `GetSettingCommand`
+
+Data Transfer Object for retrieving a global setting.
+
+    Attributes:
+        setting_key (str): The configuration key to retrieve.
+        action (Action): The strict IPC action code.
+
+| Field         | Type  | Default  |
+| ------------- | ----- | -------- |
+| `setting_key` | `str` | Required |
+
+**Action Code:** `get_setting`
+
+---
+
+### `SetConfigCommand`
+
+Data Transfer Object for updating a profile-specific config override.
+
+    Attributes:
+        setting_key (str): The configuration key to modify.
+        setting_value (Union[str, int, float, bool]): The new strictly typed value.
+        action (Action): The strict IPC action code.
+
+| Field           | Type                           | Default  |
+| --------------- | ------------------------------ | -------- |
+| `setting_key`   | `str`                          | Required |
+| `setting_value` | `Union[str, int, float, bool]` | Required |
+
+**Action Code:** `set_config`
+
+---
+
+### `GetConfigCommand`
+
+Data Transfer Object for retrieving a profile-specific config override.
+
+    Attributes:
+        setting_key (str): The configuration key to retrieve.
+        action (Action): The strict IPC action code.
+
+| Field         | Type  | Default  |
+| ------------- | ----- | -------- |
+| `setting_key` | `str` | Required |
+
+**Action Code:** `get_config`
+
+---
+
+### `SyncConfigCommand`
+
+Data Transfer Object for wiping all profile-specific settings to restore the global cascade.
+
+    Attributes:
+        action (Action): The strict IPC action code.
+
+_No additional payload parameters._
+
+**Action Code:** `sync_config`
 
 ---
 
@@ -1147,7 +1218,7 @@ Data Transfer Object indicating an action targeting a specific peer succeeded.
 
 ### `SettingUpdatedEvent`
 
-Data Transfer Object indicating an application setting was mutated.
+Data Transfer Object indicating a global setting was mutated.
 
     Attributes:
         action (Action): The triggering action.
@@ -1161,6 +1232,82 @@ Data Transfer Object indicating an application setting was mutated.
 | `key`  | `str`        | Required |
 
 **Event Type Code:** `setting_updated`
+
+---
+
+### `SettingDataEvent`
+
+Data Transfer Object returning a global setting value.
+
+    Attributes:
+        key (str): The requested setting key.
+        value (str): The stringified value.
+        code (DomainCode): The translation code.
+        type (EventType): The strict IPC event type code.
+
+| Field   | Type         | Default                   |
+| ------- | ------------ | ------------------------- |
+| `key`   | `str`        | Required                  |
+| `value` | `str`        | Required                  |
+| `code`  | `DomainCode` | `SystemCode.SETTING_DATA` |
+
+**Event Type Code:** `setting_data`
+
+---
+
+### `ConfigUpdatedEvent`
+
+Data Transfer Object indicating a profile-specific config was mutated.
+
+    Attributes:
+        action (Action): The triggering action.
+        code (DomainCode): The translation code.
+        key (str): The specific setting key modified.
+        type (EventType): The strict IPC event type code.
+
+| Field  | Type         | Default  |
+| ------ | ------------ | -------- |
+| `code` | `DomainCode` | Required |
+| `key`  | `str`        | Required |
+
+**Event Type Code:** `config_updated`
+
+---
+
+### `ConfigDataEvent`
+
+Data Transfer Object returning a profile-specific config value.
+
+    Attributes:
+        key (str): The requested config key.
+        value (str): The stringified value.
+        code (DomainCode): The translation code.
+        type (EventType): The strict IPC event type code.
+
+| Field   | Type         | Default                  |
+| ------- | ------------ | ------------------------ |
+| `key`   | `str`        | Required                 |
+| `value` | `str`        | Required                 |
+| `code`  | `DomainCode` | `SystemCode.CONFIG_DATA` |
+
+**Event Type Code:** `config_data`
+
+---
+
+### `ConfigSyncedEvent`
+
+Data Transfer Object indicating a profile's config overrides were cleared.
+
+    Attributes:
+        action (Action): The triggering action.
+        code (DomainCode): The translation code.
+        type (EventType): The strict IPC event type code.
+
+| Field  | Type         | Default                    |
+| ------ | ------------ | -------------------------- |
+| `code` | `DomainCode` | `SystemCode.CONFIG_SYNCED` |
+
+**Event Type Code:** `config_synced`
 
 ---
 

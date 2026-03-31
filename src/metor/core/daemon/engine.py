@@ -4,6 +4,7 @@ Orchestrates Network, IPC API, and Outbox routing seamlessly.
 Handles Unlock operations, Nuke/Purge protocols, and Local Authentication constraints.
 Enforces the Zero-Text Policy by emitting structured Domain-Driven payloads directly to the IPC interface.
 Ensures strict SRP by routing incoming commands to dedicated Handlers.
+Guards against UI Domain leakage by rejecting UI configurations.
 """
 
 import socket
@@ -46,6 +47,10 @@ from metor.core.api import (
     GenerateAddressCommand,
     ClearProfileDbCommand,
     SetSettingCommand,
+    GetSettingCommand,
+    SetConfigCommand,
+    GetConfigCommand,
+    SyncConfigCommand,
     SelfDestructCommand,
     UnlockCommand,
     RetunnelCommand,
@@ -55,14 +60,12 @@ from metor.core.api import (
     JsonValue,
     ActionErrorEvent,
     ActionSuccessEvent,
-    SettingUpdatedEvent,
 )
 from metor.data.profile import ProfileManager
 from metor.data import (
     HistoryManager,
     ContactManager,
     MessageManager,
-    Settings,
     SettingKey,
 )
 from metor.utils import Constants, clean_onion, secure_shred_file
@@ -76,6 +79,7 @@ from metor.core.daemon.handlers import (
     DatabaseCommandHandler,
     SystemCommandHandler,
     NetworkCommandHandler,
+    ConfigCommandHandler,
 )
 
 
@@ -128,19 +132,27 @@ class Daemon:
             pm, self._process_ui_command, self._on_ipc_disconnect
         )
         self._outbox: OutboxWorker = OutboxWorker(
-            tm, mm, hm, self._crypto, self._ipc.broadcast, self._stop_flag
+            self._tm,
+            self._mm,
+            self._hm,
+            self._crypto,
+            self._ipc.broadcast,
+            self._stop_flag,
+            config=self._pm.config,
         )
         self._network: NetworkManager = NetworkManager(
-            tm,
-            cm,
-            hm,
-            mm,
+            self._tm,
+            self._cm,
+            self._hm,
+            self._mm,
             self._crypto,
             self._ipc.broadcast,
             self._ipc.has_active_clients,
             self._stop_flag,
+            config=self._pm.config,
         )
 
+        self._config_handler: ConfigCommandHandler = ConfigCommandHandler(self._pm)
         self._db_handler: DatabaseCommandHandler = DatabaseCommandHandler(
             self._pm,
             self._cm,
@@ -160,6 +172,7 @@ class Daemon:
             self._network,
             self._ipc.broadcast,
             self._send_to_client,
+            config=self._pm.config,
         )
 
         atexit.register(self.stop)
@@ -264,7 +277,6 @@ class Daemon:
         """
         self._stop_flag.set()
         self._network.disconnect_all()
-        # Zero-trace cleanup: Force wipe all isolated orphans at shutdown
         if self._cm:
             self._cm.cleanup_orphans([])
         self._ipc.stop()
@@ -321,7 +333,7 @@ class Daemon:
         Returns:
             None
         """
-        if Settings.get(SettingKey.REQUIRE_LOCAL_AUTH):
+        if self._pm.config.get_bool(SettingKey.REQUIRE_LOCAL_AUTH):
             if not isinstance(cmd, (InitCommand, UnlockCommand)):
                 if conn not in self._authenticated_clients:
                     self._ipc.send_to(
@@ -346,7 +358,7 @@ class Daemon:
         if isinstance(cmd, UnlockCommand):
             if not self._is_locked:
                 if (
-                    Settings.get(SettingKey.REQUIRE_LOCAL_AUTH)
+                    self._pm.config.get_bool(SettingKey.REQUIRE_LOCAL_AUTH)
                     and conn not in self._authenticated_clients
                 ):
                     try:
@@ -405,6 +417,7 @@ class Daemon:
                 self._ipc.broadcast,
                 self._ipc.has_active_clients,
                 self._stop_flag,
+                config=self._pm.config,
             )
             self._outbox = OutboxWorker(
                 self._tm,
@@ -413,6 +426,7 @@ class Daemon:
                 self._crypto,
                 self._ipc.broadcast,
                 self._stop_flag,
+                config=self._pm.config,
             )
 
             self._db_handler = DatabaseCommandHandler(
@@ -432,6 +446,7 @@ class Daemon:
                 self._network,
                 self._ipc.broadcast,
                 self._send_to_client,
+                config=self._pm.config,
             )
 
             self._is_locked = False
@@ -441,37 +456,6 @@ class Daemon:
                 conn,
                 ActionSuccessEvent(action=cmd.action, code=SystemCode.DAEMON_UNLOCKED),
             )
-            return
-
-        if isinstance(cmd, SetSettingCommand):
-            try:
-                Settings.set(SettingKey(cmd.setting_key), cmd.setting_value)
-                self._ipc.send_to(
-                    conn,
-                    SettingUpdatedEvent(
-                        action=cmd.action,
-                        code=SystemCode.SETTING_UPDATED,
-                        key=cmd.setting_key,
-                    ),
-                )
-            except TypeError as e:
-                self._ipc.send_to(
-                    conn,
-                    ActionErrorEvent(
-                        action=cmd.action,
-                        code=SystemCode.SETTING_TYPE_ERROR,
-                        reason=str(e),
-                    ),
-                )
-            except Exception as e:
-                self._ipc.send_to(
-                    conn,
-                    ActionErrorEvent(
-                        action=cmd.action,
-                        code=SystemCode.SETTING_UPDATE_FAILED,
-                        reason=str(e),
-                    ),
-                )
             return
 
         if self._is_locked:
@@ -484,6 +468,18 @@ class Daemon:
         # --- DELEGATION TO DEDICATED HANDLERS ---
 
         if isinstance(
+            cmd,
+            (
+                SetSettingCommand,
+                GetSettingCommand,
+                SetConfigCommand,
+                GetConfigCommand,
+                SyncConfigCommand,
+            ),
+        ):
+            self._ipc.send_to(conn, self._config_handler.handle(cmd))
+
+        elif isinstance(
             cmd,
             (
                 InitCommand,

@@ -46,13 +46,30 @@ TRANSLATIONS: Dict[DomainCode, TranslationDef] = {
         'Self-destruct command accepted. Nuking daemon...', UISeverity.SYSTEM
     ),
     SystemCode.SETTING_UPDATED: TranslationDef(
-        "Daemon setting '{key}' updated.", UISeverity.SYSTEM
+        "Global setting '{key}' updated successfully.", UISeverity.SYSTEM
+    ),
+    SystemCode.CONFIG_UPDATED: TranslationDef(
+        "Profile configuration override for '{key}' updated successfully.",
+        UISeverity.SYSTEM,
     ),
     SystemCode.SETTING_UPDATE_FAILED: TranslationDef(
-        'Failed to update setting: {error}', UISeverity.ERROR
+        'Failed to update global setting: {error}', UISeverity.ERROR
+    ),
+    SystemCode.CONFIG_UPDATE_FAILED: TranslationDef(
+        'Failed to update profile config: {error}', UISeverity.ERROR
     ),
     SystemCode.SETTING_TYPE_ERROR: TranslationDef(
-        'Setting type error: {error}', UISeverity.ERROR
+        'Type parsing error: {error}', UISeverity.ERROR
+    ),
+    SystemCode.SETTING_DATA: TranslationDef(
+        "Global Setting '{key}': {value}", UISeverity.INFO
+    ),
+    SystemCode.CONFIG_DATA: TranslationDef(
+        "Profile Config '{key}': {value}", UISeverity.INFO
+    ),
+    SystemCode.CONFIG_SYNCED: TranslationDef(
+        'Profile overrides cleared. Config is now synced with global settings.',
+        UISeverity.INFO,
     ),
     SystemCode.UNKNOWN_COMMAND: TranslationDef('Unknown command.', UISeverity.ERROR),
     SystemCode.INIT_ERROR: TranslationDef('Initialization error.', UISeverity.ERROR),

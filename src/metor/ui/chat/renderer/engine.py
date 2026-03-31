@@ -8,10 +8,10 @@ import shutil
 import signal
 import time
 import types
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, TYPE_CHECKING
 
 from metor.core.api import JsonValue
-from metor.data import SettingKey, Settings
+from metor.data.settings import SettingKey
 from metor.ui import UIPresenter
 from metor.ui.chat.models import ChatMessageType, ChatLine
 from metor.ui.chat.presenter import ChatPresenter
@@ -20,21 +20,25 @@ from metor.ui.chat.presenter import ChatPresenter
 from metor.ui.chat.renderer.display import Display
 from metor.ui.chat.renderer.input import InputHandler
 
+if TYPE_CHECKING:
+    from metor.data.profile.config import Config
+
 
 class Renderer:
     """Facade for the UI rendering layer. Manages threading locks and sub-components."""
 
-    def __init__(self) -> None:
+    def __init__(self, config: 'Config') -> None:
         """
         Initializes the Renderer Engine and its sub-components.
 
         Args:
-            None
+            config (Config): The profile configuration instance.
 
         Returns:
             None
         """
-        self._initial_prompt: str = f'{Settings.get(SettingKey.PROMPT_SIGN)} '
+        self._config: 'Config' = config
+        self._initial_prompt: str = f'{self._config.get_str(SettingKey.PROMPT_SIGN)} '
         self._prompt: str = self._initial_prompt
 
         self._display: Display = Display(self._initial_prompt)
@@ -114,8 +118,7 @@ class Renderer:
 
             self._display.all_msgs.append(chat_line)
 
-            limit_raw: JsonValue = Settings.get(SettingKey.CHAT_LIMIT)
-            limit: int = int(str(limit_raw)) if limit_raw else 50
+            limit: int = self._config.get_int(SettingKey.CHAT_LIMIT)
             # Sliding window: We only pop one to maintain the high-watermark or stay at the limit
             if len(self._display.all_msgs) > limit:
                 self._display.all_msgs.pop(0)
@@ -181,10 +184,8 @@ class Renderer:
                 )
                 self._display.all_msgs.append(chat_line)
 
-            limit_raw: JsonValue = Settings.get(SettingKey.CHAT_LIMIT)
-            padding_raw: JsonValue = Settings.get(SettingKey.CHAT_BUFFER_PADDING)
-            limit: int = int(str(limit_raw)) if limit_raw else 50
-            padding: int = int(str(padding_raw)) if padding_raw else 20
+            limit: int = self._config.get_int(SettingKey.CHAT_LIMIT)
+            padding: int = self._config.get_int(SettingKey.CHAT_BUFFER_PADDING)
             total_limit: int = limit + padding
 
             while len(self._display.all_msgs) > total_limit:

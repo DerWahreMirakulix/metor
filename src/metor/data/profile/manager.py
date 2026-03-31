@@ -107,7 +107,7 @@ class ProfileManager:
         Returns:
             bool: True if remote, False otherwise.
         """
-        return bool(self.config.get(ProfileConfigKey.IS_REMOTE, False))
+        return self.config.get_bool(ProfileConfigKey.IS_REMOTE)
 
     def get_static_port(self) -> Optional[int]:
         """
@@ -197,7 +197,7 @@ class ProfileManager:
         Returns:
             str: Default profile name.
         """
-        return str(Settings.get(SettingKey.DEFAULT_PROFILE))
+        return Settings.get_str(SettingKey.DEFAULT_PROFILE)
 
     @classmethod
     def set_default_profile(
@@ -437,7 +437,7 @@ class ProfileManager:
             return False, DbCode.NO_DB_FOUND, {'profile': safe_name}
 
         try:
-            sql: SqlManager = SqlManager(db_path)
+            sql: SqlManager = SqlManager(db_path, pm.config)
             sql.execute('DELETE FROM history')
             sql.execute('DELETE FROM messages')
             sql.execute('DELETE FROM contacts')

@@ -2,7 +2,7 @@
 Module providing a transparent proxy for all CLI commands.
 Routes requests to the Daemon via IPC automatically, launching a HeadlessDaemon if offline.
 Formats responses securely via the centralized Translator and Presenter using strict DTOs.
-Enforces Domain-Driven Design by removing direct SQLite database access from the UI Layer.
+Enforces Domain-Driven Design by routing UI settings locally and Daemon settings via IPC.
 """
 
 import socket
@@ -23,6 +23,10 @@ from metor.core.api import (
     UnlockCommand,
     SelfDestructCommand,
     SetSettingCommand,
+    GetSettingCommand,
+    SetConfigCommand,
+    GetConfigCommand,
+    SyncConfigCommand,
     GenerateAddressCommand,
     GetAddressCommand,
     SendDropCommand,
@@ -49,7 +53,7 @@ from metor.core.daemon import HeadlessDaemon
 from metor.data import Settings, SettingKey
 from metor.data.profile import ProfileManager
 from metor.ui import Theme, UIPresenter, Translator
-from metor.utils import Constants
+from metor.utils import Constants, TypeCaster
 
 
 class CliProxy:
@@ -144,16 +148,25 @@ class CliProxy:
                     )
                 )
 
-            # Offline local state: Route through ephemeral HeadlessDaemon to enforce DDD
             password: Optional[str] = None
-            if not isinstance(cmd, (GetAddressCommand, GenerateAddressCommand)):
+            if not isinstance(
+                cmd,
+                (
+                    GetAddressCommand,
+                    GenerateAddressCommand,
+                    GetSettingCommand,
+                    SetSettingCommand,
+                    GetConfigCommand,
+                    SetConfigCommand,
+                    SyncConfigCommand,
+                ),
+            ):
                 prompt, _ = Translator.get(UiCode.ENTER_MASTER_PASSWORD)
                 password = getpass.getpass(prompt)
 
             with HeadlessDaemon(self._pm, password) as hd:
                 return self._send_to_port(hd.port, cmd, wait_for_response)
 
-        # Active local or SSH remote tunnel
         return self._send_to_port(port, cmd, wait_for_response)
 
     def _send_to_port(self, port: int, cmd: IpcCommand, wait_for_response: bool) -> str:
@@ -170,7 +183,7 @@ class CliProxy:
         """
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(2.0)
+                s.settimeout(Settings.get_float(SettingKey.IPC_TIMEOUT))
                 s.connect((Constants.LOCALHOST, port))
                 s.sendall((cmd.to_json() + '\n').encode('utf-8'))
 
@@ -206,7 +219,6 @@ class CliProxy:
                     text_fmt: str = UIPresenter.format_response(event, chat_mode=False)
                     return self._prefix_remote(text_fmt)
 
-                # For generic Success, Error, or Notification DTOs
                 params_raw: Dict[str, object] = dataclasses.asdict(event)
                 params: Dict[str, JsonValue] = {
                     k: v
@@ -255,67 +267,148 @@ class CliProxy:
             return err
         return self._request_ipc(SelfDestructCommand(), wait_for_response=True)
 
-    def _parse_setting_value(self, value: str) -> Union[str, int, float, bool]:
+    def handle_settings_set(self, key: str, value: str) -> str:
         """
-        Converts raw CLI string input into native Python types for clean persistence.
+        Sets a global setting. Applies strictly to the global configuration.
 
         Args:
-            value (str): The string value from sys.argv.
-
-        Returns:
-            Union[str, int, float, bool]: The correctly typed value.
-        """
-        val_lower: str = value.lower()
-        if val_lower == 'true':
-            return True
-        if val_lower == 'false':
-            return False
-
-        if value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
-            return int(value)
-
-        try:
-            return float(value)
-        except ValueError:
-            return value
-
-    def handle_settings(self, key: str, value: str) -> str:
-        """
-        Routes setting changes. UI settings are applied locally. Daemon settings are
-        routed via IPC if running, or applied locally if the daemon is offline.
-        Enforces strict native typing is maintained.
-
-        Args:
-            key (str): The setting key string.
+            key (str): The setting key.
             value (str): The new value.
 
         Returns:
             str: Status message.
         """
         try:
-            setting_enum: SettingKey = SettingKey(key)
+            key_enum: SettingKey = SettingKey(key)
         except ValueError:
-            return f"Unknown setting key '{key}'."
-
-        parsed_value: Union[str, int, float, bool] = self._parse_setting_value(value)
-
-        if setting_enum.value.startswith('ui.'):
-            try:
-                Settings.set(setting_enum, parsed_value)
-                return self._translate_local(SystemCode.SETTING_UPDATED, {'key': key})
-            except TypeError as e:
-                return str(e)
-
-        if self.is_remote or self._pm.is_daemon_running():
-            return self._request_ipc(
-                SetSettingCommand(setting_key=key, setting_value=parsed_value)
+            return self._translate_local(
+                SystemCode.SETTING_TYPE_ERROR, {'error': 'Invalid setting key.'}
             )
 
+        parsed_value: Union[str, int, float, bool] = TypeCaster.infer_from_string(value)
+
+        if key_enum.is_ui:
+            try:
+                Settings.set(key_enum, parsed_value)
+                return self._translate_local(SystemCode.SETTING_UPDATED, {'key': key})
+            except TypeError as e:
+                return self._translate_local(
+                    SystemCode.SETTING_TYPE_ERROR, {'error': str(e)}
+                )
+
+        return self._request_ipc(
+            SetSettingCommand(setting_key=key, setting_value=parsed_value)
+        )
+
+    def handle_settings_get(self, key: str) -> str:
+        """
+        Retrieves a global setting.
+
+        Args:
+            key (str): The setting key.
+
+        Returns:
+            str: The formatted response containing the setting value.
+        """
         try:
-            Settings.set(setting_enum, parsed_value)
-            return self._translate_local(SystemCode.SETTING_UPDATED, {'key': key})
-        except TypeError as e:
-            return str(e)
+            key_enum: SettingKey = SettingKey(key)
+        except ValueError:
+            return self._translate_local(
+                SystemCode.SETTING_TYPE_ERROR, {'error': 'Invalid setting key.'}
+            )
+
+        if key_enum.is_ui:
+            val: str = Settings.get_str(key_enum)
+            return self._translate_local(
+                SystemCode.SETTING_DATA, {'key': key, 'value': val}
+            )
+
+        return self._request_ipc(GetSettingCommand(setting_key=key))
+
+    def handle_config_set(self, key: str, value: str) -> str:
+        """
+        Sets a profile-specific override configuration.
+
+        Args:
+            key (str): The config key.
+            value (str): The new value.
+
+        Returns:
+            str: Status message.
+        """
+        try:
+            key_enum: SettingKey = SettingKey(key)
+        except ValueError:
+            return self._translate_local(
+                SystemCode.SETTING_TYPE_ERROR, {'error': 'Invalid config key.'}
+            )
+
+        parsed_value: Union[str, int, float, bool] = TypeCaster.infer_from_string(value)
+
+        if key_enum.is_ui:
+            try:
+                self._pm.config.set(key_enum, parsed_value)
+                return self._translate_local(SystemCode.CONFIG_UPDATED, {'key': key})
+            except TypeError as e:
+                return self._translate_local(
+                    SystemCode.SETTING_TYPE_ERROR, {'error': str(e)}
+                )
+
+        return self._request_ipc(
+            SetConfigCommand(setting_key=key, setting_value=parsed_value)
+        )
+
+    def handle_config_get(self, key: str) -> str:
+        """
+        Retrieves the effective profile-specific configuration value (including global fallbacks).
+
+        Args:
+            key (str): The config key.
+
+        Returns:
+            str: The formatted response containing the config value.
+        """
+        try:
+            key_enum: SettingKey = SettingKey(key)
+        except ValueError:
+            return self._translate_local(
+                SystemCode.SETTING_TYPE_ERROR, {'error': 'Invalid config key.'}
+            )
+
+        if key_enum.is_ui:
+            val: str = self._pm.config.get_str(key_enum)
+            return self._translate_local(
+                SystemCode.CONFIG_DATA, {'key': key, 'value': val}
+            )
+
+        return self._request_ipc(GetConfigCommand(setting_key=key))
+
+    def handle_config_sync(self) -> str:
+        """
+        Wipes profile overrides to restore global defaults for the active profile.
+        Syncs locally, and if a daemon is running or remote, propagates via IPC.
+
+        Args:
+            None
+
+        Returns:
+            str: Status message.
+        """
+        try:
+            self._pm.config.sync_with_global()
+            local_msg: str = self._translate_local(SystemCode.CONFIG_SYNCED)
+        except Exception as e:
+            return self._translate_local(
+                SystemCode.CONFIG_UPDATE_FAILED, {'error': str(e)}
+            )
+
+        if self.is_remote or self._pm.is_daemon_running():
+            daemon_msg: str = self._request_ipc(SyncConfigCommand())
+            if self.is_remote:
+                return f'{local_msg}\n{daemon_msg}'
+            return daemon_msg
+
+        return local_msg
 
     def get_address(self, generate: bool = False) -> str:
         """

@@ -1,7 +1,7 @@
 """
 Module for handling global application settings securely.
 Utilizes a centralized cross-platform file locking mechanism to prevent race conditions.
-Enforces strict typing using Enums for configuration keys.
+Enforces strict typing using Enums for configuration keys and strongly-typed accessors.
 """
 
 import json
@@ -9,7 +9,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, Union, Optional
 
-from metor.utils import Constants, FileLock
+from metor.utils import Constants, FileLock, TypeCaster
 
 
 # Types
@@ -26,11 +26,15 @@ class SettingKey(str, Enum):
     HISTORY_LIMIT = 'ui.history_limit'
     MESSAGES_LIMIT = 'ui.messages_limit'
     CHAT_BUFFER_PADDING = 'ui.chat_buffer_padding'
+    IPC_TIMEOUT = 'ui.ipc_timeout'
 
     # 2. Core Daemon (Server - Network, Persistence & Security)
     MAX_TOR_RETRIES = 'daemon.max_tor_retries'
     MAX_CONNECT_RETRIES = 'daemon.max_connect_retries'
     TOR_TIMEOUT = 'daemon.tor_timeout'
+    STREAM_IDLE_TIMEOUT = 'daemon.stream_idle_timeout'
+    LATE_ACCEPTANCE_TIMEOUT = 'daemon.late_acceptance_timeout'
+    DAEMON_IPC_TIMEOUT = 'daemon.ipc_timeout'
     ENABLE_TOR_LOGGING = 'daemon.enable_tor_logging'
     ENABLE_SQL_LOGGING = 'daemon.enable_sql_logging'
     AUTO_ACCEPT_CONTACTS = 'daemon.auto_accept_contacts'
@@ -47,6 +51,32 @@ class SettingKey(str, Enum):
     DROP_TUNNEL_TTL = 'daemon.drop_tunnel_ttl'
     AUTO_RECONNECT_LIVE = 'daemon.auto_reconnect_live'
 
+    @property
+    def is_ui(self) -> bool:
+        """
+        Determines if the setting belongs to the User Interface domain.
+
+        Args:
+            None
+
+        Returns:
+            bool: True if it is a UI setting.
+        """
+        return self.value.startswith('ui.')
+
+    @property
+    def is_daemon(self) -> bool:
+        """
+        Determines if the setting belongs to the Daemon domain.
+
+        Args:
+            None
+
+        Returns:
+            bool: True if it is a Daemon setting.
+        """
+        return self.value.startswith('daemon.')
+
 
 class Settings:
     """Dynamic application settings manager reading from and writing to a nested global JSON file."""
@@ -58,9 +88,13 @@ class Settings:
         SettingKey.HISTORY_LIMIT.value: 50,
         SettingKey.MESSAGES_LIMIT.value: 50,
         SettingKey.CHAT_BUFFER_PADDING.value: 20,
+        SettingKey.IPC_TIMEOUT.value: 15.0,
         SettingKey.MAX_TOR_RETRIES.value: 3,
         SettingKey.MAX_CONNECT_RETRIES.value: 3,
         SettingKey.TOR_TIMEOUT.value: 10.0,
+        SettingKey.STREAM_IDLE_TIMEOUT.value: 60.0,
+        SettingKey.LATE_ACCEPTANCE_TIMEOUT.value: 60.0,
+        SettingKey.DAEMON_IPC_TIMEOUT.value: 15.0,
         SettingKey.ENABLE_TOR_LOGGING.value: False,
         SettingKey.ENABLE_SQL_LOGGING.value: False,
         SettingKey.AUTO_ACCEPT_CONTACTS.value: True,
@@ -150,6 +184,78 @@ class Settings:
             return data[category][sub_key]
 
         return cls._DEFAULTS.get(key.value)
+
+    @classmethod
+    def get_str(cls, key: SettingKey) -> str:
+        """
+        Retrieves a setting and guarantees a string return type.
+
+        Args:
+            key (SettingKey): The setting key enum.
+
+        Returns:
+            str: The configuration value as a string.
+        """
+        val: Optional[SettingValue] = cls.get(key)
+        if val is not None:
+            return TypeCaster.to_str(val)
+
+        default_val: Optional[SettingValue] = cls._DEFAULTS.get(key.value)
+        return TypeCaster.to_str(default_val)
+
+    @classmethod
+    def get_int(cls, key: SettingKey) -> int:
+        """
+        Retrieves a setting and safely coerces it into an integer.
+
+        Args:
+            key (SettingKey): The setting key enum.
+
+        Returns:
+            int: The configuration value as an integer.
+        """
+        val: Optional[SettingValue] = cls.get(key)
+        if val is not None:
+            return TypeCaster.to_int(val)
+
+        default_val: Optional[SettingValue] = cls._DEFAULTS.get(key.value)
+        return TypeCaster.to_int(default_val)
+
+    @classmethod
+    def get_float(cls, key: SettingKey) -> float:
+        """
+        Retrieves a setting and safely coerces it into a float.
+
+        Args:
+            key (SettingKey): The setting key enum.
+
+        Returns:
+            float: The configuration value as a float.
+        """
+        val: Optional[SettingValue] = cls.get(key)
+        if val is not None:
+            return TypeCaster.to_float(val)
+
+        default_val: Optional[SettingValue] = cls._DEFAULTS.get(key.value)
+        return TypeCaster.to_float(default_val)
+
+    @classmethod
+    def get_bool(cls, key: SettingKey) -> bool:
+        """
+        Retrieves a setting and safely coerces it into a boolean.
+
+        Args:
+            key (SettingKey): The setting key enum.
+
+        Returns:
+            bool: The configuration value as a boolean.
+        """
+        val: Optional[SettingValue] = cls.get(key)
+        if val is not None:
+            return TypeCaster.to_bool(val)
+
+        default_val: Optional[SettingValue] = cls._DEFAULTS.get(key.value)
+        return TypeCaster.to_bool(default_val)
 
     @classmethod
     def set(cls, key: SettingKey, value: SettingValue) -> None:

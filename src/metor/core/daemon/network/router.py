@@ -6,7 +6,7 @@ Handles RAM buffering, JSON Payload Parsing (UUID mapping), Drop & Go fallback c
 import socket
 import base64
 import json
-from typing import List, Tuple, Dict, Callable, Optional
+from typing import List, Tuple, Dict, Callable, Optional, TYPE_CHECKING
 
 from metor.core.api import (
     IpcEvent,
@@ -29,13 +29,15 @@ from metor.data import (
     MessageDirection,
     MessageType,
     MessageStatus,
-    Settings,
     SettingKey,
 )
 
 # Local Package Imports
 from metor.core.daemon.network.state import StateTracker
 from metor.core.daemon.network.stream import TcpStreamReader
+
+if TYPE_CHECKING:
+    from metor.data.profile.config import Config
 
 
 class MessageRouter:
@@ -49,6 +51,7 @@ class MessageRouter:
         state: StateTracker,
         broadcast_callback: Callable[[IpcEvent], None],
         has_clients_callback: Callable[[], bool],
+        config: 'Config',
     ) -> None:
         """
         Initializes the MessageRouter.
@@ -60,6 +63,7 @@ class MessageRouter:
             state (StateTracker): The thread-safe connection state tracker.
             broadcast_callback (Callable[[IpcEvent], None]): Callback to emit IPC events.
             has_clients_callback (Callable[[], bool]): Callback to check for active UI clients.
+            config (Config): The profile configuration instance.
 
         Returns:
             None
@@ -70,6 +74,7 @@ class MessageRouter:
         self._state: StateTracker = state
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
         self._has_clients_callback: Callable[[], bool] = has_clients_callback
+        self._config: 'Config' = config
 
     def flush_ram_buffer(self, onion: str) -> None:
         """
@@ -123,7 +128,6 @@ class MessageRouter:
         unacked: Dict[str, str] = self._state.pop_unacked_messages(onion)
 
         if not unacked:
-            # We intentionally don't resolve the alias since it is dynamically inserted in the UI
             return False, NetworkCode.NO_PENDING_LIVE_MSGS, {'alias': alias}
 
         for msg_id, content in unacked.items():
@@ -148,7 +152,6 @@ class MessageRouter:
             )
         )
 
-        # We intentionally don't resolve the alias since it is dynamically inserted in the UI
         return (
             True,
             NetworkCode.FALLBACK_SUCCESS,
@@ -175,7 +178,7 @@ class MessageRouter:
         conn: Optional[socket.socket] = self._state.get_connection(onion)
 
         if not conn:
-            if Settings.get(SettingKey.FALLBACK_TO_DROP):
+            if self._config.get_bool(SettingKey.FALLBACK_TO_DROP):
                 self._mm.queue_message(
                     contact_onion=onion,
                     direction=MessageDirection.OUT,
@@ -200,10 +203,9 @@ class MessageRouter:
         self._state.add_unacked_message(onion, msg_id, msg)
 
         try:
-            # Envelop live message into JSON structure matching Drops
             envelope: Dict[str, JsonValue] = {
                 'id': msg_id,
-                'timestamp': '',  # Live messages rely on UI rendering order, timestamps are synced on Drops
+                'timestamp': '',
                 'text': msg,
             }
             envelope_str: str = json.dumps(envelope)
@@ -232,11 +234,9 @@ class MessageRouter:
         """
         alias: Optional[str] = self._cm.get_alias_by_onion(onion)
 
-        # Default fallbacks
         msg_id: str = payload_id
         content: str = b64_payload
 
-        # 1. Decode Payload Wrapper
         try:
             raw_text = base64.b64decode(b64_payload).decode('utf-8')
             envelope = json.loads(raw_text)
@@ -245,7 +245,6 @@ class MessageRouter:
         except Exception:
             pass
 
-        # 2. Dispatch
         if self._has_clients_callback():
             try:
                 conn.sendall(f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8'))
@@ -255,8 +254,7 @@ class MessageRouter:
             return False
         else:
             buffer_size: int = self._state.push_ram_buffer(onion, msg_id, content)
-            max_limit_raw: JsonValue = Settings.get(SettingKey.MAX_UNSEEN_LIVE_MSGS)
-            max_limit: int = int(str(max_limit_raw)) if max_limit_raw else 20
+            max_limit: int = self._config.get_int(SettingKey.MAX_UNSEEN_LIVE_MSGS)
             if buffer_size >= max_limit:
                 return True
             return False
@@ -289,7 +287,7 @@ class MessageRouter:
         Returns:
             None
         """
-        if not Settings.get(SettingKey.ALLOW_DROPS):
+        if not self._config.get_bool(SettingKey.ALLOW_DROPS):
             try:
                 conn.close()
             except Exception:
@@ -322,8 +320,8 @@ class MessageRouter:
                             content = base64.b64decode(parts[2]).decode('utf-8')
                             timestamp = None
 
-                        is_ephemeral: bool = bool(
-                            Settings.get(SettingKey.EPHEMERAL_MESSAGES)
+                        is_ephemeral: bool = self._config.get_bool(
+                            SettingKey.EPHEMERAL_MESSAGES
                         )
                         status: MessageStatus = (
                             MessageStatus.READ if is_ephemeral else MessageStatus.UNREAD

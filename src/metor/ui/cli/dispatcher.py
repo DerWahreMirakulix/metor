@@ -85,7 +85,19 @@ class CliDispatcher:
 
         elif cmd == 'settings':
             if sub == 'set' and len(self._extra) >= 2:
-                print(self._proxy.handle_settings(self._extra[0], self._extra[1]))
+                print(self._proxy.handle_settings_set(self._extra[0], self._extra[1]))
+            elif sub == 'get' and len(self._extra) >= 1:
+                print(self._proxy.handle_settings_get(self._extra[0]))
+            else:
+                print(Help.show_command_help(cmd))
+
+        elif cmd == 'config':
+            if sub == 'set' and len(self._extra) >= 2:
+                print(self._proxy.handle_config_set(self._extra[0], self._extra[1]))
+            elif sub == 'get' and len(self._extra) >= 1:
+                print(self._proxy.handle_config_get(self._extra[0]))
+            elif sub == 'sync':
+                print(self._proxy.handle_config_sync())
             else:
                 print(Help.show_command_help(cmd))
 

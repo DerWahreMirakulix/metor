@@ -5,7 +5,7 @@ the complex interactions between the Listener, Receiver, Controller, and Router.
 """
 
 import threading
-from typing import Dict, List, Callable, Tuple
+from typing import Dict, List, Callable, Tuple, TYPE_CHECKING
 
 from metor.core import TorManager
 from metor.core.api import IpcEvent, DomainCode, JsonValue
@@ -18,6 +18,9 @@ from metor.core.daemon.network.router import MessageRouter
 from metor.core.daemon.network.controller import ConnectionController
 from metor.core.daemon.network.receiver import StreamReceiver
 from metor.core.daemon.network.listener import InboundListener
+
+if TYPE_CHECKING:
+    from metor.data.profile.config import Config
 
 
 class NetworkManager:
@@ -33,6 +36,7 @@ class NetworkManager:
         broadcast_callback: Callable[[IpcEvent], None],
         has_clients_callback: Callable[[], bool],
         stop_flag: threading.Event,
+        config: 'Config',
     ) -> None:
         """
         Initializes the NetworkManager and its isolated sub-components.
@@ -46,6 +50,7 @@ class NetworkManager:
             broadcast_callback (Callable[[IpcEvent], None]): Callback to broadcast IPC events.
             has_clients_callback (Callable[[], bool]): Callback to check for active UI clients.
             stop_flag (threading.Event): Global daemon termination flag.
+            config (Config): The profile configuration instance.
 
         Returns:
             None
@@ -60,6 +65,7 @@ class NetworkManager:
             state=self._state,
             broadcast_callback=broadcast_callback,
             has_clients_callback=has_clients_callback,
+            config=config,
         )
 
         self._controller: ConnectionController = ConnectionController(
@@ -72,6 +78,7 @@ class NetworkManager:
             router=self._router,
             broadcast_callback=broadcast_callback,
             stop_flag=stop_flag,
+            config=config,
         )
 
         self._receiver: StreamReceiver = StreamReceiver(
@@ -83,9 +90,9 @@ class NetworkManager:
             has_clients_callback=has_clients_callback,
             disconnect_cb=self._controller.disconnect,
             reject_cb=self._controller.reject,
+            config=config,
         )
 
-        # Inject the instantiated receiver into the controller to resolve circular execution
         self._controller.set_receiver(self._receiver)
 
         self._listener: InboundListener = InboundListener(
@@ -98,9 +105,8 @@ class NetworkManager:
             receiver=self._receiver,
             broadcast_callback=broadcast_callback,
             stop_flag=stop_flag,
+            config=config,
         )
-
-    # --- LIFECYCLE DELEGATION ---
 
     def start_listener(self) -> None:
         """
@@ -188,8 +194,6 @@ class NetworkManager:
         """
         self._controller.retunnel(target)
 
-    # --- ROUTER DELEGATION ---
-
     def flush_ram_buffer(self, onion: str) -> None:
         """
         Flushes the headless RAM buffer to the UI and fires pending ACKs.
@@ -229,8 +233,6 @@ class NetworkManager:
             None
         """
         self._router.send_message(target, msg, msg_id)
-
-    # --- STATE DELEGATION ---
 
     def get_active_onions(self) -> List[str]:
         """

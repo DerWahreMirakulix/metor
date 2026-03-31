@@ -1,16 +1,16 @@
 """
 Module managing the profile-specific JSON configuration file.
 Provides thread-safe read/write operations and cascading lookups
-falling back to global application settings.
+falling back to global application settings. Enforces strict typing.
 """
 
 import json
 from enum import Enum
-from typing import Dict, Union, cast
+from typing import Dict, Union, cast, List
 from pathlib import Path
 
 from metor.data import SettingKey, Settings, SettingValue
-from metor.utils import FileLock
+from metor.utils import FileLock, TypeCaster
 
 # Local Package Imports
 from metor.data.profile.paths import Paths
@@ -55,7 +55,6 @@ class Config:
             ProfileConfigKey.DAEMON_PORT.value: None,
         }
 
-        # ONLY create the file if the profile folder physically exists
         if self._paths.exists():
             try:
                 with FileLock(config_file):
@@ -95,6 +94,122 @@ class Config:
 
         return default
 
+    def get_str(
+        self,
+        key: Union[ProfileConfigKey, SettingKey, str],
+        default: str = '',
+    ) -> str:
+        """
+        Retrieves a setting and guarantees a string return type.
+
+        Args:
+            key (Union[ProfileConfigKey, SettingKey, str]): The setting to retrieve.
+            default (str): Fallback string value.
+
+        Returns:
+            str: The resolved configuration value as a string.
+        """
+        key_str: str = key.value if isinstance(key, Enum) else key
+        data: Dict[str, ProfileConfigValue] = self._load()
+
+        if key_str in data and data[key_str] is not None:
+            return TypeCaster.to_str(data[key_str])
+
+        try:
+            global_key: SettingKey = SettingKey(key_str)
+            return Settings.get_str(global_key)
+        except ValueError:
+            pass
+
+        return TypeCaster.to_str(default)
+
+    def get_int(
+        self,
+        key: Union[ProfileConfigKey, SettingKey, str],
+        default: int = 0,
+    ) -> int:
+        """
+        Retrieves a setting and safely coerces it into an integer.
+
+        Args:
+            key (Union[ProfileConfigKey, SettingKey, str]): The setting to retrieve.
+            default (int): Fallback integer value.
+
+        Returns:
+            int: The resolved configuration value as an integer.
+        """
+        key_str: str = key.value if isinstance(key, Enum) else key
+        data: Dict[str, ProfileConfigValue] = self._load()
+
+        if key_str in data and data[key_str] is not None:
+            return TypeCaster.to_int(data[key_str])
+
+        try:
+            global_key: SettingKey = SettingKey(key_str)
+            return Settings.get_int(global_key)
+        except ValueError:
+            pass
+
+        return TypeCaster.to_int(default)
+
+    def get_float(
+        self,
+        key: Union[ProfileConfigKey, SettingKey, str],
+        default: float = 0.0,
+    ) -> float:
+        """
+        Retrieves a setting and safely coerces it into a float.
+
+        Args:
+            key (Union[ProfileConfigKey, SettingKey, str]): The setting to retrieve.
+            default (float): Fallback float value.
+
+        Returns:
+            float: The resolved configuration value as a float.
+        """
+        key_str: str = key.value if isinstance(key, Enum) else key
+        data: Dict[str, ProfileConfigValue] = self._load()
+
+        if key_str in data and data[key_str] is not None:
+            return TypeCaster.to_float(data[key_str])
+
+        try:
+            global_key: SettingKey = SettingKey(key_str)
+            return Settings.get_float(global_key)
+        except ValueError:
+            pass
+
+        return TypeCaster.to_float(default)
+
+    def get_bool(
+        self,
+        key: Union[ProfileConfigKey, SettingKey, str],
+        default: bool = False,
+    ) -> bool:
+        """
+        Retrieves a setting and safely coerces it into a boolean.
+
+        Args:
+            key (Union[ProfileConfigKey, SettingKey, str]): The setting to retrieve.
+            default (bool): Fallback boolean value.
+
+        Returns:
+            bool: The resolved configuration value as a boolean.
+        """
+        key_str: str = key.value if isinstance(key, Enum) else key
+        data: Dict[str, ProfileConfigValue] = self._load()
+
+        if key_str in data and data[key_str] is not None:
+            return TypeCaster.to_bool(data[key_str])
+
+        try:
+            global_key: SettingKey = SettingKey(key_str)
+            return Settings.get_bool(global_key)
+        except ValueError:
+            pass
+
+        return TypeCaster.to_bool(default)
+
     def set(
         self, key: Union[ProfileConfigKey, SettingKey, str], value: ProfileConfigValue
     ) -> None:
@@ -118,5 +233,40 @@ class Config:
         with FileLock(config_file):
             data: Dict[str, ProfileConfigValue] = self._load()
             data[key_str] = value
+            with config_file.open('w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4)
+
+    def sync_with_global(self) -> None:
+        """
+        Wipes all SettingKey overrides from the local config, forcing a fallback to global Settings.
+        Retains pure ProfileConfigKey data (like DAEMON_PORT).
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if not self._paths.exists():
+            return
+
+        config_file: Path = self._paths.get_config_file()
+        if not config_file.exists():
+            return
+
+        with FileLock(config_file):
+            data: Dict[str, ProfileConfigValue] = self._load()
+            keys_to_remove: List[str] = []
+
+            for k in data.keys():
+                try:
+                    SettingKey(k)
+                    keys_to_remove.append(k)
+                except ValueError:
+                    pass
+
+            for k in keys_to_remove:
+                del data[k]
+
             with config_file.open('w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4)

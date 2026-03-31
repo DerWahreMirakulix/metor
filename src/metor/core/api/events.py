@@ -14,6 +14,7 @@ from metor.core.api.codes import (
     Action,
     DomainCode,
     NetworkCode,
+    SystemCode,
 )
 from metor.core.api.registry import register_event
 
@@ -791,7 +792,7 @@ class TargetActionSuccessEvent(IpcEvent):
 @dataclass
 class SettingUpdatedEvent(IpcEvent):
     """
-    Data Transfer Object indicating an application setting was mutated.
+    Data Transfer Object indicating a global setting was mutated.
 
     Attributes:
         action (Action): The triggering action.
@@ -804,6 +805,80 @@ class SettingUpdatedEvent(IpcEvent):
     code: DomainCode
     key: str
     type: EventType = field(default=EventType.SETTING_UPDATED, init=False)
+
+
+@register_event(EventType.SETTING_DATA)
+@dataclass
+class SettingDataEvent(IpcEvent):
+    """
+    Data Transfer Object returning a global setting value.
+
+    Attributes:
+        key (str): The requested setting key.
+        value (str): The stringified value.
+        code (DomainCode): The translation code.
+        type (EventType): The strict IPC event type code.
+    """
+
+    key: str
+    value: str
+    code: DomainCode = SystemCode.SETTING_DATA
+    type: EventType = field(default=EventType.SETTING_DATA, init=False)
+
+
+@register_event(EventType.CONFIG_UPDATED)
+@dataclass
+class ConfigUpdatedEvent(IpcEvent):
+    """
+    Data Transfer Object indicating a profile-specific config was mutated.
+
+    Attributes:
+        action (Action): The triggering action.
+        code (DomainCode): The translation code.
+        key (str): The specific setting key modified.
+        type (EventType): The strict IPC event type code.
+    """
+
+    action: Action
+    code: DomainCode
+    key: str
+    type: EventType = field(default=EventType.CONFIG_UPDATED, init=False)
+
+
+@register_event(EventType.CONFIG_DATA)
+@dataclass
+class ConfigDataEvent(IpcEvent):
+    """
+    Data Transfer Object returning a profile-specific config value.
+
+    Attributes:
+        key (str): The requested config key.
+        value (str): The stringified value.
+        code (DomainCode): The translation code.
+        type (EventType): The strict IPC event type code.
+    """
+
+    key: str
+    value: str
+    code: DomainCode = SystemCode.CONFIG_DATA
+    type: EventType = field(default=EventType.CONFIG_DATA, init=False)
+
+
+@register_event(EventType.CONFIG_SYNCED)
+@dataclass
+class ConfigSyncedEvent(IpcEvent):
+    """
+    Data Transfer Object indicating a profile's config overrides were cleared.
+
+    Attributes:
+        action (Action): The triggering action.
+        code (DomainCode): The translation code.
+        type (EventType): The strict IPC event type code.
+    """
+
+    action: Action
+    code: DomainCode = SystemCode.CONFIG_SYNCED
+    type: EventType = field(default=EventType.CONFIG_SYNCED, init=False)
 
 
 @register_event(EventType.FALLBACK_SUCCESS)

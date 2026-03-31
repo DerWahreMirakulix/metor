@@ -10,6 +10,7 @@ import json
 from typing import List, Callable, Dict, Optional
 
 from metor.core.api import IpcCommand, IpcEvent, JsonValue
+from metor.data import SettingKey
 from metor.data.profile import ProfileManager
 from metor.utils import Constants
 
@@ -154,7 +155,7 @@ class IpcServer:
         """
         while not self._stop_flag.is_set():
             try:
-                server.settimeout(1.0)
+                server.settimeout(Constants.THREAD_POLL_TIMEOUT)
                 conn, _ = server.accept()
                 with self._lock:
                     self._clients.append(conn)
@@ -178,7 +179,8 @@ class IpcServer:
         Returns:
             None
         """
-        conn.settimeout(10.0)
+        daemon_ipc_timeout = self._pm.config.get_float(SettingKey.DAEMON_IPC_TIMEOUT)
+        conn.settimeout(daemon_ipc_timeout)
         buffer: bytearray = bytearray()
         try:
             while not self._stop_flag.is_set():

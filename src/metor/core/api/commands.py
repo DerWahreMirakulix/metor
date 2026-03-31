@@ -386,7 +386,7 @@ class ClearProfileDbCommand(IpcCommand):
 @dataclass
 class SetSettingCommand(IpcCommand):
     """
-    Data Transfer Object for updating a global or daemon setting.
+    Data Transfer Object for updating a global setting.
 
     Attributes:
         setting_key (str): The configuration key to modify.
@@ -397,6 +397,66 @@ class SetSettingCommand(IpcCommand):
     setting_key: str
     setting_value: Union[str, int, float, bool]
     action: Action = field(default=Action.SET_SETTING, init=False)
+
+
+@register_command(Action.GET_SETTING)
+@dataclass
+class GetSettingCommand(IpcCommand):
+    """
+    Data Transfer Object for retrieving a global setting.
+
+    Attributes:
+        setting_key (str): The configuration key to retrieve.
+        action (Action): The strict IPC action code.
+    """
+
+    setting_key: str
+    action: Action = field(default=Action.GET_SETTING, init=False)
+
+
+@register_command(Action.SET_CONFIG)
+@dataclass
+class SetConfigCommand(IpcCommand):
+    """
+    Data Transfer Object for updating a profile-specific config override.
+
+    Attributes:
+        setting_key (str): The configuration key to modify.
+        setting_value (Union[str, int, float, bool]): The new strictly typed value.
+        action (Action): The strict IPC action code.
+    """
+
+    setting_key: str
+    setting_value: Union[str, int, float, bool]
+    action: Action = field(default=Action.SET_CONFIG, init=False)
+
+
+@register_command(Action.GET_CONFIG)
+@dataclass
+class GetConfigCommand(IpcCommand):
+    """
+    Data Transfer Object for retrieving a profile-specific config override.
+
+    Attributes:
+        setting_key (str): The configuration key to retrieve.
+        action (Action): The strict IPC action code.
+    """
+
+    setting_key: str
+    action: Action = field(default=Action.GET_CONFIG, init=False)
+
+
+@register_command(Action.SYNC_CONFIG)
+@dataclass
+class SyncConfigCommand(IpcCommand):
+    """
+    Data Transfer Object for wiping all profile-specific settings to restore the global cascade.
+
+    Attributes:
+        action (Action): The strict IPC action code.
+    """
+
+    action: Action = field(default=Action.SYNC_CONFIG, init=False)
 
 
 @register_command(Action.SELF_DESTRUCT)

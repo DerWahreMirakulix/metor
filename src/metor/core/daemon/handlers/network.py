@@ -6,7 +6,7 @@ Emits strictly typed Domain Transfer Objects via IPC.
 
 import socket
 import threading
-from typing import Callable, Optional, cast, List, Tuple
+from typing import Callable, Optional, cast, List, Tuple, TYPE_CHECKING
 
 from metor.core import TorManager
 from metor.core.api import (
@@ -40,10 +40,12 @@ from metor.data import (
     MessageDirection,
     MessageType,
     MessageStatus,
-    Settings,
     SettingKey,
 )
 from metor.utils import clean_onion
+
+if TYPE_CHECKING:
+    from metor.data.profile.config import Config
 
 
 class NetworkCommandHandler:
@@ -58,6 +60,7 @@ class NetworkCommandHandler:
         network: NetworkManager,
         broadcast_cb: Callable[[IpcEvent], None],
         send_to_cb: Callable[[socket.socket, IpcEvent], None],
+        config: 'Config',
     ) -> None:
         """
         Initializes the NetworkCommandHandler.
@@ -70,6 +73,7 @@ class NetworkCommandHandler:
             network (NetworkManager): The core network orchestrator.
             broadcast_cb (Callable[[IpcEvent], None]): Hook to broadcast IPC events.
             send_to_cb (Callable[[socket.socket, IpcEvent], None]): Hook to send an IPC event to a specific client.
+            config (Config): The profile configuration instance.
 
         Returns:
             None
@@ -81,6 +85,7 @@ class NetworkCommandHandler:
         self._network: NetworkManager = network
         self._broadcast: Callable[[IpcEvent], None] = broadcast_cb
         self._send_to: Callable[[socket.socket, IpcEvent], None] = send_to_cb
+        self._config: 'Config' = config
 
     def _is_self_target(self, target: str) -> bool:
         """
@@ -204,7 +209,7 @@ class NetworkCommandHandler:
             ).start()
 
         elif isinstance(cmd, SendDropCommand):
-            if not Settings.get(SettingKey.ALLOW_DROPS):
+            if not self._config.get_bool(SettingKey.ALLOW_DROPS):
                 self._send_to(
                     conn,
                     ActionErrorEvent(
@@ -235,7 +240,7 @@ class NetworkCommandHandler:
                     payload=cmd.text,
                     status=MessageStatus.PENDING,
                 )
-                if Settings.get(SettingKey.RECORD_DROP_EVENTS):
+                if self._config.get_bool(SettingKey.RECORD_DROP_EVENTS):
                     self._hm.log_event(HistoryEvent.DROP_QUEUED, onion)
 
                 if cmd.cli_mode:

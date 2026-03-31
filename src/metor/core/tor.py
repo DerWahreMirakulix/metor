@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Tuple, Optional, Dict, Callable
 
 from metor.core.api import DomainCode, NetworkCode, SystemCode, JsonValue
-from metor.data import SettingKey, Settings
+from metor.data import SettingKey
 from metor.data.profile import ProfileManager
 from metor.utils import Constants, clean_onion, secure_shred_file, ensure_onion_format
 
@@ -120,7 +120,6 @@ class TorManager:
             None
         """
         hs_dir: Path = Path(self._pm.get_hidden_service_dir())
-        # We only shred the secret key. Tor requires the public key to exist.
         secure_shred_file(hs_dir / Constants.TOR_SECRET_KEY)
 
     def start(self) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
@@ -173,10 +172,13 @@ class TorManager:
             Returns:
                 None
             """
-            if Settings.get(SettingKey.ENABLE_TOR_LOGGING) and TorManager._log_callback:
+            if (
+                self._pm.config.get_bool(SettingKey.ENABLE_TOR_LOGGING)
+                and TorManager._log_callback
+            ):
                 TorManager._log_callback(line)
 
-        max_retries: int = int(str(Settings.get(SettingKey.MAX_TOR_RETRIES) or 3))
+        max_retries: int = self._pm.config.get_int(SettingKey.MAX_TOR_RETRIES)
 
         for attempt in range(max_retries):
             try:
@@ -188,7 +190,6 @@ class TorManager:
                     init_msg_handler=print_tor_output,
                 )
 
-                # Write PID to file for exact Zombie tracking during process cleanup
                 pid_file: Path = data_dir / 'tor.pid'
                 with pid_file.open('w') as f:
                     f.write(str(self._tm_proc.pid))
@@ -196,7 +197,7 @@ class TorManager:
                 break
             except OSError as e:
                 if (
-                    Settings.get(SettingKey.ENABLE_TOR_LOGGING)
+                    self._pm.config.get_bool(SettingKey.ENABLE_TOR_LOGGING)
                     and TorManager._log_callback
                 ):
                     TorManager._log_callback(f'Error starting Tor: {e}')
@@ -267,7 +268,7 @@ class TorManager:
         s.set_proxy(
             proxy_type=socks.SOCKS5, addr=Constants.LOCALHOST, port=self.socks_port
         )
-        timeout: float = float(str(Settings.get(SettingKey.TOR_TIMEOUT) or 10.0))
+        timeout: float = self._pm.config.get_float(SettingKey.TOR_TIMEOUT)
         s.settimeout(timeout)
         s.connect((onion_formatted, 80))
         return s

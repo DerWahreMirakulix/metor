@@ -19,8 +19,9 @@ from metor.core.api import (
     SwitchCommand,
 )
 from metor.data.profile import ProfileManager
+from metor.data.settings import SettingKey
 from metor.ui import Help, Theme
-from metor.utils import clean_onion, Constants
+from metor.utils import clean_onion
 
 # Local Package Imports
 from metor.ui.chat.models import ChatMessageType
@@ -46,7 +47,7 @@ class Chat:
             None
         """
         self._pm: ProfileManager = pm
-        self._renderer: Renderer = Renderer()
+        self._renderer: Renderer = Renderer(self._pm.config)
         self._session: Session = Session()
         self._ipc: Optional[IpcClient] = None
 
@@ -94,8 +95,9 @@ class Chat:
 
         self._ipc.send_command(InitCommand())
 
-        # Secure IPC waiting with a defined timeout to prevent infinite deadlocks on remote profiles
-        if not self._init_event.wait(timeout=Constants.IPC_RESPONSE_TIMEOUT):
+        ipc_timeout: float = self._pm.config.get_float(SettingKey.IPC_TIMEOUT)
+
+        if not self._init_event.wait(timeout=ipc_timeout):
             self._renderer.print_message(
                 f'{Theme.RED}IPC Timeout:{Theme.RESET} The daemon is not responding. If this is a remote profile, check your SSH tunnel.',
                 msg_type=ChatMessageType.ERROR,
@@ -259,8 +261,8 @@ class Chat:
         if self._ipc:
             self._ipc.send_command(GetConnectionsCommand(is_header=True))
 
-        # We also enforce the timeout here to prevent UI freezes on state sync failures
-        self._conn_event.wait(timeout=Constants.IPC_RESPONSE_TIMEOUT)
+        ipc_timeout: float = self._pm.config.get_float(SettingKey.IPC_TIMEOUT)
+        self._conn_event.wait(timeout=ipc_timeout)
 
         self._renderer.print_divider(compact=True)
 

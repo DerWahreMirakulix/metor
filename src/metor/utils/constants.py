@@ -18,8 +18,10 @@ class Constants:
     # Network Constraints
     MAX_STREAM_BYTES: int = 1048576  # 1 MB Limit for Tor TCP streams (OOM Protection)
     MAX_IPC_BYTES: int = 5242880  # 5 MB Limit for local IPC streams (OOM Protection)
-    IPC_RESPONSE_TIMEOUT: float = (
-        5.0  # Timeout for IPC requests to prevent deadlocks over SSH Tunnels
+
+    # Thread Constraints
+    THREAD_POLL_TIMEOUT: float = (
+        1.0  # Timeout for non-blocking accept/recv loops to allow graceful shutdown
     )
 
     # File Names

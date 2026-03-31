@@ -17,7 +17,7 @@ from metor.utils import Constants, clean_onion
 # Local Package Imports
 from metor.data.profile import ProfileManager
 from metor.data.sql import SqlManager, SqlParam
-from metor.data.settings import Settings, SettingKey
+from metor.data.settings import SettingKey
 
 
 class MessageStatus(str, Enum):
@@ -60,7 +60,7 @@ class MessageManager:
         """
         self._pm: ProfileManager = pm
         self._db_path: Path = Path(self._pm.get_config_dir()) / Constants.DB_FILE
-        self._sql: SqlManager = SqlManager(self._db_path, password)
+        self._sql: SqlManager = SqlManager(self._db_path, self._pm.config, password)
         self._initialize_table()
 
     def _initialize_table(self) -> None:
@@ -240,7 +240,7 @@ class MessageManager:
         ]
 
         if messages:
-            if Settings.get(SettingKey.EPHEMERAL_MESSAGES):
+            if self._pm.config.get_bool(SettingKey.EPHEMERAL_MESSAGES):
                 delete_query: str = (
                     'DELETE FROM messages WHERE contact_onion = ? AND status = ?'
                 )
@@ -277,7 +277,7 @@ class MessageManager:
         actual_limit: int = (
             limit
             if limit is not None
-            else int(str(Settings.get(SettingKey.MESSAGES_LIMIT)))
+            else self._pm.config.get_int(SettingKey.MESSAGES_LIMIT)
         )
         query: str = """
             SELECT direction, status, payload, timestamp 

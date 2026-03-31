@@ -14,7 +14,7 @@ from metor.utils import Constants, clean_onion
 # Local Package Imports
 from metor.data.profile import ProfileManager
 from metor.data.sql import SqlManager, SqlParam
-from metor.data.settings import Settings, SettingKey
+from metor.data.settings import SettingKey
 
 
 class HistoryEvent(str, Enum):
@@ -64,6 +64,19 @@ class HistoryEvent(str, Enum):
         """
         return self.value.startswith('drop_')
 
+    @property
+    def is_live(self) -> bool:
+        """
+        Determines if the event is related to live connections.
+
+        Args:
+            None
+
+        Returns:
+            bool: True if the event is a live type, False otherwise.
+        """
+        return self.value.startswith('live_')
+
 
 class HistoryManager:
     """Manages connection history logging using an SQLite database."""
@@ -81,7 +94,7 @@ class HistoryManager:
         """
         self._pm: ProfileManager = pm
         self._db_path: Path = Path(self._pm.get_config_dir()) / Constants.DB_FILE
-        self._sql: SqlManager = SqlManager(self._db_path, password)
+        self._sql: SqlManager = SqlManager(self._db_path, self._pm.config, password)
 
     def log_event(
         self, status: HistoryEvent, onion: Optional[str], reason: str = ''
@@ -99,10 +112,10 @@ class HistoryManager:
             None
         """
         if status.is_drop:
-            if not Settings.get(SettingKey.RECORD_DROP_EVENTS):
+            if not self._pm.config.get_bool(SettingKey.RECORD_DROP_EVENTS):
                 return
         else:
-            if not Settings.get(SettingKey.RECORD_LIVE_EVENTS):
+            if not self._pm.config.get_bool(SettingKey.RECORD_LIVE_EVENTS):
                 return
 
         onion = clean_onion(onion) if onion else None
@@ -125,7 +138,7 @@ class HistoryManager:
         actual_limit: int = (
             limit
             if limit is not None
-            else int(str(Settings.get(SettingKey.HISTORY_LIMIT)))
+            else self._pm.config.get_int(SettingKey.HISTORY_LIMIT)
         )
         if filter_onion:
             query: str = 'SELECT timestamp, status, onion, reason FROM history WHERE onion = ? ORDER BY timestamp DESC LIMIT ?'

@@ -6,19 +6,27 @@ Parses incoming data streams and delegates payloads to the Application Layer (Ro
 import socket
 import threading
 import base64
-from typing import Optional, Callable, List, cast
+from typing import Optional, Callable, List, cast, TYPE_CHECKING
 
 from metor.core.api import (
     IpcEvent,
     ConnectedEvent,
 )
 from metor.core.daemon.models import TorCommand
-from metor.data import HistoryManager, HistoryEvent, ContactManager
+from metor.data import (
+    HistoryManager,
+    HistoryEvent,
+    ContactManager,
+    SettingKey,
+)
 
 # Local Package Imports
 from metor.core.daemon.network.state import StateTracker
 from metor.core.daemon.network.stream import TcpStreamReader
 from metor.core.daemon.network.router import MessageRouter
+
+if TYPE_CHECKING:
+    from metor.data.profile.config import Config
 
 
 class StreamReceiver:
@@ -34,6 +42,7 @@ class StreamReceiver:
         has_clients_callback: Callable[[], bool],
         disconnect_cb: Callable[[str, bool, bool, Optional[socket.socket]], None],
         reject_cb: Callable[[str, bool, Optional[socket.socket]], None],
+        config: 'Config',
     ) -> None:
         """
         Initializes the StreamReceiver.
@@ -47,6 +56,7 @@ class StreamReceiver:
             has_clients_callback (Callable): Checks for active UI clients.
             disconnect_cb (Callable): Controller callback to handle safe disconnections.
             reject_cb (Callable): Controller callback to handle safe rejections.
+            config (Config): The profile configuration instance.
 
         Returns:
             None
@@ -57,6 +67,7 @@ class StreamReceiver:
         self._router: MessageRouter = router
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
         self._has_clients_callback: Callable[[], bool] = has_clients_callback
+        self._config: 'Config' = config
 
         self._disconnect_cb: Callable[
             [str, bool, bool, Optional[socket.socket]], None
@@ -101,11 +112,19 @@ class StreamReceiver:
         """
         remote_rejected: bool = False
         remote_disconnected: bool = False
+
+        idle_timeout: float = self._config.get_float(SettingKey.STREAM_IDLE_TIMEOUT)
+        conn.settimeout(idle_timeout)
+
         stream: TcpStreamReader = TcpStreamReader(conn, initial_buffer)
 
         try:
             while True:
-                msg: Optional[str] = stream.read_line()
+                try:
+                    msg: Optional[str] = stream.read_line()
+                except socket.timeout:
+                    continue
+
                 if not msg:
                     break
 

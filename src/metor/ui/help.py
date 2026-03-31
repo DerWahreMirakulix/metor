@@ -184,9 +184,30 @@ class Help:
         ),
         'settings': CommandDef(
             name='settings',
-            usage='metor settings set <domain.key> <val>',
-            description='Configure specific domain settings.',
+            usage='metor settings',
+            description='Configure global settings (affects all profiles).',
             category='System & Settings',
+            subcommands=[
+                SubCommandDef('get <domain.key>', 'Retrieve a global setting.'),
+                SubCommandDef('set <domain.key> <val>', 'Update a global setting.'),
+            ],
+        ),
+        'config': CommandDef(
+            name='config',
+            usage='metor config',
+            description='Configure profile-specific overrides.',
+            category='System & Settings',
+            subcommands=[
+                SubCommandDef(
+                    'get <domain.key>', 'Retrieve the resolved value for this profile.'
+                ),
+                SubCommandDef(
+                    'set <domain.key> <val>', 'Override a global setting locally.'
+                ),
+                SubCommandDef(
+                    'sync', 'Wipe all profile overrides to restore global defaults.'
+                ),
+            ],
         ),
         'cleanup': CommandDef(
             name='cleanup',

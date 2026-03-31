@@ -7,7 +7,7 @@ import socket
 import threading
 import time
 import secrets
-from typing import List, Optional, Callable, Dict, TYPE_CHECKING, cast, Tuple
+from typing import List, Optional, Callable, Dict, TYPE_CHECKING, Tuple
 
 from metor.core import TorManager
 from metor.core.api import (
@@ -39,7 +39,6 @@ from metor.data import (
     MessageDirection,
     MessageType,
     MessageStatus,
-    Settings,
     SettingKey,
 )
 
@@ -49,6 +48,7 @@ from metor.core.daemon.network.stream import TcpStreamReader
 from metor.core.daemon.network.router import MessageRouter
 
 if TYPE_CHECKING:
+    from metor.data.profile.config import Config
     from metor.core.daemon.network.receiver import StreamReceiver
 
 
@@ -66,6 +66,7 @@ class ConnectionController:
         router: MessageRouter,
         broadcast_callback: Callable[[IpcEvent], None],
         stop_flag: threading.Event,
+        config: 'Config',
     ) -> None:
         """
         Initializes the ConnectionController.
@@ -80,6 +81,7 @@ class ConnectionController:
             router (MessageRouter): The application-layer message router.
             broadcast_callback (Callable): IPC broadcaster.
             stop_flag (threading.Event): Global daemon termination flag.
+            config (Config): The profile configuration instance.
 
         Returns:
             None
@@ -93,10 +95,10 @@ class ConnectionController:
         self._router: MessageRouter = router
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
         self._stop_flag: threading.Event = stop_flag
+        self._config: 'Config' = config
 
         self._receiver: Optional['StreamReceiver'] = None
 
-        # Reconnect Queue Management
         self._reconnect_queue: List[str] = []
         self._reconnect_lock: threading.Lock = threading.Lock()
         threading.Thread(target=self._reconnect_worker, daemon=True).start()
@@ -132,8 +134,7 @@ class ConnectionController:
         if self._state.get_connection(onion):
             return
 
-        # OPSEC: Guard against outbound RAM/FD resource exhaustion attacks
-        max_conn: int = cast(int, Settings.get(SettingKey.MAX_CONCURRENT_CONNECTIONS))
+        max_conn: int = self._config.get_int(SettingKey.MAX_CONCURRENT_CONNECTIONS)
         if len(self._state.get_active_onions()) >= max_conn:
             self._broadcast(
                 MaxConnectionsReachedEvent(
@@ -156,13 +157,13 @@ class ConnectionController:
 
         handshake_success: bool = False
         try:
-            max_retries: int = cast(int, Settings.get(SettingKey.MAX_CONNECT_RETRIES))
+            max_retries: int = self._config.get_int(SettingKey.MAX_CONNECT_RETRIES)
             for attempt in range(1, max_retries + 1):
                 if self._stop_flag.is_set():
                     break
                 try:
                     conn: socket.socket = self._tm.connect(onion)
-                    conn.settimeout(15.0)
+                    conn.settimeout(self._config.get_float(SettingKey.TOR_TIMEOUT))
 
                     stream = TcpStreamReader(conn)
                     challenge_line: Optional[str] = stream.read_line()
@@ -179,9 +180,9 @@ class ConnectionController:
                         )
                     )
 
-                    # Do not set blocking to None yet. The receiver will enforce the Late Acceptance
-                    # Timeout natively via its read operations on the Pending socket.
-                    conn.settimeout(60.0)
+                    conn.settimeout(
+                        self._config.get_float(SettingKey.LATE_ACCEPTANCE_TIMEOUT)
+                    )
 
                     self._hm.log_event(HistoryEvent.LIVE_REQUESTED, onion)
                     self._broadcast(ConnectionPendingEvent(alias=alias))
@@ -243,7 +244,6 @@ class ConnectionController:
         try:
             conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8'))
         except Exception:
-            # Late Acceptance failure: Remote dropped before we accepted.
             self._hm.log_event(
                 HistoryEvent.LIVE_CONNECTION_LOST, onion, 'Late acceptance timeout'
             )
@@ -373,7 +373,7 @@ class ConnectionController:
         conn: Optional[socket.socket] = self._state.pop_any_connection(onion)
         unacked: Dict[str, str] = {}
 
-        if Settings.get(SettingKey.FALLBACK_TO_DROP):
+        if self._config.get_bool(SettingKey.FALLBACK_TO_DROP):
             unacked = self._state.pop_unacked_messages(onion)
 
         if not conn and not unacked:
@@ -443,8 +443,7 @@ class ConnectionController:
         for a in deleted_aliases:
             self._broadcast(ContactRemovedEvent(alias=a))
 
-        # Enqueue for Auto-Reconnect if unexpected failure
-        if is_fallback and Settings.get(SettingKey.AUTO_RECONNECT_LIVE):
+        if is_fallback and self._config.get_bool(SettingKey.AUTO_RECONNECT_LIVE):
             with self._reconnect_lock:
                 if onion not in self._reconnect_queue:
                     self._reconnect_queue.append(onion)
@@ -468,7 +467,6 @@ class ConnectionController:
                     onion = self._reconnect_queue.pop(0)
 
             if onion:
-                # OPSEC: Randomized backoff using cryptographically secure PRNG to prevent fingerprinting
                 backoff: float = 10.0 + (
                     secrets.randbelow(2001) / 100.0
                 )  # Generates 10.00 to 30.00
@@ -477,7 +475,6 @@ class ConnectionController:
                 self._hm.log_event(HistoryEvent.LIVE_AUTO_RECONNECT_ATTEMPT, onion)
                 self._broadcast(AutoReconnectAttemptEvent(alias=str(alias or onion)))
 
-                # Check if UI/Daemon has naturally reconnected in the meantime
                 time.sleep(backoff)
                 if (
                     not self._state.is_connected_or_pending(onion)
@@ -517,10 +514,8 @@ class ConnectionController:
         self._broadcast(RetunnelInitiatedEvent(alias=str(alias or onion)))
         self._hm.log_event(HistoryEvent.LIVE_RETUNNEL_INITIATED, onion)
 
-        # Disconnect existing connection forcefully
         self.disconnect(onion, initiated_by_self=True)
 
-        # Rotate circuits
         success, code, params = self._tm.rotate_circuits()
         if not success:
             self._broadcast(ActionErrorEvent(code=code))
@@ -529,5 +524,4 @@ class ConnectionController:
         self._hm.log_event(HistoryEvent.LIVE_RETUNNEL_SUCCESS, onion)
         self._broadcast(RetunnelSuccessEvent(alias=str(alias or onion)))
 
-        # Initiate fresh connection
         self.connect_to(onion)

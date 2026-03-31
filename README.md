@@ -134,10 +134,32 @@ Want to run Metor on a server and connect securely from your laptop?
 
 ## ⚙️ Settings & Configuration
 
-Metor can be finely tuned using the `settings` command. Values are persistently stored in `settings.json` inside your data directory.
-Example: `metor settings set daemon.ephemeral_messages true`
+Metor's configuration system uses a cascading architecture. You can define **global settings** that apply to all profiles, or create **profile-specific overrides**.
 
-**Important Flags:**
+### Global Settings (`settings`)
+
+Values are persistently stored in `settings.json` and affect all profiles unless overridden locally.
+
+- **Set a global value:** `metor settings set daemon.ephemeral_messages true`
+- **Get a global value:** `metor settings get daemon.ephemeral_messages`
+
+### Profile Overrides (`config`)
+
+Values are stored in the active profile's `config.json` and override the global defaults.
+
+- **Set a profile override:** `metor -p my_profile config set daemon.tor_timeout 20`
+- **Get the active value:** `metor -p my_profile config get daemon.tor_timeout` (Returns the local override, or falls back to global if none exists).
+- **Sync to global:** `metor -p my_profile config sync` (Wipes all local overrides, restoring global defaults for this profile).
+
+### Advanced Remote Routing
+
+When interacting with a remote daemon over SSH, Metor's CLI acts as a smart router to maintain strict domain boundaries:
+
+- **UI Settings (`ui.*`):** Commands like `metor config set ui.chat_limit 100` are stored **locally** on your laptop. The remote server never sees them, keeping its configuration clean.
+- **Daemon Settings (`daemon.*`):** Commands like `metor config set daemon.tor_timeout 30` are securely transmitted via IPC and stored directly on the **remote server's** disk.
+- **Config Sync:** Running `metor config sync` intelligently wipes UI overrides on your local machine _and_ instructs the remote daemon to wipe its overrides simultaneously.
+
+**Important Configuration Keys:**
 
 - `daemon.ephemeral_messages` (bool): If true, unread inbox messages are securely shredded from disk immediately upon reading.
 - `daemon.require_local_auth` (bool): Requires the master password to unlock the UI even if the daemon is already running (crucial for remote SSH setups).

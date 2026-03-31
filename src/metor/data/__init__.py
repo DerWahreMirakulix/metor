@@ -1,6 +1,6 @@
 """
 Package initializer for the Data layer.
-Exposes core data managers, settings, and domain enums via a unified Facade.
+Exposes core data managers, settings, parsers, and domain enums via a unified Facade.
 """
 
 # 1. Base Data Layer

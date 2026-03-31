@@ -10,11 +10,24 @@ import threading
 import tempfile
 from contextlib import contextmanager
 from sqlcipher3 import dbapi2 as sqlite3  # type: ignore
-from typing import List, Tuple, Optional, Iterator, Dict, Callable, Union, cast
+from typing import (
+    List,
+    Tuple,
+    Optional,
+    Iterator,
+    Dict,
+    Callable,
+    Union,
+    cast,
+    TYPE_CHECKING,
+)
 from pathlib import Path
 
 # Local Package Imports
-from metor.data.settings import Settings, SettingKey
+from metor.data.settings import SettingKey
+
+if TYPE_CHECKING:
+    from metor.data.profile.config import Config
 
 
 # Types
@@ -23,6 +36,7 @@ SqlParam = Union[str, int, float, bytes, None]
 
 @contextmanager
 def _capture_c_stderr(
+    config: 'Config',
     log_callback: Optional[Callable[[str], None]] = None,
 ) -> Iterator[None]:
     """
@@ -30,6 +44,7 @@ def _capture_c_stderr(
     Outputs them formatted if SQL logging is enabled. Ensures execution even on exceptions.
 
     Args:
+        config (Config): The profile configuration instance.
         log_callback (Optional[Callable[[str], None]]): UI-injected logging function.
 
     Yields:
@@ -50,7 +65,7 @@ def _capture_c_stderr(
         finally:
             os.dup2(old_fd, fd)
 
-            if Settings.get(SettingKey.ENABLE_SQL_LOGGING) and log_callback:
+            if config.get_bool(SettingKey.ENABLE_SQL_LOGGING) and log_callback:
                 temp_file.seek(0)
                 for line in temp_file:
                     clean_line: str = line.strip()
@@ -84,18 +99,22 @@ class SqlManager:
         """
         cls._log_callback = callback
 
-    def __init__(self, db_path: str | Path, password: Optional[str] = None) -> None:
+    def __init__(
+        self, db_path: str | Path, config: 'Config', password: Optional[str] = None
+    ) -> None:
         """
         Initializes the database connection and ensures base tables exist.
 
         Args:
             db_path (str | Path): The absolute path to the SQLite .db file.
+            config (Config): The profile configuration instance.
             password (Optional[str]): The master password for SQLCipher encryption.
 
         Returns:
             None
         """
         self.db_path: Path = Path(db_path)
+        self._config: 'Config' = config
         self._password: Optional[str] = password
         self._ensure_tables()
 
@@ -163,7 +182,7 @@ class SqlManager:
         """
 
         try:
-            with _capture_c_stderr(SqlManager._log_callback):
+            with _capture_c_stderr(self._config, SqlManager._log_callback):
                 conn = self._get_connection()
                 with conn:
                     cursor = conn.cursor()

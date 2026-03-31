@@ -7,7 +7,7 @@ Enforces Max Concurrent Connection Limits to mitigate RAM/FD Exhaustion attacks.
 import socket
 import threading
 import secrets
-from typing import Optional, Callable, List, TYPE_CHECKING, cast
+from typing import Optional, Callable, List, TYPE_CHECKING
 
 from metor.core import TorManager
 from metor.core.api import (
@@ -23,7 +23,6 @@ from metor.data import (
     HistoryManager,
     HistoryEvent,
     ContactManager,
-    Settings,
     SettingKey,
 )
 from metor.utils import Constants
@@ -36,6 +35,7 @@ from metor.core.daemon.network.router import MessageRouter
 
 if TYPE_CHECKING:
     from metor.core.daemon.network.receiver import StreamReceiver
+    from metor.data.profile.config import Config
 
 
 class InboundListener:
@@ -52,6 +52,7 @@ class InboundListener:
         receiver: 'StreamReceiver',
         broadcast_callback: Callable[[IpcEvent], None],
         stop_flag: threading.Event,
+        config: 'Config',
     ) -> None:
         """
         Initializes the InboundListener.
@@ -66,6 +67,7 @@ class InboundListener:
             receiver (StreamReceiver): The stream receiver to instantiate upon acceptance.
             broadcast_callback (Callable): IPC broadcaster.
             stop_flag (threading.Event): Global daemon termination flag.
+            config (Config): The profile configuration instance.
 
         Returns:
             None
@@ -79,6 +81,7 @@ class InboundListener:
         self._receiver: 'StreamReceiver' = receiver
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
         self._stop_flag: threading.Event = stop_flag
+        self._config: 'Config' = config
 
     def start_listener(self) -> None:
         """
@@ -109,12 +112,11 @@ class InboundListener:
 
         while not self._stop_flag.is_set():
             try:
-                listener.settimeout(1.0)
+                listener.settimeout(Constants.THREAD_POLL_TIMEOUT)
                 conn, _ = listener.accept()
 
-                # OPSEC: Guard against RAM/FD resource exhaustion attacks
-                max_conn: int = cast(
-                    int, Settings.get(SettingKey.MAX_CONCURRENT_CONNECTIONS)
+                max_conn: int = self._config.get_int(
+                    SettingKey.MAX_CONCURRENT_CONNECTIONS
                 )
                 if len(self._state.get_active_onions()) >= max_conn:
                     self._hm.log_event(
@@ -157,7 +159,8 @@ class InboundListener:
         stream: Optional[TcpStreamReader] = None
 
         try:
-            conn.settimeout(10.0)
+            tor_timeout: float = self._config.get_float(SettingKey.TOR_TIMEOUT)
+            conn.settimeout(tor_timeout)
             challenge: str = secrets.token_hex(32)
             conn.sendall(f'{TorCommand.CHALLENGE.value} {challenge}\n'.encode('utf-8'))
 
@@ -205,7 +208,6 @@ class InboundListener:
         Returns:
             None
         """
-        conn.settimeout(None)
         alias: Optional[str] = self._cm.get_alias_by_onion(onion)
         if not alias:
             conn.close()
@@ -239,7 +241,7 @@ class InboundListener:
         accepted_now: bool = False
         if is_mutual_winner or (
             (alias in self._cm.get_all_contacts())
-            and Settings.get(SettingKey.AUTO_ACCEPT_CONTACTS)
+            and self._config.get_bool(SettingKey.AUTO_ACCEPT_CONTACTS)
         ):
             self._state.add_active_connection(onion, conn)
             accepted_now = True

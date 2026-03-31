@@ -25,12 +25,12 @@ def secure_shred_file(file_path: Path) -> None:
     try:
         # Ensure we have write permissions
         file_path.chmod(stat.S_IWRITE)
+        length: int = file_path.stat().st_size
 
-        # Overwrite with random bytes matching the exact file size
-        with file_path.open('ba+') as f:
-            length: int = f.tell()
-            f.seek(0)
-            f.write(secrets.token_bytes(length))
+        if length > 0:
+            # Overwrite with random bytes matching the exact file size
+            with file_path.open('r+b') as f:
+                f.write(secrets.token_bytes(length))
 
         # Unlink from filesystem
         file_path.unlink()

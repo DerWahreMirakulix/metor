@@ -31,13 +31,22 @@ from metor.core.api import (
     MarkReadCommand,
     GetAddressCommand,
     GenerateAddressCommand,
+    SetSettingCommand,
+    GetSettingCommand,
+    SetConfigCommand,
+    GetConfigCommand,
+    SyncConfigCommand,
 )
 from metor.data import ContactManager, HistoryManager, MessageManager
 from metor.data.profile import ProfileManager
 from metor.utils import Constants
 
 # Local Package Imports
-from metor.core.daemon.handlers import DatabaseCommandHandler, SystemCommandHandler
+from metor.core.daemon.handlers import (
+    DatabaseCommandHandler,
+    SystemCommandHandler,
+    ConfigCommandHandler,
+)
 
 
 class HeadlessDaemon:
@@ -62,6 +71,7 @@ class HeadlessDaemon:
         self._km: KeyManager = KeyManager(pm, password)
         self._tm: TorManager = TorManager(pm, self._km)
 
+        self._config_handler: ConfigCommandHandler = ConfigCommandHandler(self._pm)
         self._db_handler: DatabaseCommandHandler = DatabaseCommandHandler(
             self._pm, self._cm, self._hm, self._mm, lambda: [], lambda e: None
         )
@@ -155,7 +165,7 @@ class HeadlessDaemon:
             return
 
         try:
-            self._server.settimeout(2.0)
+            self._server.settimeout(Constants.THREAD_POLL_TIMEOUT)
             while not self._stop_event.is_set():
                 try:
                     conn, _ = self._server.accept()
@@ -177,7 +187,10 @@ class HeadlessDaemon:
             None
         """
         try:
-            conn.settimeout(2.0)
+            daemon_ipc_timeout = self._pm.config.get_float(
+                'daemon.ipc_timeout'
+            )  # Resolves via fallback safely
+            conn.settimeout(daemon_ipc_timeout)
             buffer: str = ''
             while not self._stop_event.is_set():
                 try:
@@ -229,6 +242,19 @@ class HeadlessDaemon:
         Returns:
             None
         """
+        if isinstance(
+            cmd,
+            (
+                SetSettingCommand,
+                GetSettingCommand,
+                SetConfigCommand,
+                GetConfigCommand,
+                SyncConfigCommand,
+            ),
+        ):
+            self._send(conn, self._config_handler.handle(cmd))
+            return
+
         if isinstance(
             cmd,
             (
