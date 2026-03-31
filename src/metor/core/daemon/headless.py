@@ -55,6 +55,7 @@ class HeadlessDaemon:
     def __init__(self, pm: ProfileManager, password: Optional[str] = None) -> None:
         """
         Initializes the HeadlessDaemon safely, accepting a password for offline SQLite encryption.
+        Defers database instantiation until explicitly required by an incoming command.
 
         Args:
             pm (ProfileManager): The active profile configuration.
@@ -64,25 +65,145 @@ class HeadlessDaemon:
             None
         """
         self._pm: ProfileManager = pm
-        self._cm: ContactManager = ContactManager(pm, password)
-        self._hm: HistoryManager = HistoryManager(pm, password)
-        self._mm: MessageManager = MessageManager(pm, password)
+        self._password: Optional[str] = password
 
-        self._km: KeyManager = KeyManager(pm, password)
-        self._tm: TorManager = TorManager(pm, self._km)
+        self._cm_instance: Optional[ContactManager] = None
+        self._hm_instance: Optional[HistoryManager] = None
+        self._mm_instance: Optional[MessageManager] = None
 
-        self._config_handler: ConfigCommandHandler = ConfigCommandHandler(self._pm)
-        self._db_handler: DatabaseCommandHandler = DatabaseCommandHandler(
-            self._pm, self._cm, self._hm, self._mm, lambda: [], lambda e: None
-        )
-        self._sys_handler: SystemCommandHandler = SystemCommandHandler(
-            self._pm, self._tm
-        )
+        self._km_instance: Optional[KeyManager] = None
+        self._tm_instance: Optional[TorManager] = None
+
+        self._config_handler_instance: Optional[ConfigCommandHandler] = None
+        self._db_handler_instance: Optional[DatabaseCommandHandler] = None
+        self._sys_handler_instance: Optional[SystemCommandHandler] = None
 
         self.port: int = 0
         self._server: Optional[socket.socket] = None
         self._stop_event: threading.Event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+
+    @property
+    def _cm(self) -> ContactManager:
+        """
+        Lazily loads the ContactManager.
+
+        Args:
+            None
+
+        Returns:
+            ContactManager: The active instance.
+        """
+        if self._cm_instance is None:
+            self._cm_instance = ContactManager(self._pm, self._password)
+        return self._cm_instance
+
+    @property
+    def _hm(self) -> HistoryManager:
+        """
+        Lazily loads the HistoryManager.
+
+        Args:
+            None
+
+        Returns:
+            HistoryManager: The active instance.
+        """
+        if self._hm_instance is None:
+            self._hm_instance = HistoryManager(self._pm, self._password)
+        return self._hm_instance
+
+    @property
+    def _mm(self) -> MessageManager:
+        """
+        Lazily loads the MessageManager.
+
+        Args:
+            None
+
+        Returns:
+            MessageManager: The active instance.
+        """
+        if self._mm_instance is None:
+            self._mm_instance = MessageManager(self._pm, self._password)
+        return self._mm_instance
+
+    @property
+    def _km(self) -> KeyManager:
+        """
+        Lazily loads the KeyManager.
+
+        Args:
+            None
+
+        Returns:
+            KeyManager: The active instance.
+        """
+        if self._km_instance is None:
+            self._km_instance = KeyManager(self._pm, self._password)
+        return self._km_instance
+
+    @property
+    def _tm(self) -> TorManager:
+        """
+        Lazily loads the TorManager.
+
+        Args:
+            None
+
+        Returns:
+            TorManager: The active instance.
+        """
+        if self._tm_instance is None:
+            self._tm_instance = TorManager(self._pm, self._km)
+        return self._tm_instance
+
+    @property
+    def _config_handler(self) -> ConfigCommandHandler:
+        """
+        Lazily loads the ConfigCommandHandler.
+
+        Args:
+            None
+
+        Returns:
+            ConfigCommandHandler: The active instance.
+        """
+        if self._config_handler_instance is None:
+            self._config_handler_instance = ConfigCommandHandler(self._pm)
+        return self._config_handler_instance
+
+    @property
+    def _db_handler(self) -> DatabaseCommandHandler:
+        """
+        Lazily loads the DatabaseCommandHandler.
+
+        Args:
+            None
+
+        Returns:
+            DatabaseCommandHandler: The active instance.
+        """
+        if self._db_handler_instance is None:
+            self._db_handler_instance = DatabaseCommandHandler(
+                self._pm, self._cm, self._hm, self._mm, lambda: [], lambda e: None
+            )
+        return self._db_handler_instance
+
+    @property
+    def _sys_handler(self) -> SystemCommandHandler:
+        """
+        Lazily loads the SystemCommandHandler.
+
+        Args:
+            None
+
+        Returns:
+            SystemCommandHandler: The active instance.
+        """
+        if self._sys_handler_instance is None:
+            self._sys_handler_instance = SystemCommandHandler(self._pm, self._tm)
+        return self._sys_handler_instance
 
     def __enter__(self) -> 'HeadlessDaemon':
         """
