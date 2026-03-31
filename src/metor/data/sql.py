@@ -84,6 +84,7 @@ class SqlManager:
 
     _connections: Dict[str, sqlite3.Connection] = {}
     _pool_lock: threading.Lock = threading.Lock()
+    _db_lock: threading.Lock = threading.Lock()
     _log_callback: Optional[Callable[[str], None]] = None
 
     @classmethod
@@ -184,13 +185,14 @@ class SqlManager:
         try:
             with _capture_c_stderr(self._config, SqlManager._log_callback):
                 conn = self._get_connection()
-                with conn:
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT count(*) FROM sqlite_master;')
-                    cursor.fetchone()
+                with SqlManager._db_lock:
+                    with conn:
+                        cursor = conn.cursor()
+                        cursor.execute('SELECT count(*) FROM sqlite_master;')
+                        cursor.fetchone()
 
-                    cursor.execute(contacts_query)
-                    cursor.execute(history_query)
+                        cursor.execute(contacts_query)
+                        cursor.execute(history_query)
         except (sqlite3.DatabaseError, sqlite3.OperationalError, MemoryError) as e:
             path_str: str = str(self.db_path.absolute())
             with SqlManager._pool_lock:
@@ -213,9 +215,10 @@ class SqlManager:
             None
         """
         conn = self._get_connection()
-        with conn:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
+        with SqlManager._db_lock:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute(query, params)
 
     def fetchall(
         self, query: str, params: Tuple[SqlParam, ...] = ()
@@ -231,6 +234,7 @@ class SqlManager:
             List[Tuple[SqlParam, ...]]: A list of tuples representing the rows.
         """
         conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute(query, params)
-        return cast(List[Tuple[SqlParam, ...]], cursor.fetchall())
+        with SqlManager._db_lock:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            return cast(List[Tuple[SqlParam, ...]], cursor.fetchall())

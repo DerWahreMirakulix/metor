@@ -118,7 +118,10 @@ class InboundListener:
                 max_conn: int = self._config.get_int(
                     SettingKey.MAX_CONCURRENT_CONNECTIONS
                 )
-                if len(self._state.get_active_onions()) >= max_conn:
+                active_count: int = len(self._state.get_active_onions())
+                unauth_count: int = self._state.get_unauthenticated_count()
+
+                if active_count + unauth_count >= max_conn:
                     self._hm.log_event(
                         HistoryEvent.LIVE_REJECTED_MAX_CONNECTIONS,
                         None,
@@ -135,6 +138,7 @@ class InboundListener:
                         pass
                     continue
 
+                self._state.add_unauthenticated_connection(conn)
                 threading.Thread(
                     target=self._handle_incoming, args=(conn,), daemon=True
                 ).start()
@@ -180,6 +184,8 @@ class InboundListener:
             self._hm.log_event(HistoryEvent.LIVE_STREAM_CORRUPTED, onion, str(e))
         except Exception:
             pass
+        finally:
+            self._state.remove_unauthenticated_connection(conn)
 
         if not auth_successful or not onion or not stream:
             try:

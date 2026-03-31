@@ -25,6 +25,7 @@ class StateTracker:
         self._lock: threading.Lock = threading.Lock()
         self._connections: Dict[str, socket.socket] = {}
         self._pending_connections: Dict[str, socket.socket] = {}
+        self._unauthenticated_connections: Set[socket.socket] = set()
         self._outbound_attempts: Set[str] = set()
         self._initial_buffers: Dict[str, str] = {}
         self._unacked_messages: Dict[str, Dict[str, str]] = {}
@@ -298,6 +299,45 @@ class StateTracker:
                 self._connections.get(onion) == sock
                 or self._pending_connections.get(onion) == sock
             )
+
+    def add_unauthenticated_connection(self, conn: socket.socket) -> None:
+        """
+        Tracks a raw socket before the handshake is completed.
+
+        Args:
+            conn (socket.socket): The raw unauthenticated socket.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            self._unauthenticated_connections.add(conn)
+
+    def remove_unauthenticated_connection(self, conn: socket.socket) -> None:
+        """
+        Removes a raw socket from the unauthenticated tracking set.
+
+        Args:
+            conn (socket.socket): The socket to remove.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            self._unauthenticated_connections.discard(conn)
+
+    def get_unauthenticated_count(self) -> int:
+        """
+        Retrieves the current number of unauthenticated connections.
+
+        Args:
+            None
+
+        Returns:
+            int: The count of unauthenticated sockets.
+        """
+        with self._lock:
+            return len(self._unauthenticated_connections)
 
     # --- UI Focus Management for Persistent Drop Tunnels ---
 

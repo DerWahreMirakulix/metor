@@ -70,11 +70,9 @@ class TorManager:
         Returns:
             int: An available port number.
         """
-        s: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.bind((Constants.LOCALHOST, 0))
-        port: int = s.getsockname()[1]
-        s.close()
-        return port
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind((Constants.LOCALHOST, 0))
+            return int(s.getsockname()[1])
 
     def _provision_runtime_keys(self) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
         """
