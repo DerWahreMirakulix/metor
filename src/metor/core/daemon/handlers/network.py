@@ -277,7 +277,7 @@ class NetworkCommandHandler:
                     )
                     return
 
-                resolved = self._cm.resolve_target(cmd.target)
+                resolved = self._cm.resolve_target(cmd.target, auto_create=True)
                 if not resolved:
                     self._send_to(
                         conn,
