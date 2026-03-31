@@ -8,6 +8,7 @@ import socket
 import threading
 import json
 import types
+from functools import cached_property
 from typing import Dict, Optional, Type
 
 from metor.core import KeyManager, TorManager
@@ -67,23 +68,12 @@ class HeadlessDaemon:
         self._pm: ProfileManager = pm
         self._password: Optional[str] = password
 
-        self._cm_instance: Optional[ContactManager] = None
-        self._hm_instance: Optional[HistoryManager] = None
-        self._mm_instance: Optional[MessageManager] = None
-
-        self._km_instance: Optional[KeyManager] = None
-        self._tm_instance: Optional[TorManager] = None
-
-        self._config_handler_instance: Optional[ConfigCommandHandler] = None
-        self._db_handler_instance: Optional[DatabaseCommandHandler] = None
-        self._sys_handler_instance: Optional[SystemCommandHandler] = None
-
         self.port: int = 0
         self._server: Optional[socket.socket] = None
         self._stop_event: threading.Event = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
-    @property
+    @cached_property
     def _cm(self) -> ContactManager:
         """
         Lazily loads the ContactManager.
@@ -94,11 +84,9 @@ class HeadlessDaemon:
         Returns:
             ContactManager: The active instance.
         """
-        if self._cm_instance is None:
-            self._cm_instance = ContactManager(self._pm, self._password)
-        return self._cm_instance
+        return ContactManager(self._pm, self._password)
 
-    @property
+    @cached_property
     def _hm(self) -> HistoryManager:
         """
         Lazily loads the HistoryManager.
@@ -109,11 +97,9 @@ class HeadlessDaemon:
         Returns:
             HistoryManager: The active instance.
         """
-        if self._hm_instance is None:
-            self._hm_instance = HistoryManager(self._pm, self._password)
-        return self._hm_instance
+        return HistoryManager(self._pm, self._password)
 
-    @property
+    @cached_property
     def _mm(self) -> MessageManager:
         """
         Lazily loads the MessageManager.
@@ -124,11 +110,9 @@ class HeadlessDaemon:
         Returns:
             MessageManager: The active instance.
         """
-        if self._mm_instance is None:
-            self._mm_instance = MessageManager(self._pm, self._password)
-        return self._mm_instance
+        return MessageManager(self._pm, self._password)
 
-    @property
+    @cached_property
     def _km(self) -> KeyManager:
         """
         Lazily loads the KeyManager.
@@ -139,11 +123,9 @@ class HeadlessDaemon:
         Returns:
             KeyManager: The active instance.
         """
-        if self._km_instance is None:
-            self._km_instance = KeyManager(self._pm, self._password)
-        return self._km_instance
+        return KeyManager(self._pm, self._password)
 
-    @property
+    @cached_property
     def _tm(self) -> TorManager:
         """
         Lazily loads the TorManager.
@@ -154,11 +136,9 @@ class HeadlessDaemon:
         Returns:
             TorManager: The active instance.
         """
-        if self._tm_instance is None:
-            self._tm_instance = TorManager(self._pm, self._km)
-        return self._tm_instance
+        return TorManager(self._pm, self._km)
 
-    @property
+    @cached_property
     def _config_handler(self) -> ConfigCommandHandler:
         """
         Lazily loads the ConfigCommandHandler.
@@ -169,11 +149,9 @@ class HeadlessDaemon:
         Returns:
             ConfigCommandHandler: The active instance.
         """
-        if self._config_handler_instance is None:
-            self._config_handler_instance = ConfigCommandHandler(self._pm)
-        return self._config_handler_instance
+        return ConfigCommandHandler(self._pm)
 
-    @property
+    @cached_property
     def _db_handler(self) -> DatabaseCommandHandler:
         """
         Lazily loads the DatabaseCommandHandler.
@@ -184,13 +162,11 @@ class HeadlessDaemon:
         Returns:
             DatabaseCommandHandler: The active instance.
         """
-        if self._db_handler_instance is None:
-            self._db_handler_instance = DatabaseCommandHandler(
-                self._pm, self._cm, self._hm, self._mm, lambda: [], lambda e: None
-            )
-        return self._db_handler_instance
+        return DatabaseCommandHandler(
+            self._pm, self._cm, self._hm, self._mm, lambda: [], lambda e: None
+        )
 
-    @property
+    @cached_property
     def _sys_handler(self) -> SystemCommandHandler:
         """
         Lazily loads the SystemCommandHandler.
@@ -201,9 +177,7 @@ class HeadlessDaemon:
         Returns:
             SystemCommandHandler: The active instance.
         """
-        if self._sys_handler_instance is None:
-            self._sys_handler_instance = SystemCommandHandler(self._pm, self._tm)
-        return self._sys_handler_instance
+        return SystemCommandHandler(self._pm, self._tm)
 
     def __enter__(self) -> 'HeadlessDaemon':
         """
