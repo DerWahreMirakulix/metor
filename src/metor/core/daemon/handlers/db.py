@@ -4,7 +4,7 @@ Encapsulates all stateless CRUD operations for Contacts, History, and Messages.
 Used by both the active Daemon engine and the HeadlessDaemon. Emits strict DTOs.
 """
 
-from typing import Dict, Any, List, Tuple, Callable, Optional
+from typing import Dict, List, Tuple, Callable, Optional, Union
 
 from metor.core.api import (
     IpcCommand,
@@ -90,15 +90,26 @@ class DatabaseCommandHandler:
             IpcEvent: The strictly typed response event DTO.
         """
         if isinstance(cmd, GetContactsListCommand):
-            data: Dict[str, Any] = self._cm.get_contacts_data()
+            data: Dict[str, Union[str, List[Tuple[str, str]]]] = (
+                self._cm.get_contacts_data()
+            )
+
+            saved_raw = data.get('saved', [])
+            saved_list: List[Tuple[str, str]] = (
+                saved_raw if isinstance(saved_raw, list) else []
+            )
             saved_entries: List[ContactEntry] = [
-                ContactEntry(alias=str(r[0]), onion=str(r[1]))
-                for r in data.get('saved', [])
+                ContactEntry(alias=str(r[0]), onion=str(r[1])) for r in saved_list
             ]
+
+            discovered_raw = data.get('discovered', [])
+            discovered_list: List[Tuple[str, str]] = (
+                discovered_raw if isinstance(discovered_raw, list) else []
+            )
             discovered_entries: List[ContactEntry] = [
-                ContactEntry(alias=str(r[0]), onion=str(r[1]))
-                for r in data.get('discovered', [])
+                ContactEntry(alias=str(r[0]), onion=str(r[1])) for r in discovered_list
             ]
+
             return ContactsDataEvent(
                 saved=saved_entries,
                 discovered=discovered_entries,
@@ -308,7 +319,7 @@ class DatabaseCommandHandler:
                 cmd.target, default_value=cmd.target
             )
             if cmd.target:
-                messages_raw: List[Dict[str, Any]] = self._mm.get_chat_history(
+                messages_raw: List[Dict[str, str]] = self._mm.get_chat_history(
                     str(onion), cmd.limit
                 )
                 messages: List[MessageEntry] = [MessageEntry(**m) for m in messages_raw]

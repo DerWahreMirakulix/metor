@@ -4,9 +4,9 @@ Module for managing user profiles, their directories, and daemon lock states.
 
 import shutil
 from pathlib import Path
-from typing import List, Tuple, Optional, Set, Dict, Any
+from typing import List, Tuple, Optional, Set, Dict
 
-from metor.core.api import DomainCode, UiCode, DbCode
+from metor.core.api import DomainCode, UiCode, DbCode, JsonValue
 from metor.data import SettingKey, Settings, SqlManager
 from metor.utils import Constants
 
@@ -119,7 +119,8 @@ class ProfileManager:
         Returns:
             Optional[int]: The static port, or None.
         """
-        return self.config.get(ProfileConfigKey.DAEMON_PORT)
+        val = self.config.get(ProfileConfigKey.DAEMON_PORT)
+        return int(str(val)) if val is not None else None
 
     def set_daemon_port(self, port: int) -> None:
         """
@@ -196,12 +197,12 @@ class ProfileManager:
         Returns:
             str: Default profile name.
         """
-        return Settings.get(SettingKey.DEFAULT_PROFILE)
+        return str(Settings.get(SettingKey.DEFAULT_PROFILE))
 
     @classmethod
     def set_default_profile(
         cls, profile_name: str
-    ) -> Tuple[bool, DomainCode, Dict[str, Any]]:
+    ) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
         """
         Sets a new default profile.
 
@@ -209,7 +210,7 @@ class ProfileManager:
             profile_name (str): New profile name.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, Any]]: A success flag, domain state code, and parameters.
+            Tuple[bool, DomainCode, Dict[str, JsonValue]]: A success flag, domain state code, and parameters.
         """
         safe_name: str = ''.join(
             c for c in profile_name if c.isalnum() or c in ('-', '_')
@@ -245,7 +246,9 @@ class ProfileManager:
         ]
 
     @classmethod
-    def get_profiles_data(cls, active_profile: Optional[str] = None) -> Dict[str, Any]:
+    def get_profiles_data(
+        cls, active_profile: Optional[str] = None
+    ) -> Dict[str, JsonValue]:
         """
         Retrieves raw metadata for all profiles.
 
@@ -253,11 +256,11 @@ class ProfileManager:
             active_profile (Optional[str]): Current active profile.
 
         Returns:
-            Dict[str, Any]: Profile data dictionary.
+            Dict[str, JsonValue]: Profile data dictionary.
         """
         active: str = active_profile if active_profile else cls.load_default_profile()
         profiles: List[str] = cls.get_all_profiles()
-        profile_list: List[Dict[str, Any]] = []
+        profile_list: List[JsonValue] = []
 
         for p in profiles:
             pm: 'ProfileManager' = cls(p)
@@ -275,7 +278,7 @@ class ProfileManager:
     @staticmethod
     def add_profile_folder(
         name: str, is_remote: bool = False, port: Optional[int] = None
-    ) -> Tuple[bool, DomainCode, Dict[str, Any]]:
+    ) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
         """
         Creates a new profile directory safely.
 
@@ -285,7 +288,7 @@ class ProfileManager:
             port (Optional[int]): Static port.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, Any]]: A success flag, domain state code, and parameters.
+            Tuple[bool, DomainCode, Dict[str, JsonValue]]: A success flag, domain state code, and parameters.
         """
         safe_name: str = ''.join(c for c in name if c.isalnum() or c in ('-', '_'))
         if not safe_name:
@@ -319,7 +322,7 @@ class ProfileManager:
     @classmethod
     def remove_profile_folder(
         cls, name: str, active_profile: Optional[str] = None
-    ) -> Tuple[bool, DomainCode, Dict[str, Any]]:
+    ) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
         """
         Removes a profile completely.
 
@@ -328,7 +331,7 @@ class ProfileManager:
             active_profile (Optional[str]): The currently running profile to prevent deletion.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, Any]]: A success flag, domain state code, and parameters.
+            Tuple[bool, DomainCode, Dict[str, JsonValue]]: A success flag, domain state code, and parameters.
         """
         default: str = cls.load_default_profile()
         active: str = active_profile if active_profile else default
@@ -364,7 +367,7 @@ class ProfileManager:
     @classmethod
     def rename_profile_folder(
         cls, old_name: str, new_name: str
-    ) -> Tuple[bool, DomainCode, Dict[str, Any]]:
+    ) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
         """
         Renames an existing profile directory.
 
@@ -373,7 +376,7 @@ class ProfileManager:
             new_name (str): New name.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, Any]]: A success flag, domain state code, and parameters.
+            Tuple[bool, DomainCode, Dict[str, JsonValue]]: A success flag, domain state code, and parameters.
         """
         safe_old: str = ''.join(c for c in old_name if c.isalnum() or c in ('-', '_'))
         safe_new: str = ''.join(c for c in new_name if c.isalnum() or c in ('-', '_'))
@@ -402,7 +405,9 @@ class ProfileManager:
         )
 
     @classmethod
-    def clear_profile_db(cls, name: str) -> Tuple[bool, DomainCode, Dict[str, Any]]:
+    def clear_profile_db(
+        cls, name: str
+    ) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
         """
         Clears the SQLite database for a profile.
 
@@ -410,7 +415,7 @@ class ProfileManager:
             name (str): The profile name.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, Any]]: A success flag, domain state code, and parameters.
+            Tuple[bool, DomainCode, Dict[str, JsonValue]]: A success flag, domain state code, and parameters.
         """
         safe_name: str = ''.join(c for c in name if c.isalnum() or c in ('-', '_'))
         if not safe_name:

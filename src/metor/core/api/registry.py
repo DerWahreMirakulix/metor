@@ -3,17 +3,24 @@ Module providing the central routing registries for IPC deserialization factorie
 Utilizes a dynamic Decorator-Pattern to register commands and events, upholding the Open-Closed Principle (OCP).
 """
 
-from typing import Dict, Type, Any, Callable
+from typing import Dict, Type, Callable, TypeVar
 
 # Local Package Imports
 from metor.core.api.codes import Action, EventType
+from metor.core.api.base import IpcCommand, IpcEvent
 
 
-CMD_MAP: Dict[Action, Type[Any]] = {}
-EVENT_MAP: Dict[EventType, Type[Any]] = {}
+# Types
+C = TypeVar('C', bound=IpcCommand)
+E = TypeVar('E', bound=IpcEvent)
 
 
-def register_command(action: Action) -> Callable[[Type[Any]], Type[Any]]:
+# Global Registries
+CMD_MAP: Dict[Action, Type[IpcCommand]] = {}
+EVENT_MAP: Dict[EventType, Type[IpcEvent]] = {}
+
+
+def register_command(action: Action) -> Callable[[Type[C]], Type[C]]:
     """
     Decorator to dynamically register an IpcCommand DTO to a specific Action enum.
 
@@ -21,17 +28,17 @@ def register_command(action: Action) -> Callable[[Type[Any]], Type[Any]]:
         action (Action): The strict IPC action code.
 
     Returns:
-        Callable[[Type[Any]], Type[Any]]: The decorated class.
+        Callable[[Type[C]], Type[C]]: The decorated class.
     """
 
-    def wrapper(cls: Type[Any]) -> Type[Any]:
+    def wrapper(cls: Type[C]) -> Type[C]:
         CMD_MAP[action] = cls
         return cls
 
     return wrapper
 
 
-def register_event(event_type: EventType) -> Callable[[Type[Any]], Type[Any]]:
+def register_event(event_type: EventType) -> Callable[[Type[E]], Type[E]]:
     """
     Decorator to dynamically register an IpcEvent DTO to a specific EventType enum.
 
@@ -39,10 +46,10 @@ def register_event(event_type: EventType) -> Callable[[Type[Any]], Type[Any]]:
         event_type (EventType): The strict IPC event type code.
 
     Returns:
-        Callable[[Type[Any]], Type[Any]]: The decorated class.
+        Callable[[Type[E]], Type[E]]: The decorated class.
     """
 
-    def wrapper(cls: Type[Any]) -> Type[Any]:
+    def wrapper(cls: Type[E]) -> Type[E]:
         EVENT_MAP[event_type] = cls
         return cls
 

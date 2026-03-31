@@ -6,10 +6,10 @@ Isolates interactive prompts and subsystem orchestration from the generic router
 import sys
 import shutil
 import getpass
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 
 from metor.core import KeyManager, TorManager
-from metor.core.api import SystemCode, UiCode, DomainCode
+from metor.core.api import SystemCode, UiCode, DomainCode, JsonValue
 from metor.core.daemon import Daemon
 from metor.data import HistoryManager, ContactManager, MessageManager, SqlManager
 from metor.data.profile import ProfileManager
@@ -73,7 +73,7 @@ class CommandHandlers:
             sys.stdout.flush()
 
         def status_cb(
-            code: DomainCode, params: Optional[Dict[str, Any]] = None
+            code: DomainCode, params: Optional[Dict[str, JsonValue]] = None
         ) -> None:
             if params is None:
                 params = {}

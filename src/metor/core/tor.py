@@ -11,9 +11,9 @@ import stem.process
 import stem.control
 import nacl.exceptions
 from pathlib import Path
-from typing import Tuple, Optional, Any, Dict, Callable
+from typing import Tuple, Optional, Dict, Callable
 
-from metor.core.api import DomainCode, NetworkCode, SystemCode
+from metor.core.api import DomainCode, NetworkCode, SystemCode, JsonValue
 from metor.data import SettingKey, Settings
 from metor.data.profile import ProfileManager
 from metor.utils import Constants, clean_onion, secure_shred_file, ensure_onion_format
@@ -54,7 +54,7 @@ class TorManager:
         self._pm: ProfileManager = pm
         self._km: KeyManager = km
 
-        self._tm_proc: Optional[Any] = None
+        self._tm_proc: Optional[stem.process.Process] = None
         self.onion: Optional[str] = None
         self.socks_port: Optional[int] = None
         self.incoming_port: Optional[int] = None
@@ -76,7 +76,7 @@ class TorManager:
         s.close()
         return port
 
-    def _provision_runtime_keys(self) -> Tuple[bool, DomainCode, Dict[str, Any]]:
+    def _provision_runtime_keys(self) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
         """
         Injects the plaintext Ed25519 key exclusively for the Tor C-Process runtime.
         This file is shredded upon termination to maintain Data-At-Rest encryption.
@@ -85,7 +85,7 @@ class TorManager:
             None
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, Any]]: Success flag, domain code, and params.
+            Tuple[bool, DomainCode, Dict[str, JsonValue]]: Success flag, domain code, and params.
         """
         hs_dir: Path = Path(self._pm.get_hidden_service_dir())
         try:
@@ -123,7 +123,7 @@ class TorManager:
         # We only shred the secret key. Tor requires the public key to exist.
         secure_shred_file(hs_dir / Constants.TOR_SECRET_KEY)
 
-    def start(self) -> Tuple[bool, DomainCode, Dict[str, Any]]:
+    def start(self) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
         """
         Starts the Tor process and sets up ports and the onion address.
         Centralizes the startup error message reporting.
@@ -132,7 +132,7 @@ class TorManager:
             None
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, Any]]: Success flag, domain code, and params.
+            Tuple[bool, DomainCode, Dict[str, JsonValue]]: Success flag, domain code, and params.
         """
         hs_dir: Path = Path(self._pm.get_hidden_service_dir())
         data_dir: Path = Path(self._pm.get_tor_data_dir())
@@ -176,7 +176,7 @@ class TorManager:
             if Settings.get(SettingKey.ENABLE_TOR_LOGGING) and TorManager._log_callback:
                 TorManager._log_callback(line)
 
-        max_retries: int = Settings.get(SettingKey.MAX_TOR_RETRIES)
+        max_retries: int = int(str(Settings.get(SettingKey.MAX_TOR_RETRIES) or 3))
 
         for attempt in range(max_retries):
             try:
@@ -267,12 +267,12 @@ class TorManager:
         s.set_proxy(
             proxy_type=socks.SOCKS5, addr=Constants.LOCALHOST, port=self.socks_port
         )
-        timeout: float = Settings.get(SettingKey.TOR_TIMEOUT)
+        timeout: float = float(str(Settings.get(SettingKey.TOR_TIMEOUT) or 10.0))
         s.settimeout(timeout)
         s.connect((onion_formatted, 80))
         return s
 
-    def rotate_circuits(self) -> Tuple[bool, DomainCode, Dict[str, Any]]:
+    def rotate_circuits(self) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
         """
         Sends the NEWNYM signal to the Tor Control Port to rotate circuits.
         Enforces new network hops for subsequent connection attempts.
@@ -281,7 +281,7 @@ class TorManager:
             None
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, Any]]: Success flag, domain code, and params.
+            Tuple[bool, DomainCode, Dict[str, JsonValue]]: Success flag, domain code, and params.
         """
         if not self._tm_proc or not self.control_port:
             return (
@@ -299,7 +299,7 @@ class TorManager:
         except Exception as e:
             return False, NetworkCode.RETUNNEL_FAILED, {'error': str(e)}
 
-    def get_address(self) -> Tuple[bool, DomainCode, Dict[str, Any]]:
+    def get_address(self) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
         """
         Retrieves the current hidden service address for the active profile.
 
@@ -307,7 +307,7 @@ class TorManager:
             None
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, Any]]: A success flag, domain code, and params.
+            Tuple[bool, DomainCode, Dict[str, JsonValue]]: A success flag, domain code, and params.
         """
         hs_dir: Path = Path(self._pm.get_hidden_service_dir())
         hostname_file: Path = hs_dir / Constants.HOSTNAME_FILE
@@ -325,7 +325,7 @@ class TorManager:
             {'profile': self._pm.profile_name},
         )
 
-    def generate_address(self) -> Tuple[bool, DomainCode, Dict[str, Any]]:
+    def generate_address(self) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
         """
         Forces the generation of a new Tor hidden service address by restarting the process.
 
@@ -333,7 +333,7 @@ class TorManager:
             None
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, Any]]: A success flag, domain code, and params.
+            Tuple[bool, DomainCode, Dict[str, JsonValue]]: A success flag, domain code, and params.
         """
         if self._pm.is_daemon_running():
             return (

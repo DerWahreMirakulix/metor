@@ -14,7 +14,7 @@ import sys
 import os
 import signal
 import types
-from typing import List, Set, Optional, Callable, Dict, Any
+from typing import List, Set, Optional, Callable, Dict
 from pathlib import Path
 
 from metor.core import KeyManager, TorManager
@@ -52,6 +52,7 @@ from metor.core.api import (
     SystemCode,
     UiCode,
     DomainCode,
+    JsonValue,
     ActionErrorEvent,
     ActionSuccessEvent,
     SettingUpdatedEvent,
@@ -89,7 +90,9 @@ class Daemon:
         cm: ContactManager,
         hm: HistoryManager,
         mm: MessageManager,
-        status_callback: Optional[Callable[[DomainCode, Dict[str, Any]], None]] = None,
+        status_callback: Optional[
+            Callable[[DomainCode, Dict[str, JsonValue]], None]
+        ] = None,
     ) -> None:
         """
         Initializes the DaemonEngine.
@@ -112,9 +115,9 @@ class Daemon:
         self._hm: HistoryManager = hm
         self._mm: MessageManager = mm
         self._km: KeyManager = km
-        self._status_cb: Optional[Callable[[DomainCode, Dict[str, Any]], None]] = (
-            status_callback
-        )
+        self._status_cb: Optional[
+            Callable[[DomainCode, Dict[str, JsonValue]], None]
+        ] = status_callback
 
         self._stop_flag: threading.Event = threading.Event()
         self._is_locked: bool = False

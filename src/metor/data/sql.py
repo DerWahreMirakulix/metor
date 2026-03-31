@@ -17,6 +17,7 @@ from pathlib import Path
 from metor.data.settings import Settings, SettingKey
 
 
+# Types
 SqlParam = Union[str, int, float, bytes, None]
 
 

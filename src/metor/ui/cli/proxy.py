@@ -9,7 +9,7 @@ import socket
 import json
 import getpass
 import dataclasses
-from typing import Any, Optional, Dict, Union
+from typing import Optional, Dict, Union
 
 from metor.core.api import (
     JsonValue,
@@ -18,8 +18,8 @@ from metor.core.api import (
     DomainCode,
     SystemCode,
     NetworkCode,
-    UiCode,
     ContactCode,
+    UiCode,
     UnlockCommand,
     SelfDestructCommand,
     SetSettingCommand,
@@ -203,15 +203,15 @@ class CliProxy:
                         ProfilesDataEvent,
                     ),
                 ):
-                    text_fmt: str = UIPresenter.format_response(event, chat_mode=False)
+                    text_fmt: str = UIPresenter.format_response(event, chat_mode=False)  # type: ignore
                     return self._prefix_remote(text_fmt)
 
                 # For generic Success, Error, or Notification DTOs
-                params_raw: Dict[str, Any] = dataclasses.asdict(event)
+                params_raw: Dict[str, object] = dataclasses.asdict(event)
                 params: Dict[str, JsonValue] = {
                     k: v
                     for k, v in params_raw.items()
-                    if isinstance(v, (str, int, float, bool, type(None)))
+                    if isinstance(v, (str, int, float, bool, type(None), list, dict))
                 }
                 code: DomainCode = getattr(event, 'code', SystemCode.COMMAND_SUCCESS)
                 text: str = self._translate_local(code, params)

@@ -8,8 +8,9 @@ import shutil
 import signal
 import time
 import types
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional
 
+from metor.core.api import JsonValue
 from metor.data import SettingKey, Settings
 from metor.ui import UIPresenter
 from metor.ui.chat.models import ChatMessageType, ChatLine
@@ -72,7 +73,7 @@ class Renderer:
 
     def print_message(
         self,
-        msg: Any,
+        msg: str,
         msg_type: ChatMessageType = ChatMessageType.RAW,
         alias: Optional[str] = None,
         skip_prompt: bool = False,
@@ -84,7 +85,7 @@ class Renderer:
         Safely renders a new message to the terminal. Constrains buffer size via sliding window.
 
         Args:
-            msg (Any): The message content to render.
+            msg (str): The strictly typed string message to render.
             msg_type (ChatMessageType): The visual routing type of the message.
             alias (Optional[str]): The associated remote alias.
             skip_prompt (bool): Flag to skip rendering the prompt after the message.
@@ -103,7 +104,7 @@ class Renderer:
             self._display.clear_input_area(self._last_visual_lines)
 
             chat_line: ChatLine = ChatLine(
-                text=str(msg),
+                text=msg,
                 msg_type=msg_type,
                 alias=alias,
                 is_pending=bool(msg_id) if not is_drop else is_pending,
@@ -113,8 +114,8 @@ class Renderer:
 
             self._display.all_msgs.append(chat_line)
 
-            limit_raw: Any = Settings.get(SettingKey.CHAT_LIMIT)
-            limit: int = int(limit_raw) if limit_raw else 50
+            limit_raw: JsonValue = Settings.get(SettingKey.CHAT_LIMIT)
+            limit: int = int(str(limit_raw)) if limit_raw else 50
             # Sliding window: We only pop one to maintain the high-watermark or stay at the limit
             if len(self._display.all_msgs) > limit:
                 self._display.all_msgs.pop(0)
@@ -143,7 +144,7 @@ class Renderer:
 
     def print_messages_batch(
         self,
-        messages_data: List[Dict[str, Any]],
+        messages_data: List[Dict[str, JsonValue]],
         alias: str,
         is_live_flush: bool = False,
     ) -> None:
@@ -152,7 +153,7 @@ class Renderer:
         Respects the chat_buffer_padding setting to ensure smooth scrolling.
 
         Args:
-            messages_data (List[Dict[str, Any]]): The list of raw message dictionaries.
+            messages_data (List[Dict[str, JsonValue]]): The list of raw message dictionaries.
             alias (str): The target alias.
             is_live_flush (bool): Flag denoting if these messages are a live buffer flush.
 
@@ -171,7 +172,7 @@ class Renderer:
 
             for msg_dict in messages_data:
                 chat_line: ChatLine = ChatLine(
-                    text=str(msg_dict['payload']),
+                    text=str(msg_dict.get('payload', '')),
                     msg_type=ChatMessageType.REMOTE,
                     alias=alias,
                     is_pending=False,
@@ -180,10 +181,10 @@ class Renderer:
                 )
                 self._display.all_msgs.append(chat_line)
 
-            limit_raw: Any = Settings.get(SettingKey.CHAT_LIMIT)
-            padding_raw: Any = Settings.get(SettingKey.CHAT_BUFFER_PADDING)
-            limit: int = int(limit_raw) if limit_raw else 50
-            padding: int = int(padding_raw) if padding_raw else 20
+            limit_raw: JsonValue = Settings.get(SettingKey.CHAT_LIMIT)
+            padding_raw: JsonValue = Settings.get(SettingKey.CHAT_BUFFER_PADDING)
+            limit: int = int(str(limit_raw)) if limit_raw else 50
+            padding: int = int(str(padding_raw)) if padding_raw else 20
             total_limit: int = limit + padding
 
             while len(self._display.all_msgs) > total_limit:

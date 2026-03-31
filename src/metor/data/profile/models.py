@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Union
 
 
+# Types
 ProfileConfigValue = Union[str, int, float, bool, None]
 
 

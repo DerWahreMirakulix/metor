@@ -12,6 +12,7 @@ from typing import Dict, Union, Optional
 from metor.utils import Constants, FileLock
 
 
+# Types
 SettingValue = Union[str, int, float, bool]
 
 

@@ -10,10 +10,10 @@ import socket
 import threading
 import time
 import base64
-from typing import List, Optional, Tuple, Callable, Dict, Any
+from typing import List, Optional, Tuple, Callable, Dict
 
 from metor.core import TorManager
-from metor.core.api import IpcEvent, AckEvent, DropFailedEvent
+from metor.core.api import IpcEvent, AckEvent, DropFailedEvent, JsonValue
 from metor.data import (
     MessageManager,
     MessageStatus,
@@ -162,7 +162,7 @@ class OutboxWorker:
                 db_id, _, _, payload, msg_id, timestamp = row
 
                 # Envelop payload in JSON for consistency and deduplication
-                envelope: Dict[str, Any] = {
+                envelope: Dict[str, JsonValue] = {
                     'id': msg_id,
                     'timestamp': timestamp,
                     'text': payload,
@@ -243,7 +243,9 @@ class OutboxWorker:
         Returns:
             None
         """
-        ttl_setting: float = Settings.get(SettingKey.DROP_TUNNEL_TTL)
+        ttl_setting: float = float(
+            str(Settings.get(SettingKey.DROP_TUNNEL_TTL) or 30.0)
+        )
         now: float = time.time()
         expired_onions: List[str] = []
 

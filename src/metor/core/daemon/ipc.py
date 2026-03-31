@@ -7,9 +7,9 @@ Enforces strict timeouts to prevent socket blockades and uses robust UTF-8 decod
 import socket
 import threading
 import json
-from typing import List, Callable, Dict, Any, Optional
+from typing import List, Callable, Dict, Optional
 
-from metor.core.api import IpcCommand, IpcEvent
+from metor.core.api import IpcCommand, IpcEvent, JsonValue
 from metor.data.profile import ProfileManager
 from metor.utils import Constants
 
@@ -200,7 +200,7 @@ class IpcServer:
                         if not line:
                             continue
                         try:
-                            cmd_dict: Dict[str, Any] = json.loads(line)
+                            cmd_dict: Dict[str, JsonValue] = json.loads(line)
                             cmd: IpcCommand = IpcCommand.from_dict(cmd_dict)
                             self._command_callback(cmd, conn)
                         except Exception:

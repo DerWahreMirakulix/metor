@@ -5,7 +5,7 @@ Preserves the '{alias}' placeholder strictly for downstream dynamic rendering.
 Utilizes domain-agnostic UISeverity Enums instead of Chat-specific routing types.
 """
 
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Tuple, Optional
 
 from metor.core.api import (
     DomainCode,
@@ -14,6 +14,7 @@ from metor.core.api import (
     DbCode,
     ContactCode,
     UiCode,
+    JsonValue,
 )
 
 # Local Package Imports
@@ -402,7 +403,7 @@ class Translator:
 
     @staticmethod
     def get(
-        code: DomainCode, params: Optional[Dict[str, Any]] = None
+        code: DomainCode, params: Optional[Dict[str, JsonValue]] = None
     ) -> Tuple[str, UISeverity]:
         """
         Resolves a Translation Code to its localized string and generic severity type.
@@ -410,7 +411,7 @@ class Translator:
 
         Args:
             code (DomainCode): The rigid system code.
-            params (Optional[Dict[str, Any]]): Dynamic parameters to inject (e.g., attempt counts).
+            params (Optional[Dict[str, JsonValue]]): Dynamic parameters to inject (e.g., attempt counts).
 
         Returns:
             Tuple[str, UISeverity]: The formatted text and its generic severity type.
@@ -419,7 +420,7 @@ class Translator:
         if not entry:
             return f'Unknown code: {code}', UISeverity.SYSTEM
 
-        safe_params: Dict[str, Any] = params.copy() if params else {}
+        safe_params: Dict[str, JsonValue] = params.copy() if params else {}
 
         # Guard: Inject literal '{alias}' into kwargs to prevent KeyErrors during format()
         # and preserve the placeholder strictly for the Renderer.

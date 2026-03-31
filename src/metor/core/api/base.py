@@ -1,6 +1,7 @@
 """
 Module defining the abstract base classes and factory logic for IPC communication.
 Implements runtime type validation to protect daemon deserialization from malformed payloads.
+Enforces the Zero-Any policy by mapping introspection meta-types to 'object'.
 """
 
 import json
@@ -9,52 +10,56 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 from typing import (
     Dict,
-    Tuple,
     Type,
     Set,
     Union,
     List,
-    Any,
+    Tuple,
     get_type_hints,
     get_origin,
     get_args,
+    TypeVar,
 )
 
 # Local Package Imports
 from metor.core.api.codes import Action, EventType
 
 
+# Types
 JsonValue = Union[
     str, int, float, bool, None, Dict[str, 'JsonValue'], List['JsonValue']
 ]
+T = TypeVar('T')
 
 
-def _coerce_and_validate(cls: Type[Any], kwargs: Dict[str, Any]) -> Dict[str, Any]:
+def _coerce_and_validate(
+    cls: Type[T], kwargs: Dict[str, JsonValue]
+) -> Dict[str, JsonValue]:
     """
     Performs runtime type checking and coercion for incoming JSON dictionaries
     against the static type hints of a target dataclass.
 
     Args:
-        cls (Type[Any]): The target dataclass.
-        kwargs (Dict[str, Any]): The unvalidated payload dictionary.
+        cls (Type[T]): The target dataclass.
+        kwargs (Dict[str, JsonValue]): The unvalidated payload dictionary.
 
     Raises:
         TypeError: If a value violates the strict type hints.
         ValueError: If a non-optional value is None.
 
     Returns:
-        Dict[str, Any]: The validated and coerced dictionary ready for instantiation.
+        Dict[str, JsonValue]: The validated and coerced dictionary ready for instantiation.
     """
-    hints: Dict[str, Any] = get_type_hints(cls)
-    coerced: Dict[str, Any] = {}
+    hints: Dict[str, object] = get_type_hints(cls)
+    coerced: Dict[str, JsonValue] = {}
 
     for key, value in kwargs.items():
         if key not in hints:
             continue
 
-        expected_type: Any = hints[key]
-        origin: Any = get_origin(expected_type)
-        args: Tuple[Any, ...] = get_args(expected_type)
+        expected_type: object = hints[key]
+        origin: object = get_origin(expected_type)
+        args: Tuple[object, ...] = get_args(expected_type) or ()
 
         if origin is Union:
             is_optional: bool = type(None) in args
@@ -73,7 +78,7 @@ def _coerce_and_validate(cls: Type[Any], kwargs: Dict[str, Any]) -> Dict[str, An
                         coerced[key] = arg(value)
                         valid = True
                         break
-                    elif isinstance(value, arg):
+                    elif isinstance(arg, type) and isinstance(value, arg):
                         coerced[key] = value
                         valid = True
                         break
@@ -95,7 +100,9 @@ def _coerce_and_validate(cls: Type[Any], kwargs: Dict[str, Any]) -> Dict[str, An
                     if not isinstance(value, (list, dict)):
                         raise TypeError()
                     coerced[key] = value
-                elif not isinstance(value, expected_type):
+                elif isinstance(expected_type, type) and not isinstance(
+                    value, expected_type
+                ):
                     raise TypeError()
                 else:
                     coerced[key] = value
@@ -126,7 +133,9 @@ class IpcMessage:
         Returns:
             str: The serialized JSON string.
         """
-        data: Dict[str, Any] = {k: v for k, v in asdict(self).items() if v is not None}
+        data: Dict[str, JsonValue] = {
+            k: v for k, v in asdict(self).items() if v is not None
+        }
         return json.dumps(data)
 
 
@@ -156,16 +165,16 @@ class IpcCommand(IpcMessage):
         """
         from metor.core.api.registry import CMD_MAP
 
-        action_val: str = str(data['action'])
+        action_val: str = str(data.get('action', ''))
         action: Action = Action(action_val)
         target_cls: Type['IpcCommand'] = CMD_MAP[action]
 
         valid_keys: Set[str] = {f.name for f in dataclasses.fields(target_cls)}
-        kwargs: Dict[str, Any] = {
+        kwargs: Dict[str, JsonValue] = {
             k: v for k, v in data.items() if k in valid_keys and k != 'action'
         }
 
-        coerced_kwargs: Dict[str, Any] = _coerce_and_validate(target_cls, kwargs)
+        coerced_kwargs: Dict[str, JsonValue] = _coerce_and_validate(target_cls, kwargs)
         return target_cls(**coerced_kwargs)
 
 
@@ -195,14 +204,14 @@ class IpcEvent(IpcMessage):
         """
         from metor.core.api.registry import EVENT_MAP
 
-        type_val: str = str(data['type'])
+        type_val: str = str(data.get('type', ''))
         event_type: EventType = EventType(type_val)
         target_cls: Type['IpcEvent'] = EVENT_MAP[event_type]
 
         valid_keys: Set[str] = {f.name for f in dataclasses.fields(target_cls)}
-        kwargs: Dict[str, Any] = {
+        kwargs: Dict[str, JsonValue] = {
             k: v for k, v in data.items() if k in valid_keys and k != 'type'
         }
 
-        coerced_kwargs: Dict[str, Any] = _coerce_and_validate(target_cls, kwargs)
+        coerced_kwargs: Dict[str, JsonValue] = _coerce_and_validate(target_cls, kwargs)
         return target_cls(**coerced_kwargs)

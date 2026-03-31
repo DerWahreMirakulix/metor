@@ -6,7 +6,7 @@ Maps generic UISeverity types to domain-specific ChatMessageTypes using a DRY ar
 
 import threading
 import dataclasses
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 
 from metor.core.api import (
     IpcEvent,
@@ -14,6 +14,7 @@ from metor.core.api import (
     SystemCode,
     NetworkCode,
     UiCode,
+    JsonValue,
     MarkReadCommand,
     InitEvent,
     RemoteMsgEvent,
@@ -65,6 +66,7 @@ from metor.ui.chat.session import Session
 from metor.ui.chat.models import ChatMessageType
 
 
+# Mapping
 _SEVERITY_MAP: Dict[UISeverity, ChatMessageType] = {
     UISeverity.INFO: ChatMessageType.INFO,
     UISeverity.SYSTEM: ChatMessageType.SYSTEM,
@@ -105,7 +107,7 @@ class EventHandler:
     def _print_translated(
         self,
         code: DomainCode,
-        params: Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, JsonValue]] = None,
         alias: Optional[str] = None,
     ) -> None:
         """
@@ -113,7 +115,7 @@ class EventHandler:
 
         Args:
             code (DomainCode): The strict domain code for translation.
-            params (Optional[Dict[str, Any]]): Dynamic parameters to inject.
+            params (Optional[Dict[str, JsonValue]]): Dynamic parameters to inject.
             alias (Optional[str]): The associated remote alias to attach to the UI line.
 
         Returns:
@@ -164,7 +166,12 @@ class EventHandler:
             # 3. Synchronous/Asynchronous Status DTOs
             elif isinstance(event, FallbackSuccessEvent):
                 self._renderer.apply_fallback_to_drop(event.msg_ids)
-                params: Dict[str, Any] = dataclasses.asdict(event)
+                params_raw = dataclasses.asdict(event)
+                params: Dict[str, JsonValue] = {
+                    k: v
+                    for k, v in params_raw.items()
+                    if isinstance(v, (str, int, float, bool, type(None), list, dict))
+                }
                 self._print_translated(event.code, params, event.alias)
 
             elif isinstance(
@@ -183,12 +190,17 @@ class EventHandler:
                     RetunnelSuccessEvent,
                 ),
             ):
-                params = dataclasses.asdict(event)
-                target_alias = params.get('alias') or params.get('target')
+                params_raw = dataclasses.asdict(event)
+                params = {
+                    k: v
+                    for k, v in params_raw.items()
+                    if isinstance(v, (str, int, float, bool, type(None), list, dict))
+                }
+                target_alias = str(params.get('alias') or params.get('target') or '')
                 self._print_translated(
                     getattr(event, 'code', SystemCode.COMMAND_SUCCESS),
                     params,
-                    target_alias,
+                    target_alias if target_alias else None,
                 )
 
             # 4. Message & Network Primitives
@@ -283,7 +295,7 @@ class EventHandler:
 
             elif isinstance(event, InboxDataEvent):
                 if event.alias and event.messages:
-                    messages_data: List[Dict[str, Any]] = [
+                    messages_data: List[Dict[str, JsonValue]] = [
                         {'timestamp': m.timestamp, 'payload': m.payload}
                         for m in event.messages
                     ]

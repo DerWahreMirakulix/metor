@@ -4,8 +4,9 @@ Implements the Command Pattern to direct parsed inputs to the correct proxy or h
 """
 
 import argparse
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 
+from metor.core.api import JsonValue
 from metor.data.profile import ProfileManager
 from metor.ui import Help, UIPresenter
 
@@ -188,12 +189,12 @@ class CliDispatcher:
                 if len(self._extra) < 1:
                     print(Help.show_command_help(cmd))
                 else:
-                    _, msg = ProfileManager.add_profile_folder(
+                    _, _, msg_dict = ProfileManager.add_profile_folder(
                         self._extra[0],
                         is_remote=getattr(self._args, 'remote', False),
                         port=getattr(self._args, 'port', None),
                     )
-                    print(msg)
+                    print(str(msg_dict))
             elif sub in ('rm', 'remove'):
                 if len(self._extra) < 1:
                     print(Help.show_command_help(cmd))
@@ -213,24 +214,24 @@ class CliDispatcher:
                             print('Profile removal aborted.')
                             return
 
-                    _, msg = ProfileManager.remove_profile_folder(
+                    _, _, msg_dict = ProfileManager.remove_profile_folder(
                         target_profile, self._pm.profile_name
                     )
-                    print(msg)
+                    print(str(msg_dict))
             elif sub == 'rename':
                 if len(self._extra) < 2:
                     print(Help.show_command_help(cmd))
                 else:
-                    _, msg = ProfileManager.rename_profile_folder(
+                    _, _, msg_dict = ProfileManager.rename_profile_folder(
                         self._extra[0], self._extra[1]
                     )
-                    print(msg)
+                    print(str(msg_dict))
             elif sub == 'set-default':
                 if len(self._extra) < 1:
                     print(Help.show_command_help(cmd))
                 else:
-                    _, msg = ProfileManager.set_default_profile(self._extra[0])
-                    print(msg)
+                    _, _, msg_dict = ProfileManager.set_default_profile(self._extra[0])
+                    print(str(msg_dict))
             elif sub == 'clear':
                 if len(self._extra) < 1:
                     print(Help.show_command_help(cmd))
@@ -239,10 +240,10 @@ class CliDispatcher:
                     target_proxy: CliProxy = CliProxy(target_pm)
                     print(target_proxy.clear_profile_db())
             elif sub in ('list', None):
-                data: Dict[str, Any] = ProfileManager.get_profiles_data(
+                data: Dict[str, JsonValue] = ProfileManager.get_profiles_data(
                     self._pm.profile_name
                 )
-                print(UIPresenter.format_profiles(data))
+                print(UIPresenter.format_profiles(data))  # type: ignore
             else:
                 print(Help.show_command_help(cmd))
 

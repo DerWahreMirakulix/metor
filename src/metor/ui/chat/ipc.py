@@ -6,9 +6,9 @@ Isolates all raw TCP byte parsing from the Chat Engine logic and thwarts UTF-8 D
 import socket
 import threading
 import json
-from typing import Callable, Dict, Any, Optional
+from typing import Callable, Dict, Optional
 
-from metor.core.api import IpcCommand, IpcEvent
+from metor.core.api import IpcCommand, IpcEvent, JsonValue
 from metor.utils import Constants
 
 
@@ -130,7 +130,7 @@ class IpcClient:
                         continue
 
                     try:
-                        event_dict: Dict[str, Any] = json.loads(line)
+                        event_dict: Dict[str, JsonValue] = json.loads(line)
                         event: IpcEvent = IpcEvent.from_dict(event_dict)
                         self._on_event(event)
                     except Exception:

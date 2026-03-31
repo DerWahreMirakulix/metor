@@ -8,10 +8,11 @@ import sys
 import dataclasses
 from enum import Enum
 from pathlib import Path
-from typing import Any, List, Type
+from typing import List, Type
 
 # Local Package Imports
 from metor.core.api.registry import CMD_MAP, EVENT_MAP
+from metor.core.api.base import IpcMessage
 
 # Dynamically resolve paths to support execution from any directory
 SCRIPT_DIR: Path = Path(__file__).parent.resolve()
@@ -37,13 +38,13 @@ class ApiDocGenerator:
         """
         self._output_path: Path = Path(output_path)
 
-    def _get_type_name(self, field_type: Any) -> str:
+    def _get_type_name(self, field_type: object) -> str:
         """
         Extracts a clean string representation of a type hint, stripping verbose typing prefixes
         and internal module paths to maintain readability in the generated documentation.
 
         Args:
-            field_type (Any): The type annotation from the dataclass field.
+            field_type (object): The type annotation from the dataclass field.
 
         Returns:
             str: The formatted stringified type.
@@ -78,13 +79,13 @@ class ApiDocGenerator:
 
         return type_str
 
-    def _format_dataclass(self, cls: Type[Any]) -> str:
+    def _format_dataclass(self, cls: Type[IpcMessage]) -> str:
         """
         Extracts the fields, types, and defaults from a dataclass into a Markdown table.
         Filters out internal routing constants to reduce documentation noise.
 
         Args:
-            cls (Type[Any]): The dataclass type to introspect.
+            cls (Type[IpcMessage]): The dataclass type to introspect.
 
         Returns:
             str: The formatted Markdown string for the class.

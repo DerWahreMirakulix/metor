@@ -6,7 +6,7 @@ Handles RAM buffering, JSON Payload Parsing (UUID mapping), Drop & Go fallback c
 import socket
 import base64
 import json
-from typing import List, Tuple, Dict, Any, Callable, Optional
+from typing import List, Tuple, Dict, Callable, Optional
 
 from metor.core.api import (
     IpcEvent,
@@ -18,6 +18,7 @@ from metor.core.api import (
     DomainCode,
     ContactCode,
     NetworkCode,
+    JsonValue,
 )
 from metor.core.daemon.models import TorCommand
 from metor.data import (
@@ -87,13 +88,13 @@ class MessageRouter:
             return
 
         alias: Optional[str] = self._cm.get_alias_by_onion(onion)
-        messages_data: List[Dict[str, Any]] = [
+        messages_data: List[Dict[str, JsonValue]] = [
             {'id': msg_id, 'payload': content, 'type': 'text', 'timestamp': ''}
             for msg_id, content in buffered_msgs
         ]
 
         self._broadcast(
-            InboxDataEvent(alias=alias, messages=messages_data, is_live_flush=True)
+            InboxDataEvent(alias=alias, messages=messages_data, is_live_flush=True)  # type: ignore
         )
 
         for msg_id, _ in buffered_msgs:
@@ -102,7 +103,9 @@ class MessageRouter:
             except Exception:
                 pass
 
-    def force_fallback(self, target: str) -> Tuple[bool, DomainCode, Dict[str, Any]]:
+    def force_fallback(
+        self, target: str
+    ) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
         """
         Forces all unacknowledged outgoing live messages to the drop queue.
 
@@ -110,7 +113,7 @@ class MessageRouter:
             target (str): The target alias or onion address.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, Any]]: A success flag, response code, and params.
+            Tuple[bool, DomainCode, Dict[str, JsonValue]]: A success flag, response code, and params.
         """
         alias, onion, exists = self._cm.resolve_target(target)
         if not exists or not onion:
@@ -196,7 +199,7 @@ class MessageRouter:
 
         try:
             # Envelop live message into JSON structure matching Drops
-            envelope: Dict[str, Any] = {
+            envelope: Dict[str, JsonValue] = {
                 'id': msg_id,
                 'timestamp': '',  # Live messages rely on UI rendering order, timestamps are synced on Drops
                 'text': msg,
@@ -235,8 +238,8 @@ class MessageRouter:
         try:
             raw_text = base64.b64decode(b64_payload).decode('utf-8')
             envelope = json.loads(raw_text)
-            msg_id = envelope.get('id', payload_id)
-            content = envelope.get('text', raw_text)
+            msg_id = str(envelope.get('id', payload_id))
+            content = str(envelope.get('text', raw_text))
         except Exception:
             pass
 
@@ -250,7 +253,8 @@ class MessageRouter:
             return False
         else:
             buffer_size: int = self._state.push_ram_buffer(onion, msg_id, content)
-            max_limit: int = Settings.get(SettingKey.MAX_UNSEEN_LIVE_MSGS)
+            max_limit_raw: JsonValue = Settings.get(SettingKey.MAX_UNSEEN_LIVE_MSGS)
+            max_limit: int = int(str(max_limit_raw)) if max_limit_raw else 20
             if buffer_size >= max_limit:
                 return True
             return False
@@ -304,15 +308,21 @@ class MessageRouter:
                         try:
                             raw_text = base64.b64decode(parts[2]).decode('utf-8')
                             envelope = json.loads(raw_text)
-                            msg_id = envelope.get('id', payload_id)
-                            content = envelope.get('text', raw_text)
-                            timestamp = envelope.get('timestamp')
+                            msg_id = str(envelope.get('id', payload_id))
+                            content = str(envelope.get('text', raw_text))
+                            timestamp = (
+                                str(envelope.get('timestamp'))
+                                if envelope.get('timestamp')
+                                else None
+                            )
                         except Exception:
                             msg_id = payload_id
                             content = base64.b64decode(parts[2]).decode('utf-8')
                             timestamp = None
 
-                        is_ephemeral: bool = Settings.get(SettingKey.EPHEMERAL_MESSAGES)
+                        is_ephemeral: bool = bool(
+                            Settings.get(SettingKey.EPHEMERAL_MESSAGES)
+                        )
                         status: MessageStatus = (
                             MessageStatus.READ if is_ephemeral else MessageStatus.UNREAD
                         )
