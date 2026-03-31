@@ -115,9 +115,10 @@ class MessageRouter:
         Returns:
             Tuple[bool, DomainCode, Dict[str, JsonValue]]: A success flag, response code, and params.
         """
-        alias, onion, exists = self._cm.resolve_target(target)
-        if not exists or not onion:
+        resolved: Optional[Tuple[str, str]] = self._cm.resolve_target(target)
+        if not resolved:
             return False, ContactCode.PEER_NOT_FOUND, {'target': target}
+        alias, onion = resolved
 
         unacked: Dict[str, str] = self._state.pop_unacked_messages(onion)
 
@@ -166,9 +167,10 @@ class MessageRouter:
         Returns:
             None
         """
-        alias, onion, exists = self._cm.resolve_target(target)
-        if not exists or not onion:
+        resolved: Optional[Tuple[str, str]] = self._cm.resolve_target(target)
+        if not resolved:
             return
+        alias, onion = resolved
 
         conn: Optional[socket.socket] = self._state.get_connection(onion)
 

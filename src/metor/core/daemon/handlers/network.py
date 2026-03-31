@@ -6,7 +6,7 @@ Emits strictly typed Domain Transfer Objects via IPC.
 
 import socket
 import threading
-from typing import Callable, Optional, cast, List
+from typing import Callable, Optional, cast, List, Tuple
 
 from metor.core import TorManager
 from metor.core.api import (
@@ -115,6 +115,8 @@ class NetworkCommandHandler:
         Returns:
             None
         """
+        resolved: Optional[Tuple[str, str]]
+
         if isinstance(cmd, InitCommand):
             self._send_to(conn, InitEvent(onion=self._tm.onion))
             for active_onion in self._network.get_active_onions():
@@ -144,8 +146,8 @@ class NetworkCommandHandler:
                 )
                 return
 
-            alias, _, exists = self._cm.resolve_target(cmd.target, auto_create=True)
-            if not exists:
+            resolved = self._cm.resolve_target(cmd.target, auto_create=True)
+            if not resolved:
                 self._send_to(
                     conn,
                     ActionErrorEvent(
@@ -222,9 +224,10 @@ class NetworkCommandHandler:
                 )
                 return
 
-            alias, onion, exists = self._cm.resolve_target(cmd.target, auto_create=True)
+            resolved = self._cm.resolve_target(cmd.target, auto_create=True)
 
-            if exists:
+            if resolved:
+                alias, onion = resolved
                 self._mm.queue_message(
                     contact_onion=str(onion),
                     direction=MessageDirection.OUT,
@@ -269,8 +272,8 @@ class NetworkCommandHandler:
                     )
                     return
 
-                alias, _, exists = self._cm.resolve_target(cmd.target)
-                if not exists:
+                resolved = self._cm.resolve_target(cmd.target)
+                if not resolved:
                     self._send_to(
                         conn,
                         ActionErrorEvent(
@@ -281,4 +284,5 @@ class NetworkCommandHandler:
                     )
                     return
 
+                alias, onion = resolved
                 self._send_to(conn, SwitchSuccessEvent(alias=alias))

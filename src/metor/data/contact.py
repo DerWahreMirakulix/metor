@@ -372,32 +372,29 @@ class ContactManager:
     def resolve_target(
         self,
         target: Optional[str],
-        default_value: Optional[str] = None,
         auto_create: bool = False,
-    ) -> Tuple[Optional[str], Optional[str], bool]:
+    ) -> Optional[Tuple[str, str]]:
         """
-        Resolves a generic target string into an (alias, onion) tuple.
+        Resolves a generic target string into a guaranteed (alias, onion) tuple.
 
         Args:
             target (Optional[str]): The target to resolve (alias or onion).
-            default_value (Optional[str]): The fallback value if resolution fails.
             auto_create (bool): If True, automatically creates a discovered peer RAM alias if
                                 the target is a valid, unknown onion address.
 
         Returns:
-            Tuple[Optional[str], Optional[str], bool]: A tuple containing the resolved alias,
-            clean onion, and existence flag. If exists is True, both alias and onion are
-            guaranteed to be non-None valid strings.
+            Optional[Tuple[str, str]]: A tuple containing the resolved alias and
+            clean onion. Returns None if the target cannot be resolved.
         """
         onion: Optional[str] = self.get_onion_by_alias(target)
         if not onion and target:
             onion = clean_onion(target)
+
         alias: Optional[str] = self.get_alias_by_onion(onion, auto_create=auto_create)
-        return (
-            (alias, onion, True)
-            if alias and onion
-            else (default_value, default_value, False)
-        )
+
+        if alias and onion:
+            return alias, onion
+        return None
 
     def get_onion_by_alias(self, alias: Optional[str]) -> Optional[str]:
         """

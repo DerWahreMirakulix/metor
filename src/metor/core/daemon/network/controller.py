@@ -7,7 +7,7 @@ import socket
 import threading
 import time
 import secrets
-from typing import List, Optional, Callable, Dict, TYPE_CHECKING, cast
+from typing import List, Optional, Callable, Dict, TYPE_CHECKING, cast, Tuple
 
 from metor.core import TorManager
 from metor.core.api import (
@@ -124,9 +124,10 @@ class ConnectionController:
         Returns:
             None
         """
-        alias, onion, exists = self._cm.resolve_target(target)
-        if not exists or not onion or onion == self._tm.onion:
+        resolved: Optional[Tuple[str, str]] = self._cm.resolve_target(target)
+        if not resolved or resolved[1] == self._tm.onion:
             return
+        alias, onion = resolved
 
         if self._state.get_connection(onion):
             return
@@ -223,10 +224,11 @@ class ConnectionController:
         Returns:
             None
         """
-        alias, onion, exists = self._cm.resolve_target(target)
-        if not exists or not onion:
+        resolved: Optional[Tuple[str, str]] = self._cm.resolve_target(target)
+        if not resolved:
             self._broadcast(PeerNotFoundEvent(target=target))
             return
+        alias, onion = resolved
 
         conn, initial_buffer = self._state.pop_pending_connection(onion)
         if not conn:
@@ -276,11 +278,12 @@ class ConnectionController:
         Returns:
             None
         """
-        alias, onion, exists = self._cm.resolve_target(target)
-        if not exists or not onion:
+        resolved: Optional[Tuple[str, str]] = self._cm.resolve_target(target)
+        if not resolved:
             if initiated_by_self:
                 self._broadcast(PeerNotFoundEvent(target=target))
             return
+        alias, onion = resolved
 
         if initiated_by_self:
             self._state.discard_outbound_attempt(onion)
@@ -350,11 +353,12 @@ class ConnectionController:
         Returns:
             None
         """
-        alias, onion, exists = self._cm.resolve_target(target)
-        if not exists or not onion:
+        resolved: Optional[Tuple[str, str]] = self._cm.resolve_target(target)
+        if not resolved:
             if initiated_by_self:
                 self._broadcast(PeerNotFoundEvent(target=target))
             return
+        alias, onion = resolved
 
         if initiated_by_self:
             self._state.discard_outbound_attempt(onion)
@@ -504,10 +508,11 @@ class ConnectionController:
         Returns:
             None
         """
-        alias, onion, exists = self._cm.resolve_target(target)
-        if not exists or not onion:
+        resolved: Optional[Tuple[str, str]] = self._cm.resolve_target(target)
+        if not resolved:
             self._broadcast(PeerNotFoundEvent(target=target))
             return
+        alias, onion = resolved
 
         self._broadcast(RetunnelInitiatedEvent(alias=str(alias or onion)))
         self._hm.log_event(HistoryEvent.LIVE_RETUNNEL_INITIATED, onion)

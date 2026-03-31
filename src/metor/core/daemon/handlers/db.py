@@ -13,7 +13,6 @@ from metor.core.api import (
     DbCode,
     NetworkCode,
     SystemCode,
-    DomainCode,
     GetContactsListCommand,
     AddContactCommand,
     RemoveContactCommand,
@@ -90,6 +89,11 @@ class DatabaseCommandHandler:
         Returns:
             IpcEvent: The strictly typed response event DTO.
         """
+        resolved: Optional[Tuple[str, str]]
+        alias: Optional[str]
+        onion: Optional[str]
+        active_onions: List[str]
+
         if isinstance(cmd, GetContactsListCommand):
             data: Dict[str, Union[str, List[Tuple[str, str]]]] = (
                 self._cm.get_contacts_data()
@@ -142,7 +146,7 @@ class DatabaseCommandHandler:
             )
 
         if isinstance(cmd, RemoveContactCommand):
-            active_onions: List[str] = self._get_active_onions()
+            active_onions = self._get_active_onions()
             rm_success, rm_code, rm_params, rm_renames, rm_removed = (
                 self._cm.remove_contact(cmd.alias, active_onions)
             )
@@ -160,7 +164,7 @@ class DatabaseCommandHandler:
                     self._broadcast(ContactRemovedEvent(alias=a))
 
             self._cm.cleanup_orphans(active_onions)
-            rm_alias_res = str(rm_params.get('alias', cmd.alias))
+            rm_alias_res: str = str(rm_params.get('alias', cmd.alias))
 
             if rm_success:
                 return ContactActionSuccessEvent(
@@ -258,9 +262,19 @@ class DatabaseCommandHandler:
             )
 
         if isinstance(cmd, GetHistoryCommand):
-            alias, onion, _ = self._cm.resolve_target(
-                cmd.target, default_value=cmd.target
-            )
+            alias = None
+            onion = None
+
+            if cmd.target:
+                resolved = self._cm.resolve_target(cmd.target)
+                if not resolved:
+                    return ActionErrorEvent(
+                        action=cmd.action,
+                        code=NetworkCode.INVALID_TARGET,
+                        target=cmd.target,
+                    )
+                alias, onion = resolved
+
             rows: List[Tuple[str, str, Optional[str], str]] = self._hm.get_history(
                 onion, cmd.limit
             )
@@ -284,22 +298,20 @@ class DatabaseCommandHandler:
 
         if isinstance(cmd, ClearHistoryCommand):
             active_onions = self._get_active_onions()
-            alias, onion, exists = self._cm.resolve_target(
-                cmd.target, default_value=cmd.target
-            )
+            alias = None
+            onion = None
 
-            ch_success: bool
-            ch_code: DomainCode
-            ch_params: Dict[str, str]
+            if cmd.target:
+                resolved = self._cm.resolve_target(cmd.target)
+                if not resolved:
+                    return ActionErrorEvent(
+                        action=cmd.action,
+                        code=ContactCode.PEER_NOT_FOUND,
+                        target=cmd.target,
+                    )
+                alias, onion = resolved
 
-            if cmd.target and not exists:
-                ch_success, ch_code, ch_params = (
-                    False,
-                    ContactCode.PEER_NOT_FOUND,
-                    {'target': cmd.target},
-                )
-            else:
-                ch_success, ch_code, ch_params = self._hm.clear_history(onion)
+            ch_success, ch_code, ch_params = self._hm.clear_history(onion)
 
             deleted_aliases: List[str] = self._cm.cleanup_orphans(active_onions)
             for a in deleted_aliases:
@@ -324,45 +336,48 @@ class DatabaseCommandHandler:
             )
 
         if isinstance(cmd, GetMessagesCommand):
-            alias, onion, _ = self._cm.resolve_target(
-                cmd.target, default_value=cmd.target
+            if not cmd.target:
+                return ActionErrorEvent(
+                    action=cmd.action,
+                    code=NetworkCode.INVALID_TARGET,
+                )
+
+            resolved = self._cm.resolve_target(cmd.target)
+            if not resolved:
+                return ActionErrorEvent(
+                    action=cmd.action,
+                    code=NetworkCode.INVALID_TARGET,
+                    target=cmd.target,
+                )
+
+            alias, onion = resolved
+            messages_raw: List[Dict[str, str]] = self._mm.get_chat_history(
+                onion, cmd.limit
             )
-            if cmd.target:
-                messages_raw: List[Dict[str, str]] = self._mm.get_chat_history(
-                    str(onion), cmd.limit
-                )
-                messages: List[MessageEntry] = [MessageEntry(**m) for m in messages_raw]
-                return MessagesDataEvent(
-                    messages=messages,
-                    target=str(alias),
-                )
-            return ActionErrorEvent(
-                action=cmd.action,
-                code=NetworkCode.INVALID_TARGET,
-                target=cmd.target,
-                alias=alias,
+            messages: List[MessageEntry] = [MessageEntry(**m) for m in messages_raw]
+            return MessagesDataEvent(
+                messages=messages,
+                target=alias,
             )
 
         if isinstance(cmd, ClearMessagesCommand):
             active_onions = self._get_active_onions()
-            alias, onion, exists = self._cm.resolve_target(
-                cmd.target, default_value=cmd.target
+            alias = None
+            onion = None
+
+            if cmd.target:
+                resolved = self._cm.resolve_target(cmd.target)
+                if not resolved:
+                    return ActionErrorEvent(
+                        action=cmd.action,
+                        code=ContactCode.PEER_NOT_FOUND,
+                        target=cmd.target,
+                    )
+                alias, onion = resolved
+
+            cm_success, cm_code, cm_params = self._mm.clear_messages(
+                onion, cmd.non_contacts_only
             )
-
-            cm_success: bool
-            cm_code: DomainCode
-            cm_params: Dict[str, str]
-
-            if cmd.target and not exists:
-                cm_success, cm_code, cm_params = (
-                    False,
-                    ContactCode.PEER_NOT_FOUND,
-                    {'target': cmd.target},
-                )
-            else:
-                cm_success, cm_code, cm_params = self._mm.clear_messages(
-                    onion, cmd.non_contacts_only
-                )
 
             deleted_aliases = self._cm.cleanup_orphans(active_onions)
             for a in deleted_aliases:
@@ -394,19 +409,17 @@ class DatabaseCommandHandler:
             return InboxCountsEvent(inbox=inbox_data)
 
         if isinstance(cmd, MarkReadCommand):
-            alias, onion, exists = self._cm.resolve_target(
-                cmd.target, default_value=cmd.target
-            )
-            if not exists:
+            resolved = self._cm.resolve_target(cmd.target)
+            if not resolved:
                 return ActionErrorEvent(
                     action=cmd.action,
                     code=ContactCode.PEER_NOT_FOUND,
                     target=cmd.target,
-                    alias=alias,
                 )
+            alias, onion = resolved
 
             raw_messages: List[Tuple[int, str, str, str]] = self._mm.get_and_read_inbox(
-                str(onion)
+                onion
             )
             messages_list: List[UnreadMessageEntry] = [
                 UnreadMessageEntry(timestamp=str(m[3]), payload=str(m[2]))
@@ -414,7 +427,7 @@ class DatabaseCommandHandler:
             ]
             return UnreadMessagesEvent(
                 messages=messages_list,
-                target=str(alias),
+                target=alias,
             )
 
         return ActionErrorEvent(
