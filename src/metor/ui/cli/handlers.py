@@ -6,10 +6,10 @@ Isolates interactive prompts and subsystem orchestration from the generic router
 import sys
 import shutil
 import getpass
-from typing import List
+from typing import List, Dict, Any, Optional
 
 from metor.core import KeyManager, TorManager
-from metor.core.api import TransCode
+from metor.core.api import SystemCode, UiCode, DomainCode
 from metor.core.daemon import Daemon
 from metor.data import HistoryManager, ContactManager, MessageManager, SqlManager
 from metor.data.profile import ProfileManager
@@ -37,26 +37,26 @@ class CommandHandlers:
             None
         """
         if pm.is_remote():
-            msg, _ = Translator.get(TransCode.DAEMON_REMOTE_NO_START)
+            msg, _ = Translator.get(UiCode.DAEMON_REMOTE_NO_START)
             print(msg)
             return
         if pm.is_daemon_running():
             msg, _ = Translator.get(
-                TransCode.DAEMON_ALREADY_RUNNING, {'profile': pm.profile_name}
+                UiCode.DAEMON_ALREADY_RUNNING, {'profile': pm.profile_name}
             )
             print(msg)
             return
 
         startup_msg, _ = Translator.get(
-            TransCode.DAEMON_STARTING, {'profile': pm.profile_name}
+            UiCode.DAEMON_STARTING, {'profile': pm.profile_name}
         )
         print(startup_msg)
 
-        prompt, _ = Translator.get(TransCode.ENTER_MASTER_PASSWORD)
+        prompt, _ = Translator.get(UiCode.ENTER_MASTER_PASSWORD)
         password: str = getpass.getpass(prompt)
 
         if not password:
-            msg, _ = Translator.get(TransCode.DAEMON_EMPTY_PASSWORD)
+            msg, _ = Translator.get(UiCode.DAEMON_EMPTY_PASSWORD)
             print(msg)
             return
 
@@ -72,8 +72,13 @@ class CommandHandlers:
             sys.stdout.write(f'\r\033[K{Theme.CYAN}[TOR-LOG]{Theme.RESET} {line}\n')
             sys.stdout.flush()
 
-        def status_cb(line: str) -> None:
-            sys.stdout.write(f'{line}\n')
+        def status_cb(
+            code: DomainCode, params: Optional[Dict[str, Any]] = None
+        ) -> None:
+            if params is None:
+                params = {}
+            msg, _ = Translator.get(code, params)
+            sys.stdout.write(f'{msg}\n')
             sys.stdout.flush()
 
         SqlManager.set_log_callback(sql_log_cb)
@@ -109,13 +114,13 @@ class CommandHandlers:
         """
         if not pm.exists():
             msg, _ = Translator.get(
-                TransCode.PROFILE_NOT_FOUND, {'profile': pm.profile_name}
+                UiCode.PROFILE_NOT_FOUND, {'profile': pm.profile_name}
             )
             print(msg)
             return
 
         if not pm.is_daemon_running():
-            msg, _ = Translator.get(TransCode.DAEMON_OFFLINE)
+            msg, _ = Translator.get(SystemCode.DAEMON_OFFLINE)
             print(msg)
             return
 
@@ -134,7 +139,7 @@ class CommandHandlers:
         Returns:
             None
         """
-        msg, _ = Translator.get(TransCode.CLEANUP_START)
+        msg, _ = Translator.get(UiCode.CLEANUP_START)
         print(msg)
         killed: int = ProcessManager.cleanup_processes()
 
@@ -143,7 +148,7 @@ class CommandHandlers:
             if not temp_pm.is_remote():
                 temp_pm.clear_daemon_port()
 
-        result_msg, _ = Translator.get(TransCode.CLEANUP_COMPLETE, {'killed': killed})
+        result_msg, _ = Translator.get(UiCode.CLEANUP_COMPLETE, {'killed': killed})
         print(result_msg)
 
     @staticmethod
@@ -157,13 +162,13 @@ class CommandHandlers:
         Returns:
             None
         """
-        message, _ = Translator.get(TransCode.PURGE_WARNING)
+        message, _ = Translator.get(UiCode.PURGE_WARNING)
         if is_nuke_remote:
-            remote_warn, _ = Translator.get(TransCode.PURGE_WARNING_REMOTE)
+            remote_warn, _ = Translator.get(UiCode.PURGE_WARNING_REMOTE)
             message += f' {remote_warn}'
 
         print(message)
-        prompt, _ = Translator.get(TransCode.PURGE_PROMPT)
+        prompt, _ = Translator.get(UiCode.PURGE_PROMPT)
         confirmation: str = input(prompt)
 
         if confirmation.strip().lower() == 'yes':
@@ -174,17 +179,17 @@ class CommandHandlers:
                     if ProfileManager(p).is_remote()
                 ]
                 if not CommandHandlers._nuke_remote_profiles(remotes):
-                    abort_msg, _ = Translator.get(TransCode.PURGE_ABORTED)
+                    abort_msg, _ = Translator.get(UiCode.PURGE_ABORTED)
                     print(abort_msg)
                     return
 
             ProcessManager.cleanup_processes()
             if Constants.DATA.exists():
                 shutil.rmtree(str(Constants.DATA))
-                complete_msg, _ = Translator.get(TransCode.PURGE_COMPLETE)
+                complete_msg, _ = Translator.get(UiCode.PURGE_COMPLETE)
                 print(complete_msg)
         else:
-            abort_msg, _ = Translator.get(TransCode.PURGE_ABORTED)
+            abort_msg, _ = Translator.get(UiCode.PURGE_ABORTED)
             print(abort_msg)
 
     @staticmethod
@@ -199,7 +204,7 @@ class CommandHandlers:
         Returns:
             bool: True if successful or user overridden, False if aborted.
         """
-        warning_msg, _ = Translator.get(TransCode.REMOTE_NUKE_WARNING)
+        warning_msg, _ = Translator.get(UiCode.REMOTE_NUKE_WARNING)
         print(warning_msg)
         failed_remotes: List[str] = []
 
@@ -217,18 +222,18 @@ class CommandHandlers:
                 failed_remotes.append(r)
             else:
                 success_msg, _ = Translator.get(
-                    TransCode.REMOTE_NUKE_SUCCESS, {'profile': r}
+                    UiCode.REMOTE_NUKE_SUCCESS, {'profile': r}
                 )
                 print(success_msg)
 
         if failed_remotes:
             fail_msg, _ = Translator.get(
-                TransCode.REMOTE_NUKE_FAILED,
+                UiCode.REMOTE_NUKE_FAILED,
                 {'failed_remotes': f'{Theme.RESET}, {Theme.CYAN}'.join(failed_remotes)},
             )
             print(f'\n{fail_msg}\n')
 
-            prompt, _ = Translator.get(TransCode.REMOTE_NUKE_OVERRIDE)
+            prompt, _ = Translator.get(UiCode.REMOTE_NUKE_OVERRIDE)
             override: str = input(prompt)
             if override.strip().lower() != 'y':
                 return False

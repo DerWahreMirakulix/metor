@@ -1,157 +1,49 @@
 """
 Module providing the central routing registries for IPC deserialization factories.
-Binds Action and EventType enums to their respective strict DTO classes.
+Utilizes a dynamic Decorator-Pattern to register commands and events, upholding the Open-Closed Principle (OCP).
 """
 
-from typing import Dict, Type
+from typing import Dict, Type, Any, Callable
 
 # Local Package Imports
 from metor.core.api.codes import Action, EventType
-from metor.core.api.base import IpcCommand, IpcEvent
-from metor.core.api.commands import (
-    InitCommand,
-    GetConnectionsCommand,
-    GetContactsListCommand,
-    ConnectCommand,
-    DisconnectCommand,
-    AcceptCommand,
-    RejectCommand,
-    MsgCommand,
-    AddContactCommand,
-    RemoveContactCommand,
-    RenameContactCommand,
-    ClearContactsCommand,
-    SwitchCommand,
-    SendDropCommand,
-    GetInboxCommand,
-    MarkReadCommand,
-    FallbackCommand,
-    GetHistoryCommand,
-    ClearHistoryCommand,
-    GetMessagesCommand,
-    ClearMessagesCommand,
-    GetAddressCommand,
-    GenerateAddressCommand,
-    ClearProfileDbCommand,
-    SetSettingCommand,
-    SelfDestructCommand,
-    UnlockCommand,
-    RetunnelCommand,
-)
-from metor.core.api.events import (
-    InitEvent,
-    RemoteMsgEvent,
-    AckEvent,
-    DropFailedEvent,
-    ConnectedEvent,
-    DisconnectedEvent,
-    RenameSuccessEvent,
-    ContactRemovedEvent,
-    ConnectionsStateEvent,
-    SwitchSuccessEvent,
-    ConnectionPendingEvent,
-    ConnectionAutoAcceptedEvent,
-    ConnectionRetryEvent,
-    ConnectionFailedEvent,
-    IncomingConnectionEvent,
-    ConnectionRejectedEvent,
-    TiebreakerRejectedEvent,
-    AutoReconnectAttemptEvent,
-    InboxNotificationEvent,
-    InboxDataEvent,
-    ContactsDataEvent,
-    HistoryDataEvent,
-    MessagesDataEvent,
-    InboxCountsEvent,
-    UnreadMessagesEvent,
-    AddressDataEvent,
-    ProfilesDataEvent,
-    ActionSuccessEvent,
-    ActionErrorEvent,
-    ContactActionSuccessEvent,
-    ContactRenamedEvent,
-    ProfileActionSuccessEvent,
-    TargetActionSuccessEvent,
-    SettingUpdatedEvent,
-    FallbackSuccessEvent,
-    MaxConnectionsReachedEvent,
-    PeerNotFoundEvent,
-    RetunnelInitiatedEvent,
-    RetunnelSuccessEvent,
-    CommandResponseEvent,
-)
 
 
-CMD_MAP: Dict[Action, Type[IpcCommand]] = {
-    Action.INIT: InitCommand,
-    Action.GET_CONNECTIONS: GetConnectionsCommand,
-    Action.GET_CONTACTS_LIST: GetContactsListCommand,
-    Action.CONNECT: ConnectCommand,
-    Action.DISCONNECT: DisconnectCommand,
-    Action.ACCEPT: AcceptCommand,
-    Action.REJECT: RejectCommand,
-    Action.MSG: MsgCommand,
-    Action.ADD_CONTACT: AddContactCommand,
-    Action.REMOVE_CONTACT: RemoveContactCommand,
-    Action.RENAME_CONTACT: RenameContactCommand,
-    Action.CLEAR_CONTACTS: ClearContactsCommand,
-    Action.SWITCH: SwitchCommand,
-    Action.SEND_DROP: SendDropCommand,
-    Action.GET_INBOX: GetInboxCommand,
-    Action.MARK_READ: MarkReadCommand,
-    Action.FALLBACK: FallbackCommand,
-    Action.GET_HISTORY: GetHistoryCommand,
-    Action.CLEAR_HISTORY: ClearHistoryCommand,
-    Action.GET_MESSAGES: GetMessagesCommand,
-    Action.CLEAR_MESSAGES: ClearMessagesCommand,
-    Action.GET_ADDRESS: GetAddressCommand,
-    Action.GENERATE_ADDRESS: GenerateAddressCommand,
-    Action.CLEAR_PROFILE_DB: ClearProfileDbCommand,
-    Action.SET_SETTING: SetSettingCommand,
-    Action.SELF_DESTRUCT: SelfDestructCommand,
-    Action.UNLOCK: UnlockCommand,
-    Action.RETUNNEL: RetunnelCommand,
-}
+CMD_MAP: Dict[Action, Type[Any]] = {}
+EVENT_MAP: Dict[EventType, Type[Any]] = {}
 
-EVENT_MAP: Dict[EventType, Type[IpcEvent]] = {
-    EventType.INIT: InitEvent,
-    EventType.REMOTE_MSG: RemoteMsgEvent,
-    EventType.ACK: AckEvent,
-    EventType.DROP_FAILED: DropFailedEvent,
-    EventType.CONNECTED: ConnectedEvent,
-    EventType.DISCONNECTED: DisconnectedEvent,
-    EventType.RENAME_SUCCESS: RenameSuccessEvent,
-    EventType.CONTACT_REMOVED: ContactRemovedEvent,
-    EventType.CONNECTIONS_STATE: ConnectionsStateEvent,
-    EventType.SWITCH_SUCCESS: SwitchSuccessEvent,
-    EventType.CONNECTION_PENDING: ConnectionPendingEvent,
-    EventType.CONNECTION_AUTO_ACCEPTED: ConnectionAutoAcceptedEvent,
-    EventType.CONNECTION_RETRY: ConnectionRetryEvent,
-    EventType.CONNECTION_FAILED: ConnectionFailedEvent,
-    EventType.INCOMING_CONNECTION: IncomingConnectionEvent,
-    EventType.CONNECTION_REJECTED: ConnectionRejectedEvent,
-    EventType.TIEBREAKER_REJECTED: TiebreakerRejectedEvent,
-    EventType.AUTO_RECONNECT_ATTEMPT: AutoReconnectAttemptEvent,
-    EventType.INBOX_NOTIFICATION: InboxNotificationEvent,
-    EventType.INBOX_DATA: InboxDataEvent,
-    EventType.CONTACTS_DATA: ContactsDataEvent,
-    EventType.HISTORY_DATA: HistoryDataEvent,
-    EventType.MESSAGES_DATA: MessagesDataEvent,
-    EventType.INBOX_COUNTS: InboxCountsEvent,
-    EventType.UNREAD_MESSAGES: UnreadMessagesEvent,
-    EventType.ADDRESS_DATA: AddressDataEvent,
-    EventType.PROFILES_DATA: ProfilesDataEvent,
-    EventType.ACTION_SUCCESS: ActionSuccessEvent,
-    EventType.ACTION_ERROR: ActionErrorEvent,
-    EventType.CONTACT_ACTION_SUCCESS: ContactActionSuccessEvent,
-    EventType.CONTACT_RENAMED: ContactRenamedEvent,
-    EventType.PROFILE_ACTION_SUCCESS: ProfileActionSuccessEvent,
-    EventType.TARGET_ACTION_SUCCESS: TargetActionSuccessEvent,
-    EventType.SETTING_UPDATED: SettingUpdatedEvent,
-    EventType.FALLBACK_SUCCESS: FallbackSuccessEvent,
-    EventType.MAX_CONNECTIONS_REACHED: MaxConnectionsReachedEvent,
-    EventType.PEER_NOT_FOUND: PeerNotFoundEvent,
-    EventType.RETUNNEL_INITIATED: RetunnelInitiatedEvent,
-    EventType.RETUNNEL_SUCCESS: RetunnelSuccessEvent,
-    EventType.COMMAND_RESPONSE: CommandResponseEvent,
-}
+
+def register_command(action: Action) -> Callable[[Type[Any]], Type[Any]]:
+    """
+    Decorator to dynamically register an IpcCommand DTO to a specific Action enum.
+
+    Args:
+        action (Action): The strict IPC action code.
+
+    Returns:
+        Callable[[Type[Any]], Type[Any]]: The decorated class.
+    """
+
+    def wrapper(cls: Type[Any]) -> Type[Any]:
+        CMD_MAP[action] = cls
+        return cls
+
+    return wrapper
+
+
+def register_event(event_type: EventType) -> Callable[[Type[Any]], Type[Any]]:
+    """
+    Decorator to dynamically register an IpcEvent DTO to a specific EventType enum.
+
+    Args:
+        event_type (EventType): The strict IPC event type code.
+
+    Returns:
+        Callable[[Type[Any]], Type[Any]]: The decorated class.
+    """
+
+    def wrapper(cls: Type[Any]) -> Type[Any]:
+        EVENT_MAP[event_type] = cls
+        return cls
+
+    return wrapper

@@ -12,6 +12,7 @@ from typing import List, Optional, Callable, Dict, TYPE_CHECKING
 from metor.core import TorManager
 from metor.core.api import (
     IpcEvent,
+    NetworkCode,
     ConnectedEvent,
     DisconnectedEvent,
     FallbackSuccessEvent,
@@ -27,7 +28,6 @@ from metor.core.api import (
     RetunnelInitiatedEvent,
     RetunnelSuccessEvent,
     AutoReconnectAttemptEvent,
-    TransCode,
 )
 from metor.core.daemon.models import TorCommand
 from metor.core.daemon.crypto import Crypto
@@ -232,7 +232,7 @@ class ConnectionController:
         if not conn:
             self._broadcast(
                 ActionErrorEvent(
-                    code=TransCode.NO_PENDING_CONNECTION,
+                    code=NetworkCode.NO_PENDING_CONNECTION,
                     alias=str(alias or onion),
                 )
             )
@@ -298,7 +298,7 @@ class ConnectionController:
             if initiated_by_self:
                 self._broadcast(
                     ActionErrorEvent(
-                        code=TransCode.NO_CONNECTION_TO_REJECT,
+                        code=NetworkCode.NO_CONNECTION_TO_REJECT,
                         alias=str(alias or onion),
                     )
                 )
@@ -376,7 +376,7 @@ class ConnectionController:
             if initiated_by_self:
                 self._broadcast(
                     ActionErrorEvent(
-                        code=TransCode.NO_CONNECTION_TO_DISCONNECT,
+                        code=NetworkCode.NO_CONNECTION_TO_DISCONNECT,
                         alias=str(alias or onion),
                     )
                 )
@@ -396,7 +396,7 @@ class ConnectionController:
                 )
             self._broadcast(
                 FallbackSuccessEvent(
-                    code=TransCode.FALLBACK_SUCCESS,
+                    code=NetworkCode.FALLBACK_SUCCESS,
                     alias=str(alias or onion),
                     count=len(unacked),
                     msg_ids=list(unacked.keys()),

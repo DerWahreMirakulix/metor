@@ -75,7 +75,6 @@ It details the strict Data Transfer Objects (DTOs) used over the local IPC socke
 - [PeerNotFoundEvent](#peernotfoundevent)
 - [RetunnelInitiatedEvent](#retunnelinitiatedevent)
 - [RetunnelSuccessEvent](#retunnelsuccessevent)
-- [CommandResponseEvent](#commandresponseevent)
 
 ## 1. Commands (UI -> Daemon)
 
@@ -793,12 +792,13 @@ Data Transfer Object indicating an automated background reconnect attempt.
 
     Attributes:
         alias (Optional[str]): The target peer alias.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         type (EventType): The strict IPC event type code.
 
 | Field | Type | Default |
 |---|---|---|
 | `alias` | `Optional[str]` | `None` |
+| `code` | `DomainCode` | `NetworkCode.AUTO_RECONNECT_ATTEMPT` |
 
 **Event Type Code:** `auto_reconnect_attempt`
 
@@ -934,13 +934,14 @@ Data Transfer Object returning hidden service identity data.
 
     Attributes:
         action (Action): The triggering command action.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         profile (str): The active profile name.
         onion (str): The local Tor onion address.
         type (EventType): The strict IPC event type code.
 
 | Field | Type | Default |
 |---|---|---|
+| `code` | `DomainCode` | Required |
 | `profile` | `str` | Required |
 | `onion` | `str` | Required |
 
@@ -967,11 +968,13 @@ Data Transfer Object returning the available isolated profiles.
 Data Transfer Object indicating a generic action completed successfully.
 
     Attributes:
-        code (TransCode): The translation code denoting success.
+        code (DomainCode): The translation code denoting success.
         action (Optional[Action]): The triggering action.
         type (EventType): The strict IPC event type code.
 
-*No additional payload parameters.*
+| Field | Type | Default |
+|---|---|---|
+| `code` | `DomainCode` | Required |
 
 **Event Type Code:** `action_success`
 
@@ -981,7 +984,7 @@ Data Transfer Object indicating a generic action completed successfully.
 Data Transfer Object indicating a generic action failed.
 
     Attributes:
-        code (TransCode): The translation code for the error.
+        code (DomainCode): The translation code for the error.
         action (Optional[Action]): The triggering action.
         reason (Optional[str]): Specific context for the failure.
         target (Optional[str]): The associated target string, if any.
@@ -990,6 +993,7 @@ Data Transfer Object indicating a generic action failed.
 
 | Field | Type | Default |
 |---|---|---|
+| `code` | `DomainCode` | Required |
 | `reason` | `Optional[str]` | `None` |
 | `target` | `Optional[str]` | `None` |
 | `alias` | `Optional[str]` | `None` |
@@ -1003,13 +1007,14 @@ Data Transfer Object indicating a contact mutation completed successfully.
 
     Attributes:
         action (Action): The triggering action.
-        code (TransCode): The translation code denoting success.
+        code (DomainCode): The translation code denoting success.
         alias (str): The affected contact alias.
         profile (Optional[str]): The active profile.
         type (EventType): The strict IPC event type code.
 
 | Field | Type | Default |
 |---|---|---|
+| `code` | `DomainCode` | Required |
 | `alias` | `str` | Required |
 | `profile` | `Optional[str]` | `None` |
 
@@ -1022,13 +1027,14 @@ Data Transfer Object indicating a contact was renamed.
 
     Attributes:
         action (Action): The triggering action.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         old_alias (str): The previous alias.
         new_alias (str): The new alias.
         type (EventType): The strict IPC event type code.
 
 | Field | Type | Default |
 |---|---|---|
+| `code` | `DomainCode` | Required |
 | `old_alias` | `str` | Required |
 | `new_alias` | `str` | Required |
 
@@ -1041,7 +1047,7 @@ Data Transfer Object indicating a profile mutation completed successfully.
 
     Attributes:
         action (Action): The triggering action.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         profile (str): The affected profile name.
         remote_tag (Optional[str]): Network routing configuration tag.
         port (Optional[int]): Target port if remote.
@@ -1049,6 +1055,7 @@ Data Transfer Object indicating a profile mutation completed successfully.
 
 | Field | Type | Default |
 |---|---|---|
+| `code` | `DomainCode` | Required |
 | `profile` | `str` | Required |
 | `remote_tag` | `Optional[str]` | `None` |
 | `port` | `Optional[int]` | `None` |
@@ -1062,13 +1069,14 @@ Data Transfer Object indicating an action targeting a specific peer succeeded.
 
     Attributes:
         action (Action): The triggering action.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         target (Optional[str]): The specific target identifier.
         profile (Optional[str]): The active profile context.
         type (EventType): The strict IPC event type code.
 
 | Field | Type | Default |
 |---|---|---|
+| `code` | `DomainCode` | Required |
 | `target` | `Optional[str]` | `None` |
 | `profile` | `Optional[str]` | `None` |
 
@@ -1081,12 +1089,13 @@ Data Transfer Object indicating an application setting was mutated.
 
     Attributes:
         action (Action): The triggering action.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         key (str): The specific setting key modified.
         type (EventType): The strict IPC event type code.
 
 | Field | Type | Default |
 |---|---|---|
+| `code` | `DomainCode` | Required |
 | `key` | `str` | Required |
 
 **Event Type Code:** `setting_updated`
@@ -1097,7 +1106,7 @@ Data Transfer Object indicating an application setting was mutated.
 Data Transfer Object indicating live messages were successfully converted to drops.
 
     Attributes:
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         alias (str): The target peer alias.
         count (int): Number of messages converted.
         msg_ids (List[str]): List of converted message identifiers.
@@ -1106,6 +1115,7 @@ Data Transfer Object indicating live messages were successfully converted to dro
 
 | Field | Type | Default |
 |---|---|---|
+| `code` | `DomainCode` | Required |
 | `alias` | `str` | Required |
 | `count` | `int` | Required |
 | `msg_ids` | `List[str]` | Required |
@@ -1120,13 +1130,14 @@ Data Transfer Object indicating the connection limit has been exhausted.
     Attributes:
         target (str): The peer whose connection was blocked.
         max_conn (int): The current system limit.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         type (EventType): The strict IPC event type code.
 
 | Field | Type | Default |
 |---|---|---|
 | `target` | `str` | Required |
 | `max_conn` | `int` | Required |
+| `code` | `DomainCode` | `NetworkCode.MAX_CONNECTIONS_REACHED` |
 
 **Event Type Code:** `max_connections_reached`
 
@@ -1137,12 +1148,13 @@ Data Transfer Object indicating the specified peer could not be resolved.
 
     Attributes:
         target (str): The unresolvable target string.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         type (EventType): The strict IPC event type code.
 
 | Field | Type | Default |
 |---|---|---|
 | `target` | `str` | Required |
+| `code` | `DomainCode` | `ContactCode.PEER_NOT_FOUND` |
 
 **Event Type Code:** `peer_not_found`
 
@@ -1153,12 +1165,13 @@ Data Transfer Object indicating circuit rotation has started for a peer.
 
     Attributes:
         alias (str): The target peer alias.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         type (EventType): The strict IPC event type code.
 
 | Field | Type | Default |
 |---|---|---|
 | `alias` | `str` | Required |
+| `code` | `DomainCode` | `NetworkCode.RETUNNEL_INITIATED` |
 
 **Event Type Code:** `retunnel_initiated`
 
@@ -1169,32 +1182,12 @@ Data Transfer Object indicating circuit rotation completed successfully.
 
     Attributes:
         alias (str): The target peer alias.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         type (EventType): The strict IPC event type code.
 
 | Field | Type | Default |
 |---|---|---|
 | `alias` | `str` | Required |
+| `code` | `DomainCode` | `NetworkCode.RETUNNEL_SUCCESS` |
 
 **Event Type Code:** `retunnel_success`
-
----
-### `CommandResponseEvent`
-
-Fallback legacy standard response. Used for simple generic signals.
-
-    Attributes:
-        action (Action): The command action that triggered the response.
-        success (bool): Whether the command succeeded.
-        code (TransCode): The translation code for the result.
-        data (Dict[str, JsonValue]): Arbitrary JSON data payload.
-        params (Dict[str, JsonValue]): Parameters for UI translation formatting.
-        type (EventType): The strict IPC event type code.
-
-| Field | Type | Default |
-|---|---|---|
-| `success` | `bool` | `True` |
-| `data` | `Dict[str, JsonValue]` | `Factory()` |
-| `params` | `Dict[str, JsonValue]` | `Factory()` |
-
-**Event Type Code:** `command_response`

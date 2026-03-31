@@ -6,6 +6,7 @@ Automatically resolves project paths for the src-layout architecture.
 
 import sys
 import dataclasses
+from enum import Enum
 from pathlib import Path
 from typing import Any, List, Type
 
@@ -68,6 +69,13 @@ class ApiDocGenerator:
         type_str = type_str.replace('metor.core.api.codes.', '')
         type_str = type_str.replace('metor.core.api.base.', '')
 
+        # Coerce the expanded Union back to DomainCode for readability
+        if 'SystemCode, NetworkCode, DbCode, ContactCode, UiCode' in type_str:
+            type_str = type_str.replace(
+                'Union[SystemCode, NetworkCode, DbCode, ContactCode, UiCode]',
+                'DomainCode',
+            )
+
         return type_str
 
     def _format_dataclass(self, cls: Type[Any]) -> str:
@@ -93,14 +101,18 @@ class ApiDocGenerator:
 
         field_count: int = 0
         for f in dataclasses.fields(cls):
-            if f.name in ('action', 'type', 'code'):
+            # We expose 'code' now since it defines the strict DomainCode return type.
+            # Only the static routing constants 'action' and 'type' are skipped.
+            if f.name in ('action', 'type'):
                 continue
 
             field_count += 1
             type_name: str = self._get_type_name(f.type)
 
             default_val: str = 'Required'
-            if f.default is not dataclasses.MISSING:
+            if isinstance(f.default, Enum):
+                default_val = f'`{f.default.__class__.__name__}.{f.default.name}`'
+            elif f.default is not dataclasses.MISSING:
                 default_val = f'`{f.default}`'
             elif f.default_factory is not dataclasses.MISSING:
                 default_val = '`Factory()`'

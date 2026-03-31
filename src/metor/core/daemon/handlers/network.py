@@ -12,7 +12,7 @@ from metor.core import TorManager
 from metor.core.api import (
     IpcCommand,
     IpcEvent,
-    TransCode,
+    NetworkCode,
     InitCommand,
     InitEvent,
     GetConnectionsCommand,
@@ -139,7 +139,7 @@ class NetworkCommandHandler:
                     conn,
                     ActionErrorEvent(
                         action=cmd.action,
-                        code=TransCode.CANNOT_CONNECT_SELF,
+                        code=NetworkCode.CANNOT_CONNECT_SELF,
                     ),
                 )
                 return
@@ -150,7 +150,7 @@ class NetworkCommandHandler:
                     conn,
                     ActionErrorEvent(
                         action=cmd.action,
-                        code=TransCode.INVALID_TARGET,
+                        code=NetworkCode.INVALID_TARGET,
                         target=cmd.target,
                     ),
                 )
@@ -182,6 +182,7 @@ class NetworkCommandHandler:
                         code=code,
                         alias=str(params.get('alias', '')),
                         count=int(params.get('count', 0)),
+                        msg_ids=list(params.get('msg_ids', [])),
                     ),
                 )
             else:
@@ -206,7 +207,7 @@ class NetworkCommandHandler:
                     conn,
                     ActionErrorEvent(
                         action=cmd.action,
-                        code=TransCode.DROPS_DISABLED,
+                        code=NetworkCode.DROPS_DISABLED,
                     ),
                 )
                 return
@@ -216,7 +217,7 @@ class NetworkCommandHandler:
                     conn,
                     ActionErrorEvent(
                         action=cmd.action,
-                        code=TransCode.CANNOT_DROP_SELF,
+                        code=NetworkCode.CANNOT_DROP_SELF,
                     ),
                 )
                 return
@@ -239,7 +240,7 @@ class NetworkCommandHandler:
                         conn,
                         TargetActionSuccessEvent(
                             action=cmd.action,
-                            code=TransCode.DROP_QUEUED,
+                            code=NetworkCode.DROP_QUEUED,
                             target=alias,
                         ),
                     )
@@ -249,7 +250,7 @@ class NetworkCommandHandler:
                         conn,
                         ActionErrorEvent(
                             action=cmd.action,
-                            code=TransCode.INVALID_TARGET,
+                            code=NetworkCode.INVALID_TARGET,
                             target=cmd.target,
                         ),
                     )
@@ -263,7 +264,7 @@ class NetworkCommandHandler:
                         conn,
                         ActionErrorEvent(
                             action=cmd.action,
-                            code=TransCode.CANNOT_SWITCH_SELF,
+                            code=NetworkCode.CANNOT_SWITCH_SELF,
                         ),
                     )
                     return
@@ -274,7 +275,7 @@ class NetworkCommandHandler:
                         conn,
                         ActionErrorEvent(
                             action=cmd.action,
-                            code=TransCode.INVALID_TARGET,
+                            code=NetworkCode.INVALID_TARGET,
                             target=cmd.target,
                         ),
                     )

@@ -14,7 +14,7 @@ import sys
 import os
 import signal
 import types
-from typing import List, Set, Optional, Callable
+from typing import List, Set, Optional, Callable, Dict, Any
 from pathlib import Path
 
 from metor.core import KeyManager, TorManager
@@ -49,8 +49,12 @@ from metor.core.api import (
     SelfDestructCommand,
     UnlockCommand,
     RetunnelCommand,
-    CommandResponseEvent,
-    TransCode,
+    SystemCode,
+    UiCode,
+    DomainCode,
+    ActionErrorEvent,
+    ActionSuccessEvent,
+    SettingUpdatedEvent,
 )
 from metor.data.profile import ProfileManager
 from metor.data import (
@@ -60,7 +64,6 @@ from metor.data import (
     Settings,
     SettingKey,
 )
-from metor.ui import Translator
 from metor.utils import Constants, clean_onion, secure_shred_file
 
 # Local Package Imports
@@ -86,7 +89,7 @@ class Daemon:
         cm: ContactManager,
         hm: HistoryManager,
         mm: MessageManager,
-        status_callback: Optional[Callable[[str], None]] = None,
+        status_callback: Optional[Callable[[DomainCode, Dict[str, Any]], None]] = None,
     ) -> None:
         """
         Initializes the DaemonEngine.
@@ -109,7 +112,9 @@ class Daemon:
         self._hm: HistoryManager = hm
         self._mm: MessageManager = mm
         self._km: KeyManager = km
-        self._status_cb: Optional[Callable[[str], None]] = status_callback
+        self._status_cb: Optional[Callable[[DomainCode, Dict[str, Any]], None]] = (
+            status_callback
+        )
 
         self._stop_flag: threading.Event = threading.Event()
         self._is_locked: bool = False
@@ -201,8 +206,7 @@ class Daemon:
                 self._is_locked = True
                 self._ipc.start()
                 if self._status_cb:
-                    msg, _ = Translator.get(TransCode.DAEMON_LOCKED_MODE)
-                    self._status_cb(msg)
+                    self._status_cb(UiCode.DAEMON_LOCKED_MODE, {})
             else:
                 self._start_subsystems()
 
@@ -228,8 +232,7 @@ class Daemon:
         success, code, params = self._tm.start()
         if not success:
             if self._status_cb:
-                msg, _ = Translator.get(code, params)
-                self._status_cb(msg)
+                self._status_cb(code, params)
             self._stop_flag.set()
             return
 
@@ -241,11 +244,10 @@ class Daemon:
         self._outbox.start()
 
         if self._status_cb:
-            msg, _ = Translator.get(
-                TransCode.DAEMON_ACTIVE,
+            self._status_cb(
+                UiCode.DAEMON_ACTIVE,
                 {'onion': clean_onion(self._tm.onion or ''), 'port': self._ipc.port},
             )
-            self._status_cb(msg)
 
     def stop(self) -> None:
         """
@@ -321,10 +323,9 @@ class Daemon:
                 if conn not in self._authenticated_clients:
                     self._ipc.send_to(
                         conn,
-                        CommandResponseEvent(
+                        ActionErrorEvent(
                             action=cmd.action,
-                            success=False,
-                            code=TransCode.AUTH_REQUIRED,
+                            code=SystemCode.AUTH_REQUIRED,
                         ),
                     )
                     return
@@ -332,8 +333,8 @@ class Daemon:
         if isinstance(cmd, SelfDestructCommand):
             self._ipc.send_to(
                 conn,
-                CommandResponseEvent(
-                    action=cmd.action, code=TransCode.SELF_DESTRUCT_INITIATED
+                ActionSuccessEvent(
+                    action=cmd.action, code=SystemCode.SELF_DESTRUCT_INITIATED
                 ),
             )
             threading.Thread(target=self._nuke_data, daemon=True).start()
@@ -351,25 +352,24 @@ class Daemon:
                         self._authenticated_clients.add(conn)
                         self._ipc.send_to(
                             conn,
-                            CommandResponseEvent(
-                                action=cmd.action, code=TransCode.SESSION_AUTHENTICATED
+                            ActionSuccessEvent(
+                                action=cmd.action, code=SystemCode.SESSION_AUTHENTICATED
                             ),
                         )
                     except Exception:
                         self._ipc.send_to(
                             conn,
-                            CommandResponseEvent(
+                            ActionErrorEvent(
                                 action=cmd.action,
-                                success=False,
-                                code=TransCode.INVALID_PASSWORD,
+                                code=SystemCode.INVALID_PASSWORD,
                             ),
                         )
                     return
 
                 self._ipc.send_to(
                     conn,
-                    CommandResponseEvent(
-                        action=cmd.action, code=TransCode.ALREADY_UNLOCKED
+                    ActionSuccessEvent(
+                        action=cmd.action, code=SystemCode.ALREADY_UNLOCKED
                     ),
                 )
                 return
@@ -380,10 +380,9 @@ class Daemon:
             except Exception:
                 self._ipc.send_to(
                     conn,
-                    CommandResponseEvent(
+                    ActionErrorEvent(
                         action=cmd.action,
-                        success=False,
-                        code=TransCode.INVALID_PASSWORD,
+                        code=SystemCode.INVALID_PASSWORD,
                     ),
                 )
                 return
@@ -437,7 +436,7 @@ class Daemon:
             self._start_subsystems()
             self._ipc.send_to(
                 conn,
-                CommandResponseEvent(action=cmd.action, code=TransCode.DAEMON_UNLOCKED),
+                ActionSuccessEvent(action=cmd.action, code=SystemCode.DAEMON_UNLOCKED),
             )
             return
 
@@ -446,30 +445,28 @@ class Daemon:
                 Settings.set(SettingKey(cmd.setting_key), cmd.setting_value)
                 self._ipc.send_to(
                     conn,
-                    CommandResponseEvent(
+                    SettingUpdatedEvent(
                         action=cmd.action,
-                        code=TransCode.SETTING_UPDATED,
-                        params={'key': cmd.setting_key},
+                        code=SystemCode.SETTING_UPDATED,
+                        key=cmd.setting_key,
                     ),
                 )
             except TypeError as e:
                 self._ipc.send_to(
                     conn,
-                    CommandResponseEvent(
+                    ActionErrorEvent(
                         action=cmd.action,
-                        success=False,
-                        code=TransCode.SETTING_TYPE_ERROR,
-                        params={'error': str(e)},
+                        code=SystemCode.SETTING_TYPE_ERROR,
+                        reason=str(e),
                     ),
                 )
             except Exception as e:
                 self._ipc.send_to(
                     conn,
-                    CommandResponseEvent(
+                    ActionErrorEvent(
                         action=cmd.action,
-                        success=False,
-                        code=TransCode.SETTING_UPDATE_FAILED,
-                        params={'error': str(e)},
+                        code=SystemCode.SETTING_UPDATE_FAILED,
+                        reason=str(e),
                     ),
                 )
             return
@@ -477,9 +474,7 @@ class Daemon:
         if self._is_locked:
             self._ipc.send_to(
                 conn,
-                CommandResponseEvent(
-                    action=cmd.action, success=False, code=TransCode.DAEMON_LOCKED
-                ),
+                ActionErrorEvent(action=cmd.action, code=SystemCode.DAEMON_LOCKED),
             )
             return
 

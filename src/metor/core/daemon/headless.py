@@ -15,8 +15,8 @@ from metor.core.api import (
     JsonValue,
     IpcEvent,
     IpcCommand,
-    CommandResponseEvent,
-    TransCode,
+    SystemCode,
+    ActionErrorEvent,
     GetContactsListCommand,
     AddContactCommand,
     RemoveContactCommand,
@@ -252,7 +252,5 @@ class HeadlessDaemon:
         else:
             self._send(
                 conn,
-                CommandResponseEvent(
-                    action=cmd.action, success=False, code=TransCode.DAEMON_OFFLINE
-                ),
+                ActionErrorEvent(action=cmd.action, code=SystemCode.DAEMON_OFFLINE),
             )

@@ -15,7 +15,9 @@ from metor.core.api import (
     AckEvent,
     RemoteMsgEvent,
     InboxNotificationEvent,
-    TransCode,
+    DomainCode,
+    ContactCode,
+    NetworkCode,
 )
 from metor.core.daemon.models import TorCommand
 from metor.data import (
@@ -100,7 +102,7 @@ class MessageRouter:
             except Exception:
                 pass
 
-    def force_fallback(self, target: str) -> Tuple[bool, TransCode, Dict[str, Any]]:
+    def force_fallback(self, target: str) -> Tuple[bool, DomainCode, Dict[str, Any]]:
         """
         Forces all unacknowledged outgoing live messages to the drop queue.
 
@@ -108,17 +110,17 @@ class MessageRouter:
             target (str): The target alias or onion address.
 
         Returns:
-            Tuple[bool, TransCode, Dict[str, Any]]: A success flag, response code, and params.
+            Tuple[bool, DomainCode, Dict[str, Any]]: A success flag, response code, and params.
         """
         alias, onion, exists = self._cm.resolve_target(target)
         if not exists or not onion:
-            return False, TransCode.PEER_NOT_FOUND, {'target': target}
+            return False, ContactCode.PEER_NOT_FOUND, {'target': target}
 
         unacked: Dict[str, str] = self._state.pop_unacked_messages(onion)
 
         if not unacked:
             # We intentionally don't resolve the alias since it is dynamically inserted in the UI
-            return False, TransCode.NO_PENDING_LIVE_MSGS, {'alias': alias}
+            return False, NetworkCode.NO_PENDING_LIVE_MSGS, {'alias': alias}
 
         for msg_id, content in unacked.items():
             self._mm.queue_message(
@@ -135,7 +137,7 @@ class MessageRouter:
 
         self._broadcast(
             FallbackSuccessEvent(
-                code=TransCode.FALLBACK_SUCCESS,
+                code=NetworkCode.FALLBACK_SUCCESS,
                 alias=str(alias or onion),
                 count=len(unacked),
                 msg_ids=list(unacked.keys()),
@@ -143,7 +145,11 @@ class MessageRouter:
         )
 
         # We intentionally don't resolve the alias since it is dynamically inserted in the UI
-        return True, TransCode.FALLBACK_SUCCESS, {'alias': alias, 'count': len(unacked)}
+        return (
+            True,
+            NetworkCode.FALLBACK_SUCCESS,
+            {'alias': alias, 'count': len(unacked)},
+        )
 
     def send_message(self, target: str, msg: str, msg_id: str) -> None:
         """
@@ -178,7 +184,7 @@ class MessageRouter:
                 )
                 self._broadcast(
                     FallbackSuccessEvent(
-                        code=TransCode.FALLBACK_SUCCESS,
+                        code=NetworkCode.FALLBACK_SUCCESS,
                         alias=str(alias or onion),
                         count=1,
                         msg_ids=[msg_id],

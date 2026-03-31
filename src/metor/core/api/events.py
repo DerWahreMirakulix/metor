@@ -1,13 +1,21 @@
 """
 Module defining the strict Data Transfer Objects (DTOs) for outbound Daemon events.
+Utilizes dynamic decorators for registry mapping and specific Domain Codes for status tracking.
 """
 
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict
 
 # Local Package Imports
-from metor.core.api.base import IpcEvent, JsonValue
-from metor.core.api.codes import EventType, Action, TransCode
+from metor.core.api.base import IpcEvent
+from metor.core.api.codes import (
+    ContactCode,
+    EventType,
+    Action,
+    DomainCode,
+    NetworkCode,
+)
+from metor.core.api.registry import register_event
 
 
 # --- Sub-Models (Nested DTOs) ---
@@ -100,6 +108,7 @@ class ProfileEntry:
 # --- Core State & Chat Events ---
 
 
+@register_event(EventType.INIT)
 @dataclass
 class InitEvent(IpcEvent):
     """
@@ -114,6 +123,7 @@ class InitEvent(IpcEvent):
     type: EventType = field(default=EventType.INIT, init=False)
 
 
+@register_event(EventType.REMOTE_MSG)
 @dataclass
 class RemoteMsgEvent(IpcEvent):
     """
@@ -132,6 +142,7 @@ class RemoteMsgEvent(IpcEvent):
     type: EventType = field(default=EventType.REMOTE_MSG, init=False)
 
 
+@register_event(EventType.ACK)
 @dataclass
 class AckEvent(IpcEvent):
     """
@@ -148,6 +159,7 @@ class AckEvent(IpcEvent):
     type: EventType = field(default=EventType.ACK, init=False)
 
 
+@register_event(EventType.DROP_FAILED)
 @dataclass
 class DropFailedEvent(IpcEvent):
     """
@@ -162,6 +174,7 @@ class DropFailedEvent(IpcEvent):
     type: EventType = field(default=EventType.DROP_FAILED, init=False)
 
 
+@register_event(EventType.CONNECTED)
 @dataclass
 class ConnectedEvent(IpcEvent):
     """
@@ -178,6 +191,7 @@ class ConnectedEvent(IpcEvent):
     type: EventType = field(default=EventType.CONNECTED, init=False)
 
 
+@register_event(EventType.DISCONNECTED)
 @dataclass
 class DisconnectedEvent(IpcEvent):
     """
@@ -192,6 +206,7 @@ class DisconnectedEvent(IpcEvent):
     type: EventType = field(default=EventType.DISCONNECTED, init=False)
 
 
+@register_event(EventType.RENAME_SUCCESS)
 @dataclass
 class RenameSuccessEvent(IpcEvent):
     """
@@ -212,6 +227,7 @@ class RenameSuccessEvent(IpcEvent):
     type: EventType = field(default=EventType.RENAME_SUCCESS, init=False)
 
 
+@register_event(EventType.CONTACT_REMOVED)
 @dataclass
 class ContactRemovedEvent(IpcEvent):
     """
@@ -226,6 +242,7 @@ class ContactRemovedEvent(IpcEvent):
     type: EventType = field(default=EventType.CONTACT_REMOVED, init=False)
 
 
+@register_event(EventType.CONNECTIONS_STATE)
 @dataclass
 class ConnectionsStateEvent(IpcEvent):
     """
@@ -246,6 +263,7 @@ class ConnectionsStateEvent(IpcEvent):
     type: EventType = field(default=EventType.CONNECTIONS_STATE, init=False)
 
 
+@register_event(EventType.SWITCH_SUCCESS)
 @dataclass
 class SwitchSuccessEvent(IpcEvent):
     """
@@ -263,6 +281,7 @@ class SwitchSuccessEvent(IpcEvent):
 # --- Transient States ---
 
 
+@register_event(EventType.CONNECTION_PENDING)
 @dataclass
 class ConnectionPendingEvent(IpcEvent):
     """
@@ -277,6 +296,7 @@ class ConnectionPendingEvent(IpcEvent):
     type: EventType = field(default=EventType.CONNECTION_PENDING, init=False)
 
 
+@register_event(EventType.CONNECTION_AUTO_ACCEPTED)
 @dataclass
 class ConnectionAutoAcceptedEvent(IpcEvent):
     """
@@ -291,6 +311,7 @@ class ConnectionAutoAcceptedEvent(IpcEvent):
     type: EventType = field(default=EventType.CONNECTION_AUTO_ACCEPTED, init=False)
 
 
+@register_event(EventType.CONNECTION_RETRY)
 @dataclass
 class ConnectionRetryEvent(IpcEvent):
     """
@@ -309,6 +330,7 @@ class ConnectionRetryEvent(IpcEvent):
     type: EventType = field(default=EventType.CONNECTION_RETRY, init=False)
 
 
+@register_event(EventType.CONNECTION_FAILED)
 @dataclass
 class ConnectionFailedEvent(IpcEvent):
     """
@@ -325,6 +347,7 @@ class ConnectionFailedEvent(IpcEvent):
     type: EventType = field(default=EventType.CONNECTION_FAILED, init=False)
 
 
+@register_event(EventType.INCOMING_CONNECTION)
 @dataclass
 class IncomingConnectionEvent(IpcEvent):
     """
@@ -339,6 +362,7 @@ class IncomingConnectionEvent(IpcEvent):
     type: EventType = field(default=EventType.INCOMING_CONNECTION, init=False)
 
 
+@register_event(EventType.CONNECTION_REJECTED)
 @dataclass
 class ConnectionRejectedEvent(IpcEvent):
     """
@@ -355,6 +379,7 @@ class ConnectionRejectedEvent(IpcEvent):
     type: EventType = field(default=EventType.CONNECTION_REJECTED, init=False)
 
 
+@register_event(EventType.TIEBREAKER_REJECTED)
 @dataclass
 class TiebreakerRejectedEvent(IpcEvent):
     """
@@ -369,6 +394,7 @@ class TiebreakerRejectedEvent(IpcEvent):
     type: EventType = field(default=EventType.TIEBREAKER_REJECTED, init=False)
 
 
+@register_event(EventType.AUTO_RECONNECT_ATTEMPT)
 @dataclass
 class AutoReconnectAttemptEvent(IpcEvent):
     """
@@ -376,18 +402,19 @@ class AutoReconnectAttemptEvent(IpcEvent):
 
     Attributes:
         alias (Optional[str]): The target peer alias.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         type (EventType): The strict IPC event type code.
     """
 
     alias: Optional[str] = None
-    code: TransCode = TransCode.AUTO_RECONNECT_ATTEMPT
+    code: DomainCode = NetworkCode.AUTO_RECONNECT_ATTEMPT
     type: EventType = field(default=EventType.AUTO_RECONNECT_ATTEMPT, init=False)
 
 
 # --- Inbox & Drops ---
 
 
+@register_event(EventType.INBOX_NOTIFICATION)
 @dataclass
 class InboxNotificationEvent(IpcEvent):
     """
@@ -404,6 +431,7 @@ class InboxNotificationEvent(IpcEvent):
     type: EventType = field(default=EventType.INBOX_NOTIFICATION, init=False)
 
 
+@register_event(EventType.INBOX_DATA)
 @dataclass
 class InboxDataEvent(IpcEvent):
     """
@@ -440,6 +468,7 @@ class InboxDataEvent(IpcEvent):
 # --- Query Response DTOs ---
 
 
+@register_event(EventType.CONTACTS_DATA)
 @dataclass
 class ContactsDataEvent(IpcEvent):
     """
@@ -473,6 +502,7 @@ class ContactsDataEvent(IpcEvent):
             self.discovered = [ContactEntry(**x) for x in self.discovered]  # type: ignore
 
 
+@register_event(EventType.HISTORY_DATA)
 @dataclass
 class HistoryDataEvent(IpcEvent):
     """
@@ -504,6 +534,7 @@ class HistoryDataEvent(IpcEvent):
             self.history = [HistoryEntry(**x) for x in self.history]  # type: ignore
 
 
+@register_event(EventType.MESSAGES_DATA)
 @dataclass
 class MessagesDataEvent(IpcEvent):
     """
@@ -533,6 +564,7 @@ class MessagesDataEvent(IpcEvent):
             self.messages = [MessageEntry(**x) for x in self.messages]  # type: ignore
 
 
+@register_event(EventType.INBOX_COUNTS)
 @dataclass
 class InboxCountsEvent(IpcEvent):
     """
@@ -547,6 +579,7 @@ class InboxCountsEvent(IpcEvent):
     type: EventType = field(default=EventType.INBOX_COUNTS, init=False)
 
 
+@register_event(EventType.UNREAD_MESSAGES)
 @dataclass
 class UnreadMessagesEvent(IpcEvent):
     """
@@ -576,6 +609,7 @@ class UnreadMessagesEvent(IpcEvent):
             self.messages = [UnreadMessageEntry(**x) for x in self.messages]  # type: ignore
 
 
+@register_event(EventType.ADDRESS_DATA)
 @dataclass
 class AddressDataEvent(IpcEvent):
     """
@@ -583,19 +617,20 @@ class AddressDataEvent(IpcEvent):
 
     Attributes:
         action (Action): The triggering command action.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         profile (str): The active profile name.
         onion (str): The local Tor onion address.
         type (EventType): The strict IPC event type code.
     """
 
     action: Action
-    code: TransCode
+    code: DomainCode
     profile: str
     onion: str
     type: EventType = field(default=EventType.ADDRESS_DATA, init=False)
 
 
+@register_event(EventType.PROFILES_DATA)
 @dataclass
 class ProfilesDataEvent(IpcEvent):
     """
@@ -626,29 +661,31 @@ class ProfilesDataEvent(IpcEvent):
 # --- Command Success/Error DTOs ---
 
 
+@register_event(EventType.ACTION_SUCCESS)
 @dataclass
 class ActionSuccessEvent(IpcEvent):
     """
     Data Transfer Object indicating a generic action completed successfully.
 
     Attributes:
-        code (TransCode): The translation code denoting success.
+        code (DomainCode): The translation code denoting success.
         action (Optional[Action]): The triggering action.
         type (EventType): The strict IPC event type code.
     """
 
-    code: TransCode
+    code: DomainCode
     action: Optional[Action] = None
     type: EventType = field(default=EventType.ACTION_SUCCESS, init=False)
 
 
+@register_event(EventType.ACTION_ERROR)
 @dataclass
 class ActionErrorEvent(IpcEvent):
     """
     Data Transfer Object indicating a generic action failed.
 
     Attributes:
-        code (TransCode): The translation code for the error.
+        code (DomainCode): The translation code for the error.
         action (Optional[Action]): The triggering action.
         reason (Optional[str]): Specific context for the failure.
         target (Optional[str]): The associated target string, if any.
@@ -656,7 +693,7 @@ class ActionErrorEvent(IpcEvent):
         type (EventType): The strict IPC event type code.
     """
 
-    code: TransCode
+    code: DomainCode
     action: Optional[Action] = None
     reason: Optional[str] = None
     target: Optional[str] = None
@@ -664,6 +701,7 @@ class ActionErrorEvent(IpcEvent):
     type: EventType = field(default=EventType.ACTION_ERROR, init=False)
 
 
+@register_event(EventType.CONTACT_ACTION_SUCCESS)
 @dataclass
 class ContactActionSuccessEvent(IpcEvent):
     """
@@ -671,19 +709,20 @@ class ContactActionSuccessEvent(IpcEvent):
 
     Attributes:
         action (Action): The triggering action.
-        code (TransCode): The translation code denoting success.
+        code (DomainCode): The translation code denoting success.
         alias (str): The affected contact alias.
         profile (Optional[str]): The active profile.
         type (EventType): The strict IPC event type code.
     """
 
     action: Action
-    code: TransCode
+    code: DomainCode
     alias: str
     profile: Optional[str] = None
     type: EventType = field(default=EventType.CONTACT_ACTION_SUCCESS, init=False)
 
 
+@register_event(EventType.CONTACT_RENAMED)
 @dataclass
 class ContactRenamedEvent(IpcEvent):
     """
@@ -691,19 +730,20 @@ class ContactRenamedEvent(IpcEvent):
 
     Attributes:
         action (Action): The triggering action.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         old_alias (str): The previous alias.
         new_alias (str): The new alias.
         type (EventType): The strict IPC event type code.
     """
 
     action: Action
-    code: TransCode
+    code: DomainCode
     old_alias: str
     new_alias: str
     type: EventType = field(default=EventType.CONTACT_RENAMED, init=False)
 
 
+@register_event(EventType.PROFILE_ACTION_SUCCESS)
 @dataclass
 class ProfileActionSuccessEvent(IpcEvent):
     """
@@ -711,7 +751,7 @@ class ProfileActionSuccessEvent(IpcEvent):
 
     Attributes:
         action (Action): The triggering action.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         profile (str): The affected profile name.
         remote_tag (Optional[str]): Network routing configuration tag.
         port (Optional[int]): Target port if remote.
@@ -719,13 +759,14 @@ class ProfileActionSuccessEvent(IpcEvent):
     """
 
     action: Action
-    code: TransCode
+    code: DomainCode
     profile: str
     remote_tag: Optional[str] = None
     port: Optional[int] = None
     type: EventType = field(default=EventType.PROFILE_ACTION_SUCCESS, init=False)
 
 
+@register_event(EventType.TARGET_ACTION_SUCCESS)
 @dataclass
 class TargetActionSuccessEvent(IpcEvent):
     """
@@ -733,19 +774,20 @@ class TargetActionSuccessEvent(IpcEvent):
 
     Attributes:
         action (Action): The triggering action.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         target (Optional[str]): The specific target identifier.
         profile (Optional[str]): The active profile context.
         type (EventType): The strict IPC event type code.
     """
 
     action: Action
-    code: TransCode
+    code: DomainCode
     target: Optional[str] = None
     profile: Optional[str] = None
     type: EventType = field(default=EventType.TARGET_ACTION_SUCCESS, init=False)
 
 
+@register_event(EventType.SETTING_UPDATED)
 @dataclass
 class SettingUpdatedEvent(IpcEvent):
     """
@@ -753,24 +795,25 @@ class SettingUpdatedEvent(IpcEvent):
 
     Attributes:
         action (Action): The triggering action.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         key (str): The specific setting key modified.
         type (EventType): The strict IPC event type code.
     """
 
     action: Action
-    code: TransCode
+    code: DomainCode
     key: str
     type: EventType = field(default=EventType.SETTING_UPDATED, init=False)
 
 
+@register_event(EventType.FALLBACK_SUCCESS)
 @dataclass
 class FallbackSuccessEvent(IpcEvent):
     """
     Data Transfer Object indicating live messages were successfully converted to drops.
 
     Attributes:
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         alias (str): The target peer alias.
         count (int): Number of messages converted.
         msg_ids (List[str]): List of converted message identifiers.
@@ -778,7 +821,7 @@ class FallbackSuccessEvent(IpcEvent):
         type (EventType): The strict IPC event type code.
     """
 
-    code: TransCode
+    code: DomainCode
     alias: str
     count: int
     msg_ids: List[str]
@@ -789,6 +832,7 @@ class FallbackSuccessEvent(IpcEvent):
 # --- Specific Asynchronous Notification DTOs ---
 
 
+@register_event(EventType.MAX_CONNECTIONS_REACHED)
 @dataclass
 class MaxConnectionsReachedEvent(IpcEvent):
     """
@@ -797,16 +841,17 @@ class MaxConnectionsReachedEvent(IpcEvent):
     Attributes:
         target (str): The peer whose connection was blocked.
         max_conn (int): The current system limit.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         type (EventType): The strict IPC event type code.
     """
 
     target: str
     max_conn: int
-    code: TransCode = TransCode.MAX_CONNECTIONS_REACHED
+    code: DomainCode = NetworkCode.MAX_CONNECTIONS_REACHED
     type: EventType = field(default=EventType.MAX_CONNECTIONS_REACHED, init=False)
 
 
+@register_event(EventType.PEER_NOT_FOUND)
 @dataclass
 class PeerNotFoundEvent(IpcEvent):
     """
@@ -814,15 +859,16 @@ class PeerNotFoundEvent(IpcEvent):
 
     Attributes:
         target (str): The unresolvable target string.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         type (EventType): The strict IPC event type code.
     """
 
     target: str
-    code: TransCode = TransCode.PEER_NOT_FOUND
+    code: DomainCode = ContactCode.PEER_NOT_FOUND
     type: EventType = field(default=EventType.PEER_NOT_FOUND, init=False)
 
 
+@register_event(EventType.RETUNNEL_INITIATED)
 @dataclass
 class RetunnelInitiatedEvent(IpcEvent):
     """
@@ -830,15 +876,16 @@ class RetunnelInitiatedEvent(IpcEvent):
 
     Attributes:
         alias (str): The target peer alias.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         type (EventType): The strict IPC event type code.
     """
 
     alias: str
-    code: TransCode = TransCode.RETUNNEL_INITIATED
+    code: DomainCode = NetworkCode.RETUNNEL_INITIATED
     type: EventType = field(default=EventType.RETUNNEL_INITIATED, init=False)
 
 
+@register_event(EventType.RETUNNEL_SUCCESS)
 @dataclass
 class RetunnelSuccessEvent(IpcEvent):
     """
@@ -846,32 +893,10 @@ class RetunnelSuccessEvent(IpcEvent):
 
     Attributes:
         alias (str): The target peer alias.
-        code (TransCode): The translation code.
+        code (DomainCode): The translation code.
         type (EventType): The strict IPC event type code.
     """
 
     alias: str
-    code: TransCode = TransCode.RETUNNEL_SUCCESS
+    code: DomainCode = NetworkCode.RETUNNEL_SUCCESS
     type: EventType = field(default=EventType.RETUNNEL_SUCCESS, init=False)
-
-
-@dataclass
-class CommandResponseEvent(IpcEvent):
-    """
-    Fallback legacy standard response. Used for simple generic signals.
-
-    Attributes:
-        action (Action): The command action that triggered the response.
-        success (bool): Whether the command succeeded.
-        code (TransCode): The translation code for the result.
-        data (Dict[str, JsonValue]): Arbitrary JSON data payload.
-        params (Dict[str, JsonValue]): Parameters for UI translation formatting.
-        type (EventType): The strict IPC event type code.
-    """
-
-    action: Action
-    success: bool = True
-    code: TransCode = TransCode.COMMAND_SUCCESS
-    data: Dict[str, JsonValue] = field(default_factory=dict)
-    params: Dict[str, JsonValue] = field(default_factory=dict)
-    type: EventType = field(default=EventType.COMMAND_RESPONSE, init=False)

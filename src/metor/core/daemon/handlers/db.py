@@ -9,7 +9,10 @@ from typing import Dict, Any, List, Tuple, Callable, Optional
 from metor.core.api import (
     IpcCommand,
     IpcEvent,
-    TransCode,
+    ContactCode,
+    DbCode,
+    SystemCode,
+    NetworkCode,
     GetContactsListCommand,
     AddContactCommand,
     RemoveContactCommand,
@@ -211,9 +214,7 @@ class DatabaseCommandHandler:
             success_m, _, _ = self._mm.clear_messages()
 
             success: bool = success_c and success_h and success_m
-            code: TransCode = (
-                TransCode.DB_CLEARED if success else TransCode.DB_CLEAR_FAILED
-            )
+            code: DbCode = DbCode.DB_CLEARED if success else DbCode.DB_CLEAR_FAILED
 
             if success_c:
                 for old, new, was_saved in renames:
@@ -274,7 +275,7 @@ class DatabaseCommandHandler:
             if cmd.target and not exists:
                 success, code, params = (
                     False,
-                    TransCode.PEER_NOT_FOUND,
+                    ContactCode.PEER_NOT_FOUND,
                     {'target': cmd.target},
                 )
             else:
@@ -317,7 +318,7 @@ class DatabaseCommandHandler:
                 )
             return ActionErrorEvent(
                 action=cmd.action,
-                code=TransCode.INVALID_TARGET,
+                code=NetworkCode.INVALID_TARGET,
                 target=cmd.target,
                 alias=alias,
             )
@@ -331,7 +332,7 @@ class DatabaseCommandHandler:
             if cmd.target and not exists:
                 success, code, params = (
                     False,
-                    TransCode.PEER_NOT_FOUND,
+                    ContactCode.PEER_NOT_FOUND,
                     {'target': cmd.target},
                 )
             else:
@@ -375,7 +376,7 @@ class DatabaseCommandHandler:
             if not exists:
                 return ActionErrorEvent(
                     action=cmd.action,
-                    code=TransCode.PEER_NOT_FOUND,
+                    code=ContactCode.PEER_NOT_FOUND,
                     target=cmd.target,
                     alias=alias,
                 )
@@ -394,5 +395,5 @@ class DatabaseCommandHandler:
 
         return ActionErrorEvent(
             action=cmd.action,
-            code=TransCode.UNKNOWN_COMMAND,
+            code=SystemCode.UNKNOWN_COMMAND,
         )

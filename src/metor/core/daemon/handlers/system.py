@@ -7,7 +7,7 @@ from metor.core import TorManager
 from metor.core.api import (
     IpcCommand,
     IpcEvent,
-    TransCode,
+    SystemCode,
     GetAddressCommand,
     GenerateAddressCommand,
     AddressDataEvent,
@@ -75,5 +75,5 @@ class SystemCommandHandler:
 
         return ActionErrorEvent(
             action=cmd.action,
-            code=TransCode.UNKNOWN_COMMAND,
+            code=SystemCode.UNKNOWN_COMMAND,
         )

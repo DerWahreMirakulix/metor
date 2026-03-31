@@ -15,7 +15,11 @@ from metor.core.api import (
     JsonValue,
     IpcCommand,
     IpcEvent,
-    TransCode,
+    DomainCode,
+    SystemCode,
+    NetworkCode,
+    UiCode,
+    ContactCode,
     UnlockCommand,
     SelfDestructCommand,
     SetSettingCommand,
@@ -76,19 +80,19 @@ class CliProxy:
         """
         if not self._pm.exists():
             return self._translate_local(
-                TransCode.PROFILE_NOT_FOUND, {'profile': self._pm.profile_name}
+                UiCode.PROFILE_NOT_FOUND, {'profile': self._pm.profile_name}
             )
         return None
 
     def _translate_local(
-        self, code: TransCode, params: Optional[Dict[str, JsonValue]] = None
+        self, code: DomainCode, params: Optional[Dict[str, JsonValue]] = None
     ) -> str:
         """
-        Translates a TransCode to a fully formatted string specifically for the CLI.
+        Translates a DomainCode to a fully formatted string specifically for the CLI.
         Forces the resolution of {alias} since we are not in the dynamic rendering chat engine.
 
         Args:
-            code (TransCode): The strict domain code.
+            code (DomainCode): The strict domain code.
             params (Optional[Dict[str, JsonValue]]): The parameters.
 
         Returns:
@@ -135,7 +139,7 @@ class CliProxy:
             if self.is_remote:
                 return self._prefix_remote(
                     self._translate_local(
-                        TransCode.DAEMON_UNREACHABLE,
+                        SystemCode.DAEMON_UNREACHABLE,
                         {'port': str(self._pm.get_static_port())},
                     )
                 )
@@ -143,7 +147,7 @@ class CliProxy:
             # Offline local state: Route through ephemeral HeadlessDaemon to enforce DDD
             password: Optional[str] = None
             if not isinstance(cmd, (GetAddressCommand, GenerateAddressCommand)):
-                prompt, _ = Translator.get(TransCode.ENTER_MASTER_PASSWORD)
+                prompt, _ = Translator.get(UiCode.ENTER_MASTER_PASSWORD)
                 password = getpass.getpass(prompt)
 
             with HeadlessDaemon(self._pm, password) as hd:
@@ -172,7 +176,7 @@ class CliProxy:
 
                 if not wait_for_response:
                     return self._prefix_remote(
-                        self._translate_local(TransCode.COMMAND_SUCCESS)
+                        self._translate_local(SystemCode.COMMAND_SUCCESS)
                     )
 
                 buffer: str = ''
@@ -209,14 +213,16 @@ class CliProxy:
                     for k, v in params_raw.items()
                     if isinstance(v, (str, int, float, bool, type(None)))
                 }
-                code: TransCode = getattr(event, 'code', TransCode.COMMAND_SUCCESS)
+                code: DomainCode = getattr(event, 'code', SystemCode.COMMAND_SUCCESS)
                 text: str = self._translate_local(code, params)
                 return self._prefix_remote(text)
 
-            return self._prefix_remote(self._translate_local(TransCode.COMMAND_SUCCESS))
+            return self._prefix_remote(
+                self._translate_local(SystemCode.COMMAND_SUCCESS)
+            )
         except Exception:
             return self._prefix_remote(
-                self._translate_local(TransCode.COMMUNICATION_FAILED)
+                self._translate_local(SystemCode.COMMUNICATION_FAILED)
             )
 
     def unlock_daemon(self, password: str) -> str:
@@ -296,7 +302,7 @@ class CliProxy:
         if setting_enum.value.startswith('ui.'):
             try:
                 Settings.set(setting_enum, parsed_value)
-                return self._translate_local(TransCode.SETTING_UPDATED, {'key': key})
+                return self._translate_local(SystemCode.SETTING_UPDATED, {'key': key})
             except TypeError as e:
                 return str(e)
 
@@ -307,7 +313,7 @@ class CliProxy:
 
         try:
             Settings.set(setting_enum, parsed_value)
-            return self._translate_local(TransCode.SETTING_UPDATED, {'key': key})
+            return self._translate_local(SystemCode.SETTING_UPDATED, {'key': key})
         except TypeError as e:
             return str(e)
 
@@ -344,7 +350,7 @@ class CliProxy:
             return err
 
         if not self.is_remote and not self._pm.is_daemon_running():
-            return self._translate_local(TransCode.DAEMON_NOT_RUNNING_DROPS)
+            return self._translate_local(NetworkCode.DAEMON_NOT_RUNNING_DROPS)
 
         return self._request_ipc(
             SendDropCommand(target=target_alias, text=text, cli_mode=True),
@@ -459,7 +465,7 @@ class CliProxy:
             return err
 
         if not self.is_remote and not self._pm.is_daemon_running() and not onion:
-            return self._translate_local(TransCode.RAM_ALIAS_REQUIRES_DAEMON)
+            return self._translate_local(ContactCode.RAM_ALIAS_REQUIRES_DAEMON)
 
         return self._request_ipc(AddContactCommand(alias=alias, onion=onion))
 

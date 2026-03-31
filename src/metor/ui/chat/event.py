@@ -10,7 +10,10 @@ from typing import List, Optional, Dict, Any
 
 from metor.core.api import (
     IpcEvent,
-    TransCode,
+    DomainCode,
+    SystemCode,
+    NetworkCode,
+    UiCode,
     MarkReadCommand,
     InitEvent,
     RemoteMsgEvent,
@@ -101,7 +104,7 @@ class EventHandler:
 
     def _print_translated(
         self,
-        code: TransCode,
+        code: DomainCode,
         params: Optional[Dict[str, Any]] = None,
         alias: Optional[str] = None,
     ) -> None:
@@ -109,7 +112,7 @@ class EventHandler:
         Resolves a translation code and renders it directly to the UI, applying the correct severity routing.
 
         Args:
-            code (TransCode): The strict domain code for translation.
+            code (DomainCode): The strict domain code for translation.
             params (Optional[Dict[str, Any]]): Dynamic parameters to inject.
             alias (Optional[str]): The associated remote alias to attach to the UI line.
 
@@ -183,7 +186,7 @@ class EventHandler:
                 params = dataclasses.asdict(event)
                 target_alias = params.get('alias') or params.get('target')
                 self._print_translated(
-                    getattr(event, 'code', TransCode.COMMAND_SUCCESS),
+                    getattr(event, 'code', SystemCode.COMMAND_SUCCESS),
                     params,
                     target_alias,
                 )
@@ -204,28 +207,34 @@ class EventHandler:
                 self._renderer.mark_failed(msg_id=event.msg_id)
 
             elif isinstance(event, IncomingConnectionEvent):
-                self._print_translated(TransCode.INCOMING_CONNECTION, alias=event.alias)
+                self._print_translated(
+                    NetworkCode.INCOMING_CONNECTION, alias=event.alias
+                )
 
             elif isinstance(event, ConnectionPendingEvent):
-                self._print_translated(TransCode.CONNECTION_PENDING, alias=event.alias)
+                self._print_translated(
+                    NetworkCode.CONNECTION_PENDING, alias=event.alias
+                )
 
             elif isinstance(event, ConnectionAutoAcceptedEvent):
                 self._print_translated(
-                    TransCode.CONNECTION_AUTO_ACCEPTED, alias=event.alias
+                    NetworkCode.CONNECTION_AUTO_ACCEPTED, alias=event.alias
                 )
 
             elif isinstance(event, ConnectionRetryEvent):
                 self._print_translated(
-                    TransCode.CONNECTION_RETRY,
+                    NetworkCode.CONNECTION_RETRY,
                     {'attempt': event.attempt, 'max_retries': event.max_retries},
                     alias=event.alias,
                 )
 
             elif isinstance(event, ConnectionFailedEvent):
-                self._print_translated(TransCode.CONNECTION_FAILED, alias=event.alias)
+                self._print_translated(NetworkCode.CONNECTION_FAILED, alias=event.alias)
 
             elif isinstance(event, ConnectionRejectedEvent):
-                self._print_translated(TransCode.CONNECTION_REJECTED, alias=event.alias)
+                self._print_translated(
+                    NetworkCode.CONNECTION_REJECTED, alias=event.alias
+                )
 
             elif isinstance(event, TiebreakerRejectedEvent):
                 # UI Usability: The collision event is muted because it functions transparently as a Mutual Connection / Silent Accept for the user in the live chat.
@@ -233,14 +242,14 @@ class EventHandler:
 
             elif isinstance(event, AutoReconnectAttemptEvent):
                 self._print_translated(
-                    TransCode.AUTO_RECONNECT_ATTEMPT, alias=event.alias
+                    NetworkCode.AUTO_RECONNECT_ATTEMPT, alias=event.alias
                 )
 
             elif isinstance(event, ConnectedEvent):
                 if event.alias not in self._session.active_connections:
                     self._session.active_connections.append(event.alias)
 
-                self._print_translated(TransCode.CONNECTED, alias=event.alias)
+                self._print_translated(NetworkCode.CONNECTED, alias=event.alias)
 
                 if self._session.focused_alias == event.alias:
                     self._renderer.set_focus(event.alias, is_live=True)
@@ -254,7 +263,7 @@ class EventHandler:
                     self._session.pending_focus_target = None
 
             elif isinstance(event, DisconnectedEvent):
-                self._print_translated(TransCode.DISCONNECTED, alias=event.alias)
+                self._print_translated(NetworkCode.DISCONNECTED, alias=event.alias)
 
                 if event.alias in self._session.active_connections:
                     self._session.active_connections.remove(event.alias)
@@ -267,7 +276,7 @@ class EventHandler:
                     self._ipc.send_command(MarkReadCommand(target=event.alias))
                 else:
                     self._print_translated(
-                        TransCode.INBOX_NOTIFICATION,
+                        NetworkCode.INBOX_NOTIFICATION,
                         {'count': event.count},
                         alias=event.alias,
                     )
@@ -339,9 +348,9 @@ class EventHandler:
 
         if old_alias == alias:
             if alias:
-                self._print_translated(TransCode.ALREADY_FOCUSED, alias=alias)
+                self._print_translated(UiCode.ALREADY_FOCUSED, alias=alias)
             else:
-                self._print_translated(TransCode.NO_ACTIVE_FOCUS)
+                self._print_translated(UiCode.NO_ACTIVE_FOCUS)
             return
 
         self._session.focused_alias = alias
@@ -351,7 +360,7 @@ class EventHandler:
 
         if not hide_message:
             if alias:
-                self._print_translated(TransCode.FOCUS_SWITCHED, alias=alias)
+                self._print_translated(UiCode.FOCUS_SWITCHED, alias=alias)
                 self._ipc.send_command(MarkReadCommand(target=alias))
             elif old_alias:
-                self._print_translated(TransCode.FOCUS_REMOVED, alias=old_alias)
+                self._print_translated(UiCode.FOCUS_REMOVED, alias=old_alias)

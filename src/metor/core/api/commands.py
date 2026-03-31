@@ -1,5 +1,6 @@
 """
 Module defining the Data Transfer Objects (DTOs) for inbound Daemon commands.
+Utilizes dynamic decorators for registry mapping.
 """
 
 from dataclasses import dataclass, field
@@ -8,8 +9,10 @@ from typing import Optional, Union
 # Local Package Imports
 from metor.core.api.base import IpcCommand
 from metor.core.api.codes import Action
+from metor.core.api.registry import register_command
 
 
+@register_command(Action.INIT)
 @dataclass
 class InitCommand(IpcCommand):
     """
@@ -22,6 +25,7 @@ class InitCommand(IpcCommand):
     action: Action = field(default=Action.INIT, init=False)
 
 
+@register_command(Action.GET_CONNECTIONS)
 @dataclass
 class GetConnectionsCommand(IpcCommand):
     """
@@ -36,6 +40,7 @@ class GetConnectionsCommand(IpcCommand):
     action: Action = field(default=Action.GET_CONNECTIONS, init=False)
 
 
+@register_command(Action.GET_CONTACTS_LIST)
 @dataclass
 class GetContactsListCommand(IpcCommand):
     """
@@ -50,6 +55,7 @@ class GetContactsListCommand(IpcCommand):
     action: Action = field(default=Action.GET_CONTACTS_LIST, init=False)
 
 
+@register_command(Action.CONNECT)
 @dataclass
 class ConnectCommand(IpcCommand):
     """
@@ -64,6 +70,7 @@ class ConnectCommand(IpcCommand):
     action: Action = field(default=Action.CONNECT, init=False)
 
 
+@register_command(Action.DISCONNECT)
 @dataclass
 class DisconnectCommand(IpcCommand):
     """
@@ -78,6 +85,7 @@ class DisconnectCommand(IpcCommand):
     action: Action = field(default=Action.DISCONNECT, init=False)
 
 
+@register_command(Action.ACCEPT)
 @dataclass
 class AcceptCommand(IpcCommand):
     """
@@ -92,6 +100,7 @@ class AcceptCommand(IpcCommand):
     action: Action = field(default=Action.ACCEPT, init=False)
 
 
+@register_command(Action.REJECT)
 @dataclass
 class RejectCommand(IpcCommand):
     """
@@ -106,6 +115,7 @@ class RejectCommand(IpcCommand):
     action: Action = field(default=Action.REJECT, init=False)
 
 
+@register_command(Action.MSG)
 @dataclass
 class MsgCommand(IpcCommand):
     """
@@ -124,6 +134,7 @@ class MsgCommand(IpcCommand):
     action: Action = field(default=Action.MSG, init=False)
 
 
+@register_command(Action.ADD_CONTACT)
 @dataclass
 class AddContactCommand(IpcCommand):
     """
@@ -140,6 +151,7 @@ class AddContactCommand(IpcCommand):
     action: Action = field(default=Action.ADD_CONTACT, init=False)
 
 
+@register_command(Action.REMOVE_CONTACT)
 @dataclass
 class RemoveContactCommand(IpcCommand):
     """
@@ -154,6 +166,7 @@ class RemoveContactCommand(IpcCommand):
     action: Action = field(default=Action.REMOVE_CONTACT, init=False)
 
 
+@register_command(Action.RENAME_CONTACT)
 @dataclass
 class RenameContactCommand(IpcCommand):
     """
@@ -170,6 +183,7 @@ class RenameContactCommand(IpcCommand):
     action: Action = field(default=Action.RENAME_CONTACT, init=False)
 
 
+@register_command(Action.CLEAR_CONTACTS)
 @dataclass
 class ClearContactsCommand(IpcCommand):
     """
@@ -182,6 +196,7 @@ class ClearContactsCommand(IpcCommand):
     action: Action = field(default=Action.CLEAR_CONTACTS, init=False)
 
 
+@register_command(Action.SWITCH)
 @dataclass
 class SwitchCommand(IpcCommand):
     """
@@ -196,6 +211,7 @@ class SwitchCommand(IpcCommand):
     action: Action = field(default=Action.SWITCH, init=False)
 
 
+@register_command(Action.SEND_DROP)
 @dataclass
 class SendDropCommand(IpcCommand):
     """
@@ -214,6 +230,7 @@ class SendDropCommand(IpcCommand):
     action: Action = field(default=Action.SEND_DROP, init=False)
 
 
+@register_command(Action.GET_INBOX)
 @dataclass
 class GetInboxCommand(IpcCommand):
     """
@@ -228,6 +245,7 @@ class GetInboxCommand(IpcCommand):
     action: Action = field(default=Action.GET_INBOX, init=False)
 
 
+@register_command(Action.MARK_READ)
 @dataclass
 class MarkReadCommand(IpcCommand):
     """
@@ -244,6 +262,7 @@ class MarkReadCommand(IpcCommand):
     action: Action = field(default=Action.MARK_READ, init=False)
 
 
+@register_command(Action.FALLBACK)
 @dataclass
 class FallbackCommand(IpcCommand):
     """
@@ -258,6 +277,7 @@ class FallbackCommand(IpcCommand):
     action: Action = field(default=Action.FALLBACK, init=False)
 
 
+@register_command(Action.GET_HISTORY)
 @dataclass
 class GetHistoryCommand(IpcCommand):
     """
@@ -274,6 +294,7 @@ class GetHistoryCommand(IpcCommand):
     action: Action = field(default=Action.GET_HISTORY, init=False)
 
 
+@register_command(Action.CLEAR_HISTORY)
 @dataclass
 class ClearHistoryCommand(IpcCommand):
     """
@@ -288,6 +309,7 @@ class ClearHistoryCommand(IpcCommand):
     action: Action = field(default=Action.CLEAR_HISTORY, init=False)
 
 
+@register_command(Action.GET_MESSAGES)
 @dataclass
 class GetMessagesCommand(IpcCommand):
     """
@@ -304,6 +326,7 @@ class GetMessagesCommand(IpcCommand):
     action: Action = field(default=Action.GET_MESSAGES, init=False)
 
 
+@register_command(Action.CLEAR_MESSAGES)
 @dataclass
 class ClearMessagesCommand(IpcCommand):
     """
@@ -320,6 +343,7 @@ class ClearMessagesCommand(IpcCommand):
     action: Action = field(default=Action.CLEAR_MESSAGES, init=False)
 
 
+@register_command(Action.GET_ADDRESS)
 @dataclass
 class GetAddressCommand(IpcCommand):
     """
@@ -332,6 +356,7 @@ class GetAddressCommand(IpcCommand):
     action: Action = field(default=Action.GET_ADDRESS, init=False)
 
 
+@register_command(Action.GENERATE_ADDRESS)
 @dataclass
 class GenerateAddressCommand(IpcCommand):
     """
@@ -344,6 +369,7 @@ class GenerateAddressCommand(IpcCommand):
     action: Action = field(default=Action.GENERATE_ADDRESS, init=False)
 
 
+@register_command(Action.CLEAR_PROFILE_DB)
 @dataclass
 class ClearProfileDbCommand(IpcCommand):
     """
@@ -356,6 +382,7 @@ class ClearProfileDbCommand(IpcCommand):
     action: Action = field(default=Action.CLEAR_PROFILE_DB, init=False)
 
 
+@register_command(Action.SET_SETTING)
 @dataclass
 class SetSettingCommand(IpcCommand):
     """
@@ -372,6 +399,7 @@ class SetSettingCommand(IpcCommand):
     action: Action = field(default=Action.SET_SETTING, init=False)
 
 
+@register_command(Action.SELF_DESTRUCT)
 @dataclass
 class SelfDestructCommand(IpcCommand):
     """
@@ -384,6 +412,7 @@ class SelfDestructCommand(IpcCommand):
     action: Action = field(default=Action.SELF_DESTRUCT, init=False)
 
 
+@register_command(Action.UNLOCK)
 @dataclass
 class UnlockCommand(IpcCommand):
     """
@@ -398,6 +427,7 @@ class UnlockCommand(IpcCommand):
     action: Action = field(default=Action.UNLOCK, init=False)
 
 
+@register_command(Action.RETUNNEL)
 @dataclass
 class RetunnelCommand(IpcCommand):
     """
