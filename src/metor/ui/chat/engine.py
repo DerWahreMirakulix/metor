@@ -21,7 +21,7 @@ from metor.core.api import (
 from metor.data.profile import ProfileManager
 from metor.data.settings import SettingKey
 from metor.ui import Help, Theme
-from metor.utils import clean_onion
+from metor.utils import clean_onion, Constants
 
 # Local Package Imports
 from metor.ui.chat.models import ChatMessageType
@@ -171,7 +171,7 @@ class Chat:
             )
             return
 
-        msg_id: str = secrets.token_hex(4)
+        msg_id: str = secrets.token_hex(Constants.UUID_CHAT_BYTES)
         is_live: bool = self._session.focused_alias in self._session.active_connections
 
         if is_live:

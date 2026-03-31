@@ -18,11 +18,33 @@ class Constants:
     # Network Constraints
     MAX_STREAM_BYTES: int = 1048576  # 1 MB Limit for Tor TCP streams (OOM Protection)
     MAX_IPC_BYTES: int = 5242880  # 5 MB Limit for local IPC streams (OOM Protection)
+    TCP_BUFFER_SIZE: int = 4096  # Standard TCP chunk size for socket.recv
+    SERVER_BACKLOG: int = 5  # Standard socket backlog for daemon IPC and listeners
+    SERVER_BACKLOG_HEADLESS: int = 1  # Minimal socket backlog for ephemeral daemons
 
-    # Thread Constraints
-    THREAD_POLL_TIMEOUT: float = (
-        1.0  # Timeout for non-blocking accept/recv loops to allow graceful shutdown
-    )
+    # Tor Bootstrapping
+    UNIX_TOR_TIMEOUT: int = 45  # Process launch timeout for Unix Tor binaries
+    TOR_BOOTSTRAP_POLL_SEC: float = 1.0
+    TOR_BOOTSTRAP_RETRY_SEC: float = 2.0
+    TOR_HOSTNAME_POLL_RETRIES: int = 10
+
+    # Application & UI Constraints
+    DEFAULT_COLS: int = 80  # Fallback terminal width
+    UUID_MSG_BYTES: int = 8  # Byte length for persistent message UUIDs
+    UUID_CHAT_BYTES: int = 4  # Byte length for ephemeral live-chat UUIDs
+
+    # Thread Constraints & Timing
+    THREAD_POLL_TIMEOUT: float = 1.0  # Timeout for non-blocking accept/recv loops
+    WORKER_SLEEP_SEC: float = 1.0  # Standard background worker tick rate
+    WORKER_SLEEP_SLOW_SEC: float = 2.0  # Slower background worker tick rate
+    LOCK_SLEEP_SEC: float = 0.05  # Sleep interval for FileLock spinlocks
+    INPUT_SLEEP_SEC: float = 0.02  # UI non-blocking input thread sleep
+    TCP_CLOSE_LINGER_SEC: float = 0.2  # Socket linger before shutdown
+
+    # Network Backoff Jitter (Algorithmic Constants)
+    RECONNECT_BACKOFF_BASE_SEC: float = 10.0
+    RECONNECT_BACKOFF_JITTER_MAX_MS: int = 2001
+    RECONNECT_BACKOFF_JITTER_DIVISOR: float = 100.0
 
     # File Names
     DB_FILE: str = 'storage.db'

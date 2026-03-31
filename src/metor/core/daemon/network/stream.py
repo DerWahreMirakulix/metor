@@ -57,7 +57,7 @@ class TcpStreamReader:
                 )
 
             try:
-                data: bytes = self._conn.recv(4096)
+                data: bytes = self._conn.recv(Constants.TCP_BUFFER_SIZE)
                 if not data:
                     return None
 

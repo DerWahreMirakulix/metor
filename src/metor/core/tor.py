@@ -158,7 +158,9 @@ class TorManager:
             if os.name == 'nt'
             else Constants.TOR_UNIX
         )
-        tor_timeout: Optional[int] = None if os.name == 'nt' else 45
+        tor_timeout: Optional[int] = (
+            None if os.name == 'nt' else Constants.UNIX_TOR_TIMEOUT
+        )
 
         def print_tor_output(line: str) -> None:
             """
@@ -200,16 +202,16 @@ class TorManager:
                 ):
                     TorManager._log_callback(f'Error starting Tor: {e}')
                 if attempt < max_retries - 1:
-                    time.sleep(2)
+                    time.sleep(Constants.TOR_BOOTSTRAP_RETRY_SEC)
                     continue
                 else:
                     return False, NetworkCode.TOR_PROCESS_TERMINATED, {}
 
         hostname_file: Path = hs_dir / Constants.HOSTNAME_FILE
-        for _ in range(10):
+        for _ in range(Constants.TOR_HOSTNAME_POLL_RETRIES):
             if hostname_file.exists():
                 break
-            time.sleep(1)
+            time.sleep(Constants.TOR_BOOTSTRAP_POLL_SEC)
 
         if hostname_file.exists():
             with hostname_file.open('r') as f:

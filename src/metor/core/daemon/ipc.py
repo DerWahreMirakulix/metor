@@ -78,7 +78,7 @@ class IpcServer:
         bind_port: int = static_port if static_port else 0
 
         server.bind((Constants.LOCALHOST, bind_port))
-        server.listen(5)
+        server.listen(Constants.SERVER_BACKLOG)
 
         self.port = server.getsockname()[1]
         self._pm.set_daemon_port(self.port)
@@ -185,7 +185,7 @@ class IpcServer:
         try:
             while not self._stop_flag.is_set():
                 try:
-                    data: bytes = conn.recv(4096)
+                    data: bytes = conn.recv(Constants.TCP_BUFFER_SIZE)
                     if not data:
                         break
 

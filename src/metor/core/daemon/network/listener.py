@@ -108,7 +108,7 @@ class InboundListener:
         """
         listener: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.bind((Constants.LOCALHOST, self._tm.incoming_port or 0))
-        listener.listen(5)
+        listener.listen(Constants.SERVER_BACKLOG)
 
         while not self._stop_flag.is_set():
             try:

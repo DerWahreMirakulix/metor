@@ -15,6 +15,7 @@ from metor.data.settings import SettingKey
 from metor.ui import UIPresenter
 from metor.ui.chat.models import ChatMessageType, ChatLine
 from metor.ui.chat.presenter import ChatPresenter
+from metor.utils import Constants
 
 # Local Package Imports
 from metor.ui.chat.renderer.display import Display
@@ -103,7 +104,7 @@ class Renderer:
         with self._display.print_lock:
             cols: int = shutil.get_terminal_size().columns
             if cols < 1:
-                cols = 80
+                cols = Constants.DEFAULT_COLS
 
             self._display.clear_input_area(self._last_visual_lines)
 
@@ -169,7 +170,7 @@ class Renderer:
         with self._display.print_lock:
             cols: int = shutil.get_terminal_size().columns
             if cols < 1:
-                cols = 80
+                cols = Constants.DEFAULT_COLS
 
             self._display.clear_input_area(self._last_visual_lines)
 
@@ -339,7 +340,7 @@ class Renderer:
         with self._display.print_lock:
             cols: int = shutil.get_terminal_size().columns
             if cols < 1:
-                cols = 80
+                cols = Constants.DEFAULT_COLS
             self._display.clear_input_area(self._last_visual_lines)
             sys.stdout.flush()
 
@@ -369,7 +370,7 @@ class Renderer:
         with self._display.print_lock:
             cols: int = shutil.get_terminal_size().columns
             if cols < 1:
-                cols = 80
+                cols = Constants.DEFAULT_COLS
 
             self._display.clear_input_area(self._last_visual_lines)
             lines_up: int = sum(
@@ -445,7 +446,7 @@ class Renderer:
         with self._display.print_lock:
             cols: int = shutil.get_terminal_size().columns
             if cols < 1:
-                cols = 80
+                cols = Constants.DEFAULT_COLS
             self._full_redraw_locked(cols)
 
     def _on_resize(self, _signum: int, _frame: Optional[types.FrameType]) -> None:
@@ -490,13 +491,13 @@ class Renderer:
         while True:
             ch: Optional[str] = self._input.get_char()
             if ch is None:
-                time.sleep(0.02)
+                time.sleep(Constants.INPUT_SLEEP_SEC)
                 continue
 
             with self._display.print_lock:
                 cols: int = shutil.get_terminal_size().columns
                 if cols < 1:
-                    cols = 80
+                    cols = Constants.DEFAULT_COLS
 
                 result: Optional[str] = self._input.process_key(ch)
                 self._display.clear_input_area(self._last_visual_lines)

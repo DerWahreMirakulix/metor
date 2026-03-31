@@ -41,6 +41,7 @@ from metor.data import (
     MessageStatus,
     SettingKey,
 )
+from metor.utils import Constants
 
 # Local Package Imports
 from metor.core.daemon.network.state import StateTracker
@@ -200,7 +201,7 @@ class ConnectionController:
                         for _ in range(3):
                             if self._stop_flag.is_set():
                                 break
-                            time.sleep(1.0)
+                            time.sleep(Constants.WORKER_SLEEP_SEC)
                     else:
                         self._hm.log_event(
                             HistoryEvent.DROP_FAILED,
@@ -415,7 +416,7 @@ class ConnectionController:
                             'utf-8'
                         )
                     )
-                    time.sleep(0.2)
+                    time.sleep(Constants.TCP_CLOSE_LINGER_SEC)
                     conn.shutdown(socket.SHUT_RDWR)
                 except Exception:
                     pass
@@ -459,7 +460,7 @@ class ConnectionController:
             None
         """
         while not self._stop_flag.is_set():
-            time.sleep(2.0)
+            time.sleep(Constants.WORKER_SLEEP_SLOW_SEC)
             onion: Optional[str] = None
 
             with self._reconnect_lock:
@@ -467,9 +468,10 @@ class ConnectionController:
                     onion = self._reconnect_queue.pop(0)
 
             if onion:
-                backoff: float = 10.0 + (
-                    secrets.randbelow(2001) / 100.0
-                )  # Generates 10.00 to 30.00
+                backoff: float = Constants.RECONNECT_BACKOFF_BASE_SEC + (
+                    secrets.randbelow(Constants.RECONNECT_BACKOFF_JITTER_MAX_MS)
+                    / Constants.RECONNECT_BACKOFF_JITTER_DIVISOR
+                )
                 alias: Optional[str] = self._cm.get_alias_by_onion(onion)
 
                 self._hm.log_event(HistoryEvent.LIVE_AUTO_RECONNECT_ATTEMPT, onion)

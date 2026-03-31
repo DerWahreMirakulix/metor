@@ -115,7 +115,9 @@ class MessageManager:
             int: The inserted row ID or existing row ID if deduplicated.
         """
         contact_onion = clean_onion(contact_onion)
-        actual_msg_id: str = msg_id if msg_id else secrets.token_hex(8)
+        actual_msg_id: str = (
+            msg_id if msg_id else secrets.token_hex(Constants.UUID_MSG_BYTES)
+        )
 
         # Deduplication check for inbound payloads to prevent At-Least-Once replication faults
         if direction == MessageDirection.IN and actual_msg_id:

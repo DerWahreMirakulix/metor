@@ -21,6 +21,7 @@ from metor.data import (
     HistoryEvent,
     SettingKey,
 )
+from metor.utils import Constants
 
 # Local Package Imports
 from metor.core.daemon.crypto import Crypto
@@ -96,7 +97,7 @@ class OutboxWorker:
             None
         """
         while not self._stop_flag.is_set():
-            time.sleep(2.0)
+            time.sleep(Constants.WORKER_SLEEP_SLOW_SEC)
 
             pending_rows: List[Tuple[int, str, str, str, str, str]] = (
                 self._mm.get_pending_outbox()

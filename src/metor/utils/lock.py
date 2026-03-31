@@ -10,6 +10,9 @@ from typing import Optional, Type
 from types import TracebackType
 from pathlib import Path
 
+# Local Package Imports
+from metor.utils.constants import Constants
+
 
 class FileLock:
     """
@@ -76,7 +79,7 @@ class FileLock:
                 except (OSError, ValueError):
                     pass
 
-            time.sleep(0.05)
+            time.sleep(Constants.LOCK_SLEEP_SEC)
 
         raise TimeoutError(
             f'Could not acquire lock for {self.lock_path}. Another process is currently writing.'

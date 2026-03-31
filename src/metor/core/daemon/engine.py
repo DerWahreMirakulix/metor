@@ -227,7 +227,7 @@ class Daemon:
                 self._start_subsystems()
 
             while not self._stop_flag.is_set():
-                time.sleep(1.0)
+                time.sleep(Constants.WORKER_SLEEP_SEC)
         except KeyboardInterrupt:
             pass
         finally:

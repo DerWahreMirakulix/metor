@@ -128,7 +128,7 @@ class HeadlessDaemon:
         """
         self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server.bind((Constants.LOCALHOST, 0))
-        self._server.listen(1)
+        self._server.listen(Constants.SERVER_BACKLOG_HEADLESS)
         self.port = self._server.getsockname()[1]
 
         self._thread = threading.Thread(target=self._acceptor, daemon=True)
@@ -194,7 +194,7 @@ class HeadlessDaemon:
             buffer: str = ''
             while not self._stop_event.is_set():
                 try:
-                    data: bytes = conn.recv(4096)
+                    data: bytes = conn.recv(Constants.TCP_BUFFER_SIZE)
                     if not data:
                         break
                     buffer += data.decode('utf-8', errors='ignore')

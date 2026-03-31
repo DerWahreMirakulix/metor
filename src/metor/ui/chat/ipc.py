@@ -110,7 +110,7 @@ class IpcClient:
                 if not self._socket:
                     break
 
-                data: bytes = self._socket.recv(4096)
+                data: bytes = self._socket.recv(Constants.TCP_BUFFER_SIZE)
                 if not data:
                     self._on_disconnect()
                     break
