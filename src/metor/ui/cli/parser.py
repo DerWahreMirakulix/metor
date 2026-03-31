@@ -38,6 +38,8 @@ class CliParser:
         parser.add_argument('subcommand', nargs='?')
         parser.add_argument('extra', nargs='*')
 
+        args: argparse.Namespace
+        unknown: List[str]
         args, unknown = parser.parse_known_args()
         args.extra.extend(unknown)
 

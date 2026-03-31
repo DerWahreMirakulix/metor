@@ -27,6 +27,7 @@ class Constants:
     TOR_BOOTSTRAP_POLL_SEC: float = 1.0
     TOR_BOOTSTRAP_RETRY_SEC: float = 2.0
     TOR_HOSTNAME_POLL_RETRIES: int = 10
+    TOR_KILL_TIMEOUT_SEC: float = 2.0  # Timeout for Tor process termination
 
     # Application & UI Constraints
     DEFAULT_COLS: int = 80  # Fallback terminal width

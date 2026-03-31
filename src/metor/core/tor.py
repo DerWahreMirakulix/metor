@@ -242,7 +242,7 @@ class TorManager:
         if self._tm_proc:
             try:
                 self._tm_proc.terminate()
-                self._tm_proc.wait(timeout=2.0)
+                self._tm_proc.wait(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
             except Exception:
                 try:
                     self._tm_proc.kill()
