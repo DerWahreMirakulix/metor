@@ -9,8 +9,8 @@ import sys
 import threading
 import tempfile
 from contextlib import contextmanager
-from sqlcipher3 import dbapi2 as sqlite3
-from typing import List, Tuple, Optional, Iterator, Dict, Callable, Union
+from sqlcipher3 import dbapi2 as sqlite3  # type: ignore
+from typing import List, Tuple, Optional, Iterator, Dict, Callable, Union, cast
 from pathlib import Path
 
 # Local Package Imports
@@ -214,4 +214,4 @@ class SqlManager:
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute(query, params)
-        return cursor.fetchall()
+        return cast(List[Tuple[SqlParam, ...]], cursor.fetchall())

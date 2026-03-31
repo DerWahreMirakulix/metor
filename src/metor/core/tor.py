@@ -6,9 +6,9 @@ Enforces strict socket timeouts, configurable network resilience, and Tor circui
 import os
 import socket
 import time
-import socks
-import stem.process
-import stem.control
+import socks  # type: ignore
+import stem.process  # type: ignore
+import stem.control  # type: ignore
 import nacl.exceptions
 from pathlib import Path
 from typing import Tuple, Optional, Dict, Callable

@@ -9,7 +9,7 @@ from typing import Optional, List
 try:
     import msvcrt
 except ImportError:
-    msvcrt = None
+    msvcrt = None  # type: ignore
 
 if os.name != 'nt':
     import termios
@@ -79,10 +79,10 @@ class InputHandler:
             Optional[str]: The raw character, a parsed SPECIAL tag, or None if empty.
         """
         if os.name == 'nt' and msvcrt:
-            if msvcrt.kbhit():
-                ch = msvcrt.getwch()
+            if getattr(msvcrt, 'kbhit')():
+                ch = getattr(msvcrt, 'getwch')()
                 if ch in ('\x00', '\xe0'):
-                    ch2 = msvcrt.getwch()
+                    ch2 = getattr(msvcrt, 'getwch')()
                     if ch2 == 'H':
                         return 'SPECIAL:UP'
                     elif ch2 == 'P':
@@ -94,14 +94,14 @@ class InputHandler:
                     return ''
                 if ch == '\x0e':
                     return 'SPECIAL:NEWLINE'
-                return ch
+                return str(ch)
             return None
         else:
-            ch1 = sys.stdin.read(1)
+            ch1: str = str(sys.stdin.read(1))
             if ch1 == '\x1b':
-                ch2 = sys.stdin.read(1)
+                ch2 = str(sys.stdin.read(1))
                 if ch2 == '[':
-                    ch3 = sys.stdin.read(1)
+                    ch3 = str(sys.stdin.read(1))
                     return {
                         'A': 'SPECIAL:UP',
                         'B': 'SPECIAL:DOWN',

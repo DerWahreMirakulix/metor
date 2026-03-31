@@ -34,7 +34,7 @@ T = TypeVar('T')
 
 def _coerce_and_validate(
     cls: Type[T], kwargs: Dict[str, JsonValue]
-) -> Dict[str, JsonValue]:
+) -> Dict[str, object]:
     """
     Performs runtime type checking and coercion for incoming JSON dictionaries
     against the static type hints of a target dataclass.
@@ -48,10 +48,10 @@ def _coerce_and_validate(
         ValueError: If a non-optional value is None.
 
     Returns:
-        Dict[str, JsonValue]: The validated and coerced dictionary ready for instantiation.
+        Dict[str, object]: The validated and coerced dictionary ready for instantiation.
     """
     hints: Dict[str, object] = get_type_hints(cls)
-    coerced: Dict[str, JsonValue] = {}
+    coerced: Dict[str, object] = {}
 
     for key, value in kwargs.items():
         if key not in hints:
@@ -145,14 +145,15 @@ class IpcCommand(IpcMessage):
     Base class for all commands sent to the Daemon.
 
     Attributes:
-        None
+        action (Action): Provided by subclasses to identify the routing command.
     """
+
+    action: Action = dataclasses.field(init=False)
 
     @classmethod
     def from_dict(cls, data: Dict[str, JsonValue]) -> 'IpcCommand':
         """
         Factory method to instantiate the correct strict subclass based on the Action enum.
-        Applies runtime type validation to prevent malformed injections.
 
         Args:
             data (Dict[str, JsonValue]): The deserialized JSON payload from the IPC socket.
@@ -174,7 +175,7 @@ class IpcCommand(IpcMessage):
             k: v for k, v in data.items() if k in valid_keys and k != 'action'
         }
 
-        coerced_kwargs: Dict[str, JsonValue] = _coerce_and_validate(target_cls, kwargs)
+        coerced_kwargs: Dict[str, object] = _coerce_and_validate(target_cls, kwargs)
         return target_cls(**coerced_kwargs)
 
 
@@ -184,14 +185,15 @@ class IpcEvent(IpcMessage):
     Base class for all events emitted by the Daemon.
 
     Attributes:
-        None
+        type (EventType): Provided by subclasses to identify the event.
     """
+
+    type: EventType = dataclasses.field(init=False)
 
     @classmethod
     def from_dict(cls, data: Dict[str, JsonValue]) -> 'IpcEvent':
         """
         Factory method to instantiate the correct strict subclass based on the EventType enum.
-        Applies runtime type validation to prevent malformed injections.
 
         Args:
             data (Dict[str, JsonValue]): The deserialized JSON payload from the IPC socket.
@@ -213,5 +215,5 @@ class IpcEvent(IpcMessage):
             k: v for k, v in data.items() if k in valid_keys and k != 'type'
         }
 
-        coerced_kwargs: Dict[str, JsonValue] = _coerce_and_validate(target_cls, kwargs)
+        coerced_kwargs: Dict[str, object] = _coerce_and_validate(target_cls, kwargs)
         return target_cls(**coerced_kwargs)

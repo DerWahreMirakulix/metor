@@ -7,7 +7,7 @@ import socket
 import threading
 import time
 import secrets
-from typing import List, Optional, Callable, Dict, TYPE_CHECKING
+from typing import List, Optional, Callable, Dict, TYPE_CHECKING, cast
 
 from metor.core import TorManager
 from metor.core.api import (
@@ -132,7 +132,7 @@ class ConnectionController:
             return
 
         # OPSEC: Guard against outbound RAM/FD resource exhaustion attacks
-        max_conn: int = Settings.get(SettingKey.MAX_CONCURRENT_CONNECTIONS)
+        max_conn: int = cast(int, Settings.get(SettingKey.MAX_CONCURRENT_CONNECTIONS))
         if len(self._state.get_active_onions()) >= max_conn:
             self._broadcast(
                 MaxConnectionsReachedEvent(
@@ -155,7 +155,7 @@ class ConnectionController:
 
         handshake_success: bool = False
         try:
-            max_retries: int = Settings.get(SettingKey.MAX_CONNECT_RETRIES)
+            max_retries: int = cast(int, Settings.get(SettingKey.MAX_CONNECT_RETRIES))
             for attempt in range(1, max_retries + 1):
                 if self._stop_flag.is_set():
                     break

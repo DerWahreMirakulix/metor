@@ -203,7 +203,7 @@ class CliProxy:
                         ProfilesDataEvent,
                     ),
                 ):
-                    text_fmt: str = UIPresenter.format_response(event, chat_mode=False)  # type: ignore
+                    text_fmt: str = UIPresenter.format_response(event, chat_mode=False)
                     return self._prefix_remote(text_fmt)
 
                 # For generic Success, Error, or Notification DTOs

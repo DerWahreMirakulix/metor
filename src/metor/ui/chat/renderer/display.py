@@ -28,7 +28,7 @@ class Display:
         self.all_msgs: List[ChatLine] = []
         self.print_lock: threading.Lock = threading.Lock()
 
-        self._ansi_escape: re.Pattern = re.compile(
+        self._ansi_escape: re.Pattern[str] = re.compile(
             r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])'
         )
 

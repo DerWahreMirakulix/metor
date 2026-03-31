@@ -5,6 +5,7 @@ Ensures that files are not concurrently modified by different processes.
 
 import os
 import time
+import psutil  # type: ignore
 from typing import Optional, Type
 from types import TracebackType
 from pathlib import Path
@@ -53,8 +54,6 @@ class FileLock:
         Returns:
             FileLock: The current instance.
         """
-        import psutil  # Local import to prevent cyclic top-level load
-
         start_time: float = time.time()
 
         while (time.time() - start_time) < self.timeout:

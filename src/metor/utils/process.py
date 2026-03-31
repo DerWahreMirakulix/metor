@@ -3,7 +3,7 @@ Module for managing OS-level processes and cleanup operations.
 Isolates external dependencies like psutil from the core domain logic.
 """
 
-import psutil
+import psutil  # type: ignore
 from pathlib import Path
 
 # Local Package Imports

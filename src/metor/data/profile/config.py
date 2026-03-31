@@ -6,7 +6,7 @@ falling back to global application settings.
 
 import json
 from enum import Enum
-from typing import Dict, Union
+from typing import Dict, Union, cast
 from pathlib import Path
 
 from metor.data import SettingKey, Settings, SettingValue
@@ -46,7 +46,7 @@ class Config:
         if config_file.exists():
             try:
                 with config_file.open('r', encoding='utf-8') as f:
-                    return json.load(f)
+                    return cast(Dict[str, ProfileConfigValue], json.load(f))
             except (json.JSONDecodeError, IOError):
                 pass
 

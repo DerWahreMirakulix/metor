@@ -14,6 +14,7 @@ from metor.core.api.codes import (
     ContactCode,
     UiCode,
 )
+from metor.core.api.registry import CMD_MAP, EVENT_MAP
 from metor.core.api.base import IpcMessage, IpcCommand, IpcEvent, JsonValue
 from metor.core.api.commands import (
     InitCommand,
@@ -103,6 +104,8 @@ __all__ = [
     'DbCode',
     'ContactCode',
     'UiCode',
+    'CMD_MAP',
+    'EVENT_MAP',
     'IpcMessage',
     'IpcCommand',
     'IpcEvent',

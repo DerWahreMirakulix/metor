@@ -128,12 +128,12 @@ class MessageManager:
 
         ts: str = timestamp if timestamp else datetime.now(timezone.utc).isoformat()
 
-        query: str = """
+        insert_query: str = """
             INSERT INTO messages (msg_id, contact_onion, direction, msg_type, payload, timestamp, status) 
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """
         self._sql.execute(
-            query,
+            insert_query,
             (
                 actual_msg_id,
                 contact_onion,
@@ -338,11 +338,11 @@ class MessageManager:
                         {'target': onion},
                     )
                 else:
-                    query: str = """
+                    delete_all_query: str = """
                         DELETE FROM messages 
                         WHERE contact_onion NOT IN (SELECT onion FROM contacts WHERE is_saved = 1)
                     """
-                    self._sql.execute(query)
+                    self._sql.execute(delete_all_query)
                     return (
                         True,
                         DbCode.MESSAGES_CLEARED_NON_CONTACTS,

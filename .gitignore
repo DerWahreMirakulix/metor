@@ -11,8 +11,11 @@ __pycache__
 *.py[cod]
 build
 dist
+node_modules
 *.egg-info/
 *.squash.txt
+.mypy_cache
+.ruff_cache
 
 # ---------------------------------------------------
 # Virtual Environments

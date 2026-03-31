@@ -6,7 +6,7 @@ Emits strictly typed Domain Transfer Objects via IPC.
 
 import socket
 import threading
-from typing import Callable, Optional
+from typing import Callable, Optional, cast, List
 
 from metor.core import TorManager
 from metor.core.api import (
@@ -181,8 +181,8 @@ class NetworkCommandHandler:
                         action=cmd.action,
                         code=code,
                         alias=str(params.get('alias', '')),
-                        count=int(params.get('count', 0)),
-                        msg_ids=list(params.get('msg_ids', [])),
+                        count=int(cast(int, params.get('count', 0))),
+                        msg_ids=cast(List[str], params.get('msg_ids', [])),
                     ),
                 )
             else:

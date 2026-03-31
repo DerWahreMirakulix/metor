@@ -5,10 +5,10 @@ the complex interactions between the Listener, Receiver, Controller, and Router.
 """
 
 import threading
-from typing import List, Callable, Tuple
+from typing import Dict, List, Callable, Tuple
 
 from metor.core import TorManager
-from metor.core.api import IpcEvent
+from metor.core.api import IpcEvent, DomainCode, JsonValue
 from metor.core.daemon.crypto import Crypto
 from metor.data import HistoryManager, ContactManager, MessageManager
 
@@ -202,7 +202,9 @@ class NetworkManager:
         """
         self._router.flush_ram_buffer(onion)
 
-    def force_fallback(self, target: str) -> Tuple[bool, str]:
+    def force_fallback(
+        self, target: str
+    ) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
         """
         Forces all unacknowledged outgoing live messages to the drop queue.
 
@@ -210,7 +212,7 @@ class NetworkManager:
             target (str): The target alias or onion address.
 
         Returns:
-            Tuple[bool, str]: A success flag and status message.
+            Tuple[bool, DomainCode, Dict[str, JsonValue]]: A success flag, domain code and params.
         """
         return self._router.force_fallback(target)
 

@@ -1,23 +1,25 @@
 """
 Script for auto-generating Markdown API documentation from the Metor IPC registries.
 Enforces the DRY principle by dynamically introspecting dataclasses and Enums.
-Automatically resolves project paths for the src-layout architecture.
+Automatically resolves project paths for the src-layout architecture and applies
+Prettier formatting to the final output.
 """
 
 import sys
+import subprocess
 import dataclasses
 from enum import Enum
 from pathlib import Path
 from typing import List, Type
 
-# Local Package Imports
-from metor.core.api.registry import CMD_MAP, EVENT_MAP
-from metor.core.api.base import IpcMessage
+from metor.core.api import CMD_MAP, EVENT_MAP, IpcMessage
+
 
 # Dynamically resolve paths to support execution from any directory
 SCRIPT_DIR: Path = Path(__file__).parent.resolve()
 PROJECT_ROOT: Path = SCRIPT_DIR.parent
 SRC_DIR: Path = PROJECT_ROOT / 'src'
+
 
 # Inject the src directory into the module search path
 sys.path.insert(0, str(SRC_DIR))
@@ -151,14 +153,14 @@ class ApiDocGenerator:
         ]
 
         for cmd_cls in CMD_MAP.values():
-            anchor: str = cmd_cls.__name__.lower()
-            lines.append(f'- [{cmd_cls.__name__}](#{anchor})')
+            cmd_anchor: str = cmd_cls.__name__.lower()
+            lines.append(f'- [{cmd_cls.__name__}](#{cmd_anchor})')
 
         lines.extend(['', '**Events (Daemon -> UI)**'])
 
         for event_cls in EVENT_MAP.values():
-            anchor: str = event_cls.__name__.lower()
-            lines.append(f'- [{event_cls.__name__}](#{anchor})')
+            evt_anchor: str = event_cls.__name__.lower()
+            lines.append(f'- [{event_cls.__name__}](#{evt_anchor})')
 
         lines.extend(['', '## 1. Commands (UI -> Daemon)', ''])
 
@@ -185,6 +187,7 @@ class ApiDocGenerator:
 def main() -> None:
     """
     Entry point for the API doc generation script.
+    Generates the Markdown file and formats it using Prettier.
 
     Args:
         None
@@ -198,6 +201,27 @@ def main() -> None:
     sys.stdout.write(
         f'API documentation successfully generated at: {output_file.absolute()}\n'
     )
+
+    sys.stdout.write('Running Prettier on the generated file...\n')
+    try:
+        # Cross-platform binary resolution for npx
+        npx_cmd: str = 'npx.cmd' if sys.platform == 'win32' else 'npx'
+
+        subprocess.run(
+            [npx_cmd, 'prettier', '--write', str(output_file.absolute())],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        sys.stdout.write('Prettier formatting applied successfully.\n')
+    except subprocess.CalledProcessError:
+        sys.stdout.write(
+            f'Warning: Prettier formatting failed for {output_file.name}. Ensure it is configured correctly.\n'
+        )
+    except FileNotFoundError:
+        sys.stdout.write(
+            'Warning: npx command not found. Skipping Prettier formatting. (Is Node.js installed?)\n'
+        )
 
 
 if __name__ == '__main__':

@@ -11,8 +11,9 @@ from metor.core.api import (
     IpcEvent,
     ContactCode,
     DbCode,
-    SystemCode,
     NetworkCode,
+    SystemCode,
+    DomainCode,
     GetContactsListCommand,
     AddContactCommand,
     RemoveContactCommand,
@@ -118,31 +119,35 @@ class DatabaseCommandHandler:
 
         if isinstance(cmd, AddContactCommand):
             if cmd.onion:
-                success, code, params = self._cm.add_contact(cmd.alias, cmd.onion)
+                add_success, add_code, add_params = self._cm.add_contact(
+                    cmd.alias, cmd.onion
+                )
             else:
-                success, code, params = self._cm.promote_discovered_peer(cmd.alias)
+                add_success, add_code, add_params = self._cm.promote_discovered_peer(
+                    cmd.alias
+                )
 
-            alias_res: str = str(params.get('alias', cmd.alias))
-            if success:
+            alias_res: str = str(add_params.get('alias', cmd.alias))
+            if add_success:
                 return ContactActionSuccessEvent(
                     action=cmd.action,
-                    code=code,
+                    code=add_code,
                     alias=alias_res,
-                    profile=str(params.get('profile', '')),
+                    profile=str(add_params.get('profile', '')),
                 )
             return ActionErrorEvent(
                 action=cmd.action,
-                code=code,
+                code=add_code,
                 alias=alias_res,
             )
 
         if isinstance(cmd, RemoveContactCommand):
             active_onions: List[str] = self._get_active_onions()
-            success, code, params, renames, removed = self._cm.remove_contact(
-                cmd.alias, active_onions
+            rm_success, rm_code, rm_params, rm_renames, rm_removed = (
+                self._cm.remove_contact(cmd.alias, active_onions)
             )
-            if success:
-                for old, new, was_saved in renames:
+            if rm_success:
+                for old, new, was_saved in rm_renames:
                     self._broadcast(
                         RenameSuccessEvent(
                             old_alias=old,
@@ -151,52 +156,52 @@ class DatabaseCommandHandler:
                             was_saved=was_saved,
                         )
                     )
-                for a in removed:
+                for a in rm_removed:
                     self._broadcast(ContactRemovedEvent(alias=a))
 
             self._cm.cleanup_orphans(active_onions)
-            alias_res = str(params.get('alias', cmd.alias))
+            rm_alias_res = str(rm_params.get('alias', cmd.alias))
 
-            if success:
+            if rm_success:
                 return ContactActionSuccessEvent(
                     action=cmd.action,
-                    code=code,
-                    alias=alias_res,
-                    profile=str(params.get('profile', '')),
+                    code=rm_code,
+                    alias=rm_alias_res,
+                    profile=str(rm_params.get('profile', '')),
                 )
             return ActionErrorEvent(
                 action=cmd.action,
-                code=code,
-                alias=alias_res,
+                code=rm_code,
+                alias=rm_alias_res,
             )
 
         if isinstance(cmd, RenameContactCommand):
-            success, code, params = self._cm.rename_contact(
+            rn_success, rn_code, rn_params = self._cm.rename_contact(
                 cmd.old_alias, cmd.new_alias
             )
-            if success:
+            if rn_success:
                 self._broadcast(
                     RenameSuccessEvent(old_alias=cmd.old_alias, new_alias=cmd.new_alias)
                 )
                 return ContactRenamedEvent(
                     action=cmd.action,
-                    code=code,
+                    code=rn_code,
                     old_alias=cmd.old_alias,
                     new_alias=cmd.new_alias,
                 )
             return ActionErrorEvent(
                 action=cmd.action,
-                code=code,
-                alias=str(params.get('alias', cmd.old_alias)),
+                code=rn_code,
+                alias=str(rn_params.get('alias', cmd.old_alias)),
             )
 
         if isinstance(cmd, ClearContactsCommand):
             active_onions = self._get_active_onions()
-            success, code, params, renames, removed = self._cm.clear_contacts(
-                active_onions
+            clr_success, clr_code, clr_params, clr_renames, clr_removed = (
+                self._cm.clear_contacts(active_onions)
             )
-            if success:
-                for old, new, was_saved in renames:
+            if clr_success:
+                for old, new, was_saved in clr_renames:
                     self._broadcast(
                         RenameSuccessEvent(
                             old_alias=old,
@@ -205,18 +210,18 @@ class DatabaseCommandHandler:
                             was_saved=was_saved,
                         )
                     )
-                for a in removed:
+                for a in clr_removed:
                     self._broadcast(ContactRemovedEvent(alias=a))
 
             self._cm.cleanup_orphans(active_onions)
 
-            if success:
+            if clr_success:
                 return ProfileActionSuccessEvent(
                     action=cmd.action,
-                    code=code,
-                    profile=str(params.get('profile', self._pm.profile_name)),
+                    code=clr_code,
+                    profile=str(clr_params.get('profile', self._pm.profile_name)),
                 )
-            return ActionErrorEvent(action=cmd.action, code=code)
+            return ActionErrorEvent(action=cmd.action, code=clr_code)
 
         if isinstance(cmd, ClearProfileDbCommand):
             active_onions = self._get_active_onions()
@@ -283,35 +288,39 @@ class DatabaseCommandHandler:
                 cmd.target, default_value=cmd.target
             )
 
+            ch_success: bool
+            ch_code: DomainCode
+            ch_params: Dict[str, str]
+
             if cmd.target and not exists:
-                success, code, params = (
+                ch_success, ch_code, ch_params = (
                     False,
                     ContactCode.PEER_NOT_FOUND,
                     {'target': cmd.target},
                 )
             else:
-                success, code, params = self._hm.clear_history(onion)
+                ch_success, ch_code, ch_params = self._hm.clear_history(onion)
 
             deleted_aliases: List[str] = self._cm.cleanup_orphans(active_onions)
             for a in deleted_aliases:
                 self._broadcast(ContactRemovedEvent(alias=a))
 
-            if success:
+            if ch_success:
                 if cmd.target:
                     return TargetActionSuccessEvent(
                         action=cmd.action,
-                        code=code,
-                        target=str(params.get('target') or alias),
+                        code=ch_code,
+                        target=str(ch_params.get('target') or alias),
                     )
                 return ProfileActionSuccessEvent(
                     action=cmd.action,
-                    code=code,
-                    profile=str(params.get('profile', self._pm.profile_name)),
+                    code=ch_code,
+                    profile=str(ch_params.get('profile', self._pm.profile_name)),
                 )
             return ActionErrorEvent(
                 action=cmd.action,
-                code=code,
-                target=str(params.get('target', cmd.target)),
+                code=ch_code,
+                target=str(ch_params.get('target', cmd.target)),
             )
 
         if isinstance(cmd, GetMessagesCommand):
@@ -340,14 +349,18 @@ class DatabaseCommandHandler:
                 cmd.target, default_value=cmd.target
             )
 
+            cm_success: bool
+            cm_code: DomainCode
+            cm_params: Dict[str, str]
+
             if cmd.target and not exists:
-                success, code, params = (
+                cm_success, cm_code, cm_params = (
                     False,
                     ContactCode.PEER_NOT_FOUND,
                     {'target': cmd.target},
                 )
             else:
-                success, code, params = self._mm.clear_messages(
+                cm_success, cm_code, cm_params = self._mm.clear_messages(
                     onion, cmd.non_contacts_only
                 )
 
@@ -355,22 +368,22 @@ class DatabaseCommandHandler:
             for a in deleted_aliases:
                 self._broadcast(ContactRemovedEvent(alias=a))
 
-            if success:
+            if cm_success:
                 if cmd.target:
                     return TargetActionSuccessEvent(
                         action=cmd.action,
-                        code=code,
-                        target=str(params.get('target') or alias),
+                        code=cm_code,
+                        target=str(cm_params.get('target') or alias),
                     )
                 return ProfileActionSuccessEvent(
                     action=cmd.action,
-                    code=code,
-                    profile=str(params.get('profile', self._pm.profile_name)),
+                    code=cm_code,
+                    profile=str(cm_params.get('profile', self._pm.profile_name)),
                 )
             return ActionErrorEvent(
                 action=cmd.action,
-                code=code,
-                target=str(params.get('target', cmd.target)),
+                code=cm_code,
+                target=str(cm_params.get('target', cmd.target)),
             )
 
         if isinstance(cmd, GetInboxCommand):

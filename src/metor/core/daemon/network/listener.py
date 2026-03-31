@@ -7,7 +7,7 @@ Enforces Max Concurrent Connection Limits to mitigate RAM/FD Exhaustion attacks.
 import socket
 import threading
 import secrets
-from typing import Optional, Callable, List, TYPE_CHECKING
+from typing import Optional, Callable, List, TYPE_CHECKING, cast
 
 from metor.core import TorManager
 from metor.core.api import (
@@ -113,7 +113,9 @@ class InboundListener:
                 conn, _ = listener.accept()
 
                 # OPSEC: Guard against RAM/FD resource exhaustion attacks
-                max_conn: int = Settings.get(SettingKey.MAX_CONCURRENT_CONNECTIONS)
+                max_conn: int = cast(
+                    int, Settings.get(SettingKey.MAX_CONCURRENT_CONNECTIONS)
+                )
                 if len(self._state.get_active_onions()) >= max_conn:
                     self._hm.log_event(
                         HistoryEvent.LIVE_REJECTED_MAX_CONNECTIONS,

@@ -18,6 +18,9 @@ dependencies = [
     "sqlcipher3-binary",
 ]
 
+[project.optional-dependencies]
+dev = ["ruff>=0.3.0", "mypy>=1.9.0"]
+
 [project.scripts]
 metor = "metor.main:main"
 
@@ -27,5 +30,14 @@ include-package-data = true
 [tool.setuptools.dynamic]
 version = { attr = "metor.__version__" }
 
+[tool.ruff]
+line-length = 88
+
 [tool.ruff.format]
 quote-style = "single"
+
+[tool.mypy]
+strict = true
+disallow_untyped_defs = true
+disallow_any_generics = true
+warn_return_any = true

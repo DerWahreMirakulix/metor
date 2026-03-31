@@ -40,6 +40,7 @@ class HistoryEvent(str, Enum):
     LIVE_DISCONNECTED = 'live_disconnected'
     LIVE_DISCONNECTED_BY_REMOTE = 'live_disconnected_by_remote'
     LIVE_CONNECTION_LOST = 'live_connection_lost'
+    TIEBREAKER_REJECTED = 'tiebreaker_rejected'
 
     # Network Resilience
     LIVE_CONNECTION_TIMEOUT = 'live_connection_timeout'
@@ -132,8 +133,8 @@ class HistoryManager:
                 query, (filter_onion, actual_limit)
             )
         else:
-            query: str = 'SELECT timestamp, status, onion, reason FROM history ORDER BY timestamp DESC LIMIT ?'
-            rows = self._sql.fetchall(query, (actual_limit,))
+            global_query: str = 'SELECT timestamp, status, onion, reason FROM history ORDER BY timestamp DESC LIMIT ?'
+            rows = self._sql.fetchall(global_query, (actual_limit,))
 
         return [
             (

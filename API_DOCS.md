@@ -6,6 +6,7 @@ It details the strict Data Transfer Objects (DTOs) used over the local IPC socke
 ## Table of Contents
 
 **Commands (UI -> Daemon)**
+
 - [InitCommand](#initcommand)
 - [GetConnectionsCommand](#getconnectionscommand)
 - [GetContactsListCommand](#getcontactslistcommand)
@@ -36,6 +37,7 @@ It details the strict Data Transfer Objects (DTOs) used over the local IPC socke
 - [RetunnelCommand](#retunnelcommand)
 
 **Events (Daemon -> UI)**
+
 - [InitEvent](#initevent)
 - [RemoteMsgEvent](#remotemsgevent)
 - [AckEvent](#ackevent)
@@ -85,11 +87,12 @@ Data Transfer Object for initializing the daemon session.
     Attributes:
         action (Action): The strict IPC action code.
 
-*No additional payload parameters.*
+_No additional payload parameters._
 
 **Action Code:** `init`
 
 ---
+
 ### `GetConnectionsCommand`
 
 Data Transfer Object for requesting the current connection state.
@@ -98,13 +101,14 @@ Data Transfer Object for requesting the current connection state.
         is_header (bool): Flag indicating if the request is for the UI header.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field       | Type   | Default |
+| ----------- | ------ | ------- |
 | `is_header` | `bool` | `False` |
 
 **Action Code:** `get_connections`
 
 ---
+
 ### `GetContactsListCommand`
 
 Data Transfer Object for retrieving the address book.
@@ -113,13 +117,14 @@ Data Transfer Object for retrieving the address book.
         chat_mode (bool): Flag indicating if the data should be formatted for chat mode.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field       | Type   | Default |
+| ----------- | ------ | ------- |
 | `chat_mode` | `bool` | `False` |
 
 **Action Code:** `get_contacts_list`
 
 ---
+
 ### `ConnectCommand`
 
 Data Transfer Object for initiating a connection to a remote peer.
@@ -128,13 +133,14 @@ Data Transfer Object for initiating a connection to a remote peer.
         target (str): The target alias or onion address.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field    | Type  | Default  |
+| -------- | ----- | -------- |
 | `target` | `str` | Required |
 
 **Action Code:** `connect`
 
 ---
+
 ### `DisconnectCommand`
 
 Data Transfer Object for terminating an active connection.
@@ -143,13 +149,14 @@ Data Transfer Object for terminating an active connection.
         target (str): The target alias or onion address.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field    | Type  | Default  |
+| -------- | ----- | -------- |
 | `target` | `str` | Required |
 
 **Action Code:** `disconnect`
 
 ---
+
 ### `AcceptCommand`
 
 Data Transfer Object for accepting a pending connection request.
@@ -158,13 +165,14 @@ Data Transfer Object for accepting a pending connection request.
         target (str): The target alias or onion address.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field    | Type  | Default  |
+| -------- | ----- | -------- |
 | `target` | `str` | Required |
 
 **Action Code:** `accept`
 
 ---
+
 ### `RejectCommand`
 
 Data Transfer Object for rejecting a pending connection request.
@@ -173,13 +181,14 @@ Data Transfer Object for rejecting a pending connection request.
         target (str): The target alias or onion address.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field    | Type  | Default  |
+| -------- | ----- | -------- |
 | `target` | `str` | Required |
 
 **Action Code:** `reject`
 
 ---
+
 ### `MsgCommand`
 
 Data Transfer Object for sending a live chat message.
@@ -190,15 +199,16 @@ Data Transfer Object for sending a live chat message.
         msg_id (str): The unique message identifier (UUID).
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field    | Type  | Default  |
+| -------- | ----- | -------- |
 | `target` | `str` | Required |
-| `text` | `str` | Required |
+| `text`   | `str` | Required |
 | `msg_id` | `str` | Required |
 
 **Action Code:** `msg`
 
 ---
+
 ### `AddContactCommand`
 
 Data Transfer Object for adding a new contact or saving a RAM alias.
@@ -208,14 +218,15 @@ Data Transfer Object for adding a new contact or saving a RAM alias.
         onion (Optional[str]): The remote onion identity.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
-| `alias` | `str` | Required |
-| `onion` | `Optional[str]` | `None` |
+| Field   | Type            | Default  |
+| ------- | --------------- | -------- |
+| `alias` | `str`           | Required |
+| `onion` | `Optional[str]` | `None`   |
 
 **Action Code:** `add_contact`
 
 ---
+
 ### `RemoveContactCommand`
 
 Data Transfer Object for removing a saved contact.
@@ -224,13 +235,14 @@ Data Transfer Object for removing a saved contact.
         alias (str): The alias of the contact to remove.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field   | Type  | Default  |
+| ------- | ----- | -------- |
 | `alias` | `str` | Required |
 
 **Action Code:** `remove_contact`
 
 ---
+
 ### `RenameContactCommand`
 
 Data Transfer Object for renaming an existing contact.
@@ -240,14 +252,15 @@ Data Transfer Object for renaming an existing contact.
         new_alias (str): The desired new alias.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field       | Type  | Default  |
+| ----------- | ----- | -------- |
 | `old_alias` | `str` | Required |
 | `new_alias` | `str` | Required |
 
 **Action Code:** `rename_contact`
 
 ---
+
 ### `ClearContactsCommand`
 
 Data Transfer Object for wiping the entire address book.
@@ -255,11 +268,12 @@ Data Transfer Object for wiping the entire address book.
     Attributes:
         action (Action): The strict IPC action code.
 
-*No additional payload parameters.*
+_No additional payload parameters._
 
 **Action Code:** `clear_contacts`
 
 ---
+
 ### `SwitchCommand`
 
 Data Transfer Object for changing the active UI focus.
@@ -268,13 +282,14 @@ Data Transfer Object for changing the active UI focus.
         target (Optional[str]): The alias to focus on, or None to clear focus.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
-| `target` | `Optional[str]` | `None` |
+| Field    | Type            | Default |
+| -------- | --------------- | ------- |
+| `target` | `Optional[str]` | `None`  |
 
 **Action Code:** `switch`
 
 ---
+
 ### `SendDropCommand`
 
 Data Transfer Object for queuing an asynchronous offline message.
@@ -285,15 +300,16 @@ Data Transfer Object for queuing an asynchronous offline message.
         cli_mode (bool): Flag indicating if the request originated from the CLI.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
-| `target` | `str` | Required |
-| `text` | `str` | Required |
-| `cli_mode` | `bool` | `False` |
+| Field      | Type   | Default  |
+| ---------- | ------ | -------- |
+| `target`   | `str`  | Required |
+| `text`     | `str`  | Required |
+| `cli_mode` | `bool` | `False`  |
 
 **Action Code:** `send_drop`
 
 ---
+
 ### `GetInboxCommand`
 
 Data Transfer Object for requesting unread message counts.
@@ -302,13 +318,14 @@ Data Transfer Object for requesting unread message counts.
         cli_mode (bool): Flag indicating if the request originated from the CLI.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field      | Type   | Default |
+| ---------- | ------ | ------- |
 | `cli_mode` | `bool` | `False` |
 
 **Action Code:** `get_inbox`
 
 ---
+
 ### `MarkReadCommand`
 
 Data Transfer Object for reading and clearing messages from the inbox.
@@ -318,14 +335,15 @@ Data Transfer Object for reading and clearing messages from the inbox.
         cli_mode (bool): Flag indicating if the request originated from the CLI.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
-| `target` | `str` | Required |
-| `cli_mode` | `bool` | `False` |
+| Field      | Type   | Default  |
+| ---------- | ------ | -------- |
+| `target`   | `str`  | Required |
+| `cli_mode` | `bool` | `False`  |
 
 **Action Code:** `mark_read`
 
 ---
+
 ### `FallbackCommand`
 
 Data Transfer Object for forcing unacknowledged messages into the drop queue.
@@ -334,13 +352,14 @@ Data Transfer Object for forcing unacknowledged messages into the drop queue.
         target (str): The target alias or onion address.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field    | Type  | Default  |
+| -------- | ----- | -------- |
 | `target` | `str` | Required |
 
 **Action Code:** `fallback`
 
 ---
+
 ### `GetHistoryCommand`
 
 Data Transfer Object for retrieving connection event logs.
@@ -350,14 +369,15 @@ Data Transfer Object for retrieving connection event logs.
         limit (Optional[int]): The maximum number of events to retrieve.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
-| `target` | `Optional[str]` | `None` |
-| `limit` | `Optional[int]` | `None` |
+| Field    | Type            | Default |
+| -------- | --------------- | ------- |
+| `target` | `Optional[str]` | `None`  |
+| `limit`  | `Optional[int]` | `None`  |
 
 **Action Code:** `get_history`
 
 ---
+
 ### `ClearHistoryCommand`
 
 Data Transfer Object for deleting connection event logs.
@@ -366,13 +386,14 @@ Data Transfer Object for deleting connection event logs.
         target (Optional[str]): The specific alias or onion to clear.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
-| `target` | `Optional[str]` | `None` |
+| Field    | Type            | Default |
+| -------- | --------------- | ------- |
+| `target` | `Optional[str]` | `None`  |
 
 **Action Code:** `clear_history`
 
 ---
+
 ### `GetMessagesCommand`
 
 Data Transfer Object for retrieving past chat history.
@@ -382,14 +403,15 @@ Data Transfer Object for retrieving past chat history.
         limit (Optional[int]): The maximum number of messages to retrieve.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
-| `target` | `Optional[str]` | `None` |
-| `limit` | `Optional[int]` | `None` |
+| Field    | Type            | Default |
+| -------- | --------------- | ------- |
+| `target` | `Optional[str]` | `None`  |
+| `limit`  | `Optional[int]` | `None`  |
 
 **Action Code:** `get_messages`
 
 ---
+
 ### `ClearMessagesCommand`
 
 Data Transfer Object for deleting past chat history.
@@ -399,14 +421,15 @@ Data Transfer Object for deleting past chat history.
         non_contacts_only (bool): Restricts deletion to unsaved peers.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
-| `target` | `Optional[str]` | `None` |
-| `non_contacts_only` | `bool` | `False` |
+| Field               | Type            | Default |
+| ------------------- | --------------- | ------- |
+| `target`            | `Optional[str]` | `None`  |
+| `non_contacts_only` | `bool`          | `False` |
 
 **Action Code:** `clear_messages`
 
 ---
+
 ### `GetAddressCommand`
 
 Data Transfer Object for retrieving the current hidden service address.
@@ -414,11 +437,12 @@ Data Transfer Object for retrieving the current hidden service address.
     Attributes:
         action (Action): The strict IPC action code.
 
-*No additional payload parameters.*
+_No additional payload parameters._
 
 **Action Code:** `get_address`
 
 ---
+
 ### `GenerateAddressCommand`
 
 Data Transfer Object for generating a new hidden service address.
@@ -426,11 +450,12 @@ Data Transfer Object for generating a new hidden service address.
     Attributes:
         action (Action): The strict IPC action code.
 
-*No additional payload parameters.*
+_No additional payload parameters._
 
 **Action Code:** `generate_address`
 
 ---
+
 ### `ClearProfileDbCommand`
 
 Data Transfer Object for completely wiping a profile's SQLite database.
@@ -438,11 +463,12 @@ Data Transfer Object for completely wiping a profile's SQLite database.
     Attributes:
         action (Action): The strict IPC action code.
 
-*No additional payload parameters.*
+_No additional payload parameters._
 
 **Action Code:** `clear_profile_db`
 
 ---
+
 ### `SetSettingCommand`
 
 Data Transfer Object for updating a global or daemon setting.
@@ -452,14 +478,15 @@ Data Transfer Object for updating a global or daemon setting.
         setting_value (Union[str, int, float, bool]): The new strictly typed value.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
-| `setting_key` | `str` | Required |
+| Field           | Type                           | Default  |
+| --------------- | ------------------------------ | -------- |
+| `setting_key`   | `str`                          | Required |
 | `setting_value` | `Union[str, int, float, bool]` | Required |
 
 **Action Code:** `set_setting`
 
 ---
+
 ### `SelfDestructCommand`
 
 Data Transfer Object for initiating the daemon self-destruct and data purge protocol.
@@ -467,11 +494,12 @@ Data Transfer Object for initiating the daemon self-destruct and data purge prot
     Attributes:
         action (Action): The strict IPC action code.
 
-*No additional payload parameters.*
+_No additional payload parameters._
 
 **Action Code:** `self_destruct`
 
 ---
+
 ### `UnlockCommand`
 
 Data Transfer Object for authenticating and unlocking a remote daemon.
@@ -480,13 +508,14 @@ Data Transfer Object for authenticating and unlocking a remote daemon.
         password (str): The master password.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field      | Type  | Default  |
+| ---------- | ----- | -------- |
 | `password` | `str` | Required |
 
 **Action Code:** `unlock`
 
 ---
+
 ### `RetunnelCommand`
 
 Data Transfer Object for forcing a Tor circuit rotation and reconnecting.
@@ -495,8 +524,8 @@ Data Transfer Object for forcing a Tor circuit rotation and reconnecting.
         target (str): The alias or onion address to retunnel.
         action (Action): The strict IPC action code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field    | Type  | Default  |
+| -------- | ----- | -------- |
 | `target` | `str` | Required |
 
 **Action Code:** `retunnel`
@@ -511,13 +540,14 @@ Data Transfer Object for daemon initialization state.
         onion (Optional[str]): The local onion address.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `onion` | `Optional[str]` | `None` |
+| Field   | Type            | Default |
+| ------- | --------------- | ------- |
+| `onion` | `Optional[str]` | `None`  |
 
 **Event Type Code:** `init`
 
 ---
+
 ### `RemoteMsgEvent`
 
 Data Transfer Object for receiving a live chat message.
@@ -528,15 +558,16 @@ Data Transfer Object for receiving a live chat message.
         timestamp (Optional[str]): The message timestamp.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `alias` | `str` | Required |
-| `text` | `str` | Required |
-| `timestamp` | `Optional[str]` | `None` |
+| Field       | Type            | Default  |
+| ----------- | --------------- | -------- |
+| `alias`     | `str`           | Required |
+| `text`      | `str`           | Required |
+| `timestamp` | `Optional[str]` | `None`   |
 
 **Event Type Code:** `remote_msg`
 
 ---
+
 ### `AckEvent`
 
 Data Transfer Object confirming delivery of a sent message.
@@ -546,14 +577,15 @@ Data Transfer Object confirming delivery of a sent message.
         text (Optional[str]): The acknowledged payload.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `msg_id` | `str` | Required |
-| `text` | `Optional[str]` | `None` |
+| Field    | Type            | Default  |
+| -------- | --------------- | -------- |
+| `msg_id` | `str`           | Required |
+| `text`   | `Optional[str]` | `None`   |
 
 **Event Type Code:** `ack`
 
 ---
+
 ### `DropFailedEvent`
 
 Data Transfer Object indicating an asynchronous drop delivery failure.
@@ -562,13 +594,14 @@ Data Transfer Object indicating an asynchronous drop delivery failure.
         msg_id (str): The unique identifier of the failed message.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field    | Type  | Default  |
+| -------- | ----- | -------- |
 | `msg_id` | `str` | Required |
 
 **Event Type Code:** `drop_failed`
 
 ---
+
 ### `ConnectedEvent`
 
 Data Transfer Object indicating a successfully established Tor connection.
@@ -578,14 +611,15 @@ Data Transfer Object indicating a successfully established Tor connection.
         onion (Optional[str]): The peer's onion address.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `alias` | `str` | Required |
-| `onion` | `Optional[str]` | `None` |
+| Field   | Type            | Default  |
+| ------- | --------------- | -------- |
+| `alias` | `str`           | Required |
+| `onion` | `Optional[str]` | `None`   |
 
 **Event Type Code:** `connected`
 
 ---
+
 ### `DisconnectedEvent`
 
 Data Transfer Object indicating a severed Tor connection.
@@ -594,13 +628,14 @@ Data Transfer Object indicating a severed Tor connection.
         alias (str): The disconnected peer's alias.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field   | Type  | Default  |
+| ------- | ----- | -------- |
 | `alias` | `str` | Required |
 
 **Event Type Code:** `disconnected`
 
 ---
+
 ### `RenameSuccessEvent`
 
 Data Transfer Object indicating a successful local alias rename.
@@ -612,16 +647,17 @@ Data Transfer Object indicating a successful local alias rename.
         was_saved (bool): True if the contact was previously saved.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `old_alias` | `str` | Required |
-| `new_alias` | `str` | Required |
-| `is_demotion` | `bool` | `False` |
-| `was_saved` | `bool` | `True` |
+| Field         | Type   | Default  |
+| ------------- | ------ | -------- |
+| `old_alias`   | `str`  | Required |
+| `new_alias`   | `str`  | Required |
+| `is_demotion` | `bool` | `False`  |
+| `was_saved`   | `bool` | `True`   |
 
 **Event Type Code:** `rename_success`
 
 ---
+
 ### `ContactRemovedEvent`
 
 Data Transfer Object indicating the deletion of a contact.
@@ -630,13 +666,14 @@ Data Transfer Object indicating the deletion of a contact.
         alias (str): The alias of the removed contact.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field   | Type  | Default  |
+| ------- | ----- | -------- |
 | `alias` | `str` | Required |
 
 **Event Type Code:** `contact_removed`
 
 ---
+
 ### `ConnectionsStateEvent`
 
 Data Transfer Object broadcasting the current network connection states.
@@ -648,16 +685,17 @@ Data Transfer Object broadcasting the current network connection states.
         is_header (bool): Flag indicating if this is a header-state broadcast.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `active` | `List[str]` | Required |
-| `pending` | `List[str]` | Required |
-| `contacts` | `List[str]` | Required |
-| `is_header` | `bool` | `False` |
+| Field       | Type        | Default  |
+| ----------- | ----------- | -------- |
+| `active`    | `List[str]` | Required |
+| `pending`   | `List[str]` | Required |
+| `contacts`  | `List[str]` | Required |
+| `is_header` | `bool`      | `False`  |
 
 **Event Type Code:** `connections_state`
 
 ---
+
 ### `SwitchSuccessEvent`
 
 Data Transfer Object confirming a successful UI focus switch.
@@ -666,13 +704,14 @@ Data Transfer Object confirming a successful UI focus switch.
         alias (Optional[str]): The newly focused alias.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `alias` | `Optional[str]` | `None` |
+| Field   | Type            | Default |
+| ------- | --------------- | ------- |
+| `alias` | `Optional[str]` | `None`  |
 
 **Event Type Code:** `switch_success`
 
 ---
+
 ### `ConnectionPendingEvent`
 
 Data Transfer Object indicating an outbound connection is awaiting remote acceptance.
@@ -681,13 +720,14 @@ Data Transfer Object indicating an outbound connection is awaiting remote accept
         alias (Optional[str]): The target peer alias.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `alias` | `Optional[str]` | `None` |
+| Field   | Type            | Default |
+| ------- | --------------- | ------- |
+| `alias` | `Optional[str]` | `None`  |
 
 **Event Type Code:** `connection_pending`
 
 ---
+
 ### `ConnectionAutoAcceptedEvent`
 
 Data Transfer Object indicating a mutual connection was automatically accepted.
@@ -696,13 +736,14 @@ Data Transfer Object indicating a mutual connection was automatically accepted.
         alias (Optional[str]): The target peer alias.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `alias` | `Optional[str]` | `None` |
+| Field   | Type            | Default |
+| ------- | --------------- | ------- |
+| `alias` | `Optional[str]` | `None`  |
 
 **Event Type Code:** `connection_auto_accepted`
 
 ---
+
 ### `ConnectionRetryEvent`
 
 Data Transfer Object indicating a failed connection attempt will be retried.
@@ -713,15 +754,16 @@ Data Transfer Object indicating a failed connection attempt will be retried.
         max_retries (int): The maximum allowed retries.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `alias` | `Optional[str]` | `None` |
-| `attempt` | `int` | `1` |
-| `max_retries` | `int` | `3` |
+| Field         | Type            | Default |
+| ------------- | --------------- | ------- |
+| `alias`       | `Optional[str]` | `None`  |
+| `attempt`     | `int`           | `1`     |
+| `max_retries` | `int`           | `3`     |
 
 **Event Type Code:** `connection_retry`
 
 ---
+
 ### `ConnectionFailedEvent`
 
 Data Transfer Object indicating a final connection failure.
@@ -731,14 +773,15 @@ Data Transfer Object indicating a final connection failure.
         reason (str): The specific failure reason.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `alias` | `Optional[str]` | `None` |
-| `reason` | `str` | `` |
+| Field    | Type            | Default |
+| -------- | --------------- | ------- |
+| `alias`  | `Optional[str]` | `None`  |
+| `reason` | `str`           | ``      |
 
 **Event Type Code:** `connection_failed`
 
 ---
+
 ### `IncomingConnectionEvent`
 
 Data Transfer Object alerting the UI of an inbound connection request.
@@ -747,13 +790,14 @@ Data Transfer Object alerting the UI of an inbound connection request.
         alias (Optional[str]): The requesting peer alias.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `alias` | `Optional[str]` | `None` |
+| Field   | Type            | Default |
+| ------- | --------------- | ------- |
+| `alias` | `Optional[str]` | `None`  |
 
 **Event Type Code:** `incoming_connection`
 
 ---
+
 ### `ConnectionRejectedEvent`
 
 Data Transfer Object indicating a connection was rejected.
@@ -763,14 +807,15 @@ Data Transfer Object indicating a connection was rejected.
         by_remote (bool): True if the remote peer rejected the request.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `alias` | `Optional[str]` | `None` |
-| `by_remote` | `bool` | `False` |
+| Field       | Type            | Default |
+| ----------- | --------------- | ------- |
+| `alias`     | `Optional[str]` | `None`  |
+| `by_remote` | `bool`          | `False` |
 
 **Event Type Code:** `connection_rejected`
 
 ---
+
 ### `TiebreakerRejectedEvent`
 
 Data Transfer Object indicating a mutual connection tie-breaker resulted in a local reject.
@@ -779,13 +824,14 @@ Data Transfer Object indicating a mutual connection tie-breaker resulted in a lo
         alias (Optional[str]): The target peer alias.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `alias` | `Optional[str]` | `None` |
+| Field   | Type            | Default |
+| ------- | --------------- | ------- |
+| `alias` | `Optional[str]` | `None`  |
 
 **Event Type Code:** `tiebreaker_rejected`
 
 ---
+
 ### `AutoReconnectAttemptEvent`
 
 Data Transfer Object indicating an automated background reconnect attempt.
@@ -795,14 +841,15 @@ Data Transfer Object indicating an automated background reconnect attempt.
         code (DomainCode): The translation code.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `alias` | `Optional[str]` | `None` |
-| `code` | `DomainCode` | `NetworkCode.AUTO_RECONNECT_ATTEMPT` |
+| Field   | Type            | Default                              |
+| ------- | --------------- | ------------------------------------ |
+| `alias` | `Optional[str]` | `None`                               |
+| `code`  | `DomainCode`    | `NetworkCode.AUTO_RECONNECT_ATTEMPT` |
 
 **Event Type Code:** `auto_reconnect_attempt`
 
 ---
+
 ### `InboxNotificationEvent`
 
 Data Transfer Object alerting the UI to newly arrived offline messages.
@@ -812,14 +859,15 @@ Data Transfer Object alerting the UI to newly arrived offline messages.
         count (int): Number of new messages received.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `alias` | `Optional[str]` | `None` |
-| `count` | `int` | `1` |
+| Field   | Type            | Default |
+| ------- | --------------- | ------- |
+| `alias` | `Optional[str]` | `None`  |
+| `count` | `int`           | `1`     |
 
 **Event Type Code:** `inbox_notification`
 
 ---
+
 ### `InboxDataEvent`
 
 Data Transfer Object carrying buffered or inbox message payloads.
@@ -831,16 +879,17 @@ Data Transfer Object carrying buffered or inbox message payloads.
         is_live_flush (bool): True if flushing a headless live RAM buffer.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `messages` | `List[UnreadMessageEntry]` | `Factory()` |
-| `inbox_counts` | `Dict[str, int]` | `Factory()` |
-| `alias` | `Optional[str]` | `None` |
-| `is_live_flush` | `bool` | `False` |
+| Field           | Type                       | Default     |
+| --------------- | -------------------------- | ----------- |
+| `messages`      | `List[UnreadMessageEntry]` | `Factory()` |
+| `inbox_counts`  | `Dict[str, int]`           | `Factory()` |
+| `alias`         | `Optional[str]`            | `None`      |
+| `is_live_flush` | `bool`                     | `False`     |
 
 **Event Type Code:** `inbox_data`
 
 ---
+
 ### `ContactsDataEvent`
 
 Data Transfer Object returning the structured address book.
@@ -851,15 +900,16 @@ Data Transfer Object returning the structured address book.
         profile (str): The active profile name.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `saved` | `List[ContactEntry]` | Required |
+| Field        | Type                 | Default  |
+| ------------ | -------------------- | -------- |
+| `saved`      | `List[ContactEntry]` | Required |
 | `discovered` | `List[ContactEntry]` | Required |
-| `profile` | `str` | Required |
+| `profile`    | `str`                | Required |
 
 **Event Type Code:** `contacts_data`
 
 ---
+
 ### `HistoryDataEvent`
 
 Data Transfer Object returning connection event history.
@@ -870,15 +920,16 @@ Data Transfer Object returning connection event history.
         target (Optional[str]): The filtered peer alias, if queried.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field     | Type                 | Default  |
+| --------- | -------------------- | -------- |
 | `history` | `List[HistoryEntry]` | Required |
-| `profile` | `str` | Required |
-| `target` | `Optional[str]` | `None` |
+| `profile` | `str`                | Required |
+| `target`  | `Optional[str]`      | `None`   |
 
 **Event Type Code:** `history_data`
 
 ---
+
 ### `MessagesDataEvent`
 
 Data Transfer Object returning past chat payloads.
@@ -888,14 +939,15 @@ Data Transfer Object returning past chat payloads.
         target (str): The specific peer alias queried.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field      | Type                 | Default  |
+| ---------- | -------------------- | -------- |
 | `messages` | `List[MessageEntry]` | Required |
-| `target` | `str` | Required |
+| `target`   | `str`                | Required |
 
 **Event Type Code:** `messages_data`
 
 ---
+
 ### `InboxCountsEvent`
 
 Data Transfer Object returning unread message metrics.
@@ -904,13 +956,14 @@ Data Transfer Object returning unread message metrics.
         inbox (Dict[str, int]): Dictionary mapping aliases to unread message counts.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field   | Type             | Default  |
+| ------- | ---------------- | -------- |
 | `inbox` | `Dict[str, int]` | Required |
 
 **Event Type Code:** `inbox_counts`
 
 ---
+
 ### `UnreadMessagesEvent`
 
 Data Transfer Object returning all unread messages for a specific peer.
@@ -920,14 +973,15 @@ Data Transfer Object returning all unread messages for a specific peer.
         target (str): The sender's alias.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field      | Type                       | Default  |
+| ---------- | -------------------------- | -------- |
 | `messages` | `List[UnreadMessageEntry]` | Required |
-| `target` | `str` | Required |
+| `target`   | `str`                      | Required |
 
 **Event Type Code:** `unread_messages`
 
 ---
+
 ### `AddressDataEvent`
 
 Data Transfer Object returning hidden service identity data.
@@ -939,15 +993,16 @@ Data Transfer Object returning hidden service identity data.
         onion (str): The local Tor onion address.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `code` | `DomainCode` | Required |
-| `profile` | `str` | Required |
-| `onion` | `str` | Required |
+| Field     | Type         | Default  |
+| --------- | ------------ | -------- |
+| `code`    | `DomainCode` | Required |
+| `profile` | `str`        | Required |
+| `onion`   | `str`        | Required |
 
 **Event Type Code:** `address_data`
 
 ---
+
 ### `ProfilesDataEvent`
 
 Data Transfer Object returning the available isolated profiles.
@@ -956,13 +1011,14 @@ Data Transfer Object returning the available isolated profiles.
         profiles (List[ProfileEntry]): List of profile DTOs.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field      | Type                 | Default  |
+| ---------- | -------------------- | -------- |
 | `profiles` | `List[ProfileEntry]` | Required |
 
 **Event Type Code:** `profiles_data`
 
 ---
+
 ### `ActionSuccessEvent`
 
 Data Transfer Object indicating a generic action completed successfully.
@@ -972,13 +1028,14 @@ Data Transfer Object indicating a generic action completed successfully.
         action (Optional[Action]): The triggering action.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field  | Type         | Default  |
+| ------ | ------------ | -------- |
 | `code` | `DomainCode` | Required |
 
 **Event Type Code:** `action_success`
 
 ---
+
 ### `ActionErrorEvent`
 
 Data Transfer Object indicating a generic action failed.
@@ -991,16 +1048,17 @@ Data Transfer Object indicating a generic action failed.
         alias (Optional[str]): The resolved alias, if any.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `code` | `DomainCode` | Required |
-| `reason` | `Optional[str]` | `None` |
-| `target` | `Optional[str]` | `None` |
-| `alias` | `Optional[str]` | `None` |
+| Field    | Type            | Default  |
+| -------- | --------------- | -------- |
+| `code`   | `DomainCode`    | Required |
+| `reason` | `Optional[str]` | `None`   |
+| `target` | `Optional[str]` | `None`   |
+| `alias`  | `Optional[str]` | `None`   |
 
 **Event Type Code:** `action_error`
 
 ---
+
 ### `ContactActionSuccessEvent`
 
 Data Transfer Object indicating a contact mutation completed successfully.
@@ -1012,15 +1070,16 @@ Data Transfer Object indicating a contact mutation completed successfully.
         profile (Optional[str]): The active profile.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `code` | `DomainCode` | Required |
-| `alias` | `str` | Required |
-| `profile` | `Optional[str]` | `None` |
+| Field     | Type            | Default  |
+| --------- | --------------- | -------- |
+| `code`    | `DomainCode`    | Required |
+| `alias`   | `str`           | Required |
+| `profile` | `Optional[str]` | `None`   |
 
 **Event Type Code:** `contact_action_success`
 
 ---
+
 ### `ContactRenamedEvent`
 
 Data Transfer Object indicating a contact was renamed.
@@ -1032,15 +1091,16 @@ Data Transfer Object indicating a contact was renamed.
         new_alias (str): The new alias.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `code` | `DomainCode` | Required |
-| `old_alias` | `str` | Required |
-| `new_alias` | `str` | Required |
+| Field       | Type         | Default  |
+| ----------- | ------------ | -------- |
+| `code`      | `DomainCode` | Required |
+| `old_alias` | `str`        | Required |
+| `new_alias` | `str`        | Required |
 
 **Event Type Code:** `contact_renamed`
 
 ---
+
 ### `ProfileActionSuccessEvent`
 
 Data Transfer Object indicating a profile mutation completed successfully.
@@ -1053,16 +1113,17 @@ Data Transfer Object indicating a profile mutation completed successfully.
         port (Optional[int]): Target port if remote.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `code` | `DomainCode` | Required |
-| `profile` | `str` | Required |
-| `remote_tag` | `Optional[str]` | `None` |
-| `port` | `Optional[int]` | `None` |
+| Field        | Type            | Default  |
+| ------------ | --------------- | -------- |
+| `code`       | `DomainCode`    | Required |
+| `profile`    | `str`           | Required |
+| `remote_tag` | `Optional[str]` | `None`   |
+| `port`       | `Optional[int]` | `None`   |
 
 **Event Type Code:** `profile_action_success`
 
 ---
+
 ### `TargetActionSuccessEvent`
 
 Data Transfer Object indicating an action targeting a specific peer succeeded.
@@ -1074,15 +1135,16 @@ Data Transfer Object indicating an action targeting a specific peer succeeded.
         profile (Optional[str]): The active profile context.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `code` | `DomainCode` | Required |
-| `target` | `Optional[str]` | `None` |
-| `profile` | `Optional[str]` | `None` |
+| Field     | Type            | Default  |
+| --------- | --------------- | -------- |
+| `code`    | `DomainCode`    | Required |
+| `target`  | `Optional[str]` | `None`   |
+| `profile` | `Optional[str]` | `None`   |
 
 **Event Type Code:** `target_action_success`
 
 ---
+
 ### `SettingUpdatedEvent`
 
 Data Transfer Object indicating an application setting was mutated.
@@ -1093,14 +1155,15 @@ Data Transfer Object indicating an application setting was mutated.
         key (str): The specific setting key modified.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
+| Field  | Type         | Default  |
+| ------ | ------------ | -------- |
 | `code` | `DomainCode` | Required |
-| `key` | `str` | Required |
+| `key`  | `str`        | Required |
 
 **Event Type Code:** `setting_updated`
 
 ---
+
 ### `FallbackSuccessEvent`
 
 Data Transfer Object indicating live messages were successfully converted to drops.
@@ -1113,16 +1176,17 @@ Data Transfer Object indicating live messages were successfully converted to dro
         action (Optional[Action]): The triggering action.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `code` | `DomainCode` | Required |
-| `alias` | `str` | Required |
-| `count` | `int` | Required |
-| `msg_ids` | `List[str]` | Required |
+| Field     | Type         | Default  |
+| --------- | ------------ | -------- |
+| `code`    | `DomainCode` | Required |
+| `alias`   | `str`        | Required |
+| `count`   | `int`        | Required |
+| `msg_ids` | `List[str]`  | Required |
 
 **Event Type Code:** `fallback_success`
 
 ---
+
 ### `MaxConnectionsReachedEvent`
 
 Data Transfer Object indicating the connection limit has been exhausted.
@@ -1133,15 +1197,16 @@ Data Transfer Object indicating the connection limit has been exhausted.
         code (DomainCode): The translation code.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `target` | `str` | Required |
-| `max_conn` | `int` | Required |
-| `code` | `DomainCode` | `NetworkCode.MAX_CONNECTIONS_REACHED` |
+| Field      | Type         | Default                               |
+| ---------- | ------------ | ------------------------------------- |
+| `target`   | `str`        | Required                              |
+| `max_conn` | `int`        | Required                              |
+| `code`     | `DomainCode` | `NetworkCode.MAX_CONNECTIONS_REACHED` |
 
 **Event Type Code:** `max_connections_reached`
 
 ---
+
 ### `PeerNotFoundEvent`
 
 Data Transfer Object indicating the specified peer could not be resolved.
@@ -1151,14 +1216,15 @@ Data Transfer Object indicating the specified peer could not be resolved.
         code (DomainCode): The translation code.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `target` | `str` | Required |
-| `code` | `DomainCode` | `ContactCode.PEER_NOT_FOUND` |
+| Field    | Type         | Default                      |
+| -------- | ------------ | ---------------------------- |
+| `target` | `str`        | Required                     |
+| `code`   | `DomainCode` | `ContactCode.PEER_NOT_FOUND` |
 
 **Event Type Code:** `peer_not_found`
 
 ---
+
 ### `RetunnelInitiatedEvent`
 
 Data Transfer Object indicating circuit rotation has started for a peer.
@@ -1168,14 +1234,15 @@ Data Transfer Object indicating circuit rotation has started for a peer.
         code (DomainCode): The translation code.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `alias` | `str` | Required |
-| `code` | `DomainCode` | `NetworkCode.RETUNNEL_INITIATED` |
+| Field   | Type         | Default                          |
+| ------- | ------------ | -------------------------------- |
+| `alias` | `str`        | Required                         |
+| `code`  | `DomainCode` | `NetworkCode.RETUNNEL_INITIATED` |
 
 **Event Type Code:** `retunnel_initiated`
 
 ---
+
 ### `RetunnelSuccessEvent`
 
 Data Transfer Object indicating circuit rotation completed successfully.
@@ -1185,9 +1252,9 @@ Data Transfer Object indicating circuit rotation completed successfully.
         code (DomainCode): The translation code.
         type (EventType): The strict IPC event type code.
 
-| Field | Type | Default |
-|---|---|---|
-| `alias` | `str` | Required |
-| `code` | `DomainCode` | `NetworkCode.RETUNNEL_SUCCESS` |
+| Field   | Type         | Default                        |
+| ------- | ------------ | ------------------------------ |
+| `alias` | `str`        | Required                       |
+| `code`  | `DomainCode` | `NetworkCode.RETUNNEL_SUCCESS` |
 
 **Event Type Code:** `retunnel_success`
