@@ -89,6 +89,7 @@ class OutboxWorker:
     def _loop(self) -> None:
         """
         Target execution loop checking the database for pending drops and managing tunnel TTLs.
+        Enforces Thread-Safety by catching any unexpected errors to prevent silent worker crashes.
 
         Args:
             None
@@ -99,22 +100,25 @@ class OutboxWorker:
         while not self._stop_flag.is_set():
             time.sleep(Constants.WORKER_SLEEP_SLOW_SEC)
 
-            pending_rows: List[Tuple[int, str, str, str, str, str]] = (
-                self._mm.get_pending_outbox()
-            )
+            try:
+                pending_rows: List[Tuple[int, str, str, str, str, str]] = (
+                    self._mm.get_pending_outbox()
+                )
 
-            # 1. Group messages by target onion (Batching)
-            batches: Dict[str, List[Tuple[int, str, str, str, str, str]]] = {}
-            for row in pending_rows:
-                target_onion = row[1]
-                batches.setdefault(target_onion, []).append(row)
+                # 1. Group messages by target onion (Batching)
+                batches: Dict[str, List[Tuple[int, str, str, str, str, str]]] = {}
+                for row in pending_rows:
+                    target_onion = row[1]
+                    batches.setdefault(target_onion, []).append(row)
 
-            # 2. Process each batch through persistent tunnels
-            for onion, messages in batches.items():
-                self._process_batch(onion, messages)
+                # 2. Process each batch through persistent tunnels
+                for onion, messages in batches.items():
+                    self._process_batch(onion, messages)
 
-            # 3. Clean up stale or unfocused tunnels
-            self._cleanup_tunnels()
+                # 3. Clean up stale or unfocused tunnels
+                self._cleanup_tunnels()
+            except Exception:
+                pass
 
         # Teardown all tunnels on shutdown
         for onion, (conn, _, _) in self._tunnels.items():

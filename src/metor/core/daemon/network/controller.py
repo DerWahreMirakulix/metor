@@ -452,6 +452,7 @@ class ConnectionController:
     def _reconnect_worker(self) -> None:
         """
         Background thread handling failure-only reconnect attempts with randomized backoff.
+        Enforces Thread-Safety by catching unexpected states to prevent silent worker crashes.
 
         Args:
             None
@@ -461,28 +462,33 @@ class ConnectionController:
         """
         while not self._stop_flag.is_set():
             time.sleep(Constants.WORKER_SLEEP_SLOW_SEC)
-            onion: Optional[str] = None
+            try:
+                onion: Optional[str] = None
 
-            with self._reconnect_lock:
-                if self._reconnect_queue:
-                    onion = self._reconnect_queue.pop(0)
+                with self._reconnect_lock:
+                    if self._reconnect_queue:
+                        onion = self._reconnect_queue.pop(0)
 
-            if onion:
-                backoff: float = Constants.RECONNECT_BACKOFF_BASE_SEC + (
-                    secrets.randbelow(Constants.RECONNECT_BACKOFF_JITTER_MAX_MS)
-                    / Constants.RECONNECT_BACKOFF_JITTER_DIVISOR
-                )
-                alias: Optional[str] = self._cm.get_alias_by_onion(onion)
+                if onion:
+                    backoff: float = Constants.RECONNECT_BACKOFF_BASE_SEC + (
+                        secrets.randbelow(Constants.RECONNECT_BACKOFF_JITTER_MAX_MS)
+                        / Constants.RECONNECT_BACKOFF_JITTER_DIVISOR
+                    )
+                    alias: Optional[str] = self._cm.get_alias_by_onion(onion)
 
-                self._hm.log_event(HistoryEvent.LIVE_AUTO_RECONNECT_ATTEMPT, onion)
-                self._broadcast(AutoReconnectAttemptEvent(alias=str(alias or onion)))
+                    self._hm.log_event(HistoryEvent.LIVE_AUTO_RECONNECT_ATTEMPT, onion)
+                    self._broadcast(
+                        AutoReconnectAttemptEvent(alias=str(alias or onion))
+                    )
 
-                time.sleep(backoff)
-                if (
-                    not self._state.is_connected_or_pending(onion)
-                    and not self._stop_flag.is_set()
-                ):
-                    self.connect_to(onion)
+                    time.sleep(backoff)
+                    if (
+                        not self._state.is_connected_or_pending(onion)
+                        and not self._stop_flag.is_set()
+                    ):
+                        self.connect_to(onion)
+            except Exception:
+                pass
 
     def disconnect_all(self) -> None:
         """
