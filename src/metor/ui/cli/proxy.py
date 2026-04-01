@@ -3,6 +3,7 @@ Module providing a transparent proxy for all CLI commands.
 Routes requests to the Daemon via IPC automatically, launching a HeadlessDaemon if offline.
 Formats responses securely via the centralized Translator and Presenter using strict DTOs.
 Enforces Domain-Driven Design by routing UI settings locally and Daemon settings via IPC.
+Prevents structural ProfileConfigKey mutability vulnerabilities via strict property validations.
 """
 
 import socket
@@ -51,7 +52,7 @@ from metor.core.api import (
 )
 from metor.core.daemon import HeadlessDaemon
 from metor.data import Settings, SettingKey
-from metor.data.profile import ProfileManager
+from metor.data.profile import ProfileManager, ProfileConfigKey
 from metor.ui import Theme, UIPresenter, Translator
 from metor.utils import Constants, TypeCaster
 
@@ -172,6 +173,7 @@ class CliProxy:
     def _send_to_port(self, port: int, cmd: IpcCommand, wait_for_response: bool) -> str:
         """
         Executes the TCP socket transmission and cleanly parses the strictly-typed JSON response.
+        Enforces buffer limits to avoid memory faults.
 
         Args:
             port (int): The target IPC socket port.
@@ -194,7 +196,7 @@ class CliProxy:
 
                 buffer: str = ''
                 while True:
-                    chunk: bytes = s.recv(4096)
+                    chunk: bytes = s.recv(Constants.TCP_BUFFER_SIZE)
                     if not chunk:
                         break
                     buffer += chunk.decode('utf-8')
@@ -281,9 +283,7 @@ class CliProxy:
         try:
             key_enum: SettingKey = SettingKey(key)
         except ValueError:
-            return self._translate_local(
-                SystemCode.SETTING_TYPE_ERROR, {'error': 'Invalid setting key.'}
-            )
+            return self._translate_local(SystemCode.INVALID_SETTING_KEY)
 
         parsed_value: Union[str, int, float, bool] = TypeCaster.infer_from_string(value)
 
@@ -293,7 +293,7 @@ class CliProxy:
                 return self._translate_local(SystemCode.SETTING_UPDATED, {'key': key})
             except TypeError as e:
                 return self._translate_local(
-                    SystemCode.SETTING_TYPE_ERROR, {'error': str(e)}
+                    SystemCode.SETTING_TYPE_ERROR, {'reason': str(e)}
                 )
 
         return self._request_ipc(
@@ -313,9 +313,7 @@ class CliProxy:
         try:
             key_enum: SettingKey = SettingKey(key)
         except ValueError:
-            return self._translate_local(
-                SystemCode.SETTING_TYPE_ERROR, {'error': 'Invalid setting key.'}
-            )
+            return self._translate_local(SystemCode.INVALID_SETTING_KEY)
 
         if key_enum.is_ui:
             val: str = Settings.get_str(key_enum)
@@ -328,6 +326,7 @@ class CliProxy:
     def handle_config_set(self, key: str, value: str) -> str:
         """
         Sets a profile-specific override configuration.
+        Prevents modification of structural properties like 'is_remote'.
 
         Args:
             key (str): The config key.
@@ -336,24 +335,30 @@ class CliProxy:
         Returns:
             str: Status message.
         """
+        if key == ProfileConfigKey.IS_REMOTE.value:
+            return self._translate_local(SystemCode.IMMUTABLE_CONFIG_KEY)
+
         try:
-            key_enum: SettingKey = SettingKey(key)
+            key_enum: Union[SettingKey, ProfileConfigKey] = SettingKey(key)
         except ValueError:
-            return self._translate_local(
-                SystemCode.SETTING_TYPE_ERROR, {'error': 'Invalid config key.'}
-            )
+            try:
+                key_enum = ProfileConfigKey(key)
+            except ValueError:
+                return self._translate_local(SystemCode.INVALID_CONFIG_KEY)
 
         parsed_value: Union[str, int, float, bool] = TypeCaster.infer_from_string(value)
 
-        if key_enum.is_ui:
+        # Allow local routing for pure UI settings AND ProfileConfigKey (like daemon_port)
+        if isinstance(key_enum, ProfileConfigKey) or key_enum.is_ui:
             try:
                 self._pm.config.set(key_enum, parsed_value)
                 return self._translate_local(SystemCode.CONFIG_UPDATED, {'key': key})
             except TypeError as e:
                 return self._translate_local(
-                    SystemCode.SETTING_TYPE_ERROR, {'error': str(e)}
+                    SystemCode.SETTING_TYPE_ERROR, {'reason': str(e)}
                 )
 
+        # Daemon-level settings go through IPC
         return self._request_ipc(
             SetConfigCommand(setting_key=key, setting_value=parsed_value)
         )
@@ -369,13 +374,14 @@ class CliProxy:
             str: The formatted response containing the config value.
         """
         try:
-            key_enum: SettingKey = SettingKey(key)
+            key_enum: Union[SettingKey, ProfileConfigKey] = SettingKey(key)
         except ValueError:
-            return self._translate_local(
-                SystemCode.SETTING_TYPE_ERROR, {'error': 'Invalid config key.'}
-            )
+            try:
+                key_enum = ProfileConfigKey(key)
+            except ValueError:
+                return self._translate_local(SystemCode.INVALID_CONFIG_KEY)
 
-        if key_enum.is_ui:
+        if isinstance(key_enum, ProfileConfigKey) or key_enum.is_ui:
             val: str = self._pm.config.get_str(key_enum)
             return self._translate_local(
                 SystemCode.CONFIG_DATA, {'key': key, 'value': val}
@@ -399,7 +405,7 @@ class CliProxy:
             local_msg: str = self._translate_local(SystemCode.CONFIG_SYNCED)
         except Exception as e:
             return self._translate_local(
-                SystemCode.CONFIG_UPDATE_FAILED, {'error': str(e)}
+                SystemCode.CONFIG_UPDATE_FAILED, {'reason': str(e)}
             )
 
         if self.is_remote or self._pm.is_daemon_running():

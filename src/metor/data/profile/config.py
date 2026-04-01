@@ -1,7 +1,9 @@
 """
 Module managing the profile-specific JSON configuration file.
 Provides thread-safe read/write operations and cascading lookups
-falling back to global application settings. Enforces strict typing.
+falling back to global application settings. Enforces strict typing
+and automatically handles nested dictionary conversions for dot-notation keys.
+Prevents silent overwrites of corrupted JSON configurations.
 """
 
 import json
@@ -10,11 +12,15 @@ from typing import Dict, Union, cast, List
 from pathlib import Path
 
 from metor.data import SettingKey, Settings, SettingValue
-from metor.utils import FileLock, TypeCaster
+from metor.utils import FileLock, TypeCaster, validate_json_file
 
 # Local Package Imports
 from metor.data.profile.paths import Paths
-from metor.data.profile.models import ProfileConfigKey, ProfileConfigValue
+from metor.data.profile.models import (
+    ProfileConfigKey,
+    ProfileConfigValue,
+    NestedConfigDict,
+)
 
 
 class Config:
@@ -32,21 +38,77 @@ class Config:
         """
         self._paths: Paths = paths
 
+    def validate_integrity(self) -> None:
+        """
+        Validates the JSON syntax of the profile configuration file
+        using the generic parser utility.
+
+        Args:
+            None
+
+        Raises:
+            ValueError: If the file exists but contains a syntax error.
+
+        Returns:
+            None
+        """
+        config_file: Path = self._paths.get_config_file()
+        validate_json_file(config_file)
+
+    def _write_nested(self, data: Dict[str, ProfileConfigValue]) -> None:
+        """
+        Internal helper to convert flat dot-notation dictionaries into nested
+        structures and write them to disk. Assumes the caller has acquired a lock.
+
+        Args:
+            data (Dict[str, ProfileConfigValue]): The flat dictionary.
+
+        Returns:
+            None
+        """
+        nested_data: NestedConfigDict = {}
+        for k, v in data.items():
+            if '.' in k:
+                domain, subkey = k.split('.', 1)
+                if domain not in nested_data:
+                    nested_data[domain] = {}
+
+                domain_dict = nested_data[domain]
+                if isinstance(domain_dict, dict):
+                    domain_dict[subkey] = v
+            else:
+                nested_data[k] = v
+
+        config_file: Path = self._paths.get_config_file()
+        with config_file.open('w', encoding='utf-8') as f:
+            json.dump(nested_data, f, indent=4)
+
     def _load(self) -> Dict[str, ProfileConfigValue]:
         """
         Loads the JSON configuration from disk safely. Generates default config if missing.
+        Flattens nested dictionary structures into dot-notation keys.
+        Prevents overwriting the file if a JSONDecodeError occurs on an existing file.
 
         Args:
             None
 
         Returns:
-            Dict[str, ProfileConfigValue]: The loaded configuration data.
+            Dict[str, ProfileConfigValue]: The loaded configuration data as a flat dictionary.
         """
         config_file: Path = self._paths.get_config_file()
         if config_file.exists():
             try:
                 with config_file.open('r', encoding='utf-8') as f:
-                    return cast(Dict[str, ProfileConfigValue], json.load(f))
+                    raw_data: NestedConfigDict = cast(NestedConfigDict, json.load(f))
+
+                flat_data: Dict[str, ProfileConfigValue] = {}
+                for k, v in raw_data.items():
+                    if isinstance(v, dict):
+                        for sub_k, sub_v in v.items():
+                            flat_data[f'{k}.{sub_k}'] = cast(ProfileConfigValue, sub_v)
+                    else:
+                        flat_data[k] = cast(ProfileConfigValue, v)
+                return flat_data
             except (json.JSONDecodeError, IOError):
                 pass
 
@@ -55,11 +117,10 @@ class Config:
             ProfileConfigKey.DAEMON_PORT.value: None,
         }
 
-        if self._paths.exists():
+        if self._paths.exists() and not config_file.exists():
             try:
                 with FileLock(config_file):
-                    with config_file.open('w', encoding='utf-8') as f:
-                        json.dump(default_data, f, indent=4)
+                    self._write_nested(default_data)
             except IOError:
                 pass
 
@@ -214,7 +275,7 @@ class Config:
         self, key: Union[ProfileConfigKey, SettingKey, str], value: ProfileConfigValue
     ) -> None:
         """
-        Writes a setting safely using a file lock.
+        Writes a setting safely using a file lock, applying nested formatting.
         Implies directory creation if a setting is deliberately saved.
 
         Args:
@@ -233,8 +294,7 @@ class Config:
         with FileLock(config_file):
             data: Dict[str, ProfileConfigValue] = self._load()
             data[key_str] = value
-            with config_file.open('w', encoding='utf-8') as f:
-                json.dump(data, f, indent=4)
+            self._write_nested(data)
 
     def sync_with_global(self) -> None:
         """
@@ -268,5 +328,4 @@ class Config:
             for k in keys_to_remove:
                 del data[k]
 
-            with config_file.open('w', encoding='utf-8') as f:
-                json.dump(data, f, indent=4)
+            self._write_nested(data)

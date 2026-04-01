@@ -46,26 +46,44 @@ TRANSLATIONS: Dict[DomainCode, TranslationDef] = {
         'Self-destruct command accepted. Nuking daemon...', UISeverity.SYSTEM
     ),
     SystemCode.SETTING_UPDATED: TranslationDef(
-        "Global setting '{key}' updated successfully.", UISeverity.SYSTEM
+        f"Global setting '{Theme.YELLOW}{{key}}{Theme.RESET}' updated successfully.",
+        UISeverity.SYSTEM,
     ),
     SystemCode.CONFIG_UPDATED: TranslationDef(
-        "Profile configuration override for '{key}' updated successfully.",
+        f"Profile configuration override for '{Theme.YELLOW}{{key}}{Theme.RESET}' updated successfully.",
         UISeverity.SYSTEM,
     ),
     SystemCode.SETTING_UPDATE_FAILED: TranslationDef(
-        'Failed to update global setting: {error}', UISeverity.ERROR
+        f'{Theme.RED}Failed to update global setting:{Theme.RESET} {{reason}}',
+        UISeverity.ERROR,
     ),
     SystemCode.CONFIG_UPDATE_FAILED: TranslationDef(
-        'Failed to update profile config: {error}', UISeverity.ERROR
+        f'{Theme.RED}Failed to update profile config:{Theme.RESET} {{reason}}',
+        UISeverity.ERROR,
     ),
     SystemCode.SETTING_TYPE_ERROR: TranslationDef(
-        'Type parsing error: {error}', UISeverity.ERROR
+        f'{Theme.RED}Type parsing error:{Theme.RESET} {{reason}}', UISeverity.ERROR
+    ),
+    SystemCode.INVALID_SETTING_KEY: TranslationDef(
+        'Invalid setting key provided.', UISeverity.ERROR
+    ),
+    SystemCode.INVALID_CONFIG_KEY: TranslationDef(
+        'Invalid profile config key provided.', UISeverity.ERROR
+    ),
+    SystemCode.DAEMON_CANNOT_MANAGE_UI: TranslationDef(
+        'The Daemon cannot manage UI-specific settings.', UISeverity.ERROR
+    ),
+    SystemCode.IMMUTABLE_CONFIG_KEY: TranslationDef(
+        f"The '{Theme.YELLOW}is_remote{Theme.RESET}' flag is immutable and cannot be changed after profile creation.",
+        UISeverity.ERROR,
     ),
     SystemCode.SETTING_DATA: TranslationDef(
-        "Global Setting '{key}': {value}", UISeverity.INFO
+        f"Global Setting '{Theme.YELLOW}{{key}}{Theme.RESET}': {Theme.CYAN}{{value}}{Theme.RESET}",
+        UISeverity.INFO,
     ),
     SystemCode.CONFIG_DATA: TranslationDef(
-        "Profile Config '{key}': {value}", UISeverity.INFO
+        f"Profile Config '{Theme.YELLOW}{{key}}{Theme.RESET}': {Theme.CYAN}{{value}}{Theme.RESET}",
+        UISeverity.INFO,
     ),
     SystemCode.CONFIG_SYNCED: TranslationDef(
         'Profile overrides cleared. Config is now synced with global settings.',

@@ -2,6 +2,7 @@
 Module for handling global application settings securely.
 Utilizes a centralized cross-platform file locking mechanism to prevent race conditions.
 Enforces strict typing using Enums for configuration keys and strongly-typed accessors.
+Prevents silent overwrites of corrupted JSON configurations.
 """
 
 import json
@@ -9,7 +10,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, Union, Optional
 
-from metor.utils import Constants, FileLock, TypeCaster
+from metor.utils import Constants, FileLock, TypeCaster, validate_json_file
 
 
 # Types
@@ -126,10 +127,28 @@ class Settings:
         return data_dir / Constants.SETTINGS_FILE
 
     @classmethod
+    def validate_integrity(cls) -> None:
+        """
+        Validates the JSON syntax of the global settings file using the generic parser utility.
+
+        Args:
+            None
+
+        Raises:
+            ValueError: If the file exists but contains a syntax error.
+
+        Returns:
+            None
+        """
+        path: Path = cls.get_global_settings_path()
+        validate_json_file(path)
+
+    @classmethod
     def _load_settings(cls) -> Dict[str, Dict[str, SettingValue]]:
         """
         Loads the settings from the JSON file into a nested structure.
         Creates the default structure and writes it to disk if the file is missing.
+        Prevents overwriting the file if a JSONDecodeError occurs on an existing file.
 
         Args:
             None
@@ -158,9 +177,10 @@ class Settings:
             category, sub_key = key_enum.split('.', 1)
             data[category][sub_key] = val
 
-        with FileLock(path):
-            with path.open('w', encoding='utf-8') as f:
-                json.dump(data, f, indent=4)
+        if not path.exists():
+            with FileLock(path):
+                with path.open('w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=4)
 
         return data
 

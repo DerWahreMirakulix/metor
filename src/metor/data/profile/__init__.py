@@ -3,5 +3,6 @@ Package initializer for the user profile management.
 """
 
 from metor.data.profile.manager import ProfileManager
+from metor.data.profile.models import ProfileConfigKey
 
-__all__ = ['ProfileManager']
+__all__ = ['ProfileManager', 'ProfileConfigKey']

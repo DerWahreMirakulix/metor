@@ -4,11 +4,14 @@ Enforces strict typing for profile-level settings to prevent key collisions.
 """
 
 from enum import Enum
-from typing import Union
+from typing import Dict, Union
+
+from metor.data import SettingValue
 
 
 # Types
-ProfileConfigValue = Union[str, int, float, bool, None]
+ProfileConfigValue = Union[SettingValue, None]
+NestedConfigDict = Dict[str, Union[ProfileConfigValue, Dict[str, ProfileConfigValue]]]
 
 
 class ProfileConfigKey(str, Enum):

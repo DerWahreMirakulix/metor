@@ -54,15 +54,13 @@ class ConfigCommandHandler:
             except ValueError:
                 return ActionErrorEvent(
                     action=cmd.action,
-                    code=SystemCode.SETTING_TYPE_ERROR,
-                    reason='Invalid setting key.',
+                    code=SystemCode.INVALID_SETTING_KEY,
                 )
 
             if key_enum.is_ui:
                 return ActionErrorEvent(
                     action=cmd.action,
-                    code=SystemCode.SETTING_UPDATE_FAILED,
-                    reason='Daemon cannot manage UI settings.',
+                    code=SystemCode.DAEMON_CANNOT_MANAGE_UI,
                 )
 
             try:
@@ -91,15 +89,13 @@ class ConfigCommandHandler:
             except ValueError:
                 return ActionErrorEvent(
                     action=cmd.action,
-                    code=SystemCode.SETTING_TYPE_ERROR,
-                    reason='Invalid setting key.',
+                    code=SystemCode.INVALID_SETTING_KEY,
                 )
 
             if key_enum.is_ui:
                 return ActionErrorEvent(
                     action=cmd.action,
-                    code=SystemCode.SETTING_TYPE_ERROR,
-                    reason='Daemon cannot manage UI settings.',
+                    code=SystemCode.DAEMON_CANNOT_MANAGE_UI,
                 )
 
             try:
@@ -111,8 +107,7 @@ class ConfigCommandHandler:
             except ValueError:
                 return ActionErrorEvent(
                     action=cmd.action,
-                    code=SystemCode.SETTING_TYPE_ERROR,
-                    reason='Invalid setting key.',
+                    code=SystemCode.INVALID_SETTING_KEY,
                 )
 
         if isinstance(cmd, SetConfigCommand):
@@ -121,15 +116,13 @@ class ConfigCommandHandler:
             except ValueError:
                 return ActionErrorEvent(
                     action=cmd.action,
-                    code=SystemCode.SETTING_TYPE_ERROR,
-                    reason='Invalid config key.',
+                    code=SystemCode.INVALID_CONFIG_KEY,
                 )
 
             if key_enum.is_ui:
                 return ActionErrorEvent(
                     action=cmd.action,
-                    code=SystemCode.CONFIG_UPDATE_FAILED,
-                    reason='Daemon cannot manage UI configs.',
+                    code=SystemCode.DAEMON_CANNOT_MANAGE_UI,
                 )
 
             try:
@@ -158,15 +151,13 @@ class ConfigCommandHandler:
             except ValueError:
                 return ActionErrorEvent(
                     action=cmd.action,
-                    code=SystemCode.SETTING_TYPE_ERROR,
-                    reason='Invalid config key.',
+                    code=SystemCode.INVALID_CONFIG_KEY,
                 )
 
             if key_enum.is_ui:
                 return ActionErrorEvent(
                     action=cmd.action,
-                    code=SystemCode.SETTING_TYPE_ERROR,
-                    reason='Daemon cannot manage UI configs.',
+                    code=SystemCode.DAEMON_CANNOT_MANAGE_UI,
                 )
 
             try:
@@ -178,8 +169,7 @@ class ConfigCommandHandler:
             except ValueError:
                 return ActionErrorEvent(
                     action=cmd.action,
-                    code=SystemCode.SETTING_TYPE_ERROR,
-                    reason='Invalid config key.',
+                    code=SystemCode.INVALID_CONFIG_KEY,
                 )
 
         if isinstance(cmd, SyncConfigCommand):

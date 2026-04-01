@@ -41,6 +41,7 @@
     "spinlocks",
     "sqlcipher",
     "subcmd",
+    "subkey",
     "tcflush",
     "tcgetattr",
     "TCIFLUSH",

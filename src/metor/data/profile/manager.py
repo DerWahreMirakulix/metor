@@ -1,5 +1,6 @@
 """
 Module for managing user profiles, their directories, and daemon lock states.
+Enforces validation checks to prevent runtime operation on tampered profiles.
 """
 
 import shutil
@@ -34,6 +35,36 @@ class ProfileManager:
         )
         self.paths: Paths = Paths(self.profile_name)
         self.config: Config = Config(self.paths)
+
+    def validate_integrity(self) -> None:
+        """
+        Validates the JSON integrity of the profile configuration and strictly
+        enforces the cryptographic hard-lock for tampered remote profiles.
+
+        Args:
+            None
+
+        Raises:
+            ValueError: If a corruption or tampering mismatch is detected.
+
+        Returns:
+            None
+        """
+        self.config.validate_integrity()
+
+        if self.is_remote():
+            db_path: Path = self.paths.get_db_file()
+            hs_dir: Path = self.paths.get_hidden_service_dir()
+
+            db_exists: bool = db_path.exists()
+            hs_exists: bool = hs_dir.exists() and any(hs_dir.iterdir())
+
+            if db_exists or hs_exists:
+                raise ValueError(
+                    "Profile state corruption detected: 'is_remote' flag is true, "
+                    'but local cryptographic keys or databases exist. '
+                    'Revert config.json manually or delete the profile.'
+                )
 
     def exists(self) -> bool:
         """
