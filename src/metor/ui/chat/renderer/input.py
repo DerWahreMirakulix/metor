@@ -6,12 +6,28 @@ import sys
 import os
 from typing import Optional, List
 
+from metor.utils import Constants
+
+_TERMINAL_BRACKETED_PASTE_START: str = '\x1b[200~'
+_TERMINAL_BRACKETED_PASTE_END: str = '\x1b[201~'
+_TERMINAL_ARROW_UP: str = '\x1b[A'
+_TERMINAL_ARROW_DOWN: str = '\x1b[B'
+_TERMINAL_ARROW_RIGHT: str = '\x1b[C'
+_TERMINAL_ARROW_LEFT: str = '\x1b[D'
+_TERMINAL_ALT_NEWLINE_CR: str = '\x1b\r'
+_TERMINAL_ALT_NEWLINE_LF: str = '\x1b\n'
+_TERMINAL_CTRL_NEWLINE: str = '\x0e'
+_TERMINAL_ESCAPE: str = '\x1b'
+_TERMINAL_CR: str = '\r'
+_TERMINAL_LF: str = '\n'
+
 try:
     import msvcrt
 except ImportError:
     msvcrt = None  # type: ignore
 
 if os.name != 'nt':
+    import select
     import termios
     import tty
     import atexit
@@ -36,6 +52,7 @@ class InputHandler:
         self.current_input: str = ''
         self.line_chars: List[str] = []
         self.cursor_index: int = 0
+        self._pending_tokens: List[str] = []
 
         self._init_terminal()
 
@@ -78,6 +95,9 @@ class InputHandler:
         Returns:
             Optional[str]: The raw character, a parsed SPECIAL tag, or None if empty.
         """
+        if self._pending_tokens:
+            return self._pending_tokens.pop(0)
+
         if os.name == 'nt' and msvcrt:
             if getattr(msvcrt, 'kbhit')():
                 ch = getattr(msvcrt, 'getwch')()
@@ -92,28 +112,122 @@ class InputHandler:
                     elif ch2 == 'M':
                         return 'SPECIAL:RIGHT'
                     return ''
-                if ch == '\x0e':
+                if ch == _TERMINAL_CTRL_NEWLINE:
                     return 'SPECIAL:NEWLINE'
                 return str(ch)
             return None
         else:
-            ch1: str = str(sys.stdin.read(1))
-            if ch1 == '\x1b':
-                ch2 = str(sys.stdin.read(1))
-                if ch2 == '[':
-                    ch3 = str(sys.stdin.read(1))
-                    return {
-                        'A': 'SPECIAL:UP',
-                        'B': 'SPECIAL:DOWN',
-                        'C': 'SPECIAL:RIGHT',
-                        'D': 'SPECIAL:LEFT',
-                    }.get(ch3, 'SPECIAL:UNKNOWN')
-                if ch2 in ('\n', '\r'):
-                    return 'SPECIAL:NEWLINE'
-                return 'ESC'
-            if ch1 == '\x0e':
-                return 'SPECIAL:NEWLINE'
-            return ch1
+            ready, _, _ = select.select(
+                [sys.stdin],
+                [],
+                [],
+                Constants.INPUT_SELECT_TIMEOUT_SEC,
+            )
+            if not ready:
+                return None
+
+            data: str = os.read(sys.stdin.fileno(), Constants.TCP_BUFFER_SIZE).decode(
+                'utf-8', errors='ignore'
+            )
+            if not data:
+                return None
+
+            self._pending_tokens.extend(self._tokenize_posix_input(data))
+            if self._pending_tokens:
+                return self._pending_tokens.pop(0)
+            return None
+
+    def _tokenize_posix_input(self, data: str) -> List[str]:
+        """
+        Splits raw POSIX terminal bytes into semantic key or paste tokens.
+
+        Args:
+            data (str): The decoded terminal input chunk.
+
+        Returns:
+            List[str]: Parsed tokens in processing order.
+        """
+        tokens: List[str] = []
+        index: int = 0
+        paste_start: str = _TERMINAL_BRACKETED_PASTE_START
+        paste_end: str = _TERMINAL_BRACKETED_PASTE_END
+        newline_chars: tuple[str, str] = (
+            _TERMINAL_CR,
+            _TERMINAL_LF,
+        )
+        control_chars: tuple[str, ...] = (
+            _TERMINAL_ESCAPE,
+            _TERMINAL_CR,
+            _TERMINAL_LF,
+            _TERMINAL_CTRL_NEWLINE,
+        )
+
+        while index < len(data):
+            if data.startswith(paste_start, index):
+                end_index: int = data.find(paste_end, index + len(paste_start))
+                if end_index != -1:
+                    pasted_text: str = data[index + len(paste_start) : end_index]
+                    if pasted_text:
+                        tokens.append(f'PASTE:{pasted_text}')
+                    index = end_index + len(paste_end)
+                    continue
+
+            if data.startswith(_TERMINAL_ARROW_UP, index):
+                tokens.append('SPECIAL:UP')
+                index += len(_TERMINAL_ARROW_UP)
+                continue
+            if data.startswith(_TERMINAL_ARROW_DOWN, index):
+                tokens.append('SPECIAL:DOWN')
+                index += len(_TERMINAL_ARROW_DOWN)
+                continue
+            if data.startswith(_TERMINAL_ARROW_RIGHT, index):
+                tokens.append('SPECIAL:RIGHT')
+                index += len(_TERMINAL_ARROW_RIGHT)
+                continue
+            if data.startswith(_TERMINAL_ARROW_LEFT, index):
+                tokens.append('SPECIAL:LEFT')
+                index += len(_TERMINAL_ARROW_LEFT)
+                continue
+            if data.startswith(_TERMINAL_ALT_NEWLINE_CR, index) or data.startswith(
+                _TERMINAL_ALT_NEWLINE_LF, index
+            ):
+                tokens.append('SPECIAL:NEWLINE')
+                index += len(_TERMINAL_ALT_NEWLINE_CR)
+                continue
+
+            char: str = data[index]
+            if char == _TERMINAL_CTRL_NEWLINE:
+                tokens.append('SPECIAL:NEWLINE')
+                index += 1
+                continue
+
+            if char in newline_chars:
+                tokens.append(_TERMINAL_LF)
+                if index + 1 < len(data) and data[index + 1] in newline_chars:
+                    index += 2
+                else:
+                    index += 1
+                continue
+
+            if char == _TERMINAL_ESCAPE:
+                tokens.append('ESC')
+                index += 1
+                continue
+
+            text_start: int = index
+            while index < len(data) and data[index] not in control_chars:
+                index += 1
+
+            text_chunk: str = data[text_start:index]
+            if not text_chunk:
+                continue
+
+            if len(text_chunk) == 1:
+                tokens.append(text_chunk)
+            else:
+                tokens.append(f'PASTE:{text_chunk}')
+
+        return tokens
 
     def process_key(self, ch: str) -> Optional[str]:
         """
@@ -125,7 +239,15 @@ class InputHandler:
         Returns:
             Optional[str]: The completed input line if enter was pressed, None otherwise.
         """
-        if ch.startswith('SPECIAL:'):
+        if ch.startswith('PASTE:'):
+            pasted_text: str = (
+                ch[len('PASTE:') :].replace('\r\n', '\n').replace('\r', '\n')
+            )
+            for char in pasted_text:
+                self.line_chars.insert(self.cursor_index, char)
+                self.cursor_index += 1
+
+        elif ch.startswith('SPECIAL:'):
             key: str = ch.split(':')[1]
             if key == 'UP':
                 if self.history and self.history_index < len(self.history) - 1:

@@ -11,11 +11,10 @@ import socket
 import threading
 import time
 import atexit
-import sys
 import os
 import signal
 import types
-from typing import List, Set, Optional, Callable, Dict
+from typing import List, Set, Optional, Callable, Dict, Union
 from pathlib import Path
 
 from metor.core import KeyManager, TorManager
@@ -54,12 +53,9 @@ from metor.core.api import (
     SelfDestructCommand,
     UnlockCommand,
     RetunnelCommand,
-    SystemCode,
-    UiCode,
-    DomainCode,
+    EventType,
     JsonValue,
-    ActionErrorEvent,
-    ActionSuccessEvent,
+    create_event,
 )
 from metor.data.profile import ProfileManager
 from metor.data import (
@@ -74,7 +70,8 @@ from metor.utils import Constants, clean_onion, secure_shred_file
 from metor.core.daemon.crypto import Crypto
 from metor.core.daemon.ipc import IpcServer
 from metor.core.daemon.outbox import OutboxWorker
-from metor.core.daemon.network import NetworkManager
+from metor.core.daemon.network import NetworkManager, StateTracker
+from metor.core.daemon.models import DaemonStatus
 from metor.core.daemon.handlers import (
     DatabaseCommandHandler,
     SystemCommandHandler,
@@ -95,7 +92,7 @@ class Daemon:
         hm: HistoryManager,
         mm: MessageManager,
         status_callback: Optional[
-            Callable[[DomainCode, Dict[str, JsonValue]], None]
+            Callable[[Union[EventType, DaemonStatus], Dict[str, JsonValue]], None]
         ] = None,
     ) -> None:
         """
@@ -120,12 +117,13 @@ class Daemon:
         self._mm: MessageManager = mm
         self._km: KeyManager = km
         self._status_cb: Optional[
-            Callable[[DomainCode, Dict[str, JsonValue]], None]
+            Callable[[Union[EventType, DaemonStatus], Dict[str, JsonValue]], None]
         ] = status_callback
 
         self._stop_flag: threading.Event = threading.Event()
         self._is_locked: bool = False
         self._authenticated_clients: Set[socket.socket] = set()
+        self._transport_state: StateTracker = StateTracker()
 
         self._crypto: Crypto = Crypto(km)
         self._ipc: IpcServer = IpcServer(
@@ -139,6 +137,7 @@ class Daemon:
             self._ipc.broadcast,
             self._stop_flag,
             config=self._pm.config,
+            state=self._transport_state,
         )
         self._network: NetworkManager = NetworkManager(
             self._tm,
@@ -150,6 +149,7 @@ class Daemon:
             self._ipc.has_active_clients,
             self._stop_flag,
             config=self._pm.config,
+            state=self._transport_state,
         )
 
         self._config_handler: ConfigCommandHandler = ConfigCommandHandler(self._pm)
@@ -170,6 +170,7 @@ class Daemon:
             self._hm,
             self._mm,
             self._network,
+            self._outbox,
             self._ipc.broadcast,
             self._send_to_client,
             config=self._pm.config,
@@ -205,7 +206,6 @@ class Daemon:
             None
         """
         self.stop()
-        sys.exit(0)
 
     def run(self) -> None:
         """
@@ -222,7 +222,7 @@ class Daemon:
                 self._is_locked = True
                 self._ipc.start()
                 if self._status_cb:
-                    self._status_cb(UiCode.DAEMON_LOCKED_MODE, {})
+                    self._status_cb(DaemonStatus.LOCKED_MODE, {})
             else:
                 self._start_subsystems()
 
@@ -245,10 +245,10 @@ class Daemon:
         """
         self._pm.initialize()
 
-        success, code, params = self._tm.start()
+        success, event_type, params = self._tm.start()
         if not success:
-            if self._status_cb:
-                self._status_cb(code, params)
+            if self._status_cb and event_type is not None:
+                self._status_cb(event_type, params)
             self._stop_flag.set()
             return
 
@@ -261,7 +261,7 @@ class Daemon:
 
         if self._status_cb:
             self._status_cb(
-                UiCode.DAEMON_ACTIVE,
+                DaemonStatus.ACTIVE,
                 {'onion': clean_onion(self._tm.onion or ''), 'port': self._ipc.port},
             )
 
@@ -276,10 +276,15 @@ class Daemon:
             None
         """
         self._stop_flag.set()
+        self._outbox.stop()
         self._network.disconnect_all()
         if self._cm:
             self._cm.cleanup_orphans([])
         self._ipc.stop()
+        runtime_db_path: Path = (
+            Path(self._pm.get_config_dir()) / Constants.DB_RUNTIME_FILE
+        )
+        secure_shred_file(runtime_db_path)
         self._pm.clear_daemon_port()
         self._tm.stop()
 
@@ -294,7 +299,11 @@ class Daemon:
             None
         """
         db_path: Path = Path(self._pm.get_config_dir()) / Constants.DB_FILE
+        runtime_db_path: Path = (
+            Path(self._pm.get_config_dir()) / Constants.DB_RUNTIME_FILE
+        )
         secure_shred_file(db_path)
+        secure_shred_file(runtime_db_path)
 
         hs_dir: Path = Path(self._pm.get_hidden_service_dir())
         key_files: List[str] = [
@@ -321,6 +330,8 @@ class Daemon:
         if conn in self._authenticated_clients:
             self._authenticated_clients.remove(conn)
 
+        self._network_handler.clear_client_focus(conn)
+
     def _process_ui_command(self, cmd: IpcCommand, conn: socket.socket) -> None:
         """
         Routes typed IPC commands from the Chat UI or CLI Proxy to dedicated Handlers.
@@ -338,19 +349,14 @@ class Daemon:
                 if conn not in self._authenticated_clients:
                     self._ipc.send_to(
                         conn,
-                        ActionErrorEvent(
-                            action=cmd.action,
-                            code=SystemCode.AUTH_REQUIRED,
-                        ),
+                        create_event(EventType.AUTH_REQUIRED),
                     )
                     return
 
         if isinstance(cmd, SelfDestructCommand):
             self._ipc.send_to(
                 conn,
-                ActionSuccessEvent(
-                    action=cmd.action, code=SystemCode.SELF_DESTRUCT_INITIATED
-                ),
+                create_event(EventType.SELF_DESTRUCT_INITIATED),
             )
             threading.Thread(target=self._nuke_data, daemon=True).start()
             return
@@ -367,25 +373,18 @@ class Daemon:
                         self._authenticated_clients.add(conn)
                         self._ipc.send_to(
                             conn,
-                            ActionSuccessEvent(
-                                action=cmd.action, code=SystemCode.SESSION_AUTHENTICATED
-                            ),
+                            create_event(EventType.SESSION_AUTHENTICATED),
                         )
                     except Exception:
                         self._ipc.send_to(
                             conn,
-                            ActionErrorEvent(
-                                action=cmd.action,
-                                code=SystemCode.INVALID_PASSWORD,
-                            ),
+                            create_event(EventType.INVALID_PASSWORD),
                         )
                     return
 
                 self._ipc.send_to(
                     conn,
-                    ActionSuccessEvent(
-                        action=cmd.action, code=SystemCode.ALREADY_UNLOCKED
-                    ),
+                    create_event(EventType.ALREADY_UNLOCKED),
                 )
                 return
 
@@ -395,10 +394,7 @@ class Daemon:
             except Exception:
                 self._ipc.send_to(
                     conn,
-                    ActionErrorEvent(
-                        action=cmd.action,
-                        code=SystemCode.INVALID_PASSWORD,
-                    ),
+                    create_event(EventType.INVALID_PASSWORD),
                 )
                 return
 
@@ -406,6 +402,7 @@ class Daemon:
             self._cm = ContactManager(self._pm, cmd.password)
             self._hm = HistoryManager(self._pm, cmd.password)
             self._mm = MessageManager(self._pm, cmd.password)
+            self._transport_state = StateTracker()
 
             self._crypto = Crypto(self._km)
             self._network = NetworkManager(
@@ -418,6 +415,7 @@ class Daemon:
                 self._ipc.has_active_clients,
                 self._stop_flag,
                 config=self._pm.config,
+                state=self._transport_state,
             )
             self._outbox = OutboxWorker(
                 self._tm,
@@ -427,6 +425,7 @@ class Daemon:
                 self._ipc.broadcast,
                 self._stop_flag,
                 config=self._pm.config,
+                state=self._transport_state,
             )
 
             self._db_handler = DatabaseCommandHandler(
@@ -444,6 +443,7 @@ class Daemon:
                 self._hm,
                 self._mm,
                 self._network,
+                self._outbox,
                 self._ipc.broadcast,
                 self._send_to_client,
                 config=self._pm.config,
@@ -452,17 +452,11 @@ class Daemon:
             self._is_locked = False
             self._authenticated_clients.add(conn)
             self._start_subsystems()
-            self._ipc.send_to(
-                conn,
-                ActionSuccessEvent(action=cmd.action, code=SystemCode.DAEMON_UNLOCKED),
-            )
+            self._ipc.send_to(conn, create_event(EventType.DAEMON_UNLOCKED))
             return
 
         if self._is_locked:
-            self._ipc.send_to(
-                conn,
-                ActionErrorEvent(action=cmd.action, code=SystemCode.DAEMON_LOCKED),
-            )
+            self._ipc.send_to(conn, create_event(EventType.DAEMON_LOCKED))
             return
 
         # --- DELEGATION TO DEDICATED HANDLERS ---

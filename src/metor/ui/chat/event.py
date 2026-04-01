@@ -1,21 +1,19 @@
 """
 Module providing the handler for incoming Daemon IPC events.
 Updates Session state and triggers Renderer UI updates via the central Translator and Presenter.
-Maps generic UISeverity types to domain-specific ChatMessageTypes using a DRY architecture.
+Separates generic status tones from chat-specific render roles.
 """
 
-import threading
 import dataclasses
-from typing import List, Optional, Dict
+import threading
+from typing import Dict, List, Optional
 
 from metor.core.api import (
     IpcEvent,
-    DomainCode,
-    SystemCode,
-    NetworkCode,
-    UiCode,
+    EventType,
     JsonValue,
     MarkReadCommand,
+    SwitchCommand,
     InitEvent,
     RemoteMsgEvent,
     AckEvent,
@@ -29,6 +27,7 @@ from metor.core.api import (
     ConnectionsStateEvent,
     SwitchSuccessEvent,
     ConnectionPendingEvent,
+    ConnectionConnectingEvent,
     ConnectionAutoAcceptedEvent,
     ConnectionRetryEvent,
     ConnectionFailedEvent,
@@ -36,42 +35,24 @@ from metor.core.api import (
     ConnectionRejectedEvent,
     TiebreakerRejectedEvent,
     AutoReconnectAttemptEvent,
+    DropQueuedEvent,
     ContactsDataEvent,
     HistoryDataEvent,
     MessagesDataEvent,
     InboxCountsEvent,
     UnreadMessagesEvent,
     ProfilesDataEvent,
-    ActionSuccessEvent,
-    ActionErrorEvent,
-    ContactActionSuccessEvent,
-    ContactRenamedEvent,
-    ProfileActionSuccessEvent,
-    TargetActionSuccessEvent,
-    SettingUpdatedEvent,
     FallbackSuccessEvent,
-    MaxConnectionsReachedEvent,
-    PeerNotFoundEvent,
-    RetunnelInitiatedEvent,
-    RetunnelSuccessEvent,
 )
-from metor.ui import Translator, UIPresenter, UISeverity
+from metor.ui import Translator, UIPresenter, StatusTone
 from metor.utils import clean_onion
 
 # Local Package Imports
-from metor.ui.chat.renderer import Renderer
 from metor.ui.chat.presenter import ChatPresenter
+from metor.ui.chat.renderer import Renderer
 from metor.ui.chat.ipc import IpcClient
 from metor.ui.chat.session import Session
 from metor.ui.chat.models import ChatMessageType
-
-
-# Mapping
-_SEVERITY_MAP: Dict[UISeverity, ChatMessageType] = {
-    UISeverity.INFO: ChatMessageType.INFO,
-    UISeverity.SYSTEM: ChatMessageType.SYSTEM,
-    UISeverity.ERROR: ChatMessageType.ERROR,
-}
 
 
 class EventHandler:
@@ -106,24 +87,33 @@ class EventHandler:
 
     def _print_translated(
         self,
-        code: DomainCode,
+        code: EventType,
         params: Optional[Dict[str, JsonValue]] = None,
         alias: Optional[str] = None,
     ) -> None:
         """
-        Resolves a translation code and renders it directly to the UI, applying the correct severity routing.
+        Resolves a strict translation key and renders it directly to the UI.
 
         Args:
-            code (DomainCode): The strict domain code for translation.
+            code (EventType): The strict daemon event identifier.
             params (Optional[Dict[str, JsonValue]]): Dynamic parameters to inject.
             alias (Optional[str]): The associated remote alias to attach to the UI line.
 
         Returns:
             None
         """
-        text, severity = Translator.get(code, params)
-        msg_type: ChatMessageType = _SEVERITY_MAP.get(severity, ChatMessageType.SYSTEM)
-        self._renderer.print_message(text, msg_type=msg_type, alias=alias)
+        render_params: Dict[str, JsonValue] = params.copy() if params else {}
+        if alias and not render_params.get('alias'):
+            render_params['alias'] = alias
+
+        text, tone = Translator.get(code, render_params)
+        line_alias: Optional[str] = alias if tone is StatusTone.INFO else None
+        self._renderer.print_message(
+            text,
+            msg_type=ChatMessageType.STATUS,
+            tone=tone,
+            alias=line_alias,
+        )
 
     def handle(self, event: IpcEvent) -> None:
         """
@@ -149,7 +139,6 @@ class EventHandler:
                     HistoryDataEvent,
                     MessagesDataEvent,
                     InboxCountsEvent,
-                    UnreadMessagesEvent,
                     ProfilesDataEvent,
                 ),
             ):
@@ -159,9 +148,20 @@ class EventHandler:
                 )
                 self._renderer.print_message(
                     text_fmt,
-                    msg_type=ChatMessageType.SYSTEM,
+                    msg_type=ChatMessageType.STATUS,
+                    tone=StatusTone.SYSTEM,
                     alias=target_alias,
                 )
+
+            elif isinstance(event, UnreadMessagesEvent):
+                if event.messages:
+                    messages_data: List[Dict[str, JsonValue]] = [
+                        {'id': '', 'payload': m.payload, 'timestamp': m.timestamp}
+                        for m in event.messages
+                    ]
+                    self._renderer.print_messages_batch(
+                        messages_data, event.alias, is_live_flush=False
+                    )
 
             # 3. Synchronous/Asynchronous Status DTOs
             elif isinstance(event, FallbackSuccessEvent):
@@ -172,36 +172,7 @@ class EventHandler:
                     for k, v in params_raw.items()
                     if isinstance(v, (str, int, float, bool, type(None), list, dict))
                 }
-                self._print_translated(event.code, params, event.alias)
-
-            elif isinstance(
-                event,
-                (
-                    ActionSuccessEvent,
-                    ActionErrorEvent,
-                    ContactActionSuccessEvent,
-                    ContactRenamedEvent,
-                    ProfileActionSuccessEvent,
-                    TargetActionSuccessEvent,
-                    SettingUpdatedEvent,
-                    MaxConnectionsReachedEvent,
-                    PeerNotFoundEvent,
-                    RetunnelInitiatedEvent,
-                    RetunnelSuccessEvent,
-                ),
-            ):
-                params_raw = dataclasses.asdict(event)
-                params = {
-                    k: v
-                    for k, v in params_raw.items()
-                    if isinstance(v, (str, int, float, bool, type(None), list, dict))
-                }
-                target_alias = str(params.get('alias') or params.get('target') or '')
-                self._print_translated(
-                    getattr(event, 'code', SystemCode.COMMAND_SUCCESS),
-                    params,
-                    target_alias if target_alias else None,
-                )
+                self._print_translated(event.event_type, params, event.alias)
 
             # 4. Message & Network Primitives
             elif isinstance(event, RemoteMsgEvent):
@@ -209,6 +180,7 @@ class EventHandler:
                     event.text,
                     msg_type=ChatMessageType.REMOTE,
                     alias=event.alias,
+                    timestamp=event.timestamp,
                     is_drop=False,
                 )
 
@@ -218,50 +190,58 @@ class EventHandler:
             elif isinstance(event, DropFailedEvent):
                 self._renderer.mark_failed(msg_id=event.msg_id)
 
+            elif isinstance(event, DropQueuedEvent):
+                # Chat already renders the local drop line optimistically. The
+                # structured success event stays useful for other UIs.
+                pass
+
             elif isinstance(event, IncomingConnectionEvent):
-                self._print_translated(
-                    NetworkCode.INCOMING_CONNECTION, alias=event.alias
-                )
+                self._print_translated(event.event_type, alias=event.alias)
 
             elif isinstance(event, ConnectionPendingEvent):
-                self._print_translated(
-                    NetworkCode.CONNECTION_PENDING, alias=event.alias
-                )
+                if event.alias not in self._session.pending_connections:
+                    self._session.pending_connections.append(event.alias)
+                self._print_translated(event.event_type, alias=event.alias)
+
+            elif isinstance(event, ConnectionConnectingEvent):
+                self._print_translated(event.event_type, alias=event.alias)
 
             elif isinstance(event, ConnectionAutoAcceptedEvent):
-                self._print_translated(
-                    NetworkCode.CONNECTION_AUTO_ACCEPTED, alias=event.alias
-                )
+                if event.alias in self._session.pending_connections:
+                    self._session.pending_connections.remove(event.alias)
+                self._print_translated(event.event_type, alias=event.alias)
 
             elif isinstance(event, ConnectionRetryEvent):
                 self._print_translated(
-                    NetworkCode.CONNECTION_RETRY,
+                    event.event_type,
                     {'attempt': event.attempt, 'max_retries': event.max_retries},
                     alias=event.alias,
                 )
 
             elif isinstance(event, ConnectionFailedEvent):
-                self._print_translated(NetworkCode.CONNECTION_FAILED, alias=event.alias)
+                if event.alias in self._session.pending_connections:
+                    self._session.pending_connections.remove(event.alias)
+                self._print_translated(event.event_type, alias=event.alias)
 
             elif isinstance(event, ConnectionRejectedEvent):
-                self._print_translated(
-                    NetworkCode.CONNECTION_REJECTED, alias=event.alias
-                )
+                if event.alias in self._session.pending_connections:
+                    self._session.pending_connections.remove(event.alias)
+                self._print_translated(event.event_type, alias=event.alias)
 
             elif isinstance(event, TiebreakerRejectedEvent):
                 # UI Usability: The collision event is muted because it functions transparently as a Mutual Connection / Silent Accept for the user in the live chat.
                 pass
 
             elif isinstance(event, AutoReconnectAttemptEvent):
-                self._print_translated(
-                    NetworkCode.AUTO_RECONNECT_ATTEMPT, alias=event.alias
-                )
+                self._print_translated(event.event_type, alias=event.alias)
 
             elif isinstance(event, ConnectedEvent):
                 if event.alias not in self._session.active_connections:
                     self._session.active_connections.append(event.alias)
+                if event.alias in self._session.pending_connections:
+                    self._session.pending_connections.remove(event.alias)
 
-                self._print_translated(NetworkCode.CONNECTED, alias=event.alias)
+                self._print_translated(event.event_type, alias=event.alias)
 
                 if self._session.focused_alias == event.alias:
                     self._renderer.set_focus(event.alias, is_live=True)
@@ -271,14 +251,16 @@ class EventHandler:
                     or clean_onion(self._session.pending_focus_target)
                     == clean_onion(event.onion or '')
                 ):
-                    self._switch_focus(event.alias)
+                    self._switch_focus(event.alias, sync_daemon=True)
                     self._session.pending_focus_target = None
 
             elif isinstance(event, DisconnectedEvent):
-                self._print_translated(NetworkCode.DISCONNECTED, alias=event.alias)
+                self._print_translated(event.event_type, alias=event.alias)
 
                 if event.alias in self._session.active_connections:
                     self._session.active_connections.remove(event.alias)
+                if event.alias in self._session.pending_connections:
+                    self._session.pending_connections.remove(event.alias)
 
                 if self._session.focused_alias == event.alias:
                     self._renderer.set_focus(event.alias, is_live=False)
@@ -288,25 +270,28 @@ class EventHandler:
                     self._ipc.send_command(MarkReadCommand(target=event.alias))
                 else:
                     self._print_translated(
-                        NetworkCode.INBOX_NOTIFICATION,
+                        event.event_type,
                         {'count': event.count},
                         alias=event.alias,
                     )
 
             elif isinstance(event, InboxDataEvent):
                 if event.alias and event.messages:
-                    messages_data: List[Dict[str, JsonValue]] = [
-                        {'timestamp': m.timestamp, 'payload': m.payload}
+                    messages_data_dict: List[Dict[str, JsonValue]] = [
+                        {'id': '', 'timestamp': m.timestamp, 'payload': m.payload}
                         for m in event.messages
                     ]
                     self._renderer.print_messages_batch(
-                        messages_data, event.alias, event.is_live_flush
+                        messages_data_dict, event.alias, event.is_live_flush
                     )
 
             elif isinstance(event, RenameSuccessEvent):
                 if event.old_alias in self._session.active_connections:
                     self._session.active_connections.remove(event.old_alias)
                     self._session.active_connections.append(event.new_alias)
+                if event.old_alias in self._session.pending_connections:
+                    self._session.pending_connections.remove(event.old_alias)
+                    self._session.pending_connections.append(event.new_alias)
 
                 self._renderer.rename_alias_in_history(event.old_alias, event.new_alias)
 
@@ -316,11 +301,14 @@ class EventHandler:
             elif isinstance(event, ContactRemovedEvent):
                 if event.alias in self._session.active_connections:
                     self._session.active_connections.remove(event.alias)
+                if event.alias in self._session.pending_connections:
+                    self._session.pending_connections.remove(event.alias)
                 if self._session.focused_alias == event.alias:
-                    self._switch_focus(None, hide_message=True)
+                    self._switch_focus(None, hide_message=True, sync_daemon=True)
 
             elif isinstance(event, ConnectionsStateEvent):
                 self._session.active_connections = event.active
+                self._session.pending_connections = event.pending
                 if event.is_header:
                     self._session.header_active = event.active
                     self._session.header_pending = event.pending
@@ -329,29 +317,50 @@ class EventHandler:
                 else:
                     formatted_state: str = ChatPresenter.format_session_state(
                         self._session.active_connections,
-                        [],
+                        self._session.pending_connections,
                         self._session.header_contacts,
                         self._session.focused_alias,
                         is_header_mode=False,
                     )
                     self._renderer.print_message(
                         formatted_state,
-                        msg_type=ChatMessageType.SYSTEM,
+                        msg_type=ChatMessageType.STATUS,
+                        tone=StatusTone.SYSTEM,
                     )
 
             elif isinstance(event, SwitchSuccessEvent):
                 self._switch_focus(event.alias)
 
+            else:
+                params_raw = dataclasses.asdict(event)
+                params = {
+                    k: v
+                    for k, v in params_raw.items()
+                    if isinstance(v, (str, int, float, bool, type(None), list, dict))
+                }
+                target_alias = str(params.get('alias') or params.get('target') or '')
+                self._print_translated(
+                    event.event_type,
+                    params,
+                    target_alias if target_alias else None,
+                )
+
         except Exception:
             pass
 
-    def _switch_focus(self, alias: Optional[str], hide_message: bool = False) -> None:
+    def _switch_focus(
+        self,
+        alias: Optional[str],
+        hide_message: bool = False,
+        sync_daemon: bool = False,
+    ) -> None:
         """
         Helper to safely change the active UI focus and fetch missing drops.
 
         Args:
             alias (Optional[str]): The target alias.
             hide_message (bool): Flag to skip printing the focus message.
+            sync_daemon (bool): Flag to synchronize the focus change back to the daemon.
 
         Returns:
             None
@@ -359,20 +368,29 @@ class EventHandler:
         old_alias: Optional[str] = self._session.focused_alias
 
         if old_alias == alias:
-            if alias:
-                self._print_translated(UiCode.ALREADY_FOCUSED, alias=alias)
-            else:
-                self._print_translated(UiCode.NO_ACTIVE_FOCUS)
             return
 
         self._session.focused_alias = alias
-        is_live: bool = alias in self._session.active_connections if alias else False
+        is_live: bool = self._session.is_connected(alias)
 
         self._renderer.set_focus(alias, is_live)
 
+        if sync_daemon:
+            self._ipc.send_command(SwitchCommand(target=alias))
+
         if not hide_message:
             if alias:
-                self._print_translated(UiCode.FOCUS_SWITCHED, alias=alias)
+                self._renderer.print_message(
+                    f"Switched focus to '{alias}'.",
+                    msg_type=ChatMessageType.STATUS,
+                    tone=StatusTone.INFO,
+                    alias=alias,
+                )
                 self._ipc.send_command(MarkReadCommand(target=alias))
             elif old_alias:
-                self._print_translated(UiCode.FOCUS_REMOVED, alias=old_alias)
+                self._renderer.print_message(
+                    "Removed focus from '{alias}'.",
+                    msg_type=ChatMessageType.STATUS,
+                    tone=StatusTone.INFO,
+                    alias=old_alias,
+                )

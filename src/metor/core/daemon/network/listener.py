@@ -4,18 +4,24 @@ Routes inbound connections to the application drops or the live connection state
 Enforces Max Concurrent Connection Limits to mitigate RAM/FD Exhaustion attacks.
 """
 
+import select
 import socket
 import threading
 import secrets
+import time
 from typing import Optional, Callable, List, TYPE_CHECKING
 
 from metor.core import TorManager
 from metor.core.api import (
+    EventType,
     IpcEvent,
     ConnectedEvent,
+    DisconnectedEvent,
     IncomingConnectionEvent,
+    RetunnelSuccessEvent,
     TiebreakerRejectedEvent,
     MaxConnectionsReachedEvent,
+    create_event,
 )
 from metor.core.daemon.models import TorCommand
 from metor.core.daemon.crypto import Crypto
@@ -200,6 +206,85 @@ class InboundListener:
 
         self._handle_live_incoming(conn, stream, onion)
 
+    def _watch_pending_connection(
+        self, onion: str, alias: str, conn: socket.socket
+    ) -> None:
+        """
+        Expires a pending inbound live socket once the remote side disappears or the
+        late-acceptance window elapses.
+
+        Args:
+            onion (str): The peer onion identity.
+            alias (str): The strict alias for UI feedback.
+            conn (socket.socket): The pending socket to supervise.
+
+        Returns:
+            None
+        """
+        deadline: float = time.time() + self._config.get_float(
+            SettingKey.LATE_ACCEPTANCE_TIMEOUT
+        )
+
+        while not self._stop_flag.is_set():
+            if not self._state.is_pending_socket(onion, conn):
+                return
+
+            remaining_sec: float = deadline - time.time()
+            if remaining_sec <= 0:
+                break
+
+            wait_sec: float = min(Constants.THREAD_POLL_TIMEOUT, remaining_sec)
+            try:
+                readable, _, exceptional = select.select([conn], [], [conn], wait_sec)
+            except Exception:
+                break
+
+            if not self._state.is_pending_socket(onion, conn):
+                return
+
+            if exceptional:
+                break
+
+            if not readable:
+                continue
+
+            try:
+                peek: bytes = conn.recv(1, socket.MSG_PEEK)
+            except (BlockingIOError, InterruptedError):
+                continue
+            except Exception:
+                break
+
+            if peek == b'' or peek:
+                break
+
+        if not self._state.remove_pending_connection_if_socket(onion, conn):
+            return
+
+        self._hm.log_event(
+            HistoryEvent.LIVE_CONNECTION_LOST,
+            onion,
+            'Pending acceptance expired',
+        )
+
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+        if self._state.is_retunneling(onion):
+            self._state.clear_retunnel_flow(onion)
+            self._broadcast(DisconnectedEvent(alias=alias))
+            self._broadcast(
+                create_event(
+                    EventType.RETUNNEL_FAILED,
+                    {
+                        'alias': alias,
+                        'error': 'Pending acceptance expired',
+                    },
+                )
+            )
+
     def _handle_live_incoming(
         self, conn: socket.socket, stream: TcpStreamReader, onion: str
     ) -> None:
@@ -214,7 +299,7 @@ class InboundListener:
         Returns:
             None
         """
-        alias: Optional[str] = self._cm.get_alias_by_onion(onion)
+        alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
         if not alias:
             conn.close()
             return
@@ -224,7 +309,9 @@ class InboundListener:
             self._tm.onion, onion, is_outbound_attempt
         )
 
-        if self._state.is_connected_or_pending(onion):
+        grace_reconnect: bool = self._state.consume_live_reconnect_grace(onion)
+
+        if self._state.is_connected_or_pending(onion) and not grace_reconnect:
             should_reject = True
 
         if should_reject:
@@ -245,14 +332,26 @@ class InboundListener:
             return
 
         accepted_now: bool = False
-        if is_mutual_winner or (
+        if grace_reconnect:
+            self._state.add_active_connection(onion, conn)
+            accepted_now = True
+        elif is_mutual_winner or (
             (alias in self._cm.get_all_contacts())
             and self._config.get_bool(SettingKey.AUTO_ACCEPT_CONTACTS)
         ):
             self._state.add_active_connection(onion, conn)
             accepted_now = True
         else:
+            try:
+                conn.sendall(f'{TorCommand.PENDING.value}\n'.encode('utf-8'))
+            except Exception:
+                pass
             self._state.add_pending_connection(onion, conn, stream.get_buffer())
+            threading.Thread(
+                target=self._watch_pending_connection,
+                args=(onion, alias, conn),
+                daemon=True,
+            ).start()
 
         if accepted_now:
             try:
@@ -261,7 +360,12 @@ class InboundListener:
                 pass
 
             self._hm.log_event(HistoryEvent.LIVE_CONNECTED, onion)
-            self._broadcast(ConnectedEvent(alias=alias, onion=onion))
+            if self._state.consume_retunnel_reconnect(onion):
+                self._hm.log_event(HistoryEvent.LIVE_RETUNNEL_SUCCESS, onion)
+                self._state.clear_retunnel_flow(onion)
+                self._broadcast(RetunnelSuccessEvent(alias=alias))
+            else:
+                self._broadcast(ConnectedEvent(alias=alias, onion=onion))
 
             if self._receiver:
                 self._receiver.start_receiving(onion, conn, stream.get_buffer())

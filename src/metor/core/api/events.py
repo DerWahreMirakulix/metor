@@ -1,36 +1,29 @@
-"""
-Module defining the strict Data Transfer Objects (DTOs) for outbound Daemon events.
-Utilizes dynamic decorators for registry mapping and specific Domain Codes for status tracking.
-"""
+"""Strict daemon-to-UI DTO definitions."""
 
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict
+from typing import Dict, List, Optional, Sequence, Type, TypeVar, cast
 
 # Local Package Imports
-from metor.core.api.base import IpcEvent
-from metor.core.api.codes import (
-    ContactCode,
-    EventType,
-    Action,
-    DomainCode,
-    NetworkCode,
-    SystemCode,
-)
+from metor.core.api.base import IpcEvent, JsonValue
+from metor.core.api.codes import EventType
 from metor.core.api.registry import register_event
 
 
-# --- Sub-Models (Nested DTOs) ---
+EntryT = TypeVar('EntryT')
+
+
+def _cast_entry_list(
+    values: Sequence[object], entry_type: Type[EntryT]
+) -> List[EntryT]:
+    """Casts JSON dictionaries in a list to their DTO entry type."""
+    if values and isinstance(values[0], dict):
+        return [entry_type(**cast(Dict[str, JsonValue], value)) for value in values]
+    return [cast(EntryT, value) for value in values]
 
 
 @dataclass
 class ContactEntry:
-    """
-    Represents a single contact entry in the address book.
-
-    Attributes:
-        alias (str): The user-defined alias.
-        onion (str): The remote onion address.
-    """
+    """Represents a structured contact entry."""
 
     alias: str
     onion: str
@@ -38,35 +31,18 @@ class ContactEntry:
 
 @dataclass
 class HistoryEntry:
-    """
-    Represents a single historical network event.
-
-    Attributes:
-        timestamp (str): The ISO 8601 timestamp.
-        status (str): The event state.
-        onion (Optional[str]): The associated onion address, if any.
-        reason (str): The context or reason for the event.
-        alias (str): The resolved alias of the peer.
-    """
+    """Represents a stored history row."""
 
     timestamp: str
     status: str
     onion: Optional[str]
     reason: str
-    alias: str
+    alias: Optional[str]
 
 
 @dataclass
 class MessageEntry:
-    """
-    Represents a chat message within the history database.
-
-    Attributes:
-        direction (str): The flow direction ('in' or 'out').
-        status (str): The current message status.
-        payload (str): The actual message content.
-        timestamp (str): The ISO 8601 timestamp.
-    """
+    """Represents a stored chat message."""
 
     direction: str
     status: str
@@ -76,13 +52,7 @@ class MessageEntry:
 
 @dataclass
 class UnreadMessageEntry:
-    """
-    Represents an unread asynchronous message.
-
-    Attributes:
-        timestamp (str): The ISO 8601 timestamp.
-        payload (str): The unread message content.
-    """
+    """Represents a single unread offline message."""
 
     timestamp: str
     payload: str
@@ -90,15 +60,7 @@ class UnreadMessageEntry:
 
 @dataclass
 class ProfileEntry:
-    """
-    Represents a Metor profile state.
-
-    Attributes:
-        name (str): The profile name.
-        is_active (bool): True if this is the currently loaded profile.
-        is_remote (bool): True if configured for remote Daemon access.
-        port (Optional[int]): The bound static port, if applicable.
-    """
+    """Represents one profile in the profile list response."""
 
     name: str
     is_active: bool
@@ -106,872 +68,949 @@ class ProfileEntry:
     port: Optional[int]
 
 
-# --- Core State & Chat Events ---
-
-
 @register_event(EventType.INIT)
 @dataclass
 class InitEvent(IpcEvent):
-    """
-    Data Transfer Object for daemon initialization state.
-
-    Attributes:
-        onion (Optional[str]): The local onion address.
-        type (EventType): The strict IPC event type code.
-    """
+    """Initializes the UI with the local onion address."""
 
     onion: Optional[str] = None
-    type: EventType = field(default=EventType.INIT, init=False)
+    event_type: EventType = field(default=EventType.INIT, init=False)
+
+
+@register_event(EventType.TOR_KEY_ERROR)
+@dataclass
+class TorKeyErrorEvent(IpcEvent):
+    """Signals a failure while provisioning Tor runtime keys."""
+
+    event_type: EventType = field(default=EventType.TOR_KEY_ERROR, init=False)
+
+
+@register_event(EventType.TOR_START_FAILED)
+@dataclass
+class TorStartFailedEvent(IpcEvent):
+    """Signals that the Tor process could not be started."""
+
+    event_type: EventType = field(default=EventType.TOR_START_FAILED, init=False)
+
+
+@register_event(EventType.TOR_PROCESS_TERMINATED)
+@dataclass
+class TorProcessTerminatedEvent(IpcEvent):
+    """Signals that Tor terminated unexpectedly during startup."""
+
+    event_type: EventType = field(
+        default=EventType.TOR_PROCESS_TERMINATED,
+        init=False,
+    )
 
 
 @register_event(EventType.REMOTE_MSG)
 @dataclass
 class RemoteMsgEvent(IpcEvent):
-    """
-    Data Transfer Object for receiving a live chat message.
-
-    Attributes:
-        alias (str): The sender's alias.
-        text (str): The message content.
-        timestamp (Optional[str]): The message timestamp.
-        type (EventType): The strict IPC event type code.
-    """
+    """Carries a live inbound message."""
 
     alias: str
     text: str
     timestamp: Optional[str] = None
-    type: EventType = field(default=EventType.REMOTE_MSG, init=False)
+    event_type: EventType = field(default=EventType.REMOTE_MSG, init=False)
 
 
 @register_event(EventType.ACK)
 @dataclass
 class AckEvent(IpcEvent):
-    """
-    Data Transfer Object confirming delivery of a sent message.
-
-    Attributes:
-        msg_id (str): The unique identifier of the acknowledged message.
-        text (Optional[str]): The acknowledged payload.
-        type (EventType): The strict IPC event type code.
-    """
+    """Confirms delivery of a live outbound message."""
 
     msg_id: str
     text: Optional[str] = None
-    type: EventType = field(default=EventType.ACK, init=False)
+    event_type: EventType = field(default=EventType.ACK, init=False)
 
 
 @register_event(EventType.DROP_FAILED)
 @dataclass
 class DropFailedEvent(IpcEvent):
-    """
-    Data Transfer Object indicating an asynchronous drop delivery failure.
-
-    Attributes:
-        msg_id (str): The unique identifier of the failed message.
-        type (EventType): The strict IPC event type code.
-    """
+    """Marks an asynchronous drop as failed."""
 
     msg_id: str
-    type: EventType = field(default=EventType.DROP_FAILED, init=False)
+    event_type: EventType = field(default=EventType.DROP_FAILED, init=False)
 
 
 @register_event(EventType.CONNECTED)
 @dataclass
 class ConnectedEvent(IpcEvent):
-    """
-    Data Transfer Object indicating a successfully established Tor connection.
-
-    Attributes:
-        alias (str): The peer's alias.
-        onion (Optional[str]): The peer's onion address.
-        type (EventType): The strict IPC event type code.
-    """
+    """Announces a connected peer."""
 
     alias: str
-    onion: Optional[str] = None
-    type: EventType = field(default=EventType.CONNECTED, init=False)
+    onion: str
+    event_type: EventType = field(default=EventType.CONNECTED, init=False)
 
 
 @register_event(EventType.DISCONNECTED)
 @dataclass
 class DisconnectedEvent(IpcEvent):
-    """
-    Data Transfer Object indicating a severed Tor connection.
-
-    Attributes:
-        alias (str): The disconnected peer's alias.
-        type (EventType): The strict IPC event type code.
-    """
+    """Announces a disconnected peer."""
 
     alias: str
-    type: EventType = field(default=EventType.DISCONNECTED, init=False)
+    event_type: EventType = field(default=EventType.DISCONNECTED, init=False)
+
+
+@register_event(EventType.CONNECTION_CONNECTING)
+@dataclass
+class ConnectionConnectingEvent(IpcEvent):
+    """Signals that an outbound connection attempt has started."""
+
+    alias: str
+    event_type: EventType = field(
+        default=EventType.CONNECTION_CONNECTING,
+        init=False,
+    )
 
 
 @register_event(EventType.RENAME_SUCCESS)
 @dataclass
 class RenameSuccessEvent(IpcEvent):
-    """
-    Data Transfer Object indicating a successful local alias rename.
-
-    Attributes:
-        old_alias (str): The previous alias.
-        new_alias (str): The newly assigned alias.
-        is_demotion (bool): True if the contact was removed from permanent storage.
-        was_saved (bool): True if the contact was previously saved.
-        type (EventType): The strict IPC event type code.
-    """
+    """Synchronizes a peer alias rename across UIs."""
 
     old_alias: str
     new_alias: str
     is_demotion: bool = False
     was_saved: bool = True
-    type: EventType = field(default=EventType.RENAME_SUCCESS, init=False)
+    event_type: EventType = field(default=EventType.RENAME_SUCCESS, init=False)
 
 
 @register_event(EventType.CONTACT_REMOVED)
 @dataclass
 class ContactRemovedEvent(IpcEvent):
-    """
-    Data Transfer Object indicating the deletion of a contact.
-
-    Attributes:
-        alias (str): The alias of the removed contact.
-        type (EventType): The strict IPC event type code.
-    """
+    """Announces that a contact or peer was removed from the profile."""
 
     alias: str
-    type: EventType = field(default=EventType.CONTACT_REMOVED, init=False)
+    profile: Optional[str] = None
+    event_type: EventType = field(default=EventType.CONTACT_REMOVED, init=False)
 
 
 @register_event(EventType.CONNECTIONS_STATE)
 @dataclass
 class ConnectionsStateEvent(IpcEvent):
-    """
-    Data Transfer Object broadcasting the current network connection states.
-
-    Attributes:
-        active (List[str]): List of active session aliases.
-        pending (List[str]): List of pending session aliases.
-        contacts (List[str]): List of saved contact aliases.
-        is_header (bool): Flag indicating if this is a header-state broadcast.
-        type (EventType): The strict IPC event type code.
-    """
+    """Broadcasts the current connection-state snapshot."""
 
     active: List[str]
     pending: List[str]
     contacts: List[str]
     is_header: bool = False
-    type: EventType = field(default=EventType.CONNECTIONS_STATE, init=False)
+    event_type: EventType = field(default=EventType.CONNECTIONS_STATE, init=False)
 
 
 @register_event(EventType.SWITCH_SUCCESS)
 @dataclass
 class SwitchSuccessEvent(IpcEvent):
-    """
-    Data Transfer Object confirming a successful UI focus switch.
-
-    Attributes:
-        alias (Optional[str]): The newly focused alias.
-        type (EventType): The strict IPC event type code.
-    """
+    """Confirms a focus switch or focus clear operation."""
 
     alias: Optional[str] = None
-    type: EventType = field(default=EventType.SWITCH_SUCCESS, init=False)
-
-
-# --- Transient States ---
+    event_type: EventType = field(default=EventType.SWITCH_SUCCESS, init=False)
 
 
 @register_event(EventType.CONNECTION_PENDING)
 @dataclass
 class ConnectionPendingEvent(IpcEvent):
-    """
-    Data Transfer Object indicating an outbound connection is awaiting remote acceptance.
+    """Signals a pending outbound live connection."""
 
-    Attributes:
-        alias (Optional[str]): The target peer alias.
-        type (EventType): The strict IPC event type code.
-    """
-
-    alias: Optional[str] = None
-    type: EventType = field(default=EventType.CONNECTION_PENDING, init=False)
+    alias: str
+    event_type: EventType = field(default=EventType.CONNECTION_PENDING, init=False)
 
 
 @register_event(EventType.CONNECTION_AUTO_ACCEPTED)
 @dataclass
 class ConnectionAutoAcceptedEvent(IpcEvent):
-    """
-    Data Transfer Object indicating a mutual connection was automatically accepted.
+    """Signals that a pending connection was auto-accepted."""
 
-    Attributes:
-        alias (Optional[str]): The target peer alias.
-        type (EventType): The strict IPC event type code.
-    """
-
-    alias: Optional[str] = None
-    type: EventType = field(default=EventType.CONNECTION_AUTO_ACCEPTED, init=False)
+    alias: str
+    event_type: EventType = field(
+        default=EventType.CONNECTION_AUTO_ACCEPTED,
+        init=False,
+    )
 
 
 @register_event(EventType.CONNECTION_RETRY)
 @dataclass
 class ConnectionRetryEvent(IpcEvent):
-    """
-    Data Transfer Object indicating a failed connection attempt will be retried.
+    """Signals a retrying connection attempt."""
 
-    Attributes:
-        alias (Optional[str]): The target peer alias.
-        attempt (int): The current retry attempt.
-        max_retries (int): The maximum allowed retries.
-        type (EventType): The strict IPC event type code.
-    """
-
-    alias: Optional[str] = None
-    attempt: int = 1
-    max_retries: int = 3
-    type: EventType = field(default=EventType.CONNECTION_RETRY, init=False)
+    alias: str
+    attempt: int
+    max_retries: int
+    event_type: EventType = field(default=EventType.CONNECTION_RETRY, init=False)
 
 
 @register_event(EventType.CONNECTION_FAILED)
 @dataclass
 class ConnectionFailedEvent(IpcEvent):
-    """
-    Data Transfer Object indicating a final connection failure.
+    """Signals that a connection attempt failed permanently."""
 
-    Attributes:
-        alias (Optional[str]): The target peer alias.
-        reason (str): The specific failure reason.
-        type (EventType): The strict IPC event type code.
-    """
-
-    alias: Optional[str] = None
-    reason: str = ''
-    type: EventType = field(default=EventType.CONNECTION_FAILED, init=False)
+    alias: str
+    event_type: EventType = field(default=EventType.CONNECTION_FAILED, init=False)
 
 
 @register_event(EventType.INCOMING_CONNECTION)
 @dataclass
 class IncomingConnectionEvent(IpcEvent):
-    """
-    Data Transfer Object alerting the UI of an inbound connection request.
+    """Signals an inbound live connection request."""
 
-    Attributes:
-        alias (Optional[str]): The requesting peer alias.
-        type (EventType): The strict IPC event type code.
-    """
-
-    alias: Optional[str] = None
-    type: EventType = field(default=EventType.INCOMING_CONNECTION, init=False)
+    alias: str
+    event_type: EventType = field(default=EventType.INCOMING_CONNECTION, init=False)
 
 
 @register_event(EventType.CONNECTION_REJECTED)
 @dataclass
 class ConnectionRejectedEvent(IpcEvent):
-    """
-    Data Transfer Object indicating a connection was rejected.
+    """Signals that a live connection was rejected."""
 
-    Attributes:
-        alias (Optional[str]): The target peer alias.
-        by_remote (bool): True if the remote peer rejected the request.
-        type (EventType): The strict IPC event type code.
-    """
-
-    alias: Optional[str] = None
+    alias: str
     by_remote: bool = False
-    type: EventType = field(default=EventType.CONNECTION_REJECTED, init=False)
+    event_type: EventType = field(default=EventType.CONNECTION_REJECTED, init=False)
 
 
 @register_event(EventType.TIEBREAKER_REJECTED)
 @dataclass
 class TiebreakerRejectedEvent(IpcEvent):
-    """
-    Data Transfer Object indicating a mutual connection tie-breaker resulted in a local reject.
+    """Signals that a tie-breaker rejected a duplicate connection."""
 
-    Attributes:
-        alias (Optional[str]): The target peer alias.
-        type (EventType): The strict IPC event type code.
-    """
-
-    alias: Optional[str] = None
-    type: EventType = field(default=EventType.TIEBREAKER_REJECTED, init=False)
+    alias: str
+    event_type: EventType = field(default=EventType.TIEBREAKER_REJECTED, init=False)
 
 
 @register_event(EventType.AUTO_RECONNECT_ATTEMPT)
 @dataclass
 class AutoReconnectAttemptEvent(IpcEvent):
-    """
-    Data Transfer Object indicating an automated background reconnect attempt.
+    """Signals an automatic reconnect attempt."""
 
-    Attributes:
-        alias (Optional[str]): The target peer alias.
-        code (DomainCode): The translation code.
-        type (EventType): The strict IPC event type code.
-    """
-
-    alias: Optional[str] = None
-    code: DomainCode = NetworkCode.AUTO_RECONNECT_ATTEMPT
-    type: EventType = field(default=EventType.AUTO_RECONNECT_ATTEMPT, init=False)
-
-
-# --- Inbox & Drops ---
+    alias: str
+    event_type: EventType = field(
+        default=EventType.AUTO_RECONNECT_ATTEMPT,
+        init=False,
+    )
 
 
 @register_event(EventType.INBOX_NOTIFICATION)
 @dataclass
 class InboxNotificationEvent(IpcEvent):
-    """
-    Data Transfer Object alerting the UI to newly arrived offline messages.
+    """Signals new unread offline messages for a peer."""
 
-    Attributes:
-        alias (Optional[str]): The sender's alias.
-        count (int): Number of new messages received.
-        type (EventType): The strict IPC event type code.
-    """
-
-    alias: Optional[str] = None
+    alias: str
     count: int = 1
-    type: EventType = field(default=EventType.INBOX_NOTIFICATION, init=False)
+    event_type: EventType = field(default=EventType.INBOX_NOTIFICATION, init=False)
 
 
 @register_event(EventType.INBOX_DATA)
 @dataclass
 class InboxDataEvent(IpcEvent):
-    """
-    Data Transfer Object carrying buffered or inbox message payloads.
+    """Carries buffered or unread offline messages."""
 
-    Attributes:
-        messages (List[UnreadMessageEntry]): List of unread message DTOs.
-        inbox_counts (Dict[str, int]): Map of aliases to their unread message counts.
-        alias (Optional[str]): The target sender alias.
-        is_live_flush (bool): True if flushing a headless live RAM buffer.
-        type (EventType): The strict IPC event type code.
-    """
-
+    alias: str
     messages: List[UnreadMessageEntry] = field(default_factory=list)
     inbox_counts: Dict[str, int] = field(default_factory=dict)
-    alias: Optional[str] = None
     is_live_flush: bool = False
-    type: EventType = field(default=EventType.INBOX_DATA, init=False)
+    event_type: EventType = field(default=EventType.INBOX_DATA, init=False)
 
     def __post_init__(self) -> None:
-        """
-        Casts dictionary payloads to strong UnreadMessageEntry DTOs.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-        if self.messages and isinstance(self.messages[0], dict):
-            self.messages = [UnreadMessageEntry(**x) for x in self.messages]  # type: ignore
-
-
-# --- Query Response DTOs ---
+        """Casts nested unread-message dictionaries to DTO entries."""
+        self.messages = _cast_entry_list(self.messages, UnreadMessageEntry)
 
 
 @register_event(EventType.CONTACTS_DATA)
 @dataclass
 class ContactsDataEvent(IpcEvent):
-    """
-    Data Transfer Object returning the structured address book.
-
-    Attributes:
-        saved (List[ContactEntry]): List of permanent contacts.
-        discovered (List[ContactEntry]): List of temporary RAM peers.
-        profile (str): The active profile name.
-        type (EventType): The strict IPC event type code.
-    """
+    """Returns the structured address book."""
 
     saved: List[ContactEntry]
     discovered: List[ContactEntry]
     profile: str
-    type: EventType = field(default=EventType.CONTACTS_DATA, init=False)
+    event_type: EventType = field(default=EventType.CONTACTS_DATA, init=False)
 
     def __post_init__(self) -> None:
-        """
-        Casts dictionary payloads to strong ContactEntry DTOs.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-        if self.saved and isinstance(self.saved[0], dict):
-            self.saved = [ContactEntry(**x) for x in self.saved]  # type: ignore
-        if self.discovered and isinstance(self.discovered[0], dict):
-            self.discovered = [ContactEntry(**x) for x in self.discovered]  # type: ignore
+        """Casts nested contact dictionaries to DTO entries."""
+        self.saved = _cast_entry_list(self.saved, ContactEntry)
+        self.discovered = _cast_entry_list(self.discovered, ContactEntry)
 
 
 @register_event(EventType.HISTORY_DATA)
 @dataclass
 class HistoryDataEvent(IpcEvent):
-    """
-    Data Transfer Object returning connection event history.
-
-    Attributes:
-        history (List[HistoryEntry]): List of historical event DTOs.
-        profile (str): The active profile name.
-        target (Optional[str]): The filtered peer alias, if queried.
-        type (EventType): The strict IPC event type code.
-    """
+    """Returns stored connection history."""
 
     history: List[HistoryEntry]
     profile: str
-    target: Optional[str] = None
-    type: EventType = field(default=EventType.HISTORY_DATA, init=False)
+    alias: Optional[str] = None
+    event_type: EventType = field(default=EventType.HISTORY_DATA, init=False)
 
     def __post_init__(self) -> None:
-        """
-        Casts dictionary payloads to strong HistoryEntry DTOs.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-        if self.history and isinstance(self.history[0], dict):
-            self.history = [HistoryEntry(**x) for x in self.history]  # type: ignore
+        """Casts nested history dictionaries to DTO entries."""
+        self.history = _cast_entry_list(self.history, HistoryEntry)
 
 
 @register_event(EventType.MESSAGES_DATA)
 @dataclass
 class MessagesDataEvent(IpcEvent):
-    """
-    Data Transfer Object returning past chat payloads.
-
-    Attributes:
-        messages (List[MessageEntry]): List of message DTOs.
-        target (str): The specific peer alias queried.
-        type (EventType): The strict IPC event type code.
-    """
+    """Returns stored chat messages for a peer."""
 
     messages: List[MessageEntry]
-    target: str
-    type: EventType = field(default=EventType.MESSAGES_DATA, init=False)
+    alias: str
+    event_type: EventType = field(default=EventType.MESSAGES_DATA, init=False)
 
     def __post_init__(self) -> None:
-        """
-        Casts dictionary payloads to strong MessageEntry DTOs.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-        if self.messages and isinstance(self.messages[0], dict):
-            self.messages = [MessageEntry(**x) for x in self.messages]  # type: ignore
+        """Casts nested message dictionaries to DTO entries."""
+        self.messages = _cast_entry_list(self.messages, MessageEntry)
 
 
 @register_event(EventType.INBOX_COUNTS)
 @dataclass
 class InboxCountsEvent(IpcEvent):
-    """
-    Data Transfer Object returning unread message metrics.
-
-    Attributes:
-        inbox (Dict[str, int]): Dictionary mapping aliases to unread message counts.
-        type (EventType): The strict IPC event type code.
-    """
+    """Returns unread-message counts grouped by peer."""
 
     inbox: Dict[str, int]
-    type: EventType = field(default=EventType.INBOX_COUNTS, init=False)
+    event_type: EventType = field(default=EventType.INBOX_COUNTS, init=False)
 
 
 @register_event(EventType.UNREAD_MESSAGES)
 @dataclass
 class UnreadMessagesEvent(IpcEvent):
-    """
-    Data Transfer Object returning all unread messages for a specific peer.
-
-    Attributes:
-        messages (List[UnreadMessageEntry]): List of unread message DTOs.
-        target (str): The sender's alias.
-        type (EventType): The strict IPC event type code.
-    """
+    """Returns unread offline messages for a peer."""
 
     messages: List[UnreadMessageEntry]
-    target: str
-    type: EventType = field(default=EventType.UNREAD_MESSAGES, init=False)
+    alias: str
+    event_type: EventType = field(default=EventType.UNREAD_MESSAGES, init=False)
 
     def __post_init__(self) -> None:
-        """
-        Casts dictionary payloads to strong UnreadMessageEntry DTOs.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-        if self.messages and isinstance(self.messages[0], dict):
-            self.messages = [UnreadMessageEntry(**x) for x in self.messages]  # type: ignore
+        """Casts nested unread-message dictionaries to DTO entries."""
+        self.messages = _cast_entry_list(self.messages, UnreadMessageEntry)
 
 
-@register_event(EventType.ADDRESS_DATA)
+@register_event(EventType.ADDRESS_CURRENT)
 @dataclass
-class AddressDataEvent(IpcEvent):
-    """
-    Data Transfer Object returning hidden service identity data.
+class AddressCurrentEvent(IpcEvent):
+    """Returns the current onion address."""
 
-    Attributes:
-        action (Action): The triggering command action.
-        code (DomainCode): The translation code.
-        profile (str): The active profile name.
-        onion (str): The local Tor onion address.
-        type (EventType): The strict IPC event type code.
-    """
-
-    action: Action
-    code: DomainCode
     profile: str
     onion: str
-    type: EventType = field(default=EventType.ADDRESS_DATA, init=False)
+    event_type: EventType = field(default=EventType.ADDRESS_CURRENT, init=False)
+
+
+@register_event(EventType.ADDRESS_GENERATED)
+@dataclass
+class AddressGeneratedEvent(IpcEvent):
+    """Returns a newly generated onion address."""
+
+    profile: str
+    onion: str
+    event_type: EventType = field(default=EventType.ADDRESS_GENERATED, init=False)
+
+
+@register_event(EventType.ADDRESS_CANT_GENERATE_RUNNING)
+@dataclass
+class AddressCantGenerateRunningEvent(IpcEvent):
+    """Signals that address generation is blocked by a running daemon."""
+
+    profile: str
+    event_type: EventType = field(
+        default=EventType.ADDRESS_CANT_GENERATE_RUNNING,
+        init=False,
+    )
+
+
+@register_event(EventType.ADDRESS_NOT_GENERATED)
+@dataclass
+class AddressNotGeneratedEvent(IpcEvent):
+    """Signals that a profile has no generated onion address yet."""
+
+    profile: str
+    event_type: EventType = field(
+        default=EventType.ADDRESS_NOT_GENERATED,
+        init=False,
+    )
 
 
 @register_event(EventType.PROFILES_DATA)
 @dataclass
 class ProfilesDataEvent(IpcEvent):
-    """
-    Data Transfer Object returning the available isolated profiles.
-
-    Attributes:
-        profiles (List[ProfileEntry]): List of profile DTOs.
-        type (EventType): The strict IPC event type code.
-    """
+    """Returns the list of available profiles."""
 
     profiles: List[ProfileEntry]
-    type: EventType = field(default=EventType.PROFILES_DATA, init=False)
+    event_type: EventType = field(default=EventType.PROFILES_DATA, init=False)
 
     def __post_init__(self) -> None:
-        """
-        Casts dictionary payloads to strong ProfileEntry DTOs.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-        if self.profiles and isinstance(self.profiles[0], dict):
-            self.profiles = [ProfileEntry(**x) for x in self.profiles]  # type: ignore
+        """Casts nested profile dictionaries to DTO entries."""
+        self.profiles = _cast_entry_list(self.profiles, ProfileEntry)
 
 
-# --- Command Success/Error DTOs ---
-
-
-@register_event(EventType.ACTION_SUCCESS)
+@register_event(EventType.AUTH_REQUIRED)
 @dataclass
-class ActionSuccessEvent(IpcEvent):
-    """
-    Data Transfer Object indicating a generic action completed successfully.
+class AuthRequiredEvent(IpcEvent):
+    """Signals that the session must authenticate first."""
 
-    Attributes:
-        code (DomainCode): The translation code denoting success.
-        action (Optional[Action]): The triggering action.
-        type (EventType): The strict IPC event type code.
-    """
-
-    code: DomainCode
-    action: Optional[Action] = None
-    type: EventType = field(default=EventType.ACTION_SUCCESS, init=False)
+    event_type: EventType = field(default=EventType.AUTH_REQUIRED, init=False)
 
 
-@register_event(EventType.ACTION_ERROR)
+@register_event(EventType.INVALID_PASSWORD)
 @dataclass
-class ActionErrorEvent(IpcEvent):
-    """
-    Data Transfer Object indicating a generic action failed.
+class InvalidPasswordEvent(IpcEvent):
+    """Signals that the supplied password was invalid."""
 
-    Attributes:
-        code (DomainCode): The translation code for the error.
-        action (Optional[Action]): The triggering action.
-        reason (Optional[str]): Specific context for the failure.
-        target (Optional[str]): The associated target string, if any.
-        alias (Optional[str]): The resolved alias, if any.
-        type (EventType): The strict IPC event type code.
-    """
-
-    code: DomainCode
-    action: Optional[Action] = None
-    reason: Optional[str] = None
-    target: Optional[str] = None
-    alias: Optional[str] = None
-    type: EventType = field(default=EventType.ACTION_ERROR, init=False)
+    event_type: EventType = field(default=EventType.INVALID_PASSWORD, init=False)
 
 
-@register_event(EventType.CONTACT_ACTION_SUCCESS)
+@register_event(EventType.ALREADY_UNLOCKED)
 @dataclass
-class ContactActionSuccessEvent(IpcEvent):
-    """
-    Data Transfer Object indicating a contact mutation completed successfully.
+class AlreadyUnlockedEvent(IpcEvent):
+    """Signals that the daemon is already unlocked."""
 
-    Attributes:
-        action (Action): The triggering action.
-        code (DomainCode): The translation code denoting success.
-        alias (str): The affected contact alias.
-        profile (Optional[str]): The active profile.
-        type (EventType): The strict IPC event type code.
-    """
-
-    action: Action
-    code: DomainCode
-    alias: str
-    profile: Optional[str] = None
-    type: EventType = field(default=EventType.CONTACT_ACTION_SUCCESS, init=False)
+    event_type: EventType = field(default=EventType.ALREADY_UNLOCKED, init=False)
 
 
-@register_event(EventType.CONTACT_RENAMED)
+@register_event(EventType.SESSION_AUTHENTICATED)
 @dataclass
-class ContactRenamedEvent(IpcEvent):
-    """
-    Data Transfer Object indicating a contact was renamed.
+class SessionAuthenticatedEvent(IpcEvent):
+    """Signals that the current session authenticated successfully."""
 
-    Attributes:
-        action (Action): The triggering action.
-        code (DomainCode): The translation code.
-        old_alias (str): The previous alias.
-        new_alias (str): The new alias.
-        type (EventType): The strict IPC event type code.
-    """
-
-    action: Action
-    code: DomainCode
-    old_alias: str
-    new_alias: str
-    type: EventType = field(default=EventType.CONTACT_RENAMED, init=False)
+    event_type: EventType = field(
+        default=EventType.SESSION_AUTHENTICATED,
+        init=False,
+    )
 
 
-@register_event(EventType.PROFILE_ACTION_SUCCESS)
+@register_event(EventType.SELF_DESTRUCT_INITIATED)
 @dataclass
-class ProfileActionSuccessEvent(IpcEvent):
-    """
-    Data Transfer Object indicating a profile mutation completed successfully.
+class SelfDestructInitiatedEvent(IpcEvent):
+    """Signals that daemon self-destruction has started."""
 
-    Attributes:
-        action (Action): The triggering action.
-        code (DomainCode): The translation code.
-        profile (str): The affected profile name.
-        remote_tag (Optional[str]): Network routing configuration tag.
-        port (Optional[int]): Target port if remote.
-        type (EventType): The strict IPC event type code.
-    """
-
-    action: Action
-    code: DomainCode
-    profile: str
-    remote_tag: Optional[str] = None
-    port: Optional[int] = None
-    type: EventType = field(default=EventType.PROFILE_ACTION_SUCCESS, init=False)
+    event_type: EventType = field(
+        default=EventType.SELF_DESTRUCT_INITIATED,
+        init=False,
+    )
 
 
-@register_event(EventType.TARGET_ACTION_SUCCESS)
+@register_event(EventType.DAEMON_UNLOCKED)
 @dataclass
-class TargetActionSuccessEvent(IpcEvent):
-    """
-    Data Transfer Object indicating an action targeting a specific peer succeeded.
+class DaemonUnlockedEvent(IpcEvent):
+    """Signals that the daemon was unlocked successfully."""
 
-    Attributes:
-        action (Action): The triggering action.
-        code (DomainCode): The translation code.
-        target (Optional[str]): The specific target identifier.
-        profile (Optional[str]): The active profile context.
-        type (EventType): The strict IPC event type code.
-    """
+    event_type: EventType = field(default=EventType.DAEMON_UNLOCKED, init=False)
 
-    action: Action
-    code: DomainCode
-    target: Optional[str] = None
-    profile: Optional[str] = None
-    type: EventType = field(default=EventType.TARGET_ACTION_SUCCESS, init=False)
+
+@register_event(EventType.DAEMON_LOCKED)
+@dataclass
+class DaemonLockedEvent(IpcEvent):
+    """Signals that the daemon is locked."""
+
+    event_type: EventType = field(default=EventType.DAEMON_LOCKED, init=False)
+
+
+@register_event(EventType.DAEMON_OFFLINE)
+@dataclass
+class DaemonOfflineEvent(IpcEvent):
+    """Signals that no local daemon is running."""
+
+    event_type: EventType = field(default=EventType.DAEMON_OFFLINE, init=False)
+
+
+@register_event(EventType.UNKNOWN_COMMAND)
+@dataclass
+class UnknownCommandEvent(IpcEvent):
+    """Signals that the daemon received an unknown command."""
+
+    event_type: EventType = field(default=EventType.UNKNOWN_COMMAND, init=False)
+
+
+@register_event(EventType.INVALID_SETTING_KEY)
+@dataclass
+class InvalidSettingKeyEvent(IpcEvent):
+    """Signals that a setting key was invalid."""
+
+    event_type: EventType = field(default=EventType.INVALID_SETTING_KEY, init=False)
+
+
+@register_event(EventType.INVALID_CONFIG_KEY)
+@dataclass
+class InvalidConfigKeyEvent(IpcEvent):
+    """Signals that a configuration key was invalid."""
+
+    event_type: EventType = field(default=EventType.INVALID_CONFIG_KEY, init=False)
+
+
+@register_event(EventType.DAEMON_CANNOT_MANAGE_UI)
+@dataclass
+class DaemonCannotManageUiEvent(IpcEvent):
+    """Signals that a UI-only setting was routed to the daemon."""
+
+    event_type: EventType = field(
+        default=EventType.DAEMON_CANNOT_MANAGE_UI,
+        init=False,
+    )
 
 
 @register_event(EventType.SETTING_UPDATED)
 @dataclass
 class SettingUpdatedEvent(IpcEvent):
-    """
-    Data Transfer Object indicating a global setting was mutated.
+    """Signals that a global setting was updated."""
 
-    Attributes:
-        action (Action): The triggering action.
-        code (DomainCode): The translation code.
-        key (str): The specific setting key modified.
-        type (EventType): The strict IPC event type code.
-    """
-
-    action: Action
-    code: DomainCode
     key: str
-    type: EventType = field(default=EventType.SETTING_UPDATED, init=False)
+    event_type: EventType = field(default=EventType.SETTING_UPDATED, init=False)
+
+
+@register_event(EventType.SETTING_UPDATE_FAILED)
+@dataclass
+class SettingUpdateFailedEvent(IpcEvent):
+    """Signals that a global setting update failed."""
+
+    event_type: EventType = field(
+        default=EventType.SETTING_UPDATE_FAILED,
+        init=False,
+    )
+
+
+@register_event(EventType.SETTING_TYPE_ERROR)
+@dataclass
+class SettingTypeErrorEvent(IpcEvent):
+    """Signals a type mismatch while applying a setting value."""
+
+    event_type: EventType = field(default=EventType.SETTING_TYPE_ERROR, init=False)
 
 
 @register_event(EventType.SETTING_DATA)
 @dataclass
 class SettingDataEvent(IpcEvent):
-    """
-    Data Transfer Object returning a global setting value.
-
-    Attributes:
-        key (str): The requested setting key.
-        value (str): The stringified value.
-        code (DomainCode): The translation code.
-        type (EventType): The strict IPC event type code.
-    """
+    """Returns a global setting value."""
 
     key: str
     value: str
-    code: DomainCode = SystemCode.SETTING_DATA
-    type: EventType = field(default=EventType.SETTING_DATA, init=False)
+    event_type: EventType = field(default=EventType.SETTING_DATA, init=False)
 
 
 @register_event(EventType.CONFIG_UPDATED)
 @dataclass
 class ConfigUpdatedEvent(IpcEvent):
-    """
-    Data Transfer Object indicating a profile-specific config was mutated.
+    """Signals that a profile-specific config override was updated."""
 
-    Attributes:
-        action (Action): The triggering action.
-        code (DomainCode): The translation code.
-        key (str): The specific setting key modified.
-        type (EventType): The strict IPC event type code.
-    """
-
-    action: Action
-    code: DomainCode
     key: str
-    type: EventType = field(default=EventType.CONFIG_UPDATED, init=False)
+    event_type: EventType = field(default=EventType.CONFIG_UPDATED, init=False)
+
+
+@register_event(EventType.CONFIG_UPDATE_FAILED)
+@dataclass
+class ConfigUpdateFailedEvent(IpcEvent):
+    """Signals that a config update failed."""
+
+    event_type: EventType = field(
+        default=EventType.CONFIG_UPDATE_FAILED,
+        init=False,
+    )
 
 
 @register_event(EventType.CONFIG_DATA)
 @dataclass
 class ConfigDataEvent(IpcEvent):
-    """
-    Data Transfer Object returning a profile-specific config value.
-
-    Attributes:
-        key (str): The requested config key.
-        value (str): The stringified value.
-        code (DomainCode): The translation code.
-        type (EventType): The strict IPC event type code.
-    """
+    """Returns a profile-specific config value."""
 
     key: str
     value: str
-    code: DomainCode = SystemCode.CONFIG_DATA
-    type: EventType = field(default=EventType.CONFIG_DATA, init=False)
+    event_type: EventType = field(default=EventType.CONFIG_DATA, init=False)
 
 
 @register_event(EventType.CONFIG_SYNCED)
 @dataclass
 class ConfigSyncedEvent(IpcEvent):
-    """
-    Data Transfer Object indicating a profile's config overrides were cleared.
+    """Signals that profile config overrides were cleared."""
 
-    Attributes:
-        action (Action): The triggering action.
-        code (DomainCode): The translation code.
-        type (EventType): The strict IPC event type code.
-    """
-
-    action: Action
-    code: DomainCode = SystemCode.CONFIG_SYNCED
-    type: EventType = field(default=EventType.CONFIG_SYNCED, init=False)
+    event_type: EventType = field(default=EventType.CONFIG_SYNCED, init=False)
 
 
-@register_event(EventType.FALLBACK_SUCCESS)
+@register_event(EventType.CANNOT_CONNECT_SELF)
 @dataclass
-class FallbackSuccessEvent(IpcEvent):
-    """
-    Data Transfer Object indicating live messages were successfully converted to drops.
+class CannotConnectSelfEvent(IpcEvent):
+    """Signals that the local onion cannot connect to itself."""
 
-    Attributes:
-        code (DomainCode): The translation code.
-        alias (str): The target peer alias.
-        count (int): Number of messages converted.
-        msg_ids (List[str]): List of converted message identifiers.
-        action (Optional[Action]): The triggering action.
-        type (EventType): The strict IPC event type code.
-    """
+    event_type: EventType = field(default=EventType.CANNOT_CONNECT_SELF, init=False)
 
-    code: DomainCode
+
+@register_event(EventType.INVALID_TARGET)
+@dataclass
+class InvalidTargetEvent(IpcEvent):
+    """Signals that a user-supplied target could not be resolved."""
+
+    target: str
+    event_type: EventType = field(default=EventType.INVALID_TARGET, init=False)
+
+
+@register_event(EventType.CANNOT_SWITCH_SELF)
+@dataclass
+class CannotSwitchSelfEvent(IpcEvent):
+    """Signals that the UI cannot focus the local onion."""
+
+    event_type: EventType = field(default=EventType.CANNOT_SWITCH_SELF, init=False)
+
+
+@register_event(EventType.NO_CONNECTION_TO_REJECT)
+@dataclass
+class NoConnectionToRejectEvent(IpcEvent):
+    """Signals that there is no connection to reject."""
+
     alias: str
-    count: int
-    msg_ids: List[str]
-    action: Optional[Action] = None
-    type: EventType = field(default=EventType.FALLBACK_SUCCESS, init=False)
+    event_type: EventType = field(
+        default=EventType.NO_CONNECTION_TO_REJECT,
+        init=False,
+    )
 
 
-# --- Specific Asynchronous Notification DTOs ---
+@register_event(EventType.NO_CONNECTION_TO_DISCONNECT)
+@dataclass
+class NoConnectionToDisconnectEvent(IpcEvent):
+    """Signals that there is no connection to disconnect."""
+
+    alias: str
+    event_type: EventType = field(
+        default=EventType.NO_CONNECTION_TO_DISCONNECT,
+        init=False,
+    )
+
+
+@register_event(EventType.NO_PENDING_CONNECTION)
+@dataclass
+class NoPendingConnectionEvent(IpcEvent):
+    """Signals that there is no pending connection to accept."""
+
+    alias: str
+    event_type: EventType = field(default=EventType.NO_PENDING_CONNECTION, init=False)
 
 
 @register_event(EventType.MAX_CONNECTIONS_REACHED)
 @dataclass
 class MaxConnectionsReachedEvent(IpcEvent):
-    """
-    Data Transfer Object indicating the connection limit has been exhausted.
-
-    Attributes:
-        target (str): The peer whose connection was blocked.
-        max_conn (int): The current system limit.
-        code (DomainCode): The translation code.
-        type (EventType): The strict IPC event type code.
-    """
+    """Signals that the maximum live connection count was reached."""
 
     target: str
     max_conn: int
-    code: DomainCode = NetworkCode.MAX_CONNECTIONS_REACHED
-    type: EventType = field(default=EventType.MAX_CONNECTIONS_REACHED, init=False)
+    event_type: EventType = field(
+        default=EventType.MAX_CONNECTIONS_REACHED,
+        init=False,
+    )
+
+
+@register_event(EventType.DROPS_DISABLED)
+@dataclass
+class DropsDisabledEvent(IpcEvent):
+    """Signals that offline drops are disabled."""
+
+    event_type: EventType = field(default=EventType.DROPS_DISABLED, init=False)
+
+
+@register_event(EventType.CANNOT_DROP_SELF)
+@dataclass
+class CannotDropSelfEvent(IpcEvent):
+    """Signals that the local onion cannot send drops to itself."""
+
+    event_type: EventType = field(default=EventType.CANNOT_DROP_SELF, init=False)
+
+
+@register_event(EventType.DROP_QUEUED)
+@dataclass
+class DropQueuedEvent(IpcEvent):
+    """Signals that a drop was queued successfully."""
+
+    alias: str
+    event_type: EventType = field(default=EventType.DROP_QUEUED, init=False)
+
+
+@register_event(EventType.NO_PENDING_LIVE_MSGS)
+@dataclass
+class NoPendingLiveMessagesEvent(IpcEvent):
+    """Signals that no pending live messages existed for fallback."""
+
+    alias: str
+    event_type: EventType = field(default=EventType.NO_PENDING_LIVE_MSGS, init=False)
+
+
+@register_event(EventType.FALLBACK_SUCCESS)
+@dataclass
+class FallbackSuccessEvent(IpcEvent):
+    """Signals that pending live messages were converted to drops."""
+
+    alias: str
+    count: int
+    msg_ids: List[str]
+    event_type: EventType = field(default=EventType.FALLBACK_SUCCESS, init=False)
+
+
+@register_event(EventType.CONTACT_ADDED)
+@dataclass
+class ContactAddedEvent(IpcEvent):
+    """Signals that a contact was added to the address book."""
+
+    alias: str
+    profile: str
+    event_type: EventType = field(default=EventType.CONTACT_ADDED, init=False)
 
 
 @register_event(EventType.PEER_NOT_FOUND)
 @dataclass
 class PeerNotFoundEvent(IpcEvent):
-    """
-    Data Transfer Object indicating the specified peer could not be resolved.
-
-    Attributes:
-        target (str): The unresolvable target string.
-        code (DomainCode): The translation code.
-        type (EventType): The strict IPC event type code.
-    """
+    """Signals that a user-supplied peer could not be resolved."""
 
     target: str
-    code: DomainCode = ContactCode.PEER_NOT_FOUND
-    type: EventType = field(default=EventType.PEER_NOT_FOUND, init=False)
+    event_type: EventType = field(default=EventType.PEER_NOT_FOUND, init=False)
+
+
+@register_event(EventType.CONTACT_ALREADY_SAVED)
+@dataclass
+class ContactAlreadySavedEvent(IpcEvent):
+    """Signals that a discovered peer was already saved."""
+
+    alias: str
+    event_type: EventType = field(
+        default=EventType.CONTACT_ALREADY_SAVED,
+        init=False,
+    )
+
+
+@register_event(EventType.PEER_PROMOTED)
+@dataclass
+class PeerPromotedEvent(IpcEvent):
+    """Signals that a discovered peer was promoted to a contact."""
+
+    alias: str
+    event_type: EventType = field(default=EventType.PEER_PROMOTED, init=False)
+
+
+@register_event(EventType.ALIAS_IN_USE)
+@dataclass
+class AliasInUseEvent(IpcEvent):
+    """Signals that an alias is already in use."""
+
+    alias: str
+    event_type: EventType = field(default=EventType.ALIAS_IN_USE, init=False)
+
+
+@register_event(EventType.ONION_IN_USE)
+@dataclass
+class OnionInUseEvent(IpcEvent):
+    """Signals that an onion is already bound to a saved contact."""
+
+    alias: str
+    event_type: EventType = field(default=EventType.ONION_IN_USE, init=False)
+
+
+@register_event(EventType.ALIAS_SAME)
+@dataclass
+class AliasSameEvent(IpcEvent):
+    """Signals that a rename reused the same alias."""
+
+    event_type: EventType = field(default=EventType.ALIAS_SAME, init=False)
+
+
+@register_event(EventType.ALIAS_NOT_FOUND)
+@dataclass
+class AliasNotFoundEvent(IpcEvent):
+    """Signals that the requested alias does not exist."""
+
+    alias: str
+    event_type: EventType = field(default=EventType.ALIAS_NOT_FOUND, init=False)
+
+
+@register_event(EventType.ALIAS_RENAMED)
+@dataclass
+class AliasRenamedEvent(IpcEvent):
+    """Signals that an alias was renamed successfully."""
+
+    old_alias: str
+    new_alias: str
+    event_type: EventType = field(default=EventType.ALIAS_RENAMED, init=False)
+
+
+@register_event(EventType.PEER_CANT_DELETE_ACTIVE)
+@dataclass
+class PeerCantDeleteActiveEvent(IpcEvent):
+    """Signals that an active peer cannot be deleted."""
+
+    alias: str
+    event_type: EventType = field(
+        default=EventType.PEER_CANT_DELETE_ACTIVE,
+        init=False,
+    )
+
+
+@register_event(EventType.CONTACT_DOWNGRADED)
+@dataclass
+class ContactDowngradedEvent(IpcEvent):
+    """Signals that a saved contact was downgraded to unsaved."""
+
+    alias: str
+    event_type: EventType = field(default=EventType.CONTACT_DOWNGRADED, init=False)
+
+
+@register_event(EventType.CONTACT_REMOVED_DOWNGRADED)
+@dataclass
+class ContactRemovedDowngradedEvent(IpcEvent):
+    """Signals that a removed contact was downgraded to a session peer."""
+
+    alias: str
+    new_alias: str
+    event_type: EventType = field(
+        default=EventType.CONTACT_REMOVED_DOWNGRADED,
+        init=False,
+    )
+
+
+@register_event(EventType.PEER_ANONYMIZED)
+@dataclass
+class PeerAnonymizedEvent(IpcEvent):
+    """Signals that a discovered peer was anonymized."""
+
+    alias: str
+    new_alias: str
+    event_type: EventType = field(default=EventType.PEER_ANONYMIZED, init=False)
+
+
+@register_event(EventType.PEER_REMOVED)
+@dataclass
+class PeerRemovedEvent(IpcEvent):
+    """Signals that a discovered peer was removed."""
+
+    alias: str
+    event_type: EventType = field(default=EventType.PEER_REMOVED, init=False)
+
+
+@register_event(EventType.CONTACTS_CLEARED)
+@dataclass
+class ContactsClearedEvent(IpcEvent):
+    """Signals that the address book was cleared."""
+
+    profile: str
+    event_type: EventType = field(default=EventType.CONTACTS_CLEARED, init=False)
+
+
+@register_event(EventType.CONTACTS_CLEAR_FAILED)
+@dataclass
+class ContactsClearFailedEvent(IpcEvent):
+    """Signals that clearing the address book failed."""
+
+    event_type: EventType = field(
+        default=EventType.CONTACTS_CLEAR_FAILED,
+        init=False,
+    )
+
+
+@register_event(EventType.HISTORY_CLEARED)
+@dataclass
+class HistoryClearedEvent(IpcEvent):
+    """Signals that a peer-specific history was cleared."""
+
+    alias: str
+    event_type: EventType = field(default=EventType.HISTORY_CLEARED, init=False)
+
+
+@register_event(EventType.HISTORY_CLEARED_ALL)
+@dataclass
+class HistoryClearedAllEvent(IpcEvent):
+    """Signals that profile history was cleared."""
+
+    profile: str
+    event_type: EventType = field(default=EventType.HISTORY_CLEARED_ALL, init=False)
+
+
+@register_event(EventType.HISTORY_CLEAR_FAILED)
+@dataclass
+class HistoryClearFailedEvent(IpcEvent):
+    """Signals that clearing history failed."""
+
+    event_type: EventType = field(default=EventType.HISTORY_CLEAR_FAILED, init=False)
+
+
+@register_event(EventType.MESSAGES_CLEARED)
+@dataclass
+class MessagesClearedEvent(IpcEvent):
+    """Signals that peer-specific messages were cleared."""
+
+    alias: str
+    event_type: EventType = field(default=EventType.MESSAGES_CLEARED, init=False)
+
+
+@register_event(EventType.MESSAGES_CLEARED_NON_CONTACTS)
+@dataclass
+class MessagesClearedNonContactsEvent(IpcEvent):
+    """Signals that non-contact messages for a peer were cleared."""
+
+    alias: str
+    event_type: EventType = field(
+        default=EventType.MESSAGES_CLEARED_NON_CONTACTS,
+        init=False,
+    )
+
+
+@register_event(EventType.MESSAGES_CLEARED_NON_CONTACTS_ALL)
+@dataclass
+class MessagesClearedNonContactsAllEvent(IpcEvent):
+    """Signals that non-contact messages for a profile were cleared."""
+
+    profile: str
+    event_type: EventType = field(
+        default=EventType.MESSAGES_CLEARED_NON_CONTACTS_ALL,
+        init=False,
+    )
+
+
+@register_event(EventType.MESSAGES_CLEARED_ALL)
+@dataclass
+class MessagesClearedAllEvent(IpcEvent):
+    """Signals that all profile messages were cleared."""
+
+    profile: str
+    event_type: EventType = field(default=EventType.MESSAGES_CLEARED_ALL, init=False)
+
+
+@register_event(EventType.MESSAGES_CLEAR_FAILED)
+@dataclass
+class MessagesClearFailedEvent(IpcEvent):
+    """Signals that clearing messages failed."""
+
+    event_type: EventType = field(default=EventType.MESSAGES_CLEAR_FAILED, init=False)
+
+
+@register_event(EventType.DB_CLEARED)
+@dataclass
+class DatabaseClearedEvent(IpcEvent):
+    """Signals that a profile database was cleared."""
+
+    profile: str
+    event_type: EventType = field(default=EventType.DB_CLEARED, init=False)
+
+
+@register_event(EventType.DB_CLEAR_FAILED)
+@dataclass
+class DatabaseClearFailedEvent(IpcEvent):
+    """Signals that clearing the profile database failed."""
+
+    event_type: EventType = field(default=EventType.DB_CLEAR_FAILED, init=False)
 
 
 @register_event(EventType.RETUNNEL_INITIATED)
 @dataclass
 class RetunnelInitiatedEvent(IpcEvent):
-    """
-    Data Transfer Object indicating circuit rotation has started for a peer.
-
-    Attributes:
-        alias (str): The target peer alias.
-        code (DomainCode): The translation code.
-        type (EventType): The strict IPC event type code.
-    """
+    """Signals that retunneling has started for a peer."""
 
     alias: str
-    code: DomainCode = NetworkCode.RETUNNEL_INITIATED
-    type: EventType = field(default=EventType.RETUNNEL_INITIATED, init=False)
+    event_type: EventType = field(default=EventType.RETUNNEL_INITIATED, init=False)
 
 
 @register_event(EventType.RETUNNEL_SUCCESS)
 @dataclass
 class RetunnelSuccessEvent(IpcEvent):
-    """
-    Data Transfer Object indicating circuit rotation completed successfully.
-
-    Attributes:
-        alias (str): The target peer alias.
-        code (DomainCode): The translation code.
-        type (EventType): The strict IPC event type code.
-    """
+    """Signals that retunneling succeeded for a peer."""
 
     alias: str
-    code: DomainCode = NetworkCode.RETUNNEL_SUCCESS
-    type: EventType = field(default=EventType.RETUNNEL_SUCCESS, init=False)
+    event_type: EventType = field(default=EventType.RETUNNEL_SUCCESS, init=False)
+
+
+@register_event(EventType.RETUNNEL_FAILED)
+@dataclass
+class RetunnelFailedEvent(IpcEvent):
+    """Signals that retunneling failed for a peer."""
+
+    alias: str
+    error: Optional[str] = None
+    event_type: EventType = field(default=EventType.RETUNNEL_FAILED, init=False)

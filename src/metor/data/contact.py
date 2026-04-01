@@ -6,7 +6,7 @@ Maintains data integrity without applying UI presentation formatting.
 from pathlib import Path
 from typing import Tuple, Optional, List, Dict, Union
 
-from metor.core.api import DomainCode, ContactCode
+from metor.core.api import EventType
 from metor.utils import Constants, clean_onion
 
 # Local Package Imports
@@ -65,7 +65,7 @@ class ContactManager:
 
     def add_contact(
         self, alias: str, onion: str
-    ) -> Tuple[bool, DomainCode, Dict[str, str]]:
+    ) -> Tuple[bool, EventType, Dict[str, str]]:
         """
         Adds a new contact to the address book.
 
@@ -74,13 +74,13 @@ class ContactManager:
             onion (str): The remote onion identity.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, str]]: A success flag, domain state code, and parameters.
+            Tuple[bool, EventType, Dict[str, str]]: A success flag, strict event type, and payload.
         """
         alias = alias.strip().lower()
         onion = clean_onion(onion)
 
         if self._sql.fetchall('SELECT onion FROM contacts WHERE alias = ?', (alias,)):
-            return False, ContactCode.ALIAS_IN_USE, {'alias': alias}
+            return False, EventType.ALIAS_IN_USE, {'alias': alias}
 
         res: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
             'SELECT alias FROM contacts WHERE onion = ? AND is_saved = 1', (onion,)
@@ -88,7 +88,7 @@ class ContactManager:
         if res:
             return (
                 False,
-                ContactCode.ONION_IN_USE,
+                EventType.ONION_IN_USE,
                 {'alias': str(res[0][0])},
             )
 
@@ -106,13 +106,13 @@ class ContactManager:
         # We intentionally don't resolve the alias since it is dynamically inserted in the UI
         return (
             True,
-            ContactCode.CONTACT_ADDED,
+            EventType.CONTACT_ADDED,
             {'alias': alias, 'profile': self._pm.profile_name},
         )
 
     def promote_discovered_peer(
         self, alias: str
-    ) -> Tuple[bool, DomainCode, Dict[str, str]]:
+    ) -> Tuple[bool, EventType, Dict[str, str]]:
         """
         Promotes a discovered peer to a permanent address book contact.
 
@@ -120,7 +120,7 @@ class ContactManager:
             alias (str): The discovered alias to promote.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, str]]: A success flag, domain state code, and parameters.
+            Tuple[bool, EventType, Dict[str, str]]: A success flag, strict event type, and payload.
         """
         alias = alias.strip().lower()
         res: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
@@ -128,18 +128,18 @@ class ContactManager:
         )
 
         if not res:
-            return False, ContactCode.PEER_NOT_FOUND, {'target': alias}
+            return False, EventType.PEER_NOT_FOUND, {'target': alias}
         if res[0][0] == 1:
-            return False, ContactCode.CONTACT_ALREADY_SAVED, {'alias': alias}
+            return False, EventType.CONTACT_ALREADY_SAVED, {'alias': alias}
 
         self._sql.execute('UPDATE contacts SET is_saved = 1 WHERE alias = ?', (alias,))
 
         # We intentionally don't resolve the alias since it is dynamically inserted in the UI
-        return True, ContactCode.PEER_PROMOTED, {'alias': alias}
+        return True, EventType.PEER_PROMOTED, {'alias': alias}
 
     def rename_contact(
         self, old_alias: str, new_alias: str
-    ) -> Tuple[bool, DomainCode, Dict[str, str]]:
+    ) -> Tuple[bool, EventType, Dict[str, str]]:
         """
         Renames a contact or discovered peer dynamically.
 
@@ -148,38 +148,36 @@ class ContactManager:
             new_alias (str): The desired new alias.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, str]]: A success flag, domain state code, and parameters.
+            Tuple[bool, EventType, Dict[str, str]]: A success flag, strict event type, and payload.
         """
         old_alias = old_alias.strip().lower()
         new_alias = new_alias.strip().lower()
 
         if old_alias == new_alias:
-            return False, ContactCode.ALIAS_SAME, {}
+            return False, EventType.ALIAS_SAME, {}
 
         if self._sql.fetchall(
             'SELECT onion FROM contacts WHERE alias = ?', (new_alias,)
         ):
-            return False, ContactCode.ALIAS_IN_USE, {'alias': new_alias}
+            return False, EventType.ALIAS_IN_USE, {'alias': new_alias}
 
         if not self._sql.fetchall(
             'SELECT onion FROM contacts WHERE alias = ?', (old_alias,)
         ):
-            return False, ContactCode.ALIAS_NOT_FOUND, {'alias': old_alias}
+            return False, EventType.ALIAS_NOT_FOUND, {'alias': old_alias}
 
         self._sql.execute(
             'UPDATE contacts SET alias = ? WHERE alias = ?', (new_alias, old_alias)
         )
         return (
             True,
-            ContactCode.ALIAS_RENAMED,
+            EventType.ALIAS_RENAMED,
             {'old_alias': old_alias, 'new_alias': new_alias},
         )
 
     def remove_contact(
         self, alias: str, active_onions: Optional[List[str]] = None
-    ) -> Tuple[
-        bool, DomainCode, Dict[str, str], List[Tuple[str, str, bool]], List[str]
-    ]:
+    ) -> Tuple[bool, EventType, Dict[str, str], List[Tuple[str, str, bool]], List[str]]:
         """
         Removes a saved contact or anonymizes a renamed discovered peer.
         Refuses to physically delete peers tied to active states, demotes instead.
@@ -189,7 +187,7 @@ class ContactManager:
             active_onions (Optional[List[str]]): Currently connected onions functioning as a shield.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, str], List[Tuple[str, str, bool]], List[str]]: A success flag, state code, params, UI renames, and UI deletions.
+            Tuple[bool, EventType, Dict[str, str], List[Tuple[str, str, bool]], List[str]]: A success flag, strict event type, payload, UI renames, and UI deletions.
         """
         active_onions = active_onions or []
         alias = alias.strip().lower()
@@ -198,7 +196,7 @@ class ContactManager:
         )
 
         if not res:
-            return False, ContactCode.PEER_NOT_FOUND, {'target': alias}, [], []
+            return False, EventType.PEER_NOT_FOUND, {'target': alias}, [], []
 
         is_saved, raw_onion = res[0]
         onion = str(raw_onion)
@@ -222,7 +220,7 @@ class ContactManager:
                     )
                     return (
                         True,
-                        ContactCode.CONTACT_DOWNGRADED,
+                        EventType.CONTACT_DOWNGRADED,
                         {'alias': alias},
                         [],
                         [],
@@ -230,7 +228,7 @@ class ContactManager:
                 else:
                     return (
                         False,
-                        ContactCode.PEER_CANT_DELETE_ACTIVE,
+                        EventType.PEER_CANT_DELETE_ACTIVE,
                         {'alias': alias},
                         [],
                         [],
@@ -244,7 +242,7 @@ class ContactManager:
             if was_saved:
                 return (
                     True,
-                    ContactCode.CONTACT_REMOVED_DOWNGRADED,
+                    EventType.CONTACT_REMOVED_DOWNGRADED,
                     {'alias': alias, 'new_alias': new_alias},
                     [(alias, new_alias, was_saved)],
                     [],
@@ -252,7 +250,7 @@ class ContactManager:
             else:
                 return (
                     True,
-                    ContactCode.PEER_ANONYMIZED,
+                    EventType.PEER_ANONYMIZED,
                     {'alias': alias, 'new_alias': new_alias},
                     [(alias, new_alias, was_saved)],
                     [],
@@ -263,19 +261,17 @@ class ContactManager:
             if was_saved:
                 return (
                     True,
-                    ContactCode.CONTACT_REMOVED,
+                    EventType.CONTACT_REMOVED,
                     {'alias': alias, 'profile': self._pm.profile_name},
                     [],
                     [alias],
                 )
             else:
-                return True, ContactCode.PEER_REMOVED, {'alias': alias}, [], [alias]
+                return True, EventType.PEER_REMOVED, {'alias': alias}, [], [alias]
 
     def clear_contacts(
         self, active_onions: Optional[List[str]] = None
-    ) -> Tuple[
-        bool, DomainCode, Dict[str, str], List[Tuple[str, str, bool]], List[str]
-    ]:
+    ) -> Tuple[bool, EventType, Dict[str, str], List[Tuple[str, str, bool]], List[str]]:
         """
         Wipes the address book, demoting saved contacts to discovered peers if they
         are still tied to history, messages, or active network connections.
@@ -284,7 +280,7 @@ class ContactManager:
             active_onions (Optional[List[str]]): Currently connected onions functioning as a shield.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, str], List[Tuple[str, str, bool]], List[str]]: A success flag, state code, params, UI renames, and UI deletions.
+            Tuple[bool, EventType, Dict[str, str], List[Tuple[str, str, bool]], List[str]]: A success flag, strict event type, payload, UI renames, and UI deletions.
         """
         active_onions = active_onions or []
         try:
@@ -319,13 +315,13 @@ class ContactManager:
 
             return (
                 True,
-                ContactCode.CONTACTS_CLEARED,
+                EventType.CONTACTS_CLEARED,
                 {'profile': self._pm.profile_name},
                 renames,
                 removed,
             )
         except Exception:
-            return False, ContactCode.CONTACTS_CLEAR_FAILED, {}, [], []
+            return False, EventType.CONTACTS_CLEAR_FAILED, {}, [], []
 
     def cleanup_orphans(self, active_onions: Optional[List[str]] = None) -> List[str]:
         """
@@ -369,18 +365,13 @@ class ContactManager:
 
         return deleted_aliases
 
-    def resolve_target(
-        self,
-        target: Optional[str],
-        auto_create: bool = False,
-    ) -> Optional[Tuple[str, str]]:
+    def resolve_target(self, target: Optional[str]) -> Optional[Tuple[str, str]]:
         """
         Resolves a generic target string into a guaranteed (alias, onion) tuple.
+        This variant is strictly read-only and never creates aliases.
 
         Args:
             target (Optional[str]): The target to resolve (alias or onion).
-            auto_create (bool): If True, automatically creates a discovered peer RAM alias if
-                                the target is a valid, unknown onion address.
 
         Returns:
             Optional[Tuple[str, str]]: A tuple containing the resolved alias and
@@ -390,7 +381,33 @@ class ContactManager:
         if not onion and target:
             onion = clean_onion(target)
 
-        alias: Optional[str] = self.get_alias_by_onion(onion, auto_create=auto_create)
+        alias: Optional[str] = self.get_alias_by_onion(onion)
+
+        if alias and onion:
+            return alias, onion
+        return None
+
+    def resolve_target_for_interaction(
+        self,
+        target: Optional[str],
+    ) -> Optional[Tuple[str, str]]:
+        """
+        Resolves a generic target string into a guaranteed (alias, onion) tuple.
+        This variant may create a RAM alias for a previously unseen onion because
+        it is intended for interactive peer actions such as connect, switch, or drops.
+
+        Args:
+            target (Optional[str]): The target to resolve (alias or onion).
+
+        Returns:
+            Optional[Tuple[str, str]]: A tuple containing the resolved alias and
+            clean onion. Returns None if the target cannot be resolved.
+        """
+        onion: Optional[str] = self.get_onion_by_alias(target)
+        if not onion and target:
+            onion = clean_onion(target)
+
+        alias: Optional[str] = self.ensure_alias_for_onion(onion)
 
         if alias and onion:
             return alias, onion
@@ -437,18 +454,15 @@ class ContactManager:
             alias = f'{base_alias}{counter}'
         return alias
 
-    def get_alias_by_onion(
-        self, onion: Optional[str], auto_create: bool = True
-    ) -> Optional[str]:
+    def get_alias_by_onion(self, onion: Optional[str]) -> Optional[str]:
         """
-        Returns the alias for an onion, or auto-generates a discovered peer if unknown.
+        Returns the alias for an onion without mutating storage.
 
         Args:
             onion (Optional[str]): The onion address.
-            auto_create (bool): Whether to generate a temporary alias if it doesn't exist.
 
         Returns:
-            Optional[str]: The mapped or generated alias.
+            Optional[str]: The mapped alias.
         """
         if not onion:
             return None
@@ -460,8 +474,29 @@ class ContactManager:
         if res:
             return str(res[0][0])
 
-        if len(onion) == 56 and auto_create:
-            alias: str = self._generate_ram_alias(onion)
+        return None
+
+    def ensure_alias_for_onion(self, onion: Optional[str]) -> Optional[str]:
+        """
+        Returns the alias for an onion, creating a RAM alias if needed.
+
+        Args:
+            onion (Optional[str]): The onion address.
+
+        Returns:
+            Optional[str]: The mapped or newly created alias.
+        """
+        alias: Optional[str] = self.get_alias_by_onion(onion)
+        if alias:
+            return alias
+
+        if not onion:
+            return None
+
+        onion = clean_onion(onion)
+
+        if len(onion) == 56:
+            alias = self._generate_ram_alias(onion)
             self._sql.execute(
                 'INSERT INTO contacts (onion, alias, is_saved) VALUES (?, ?, 0)',
                 (onion, alias),
@@ -469,6 +504,24 @@ class ContactManager:
             return alias
 
         return None
+
+    def require_alias_by_onion(self, onion: str) -> str:
+        """
+        Resolves an onion to an already existing alias.
+
+        Args:
+            onion (str): The onion address.
+
+        Raises:
+            ValueError: If no alias mapping exists.
+
+        Returns:
+            str: The resolved alias.
+        """
+        alias: Optional[str] = self.get_alias_by_onion(onion)
+        if not alias:
+            raise ValueError(f"Missing alias mapping for onion '{clean_onion(onion)}'.")
+        return alias
 
     def get_contacts_data(self) -> Dict[str, Union[str, List[Tuple[str, str]]]]:
         """

@@ -13,14 +13,10 @@ import dataclasses
 from typing import Optional, Dict, Union
 
 from metor.core.api import (
+    EventType,
     JsonValue,
     IpcCommand,
     IpcEvent,
-    DomainCode,
-    SystemCode,
-    NetworkCode,
-    ContactCode,
-    UiCode,
     UnlockCommand,
     SelfDestructCommand,
     SetSettingCommand,
@@ -53,12 +49,12 @@ from metor.core.api import (
 from metor.core.daemon import HeadlessDaemon
 from metor.data import Settings, SettingKey
 from metor.data.profile import ProfileManager, ProfileConfigKey
-from metor.ui import Theme, UIPresenter, Translator
+from metor.ui import Theme, Translator, UIPresenter
 from metor.utils import Constants, TypeCaster
 
 
 class CliProxy:
-    """Facade for CLI operations, strictly interacting via IPC events and DTOs only."""
+    """Facade for CLI operations that either route locally or over strict IPC DTOs."""
 
     def __init__(self, pm: ProfileManager) -> None:
         """
@@ -84,20 +80,20 @@ class CliProxy:
             Optional[str]: Error message if profile doesn't exist, None otherwise.
         """
         if not self._pm.exists():
-            return self._translate_local(
-                UiCode.PROFILE_NOT_FOUND, {'profile': self._pm.profile_name}
-            )
+            return f"Profile '{self._pm.profile_name}' does not exist."
         return None
 
-    def _translate_local(
-        self, code: DomainCode, params: Optional[Dict[str, JsonValue]] = None
+    def _translate_event(
+        self,
+        code: EventType,
+        params: Optional[Dict[str, JsonValue]] = None,
     ) -> str:
         """
-        Translates a DomainCode to a fully formatted string specifically for the CLI.
+        Translates a strict daemon event to a fully formatted string for the CLI.
         Forces the resolution of {alias} since we are not in the dynamic rendering chat engine.
 
         Args:
-            code (DomainCode): The strict domain code.
+            code (EventType): The strict daemon event identifier.
             params (Optional[Dict[str, JsonValue]]): The parameters.
 
         Returns:
@@ -143,10 +139,9 @@ class CliProxy:
         if not port:
             if self.is_remote:
                 return self._prefix_remote(
-                    self._translate_local(
-                        SystemCode.DAEMON_UNREACHABLE,
-                        {'port': str(self._pm.get_static_port())},
-                    )
+                    f'Cannot reach remote Daemon on port '
+                    f'{Theme.YELLOW}{self._pm.get_static_port()}{Theme.RESET}. '
+                    'Did you forget the SSH tunnel?'
                 )
 
             password: Optional[str] = None
@@ -162,8 +157,9 @@ class CliProxy:
                     SyncConfigCommand,
                 ),
             ):
-                prompt, _ = Translator.get(UiCode.ENTER_MASTER_PASSWORD)
-                password = getpass.getpass(prompt)
+                password = getpass.getpass(
+                    f'{Theme.GREEN}Enter Master Password: {Theme.RESET}'
+                )
 
             with HeadlessDaemon(self._pm, password) as hd:
                 return self._send_to_port(hd.port, cmd, wait_for_response)
@@ -190,9 +186,7 @@ class CliProxy:
                 s.sendall((cmd.to_json() + '\n').encode('utf-8'))
 
                 if not wait_for_response:
-                    return self._prefix_remote(
-                        self._translate_local(SystemCode.COMMAND_SUCCESS)
-                    )
+                    return self._prefix_remote('Command executed successfully.')
 
                 buffer: str = ''
                 while True:
@@ -227,17 +221,12 @@ class CliProxy:
                     for k, v in params_raw.items()
                     if isinstance(v, (str, int, float, bool, type(None), list, dict))
                 }
-                code: DomainCode = getattr(event, 'code', SystemCode.COMMAND_SUCCESS)
-                text: str = self._translate_local(code, params)
+                text: str = self._translate_event(event.event_type, params)
                 return self._prefix_remote(text)
 
-            return self._prefix_remote(
-                self._translate_local(SystemCode.COMMAND_SUCCESS)
-            )
+            return self._prefix_remote('Command executed successfully.')
         except Exception:
-            return self._prefix_remote(
-                self._translate_local(SystemCode.COMMUNICATION_FAILED)
-            )
+            return self._prefix_remote('Failed to communicate with the daemon.')
 
     def unlock_daemon(self, password: str) -> str:
         """
@@ -283,18 +272,19 @@ class CliProxy:
         try:
             key_enum: SettingKey = SettingKey(key)
         except ValueError:
-            return self._translate_local(SystemCode.INVALID_SETTING_KEY)
+            return 'Invalid setting key provided.'
 
         parsed_value: Union[str, int, float, bool] = TypeCaster.infer_from_string(value)
 
         if key_enum.is_ui:
             try:
                 Settings.set(key_enum, parsed_value)
-                return self._translate_local(SystemCode.SETTING_UPDATED, {'key': key})
-            except TypeError as e:
-                return self._translate_local(
-                    SystemCode.SETTING_TYPE_ERROR, {'reason': str(e)}
+                return (
+                    f"Global setting '{Theme.YELLOW}{key}{Theme.RESET}' updated "
+                    'successfully.'
                 )
+            except TypeError:
+                return 'Type parsing error.'
 
         return self._request_ipc(
             SetSettingCommand(setting_key=key, setting_value=parsed_value)
@@ -313,12 +303,13 @@ class CliProxy:
         try:
             key_enum: SettingKey = SettingKey(key)
         except ValueError:
-            return self._translate_local(SystemCode.INVALID_SETTING_KEY)
+            return 'Invalid setting key provided.'
 
         if key_enum.is_ui:
             val: str = Settings.get_str(key_enum)
-            return self._translate_local(
-                SystemCode.SETTING_DATA, {'key': key, 'value': val}
+            return (
+                f"Global Setting '{Theme.YELLOW}{key}{Theme.RESET}': "
+                f'{Theme.CYAN}{val}{Theme.RESET}'
             )
 
         return self._request_ipc(GetSettingCommand(setting_key=key))
@@ -336,7 +327,10 @@ class CliProxy:
             str: Status message.
         """
         if key == ProfileConfigKey.IS_REMOTE.value:
-            return self._translate_local(SystemCode.IMMUTABLE_CONFIG_KEY)
+            return (
+                f"The '{Theme.YELLOW}is_remote{Theme.RESET}' flag is immutable and "
+                'cannot be changed after profile creation.'
+            )
 
         try:
             key_enum: Union[SettingKey, ProfileConfigKey] = SettingKey(key)
@@ -344,7 +338,7 @@ class CliProxy:
             try:
                 key_enum = ProfileConfigKey(key)
             except ValueError:
-                return self._translate_local(SystemCode.INVALID_CONFIG_KEY)
+                return 'Invalid profile config key provided.'
 
         parsed_value: Union[str, int, float, bool] = TypeCaster.infer_from_string(value)
 
@@ -352,11 +346,12 @@ class CliProxy:
         if isinstance(key_enum, ProfileConfigKey) or key_enum.is_ui:
             try:
                 self._pm.config.set(key_enum, parsed_value)
-                return self._translate_local(SystemCode.CONFIG_UPDATED, {'key': key})
-            except TypeError as e:
-                return self._translate_local(
-                    SystemCode.SETTING_TYPE_ERROR, {'reason': str(e)}
+                return (
+                    f"Profile configuration override for '{Theme.YELLOW}{key}{Theme.RESET}' "
+                    'updated successfully.'
                 )
+            except TypeError:
+                return 'Type parsing error.'
 
         # Daemon-level settings go through IPC
         return self._request_ipc(
@@ -379,12 +374,13 @@ class CliProxy:
             try:
                 key_enum = ProfileConfigKey(key)
             except ValueError:
-                return self._translate_local(SystemCode.INVALID_CONFIG_KEY)
+                return 'Invalid profile config key provided.'
 
         if isinstance(key_enum, ProfileConfigKey) or key_enum.is_ui:
             val: str = self._pm.config.get_str(key_enum)
-            return self._translate_local(
-                SystemCode.CONFIG_DATA, {'key': key, 'value': val}
+            return (
+                f"Profile Config '{Theme.YELLOW}{key}{Theme.RESET}': "
+                f'{Theme.CYAN}{val}{Theme.RESET}'
             )
 
         return self._request_ipc(GetConfigCommand(setting_key=key))
@@ -402,11 +398,11 @@ class CliProxy:
         """
         try:
             self._pm.config.sync_with_global()
-            local_msg: str = self._translate_local(SystemCode.CONFIG_SYNCED)
-        except Exception as e:
-            return self._translate_local(
-                SystemCode.CONFIG_UPDATE_FAILED, {'reason': str(e)}
+            local_msg: str = (
+                'Profile overrides cleared. Config is now synced with global settings.'
             )
+        except Exception:
+            return 'Failed to update profile config.'
 
         if self.is_remote or self._pm.is_daemon_running():
             daemon_msg: str = self._request_ipc(SyncConfigCommand())
@@ -449,10 +445,10 @@ class CliProxy:
             return err
 
         if not self.is_remote and not self._pm.is_daemon_running():
-            return self._translate_local(NetworkCode.DAEMON_NOT_RUNNING_DROPS)
+            return 'The daemon must be running to send drops.'
 
         return self._request_ipc(
-            SendDropCommand(target=target_alias, text=text, cli_mode=True),
+            SendDropCommand(target=target_alias, text=text),
             wait_for_response=True,
         )
 
@@ -526,9 +522,7 @@ class CliProxy:
             return err
 
         cmd: IpcCommand = (
-            MarkReadCommand(target=target, cli_mode=True)
-            if target
-            else GetInboxCommand(cli_mode=True)
+            MarkReadCommand(target=target) if target else GetInboxCommand()
         )
         return self._request_ipc(cmd)
 
@@ -564,7 +558,9 @@ class CliProxy:
             return err
 
         if not self.is_remote and not self._pm.is_daemon_running() and not onion:
-            return self._translate_local(ContactCode.RAM_ALIAS_REQUIRES_DAEMON)
+            return (
+                'Daemon not running. Cannot save a RAM alias without an active session.'
+            )
 
         return self._request_ipc(AddContactCommand(alias=alias, onion=onion))
 

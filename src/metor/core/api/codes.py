@@ -1,14 +1,10 @@
-"""
-Module defining the strict enumeration codes used across the IPC boundary.
-Separated into specific domains to adhere to the Single Responsibility Principle.
-"""
+"""Enumeration types shared across the IPC boundary."""
 
 from enum import Enum
-from typing import Union
 
 
-class Action(str, Enum):
-    """Enumeration of commands sent from the UI/CLI to the Daemon."""
+class CommandType(str, Enum):
+    """Enumeration of commands sent from the UI or CLI to the daemon."""
 
     INIT = 'init'
     GET_CONNECTIONS = 'get_connections'
@@ -45,13 +41,18 @@ class Action(str, Enum):
 
 
 class EventType(str, Enum):
-    """Enumeration of events broadcasted by the Daemon to the connected UIs."""
+    """Enumeration of strict daemon-to-UI events."""
 
     INIT = 'init'
+    TOR_KEY_ERROR = 'tor_key_error'
+    TOR_START_FAILED = 'tor_start_failed'
+    TOR_PROCESS_TERMINATED = 'tor_process_terminated'
     REMOTE_MSG = 'remote_msg'
     ACK = 'ack'
+    DROP_FAILED = 'drop_failed'
     CONNECTED = 'connected'
     DISCONNECTED = 'disconnected'
+    CONNECTION_CONNECTING = 'connection_connecting'
     RENAME_SUCCESS = 'rename_success'
     CONTACT_REMOVED = 'contact_removed'
     CONNECTIONS_STATE = 'connections_state'
@@ -71,68 +72,31 @@ class EventType(str, Enum):
     MESSAGES_DATA = 'messages_data'
     INBOX_COUNTS = 'inbox_counts'
     UNREAD_MESSAGES = 'unread_messages'
-    ADDRESS_DATA = 'address_data'
+    ADDRESS_CURRENT = 'address_current'
+    ADDRESS_GENERATED = 'address_generated'
+    ADDRESS_CANT_GENERATE_RUNNING = 'address_cant_generate_running'
+    ADDRESS_NOT_GENERATED = 'address_not_generated'
     PROFILES_DATA = 'profiles_data'
-    ACTION_SUCCESS = 'action_success'
-    ACTION_ERROR = 'action_error'
-    CONTACT_ACTION_SUCCESS = 'contact_action_success'
-    CONTACT_RENAMED = 'contact_renamed'
-    PROFILE_ACTION_SUCCESS = 'profile_action_success'
-    TARGET_ACTION_SUCCESS = 'target_action_success'
-    SETTING_UPDATED = 'setting_updated'
-    SETTING_DATA = 'setting_data'
-    CONFIG_UPDATED = 'config_updated'
-    CONFIG_DATA = 'config_data'
-    CONFIG_SYNCED = 'config_synced'
-    FALLBACK_SUCCESS = 'fallback_success'
-    MAX_CONNECTIONS_REACHED = 'max_connections_reached'
-    PEER_NOT_FOUND = 'peer_not_found'
-    RETUNNEL_INITIATED = 'retunnel_initiated'
-    RETUNNEL_SUCCESS = 'retunnel_success'
-    DROP_FAILED = 'drop_failed'
-
-
-class SystemCode(str, Enum):
-    """System-level and Daemon state codes."""
-
-    DAEMON_LOCKED = 'daemon_locked'
-    DAEMON_UNLOCKED = 'daemon_unlocked'
     AUTH_REQUIRED = 'auth_required'
     INVALID_PASSWORD = 'invalid_password'
     ALREADY_UNLOCKED = 'already_unlocked'
     SESSION_AUTHENTICATED = 'session_authenticated'
     SELF_DESTRUCT_INITIATED = 'self_destruct_initiated'
-    SETTING_UPDATED = 'setting_updated'
-    SETTING_UPDATE_FAILED = 'setting_update_failed'
-    SETTING_TYPE_ERROR = 'setting_type_error'
+    DAEMON_UNLOCKED = 'daemon_unlocked'
+    DAEMON_LOCKED = 'daemon_locked'
+    DAEMON_OFFLINE = 'daemon_offline'
+    UNKNOWN_COMMAND = 'unknown_command'
     INVALID_SETTING_KEY = 'invalid_setting_key'
     INVALID_CONFIG_KEY = 'invalid_config_key'
     DAEMON_CANNOT_MANAGE_UI = 'daemon_cannot_manage_ui'
-    IMMUTABLE_CONFIG_KEY = 'immutable_config_key'
+    SETTING_UPDATED = 'setting_updated'
+    SETTING_UPDATE_FAILED = 'setting_update_failed'
+    SETTING_TYPE_ERROR = 'setting_type_error'
     SETTING_DATA = 'setting_data'
     CONFIG_UPDATED = 'config_updated'
     CONFIG_UPDATE_FAILED = 'config_update_failed'
     CONFIG_DATA = 'config_data'
     CONFIG_SYNCED = 'config_synced'
-    DAEMON_UNREACHABLE = 'daemon_unreachable'
-    DAEMON_OFFLINE = 'daemon_offline'
-    COMMAND_SUCCESS = 'command_success'
-    COMMUNICATION_FAILED = 'communication_failed'
-    UNKNOWN_COMMAND = 'unknown_command'
-    INIT_ERROR = 'init_error'
-
-
-class NetworkCode(str, Enum):
-    """Network, Tor, and connection state codes."""
-
-    TOR_KEY_ERROR = 'tor_key_error'
-    TOR_START_FAILED = 'tor_start_failed'
-    TOR_PROCESS_TERMINATED = 'tor_process_terminated'
-    ADDRESS_CURRENT = 'address_current'
-    ADDRESS_GENERATED = 'address_generated'
-    ADDRESS_CANT_GENERATE_RUNNING = 'address_cant_generate_running'
-    ADDRESS_NOT_GENERATED = 'address_not_generated'
-    RETUNNEL_FAILED = 'retunnel_failed'
     CANNOT_CONNECT_SELF = 'cannot_connect_self'
     INVALID_TARGET = 'invalid_target'
     CANNOT_SWITCH_SELF = 'cannot_switch_self'
@@ -140,52 +104,17 @@ class NetworkCode(str, Enum):
     NO_CONNECTION_TO_DISCONNECT = 'no_connection_to_disconnect'
     NO_PENDING_CONNECTION = 'no_pending_connection'
     MAX_CONNECTIONS_REACHED = 'max_connections_reached'
-    CONNECTED = 'connected'
-    DISCONNECTED = 'disconnected'
-    INCOMING_CONNECTION = 'incoming_connection'
-    CONNECTION_PENDING = 'connection_pending'
-    CONNECTION_AUTO_ACCEPTED = 'connection_auto_accepted'
-    CONNECTION_RETRY = 'connection_retry'
-    CONNECTION_FAILED = 'connection_failed'
-    CONNECTION_REJECTED = 'connection_rejected'
-    CONNECTION_TIMEOUT = 'connection_timeout'
-    AUTO_RECONNECT_ATTEMPT = 'auto_reconnect_attempt'
-    AUTO_RECONNECT_FAILED = 'auto_reconnect_failed'
-    RETUNNEL_INITIATED = 'retunnel_initiated'
-    RETUNNEL_SUCCESS = 'retunnel_success'
     DROPS_DISABLED = 'drops_disabled'
     CANNOT_DROP_SELF = 'cannot_drop_self'
     DROP_QUEUED = 'drop_queued'
     NO_PENDING_LIVE_MSGS = 'no_pending_live_msgs'
     FALLBACK_SUCCESS = 'fallback_success'
-    INBOX_NOTIFICATION = 'inbox_notification'
-    DAEMON_NOT_RUNNING_DROPS = 'daemon_not_running_drops'
-
-
-class DbCode(str, Enum):
-    """Database and persistence state codes."""
-
-    HISTORY_CLEARED = 'history_cleared'
-    HISTORY_CLEARED_ALL = 'history_cleared_all'
-    HISTORY_CLEAR_FAILED = 'history_clear_failed'
-    MESSAGES_CLEARED = 'messages_cleared'
-    MESSAGES_CLEARED_NON_CONTACTS = 'messages_cleared_non_contacts'
-    MESSAGES_CLEARED_ALL = 'messages_cleared_all'
-    MESSAGES_CLEAR_FAILED = 'messages_clear_failed'
-    NO_DB_FOUND = 'no_db_found'
-    DB_CLEARED = 'db_cleared'
-    DB_CLEAR_FAILED = 'db_clear_failed'
-
-
-class ContactCode(str, Enum):
-    """Address book and peer state codes."""
-
-    ALIAS_IN_USE = 'alias_in_use'
-    ONION_IN_USE = 'onion_in_use'
     CONTACT_ADDED = 'contact_added'
     PEER_NOT_FOUND = 'peer_not_found'
     CONTACT_ALREADY_SAVED = 'contact_already_saved'
     PEER_PROMOTED = 'peer_promoted'
+    ALIAS_IN_USE = 'alias_in_use'
+    ONION_IN_USE = 'onion_in_use'
     ALIAS_SAME = 'alias_same'
     ALIAS_NOT_FOUND = 'alias_not_found'
     ALIAS_RENAMED = 'alias_renamed'
@@ -193,52 +122,19 @@ class ContactCode(str, Enum):
     CONTACT_DOWNGRADED = 'contact_downgraded'
     CONTACT_REMOVED_DOWNGRADED = 'contact_removed_downgraded'
     PEER_ANONYMIZED = 'peer_anonymized'
-    CONTACT_REMOVED = 'contact_removed'
     PEER_REMOVED = 'peer_removed'
     CONTACTS_CLEARED = 'contacts_cleared'
     CONTACTS_CLEAR_FAILED = 'contacts_clear_failed'
-    RAM_ALIAS_REQUIRES_DAEMON = 'ram_alias_requires_daemon'
-
-
-class UiCode(str, Enum):
-    """UI, CLI, and configuration interaction codes."""
-
-    ENTER_MASTER_PASSWORD = 'enter_master_password'
-    DAEMON_STARTING = 'daemon_starting'
-    DAEMON_ACTIVE = 'daemon_active'
-    DAEMON_LOCKED_MODE = 'daemon_locked_mode'
-    DAEMON_REMOTE_NO_START = 'daemon_remote_no_start'
-    DAEMON_ALREADY_RUNNING = 'daemon_already_running'
-    DAEMON_EMPTY_PASSWORD = 'daemon_empty_password'
-    PURGE_WARNING = 'purge_warning'
-    PURGE_WARNING_REMOTE = 'purge_warning_remote'
-    PURGE_PROMPT = 'purge_prompt'
-    PURGE_ABORTED = 'purge_aborted'
-    PURGE_COMPLETE = 'purge_complete'
-    CLEANUP_START = 'cleanup_start'
-    CLEANUP_COMPLETE = 'cleanup_complete'
-    REMOTE_NUKE_WARNING = 'remote_nuke_warning'
-    REMOTE_NUKE_SUCCESS = 'remote_nuke_success'
-    REMOTE_NUKE_FAILED = 'remote_nuke_failed'
-    REMOTE_NUKE_OVERRIDE = 'remote_nuke_override'
-    ALREADY_FOCUSED = 'already_focused'
-    NO_ACTIVE_FOCUS = 'no_active_focus'
-    FOCUS_SWITCHED = 'focus_switched'
-    FOCUS_REMOVED = 'focus_removed'
-    INVALID_PROFILE_NAME = 'invalid_profile_name'
-    PROFILE_SET_DEFAULT = 'profile_set_default'
-    REMOTE_REQUIRES_PORT = 'remote_requires_port'
-    PROFILE_EXISTS = 'profile_exists'
-    PROFILE_CREATED = 'profile_created'
-    PROFILE_CREATED_PORT = 'profile_created_port'
-    PROFILE_NOT_FOUND = 'profile_not_found'
-    CANT_REMOVE_ACTIVE_PROFILE = 'cant_remove_active_profile'
-    CANT_REMOVE_DEFAULT_PROFILE = 'cant_remove_default_profile'
-    DAEMON_RUNNING_CANT_REMOVE = 'daemon_running_cant_remove'
-    PROFILE_REMOVED = 'profile_removed'
-    DAEMON_RUNNING_CANT_RENAME = 'daemon_running_cant_rename'
-    PROFILE_RENAMED = 'profile_renamed'
-    DAEMON_RUNNING_CANT_CLEAR_DB = 'daemon_running_cant_clear_db'
-
-
-DomainCode = Union[SystemCode, NetworkCode, DbCode, ContactCode, UiCode]
+    HISTORY_CLEARED = 'history_cleared'
+    HISTORY_CLEARED_ALL = 'history_cleared_all'
+    HISTORY_CLEAR_FAILED = 'history_clear_failed'
+    MESSAGES_CLEARED = 'messages_cleared'
+    MESSAGES_CLEARED_NON_CONTACTS = 'messages_cleared_non_contacts'
+    MESSAGES_CLEARED_NON_CONTACTS_ALL = 'messages_cleared_non_contacts_all'
+    MESSAGES_CLEARED_ALL = 'messages_cleared_all'
+    MESSAGES_CLEAR_FAILED = 'messages_clear_failed'
+    DB_CLEARED = 'db_cleared'
+    DB_CLEAR_FAILED = 'db_clear_failed'
+    RETUNNEL_INITIATED = 'retunnel_initiated'
+    RETUNNEL_SUCCESS = 'retunnel_success'
+    RETUNNEL_FAILED = 'retunnel_failed'

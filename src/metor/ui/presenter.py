@@ -35,7 +35,7 @@ class UIPresenter:
         Returns:
             str: The formatted header string.
         """
-        return f'--- {text} ---'
+        return f'\n--- {text} ---\n'
 
     @staticmethod
     def get_divider_string(length: int = 30, add_spaces: bool = False) -> str:
@@ -125,8 +125,8 @@ class UIPresenter:
         Returns:
             str: The formatted event history output.
         """
-        if event.target:
-            disp_name: str = f'peer {Theme.CYAN}{event.target}{Theme.RESET}'
+        if event.alias:
+            disp_name: str = f'peer {Theme.CYAN}{event.alias}{Theme.RESET}'
         else:
             disp_name = f'profile {Theme.CYAN}{event.profile}{Theme.RESET}'
 
@@ -137,12 +137,12 @@ class UIPresenter:
 
         for item in event.history:
             row_onion: str = item.onion or 'Unknown'
-            line: str = f'[{item.timestamp}] {Theme.CYAN}{item.status}{Theme.RESET} | remote alias: {Theme.PURPLE}{item.alias}{Theme.RESET} | remote identity: {Theme.YELLOW}{row_onion}{Theme.RESET}'
+            row_alias: str = item.alias or 'n/a'
+            line: str = f'[{item.timestamp}] {Theme.CYAN}{item.status}{Theme.RESET} | remote alias: {Theme.PURPLE}{row_alias}{Theme.RESET} | remote identity: {Theme.YELLOW}{row_onion}{Theme.RESET}'
             if item.reason:
                 line += f' | reason: {Theme.CYAN}{item.reason}{Theme.RESET}'
             out += f'{line}\n'
 
-        out += UIPresenter.get_divider_string()
         return out
 
     @staticmethod
@@ -157,21 +157,20 @@ class UIPresenter:
             str: The formatted terminal output of the chat history.
         """
         if not event.messages:
-            return f"No chat history found for '{event.target}'."
+            return f"No chat history found for '{event.alias}'."
 
-        out: str = f'{UIPresenter.get_header_string(f"Chat History with {Theme.CYAN}{event.target}{Theme.RESET} (Last {len(event.messages)})")}\n'
+        out: str = f'{UIPresenter.get_header_string(f"Chat History with {Theme.CYAN}{event.alias}{Theme.RESET} (Last {len(event.messages)})")}\n'
         for msg in event.messages:
             if msg.direction == MessageDirection.OUT.value:
                 if msg.status == MessageStatus.DELIVERED.value:
-                    prefix: str = f'{Theme.GREEN}To {event.target}{Theme.RESET}'
+                    prefix: str = f'{Theme.GREEN}To {event.alias}{Theme.RESET}'
                 else:
-                    prefix = f'To {event.target}'
+                    prefix = f'To {event.alias}'
             else:
-                prefix = f'{Theme.PURPLE}From {event.target}{Theme.RESET}'
+                prefix = f'{Theme.PURPLE}From {event.alias}{Theme.RESET}'
 
             out += f'[{msg.timestamp}] {prefix}: {msg.payload}\n'
 
-        out += UIPresenter.get_divider_string()
         return out
 
     @staticmethod
@@ -206,14 +205,13 @@ class UIPresenter:
             str: The colorized terminal output displaying the messages.
         """
         if not event.messages:
-            return f"No unread messages from '{event.target}'."
+            return f"No unread messages from '{event.alias}'."
 
-        out: str = f'{UIPresenter.get_header_string(f"Messages from {Theme.CYAN}{event.target}{Theme.RESET}")}\n'
+        out: str = f'{UIPresenter.get_header_string(f"Messages from {Theme.CYAN}{event.alias}{Theme.RESET}")}\n'
         for msg in event.messages:
-            prefix: str = f'{Theme.PURPLE}From {event.target}{Theme.RESET}'
+            prefix: str = f'{Theme.PURPLE}From {event.alias}{Theme.RESET}'
             out += f'[{msg.timestamp}] {prefix}: {msg.payload}\n'
 
-        out += UIPresenter.get_divider_string()
         return out
 
     @staticmethod

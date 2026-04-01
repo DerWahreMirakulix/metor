@@ -5,6 +5,7 @@ Module providing stateless text formatting and ANSI color logic for the interact
 from typing import Optional, List
 
 from metor.ui import Theme
+from metor.ui.models import StatusTone
 
 # Local Package Imports
 from metor.ui.chat.models import ChatMessageType, ChatLine
@@ -56,13 +57,18 @@ class ChatPresenter:
 
     @staticmethod
     def get_visible_prefix_len(
-        msg_type: ChatMessageType, alias: Optional[str], is_drop: bool, prompt_len: int
+        msg_type: ChatMessageType,
+        tone: Optional[StatusTone],
+        alias: Optional[str],
+        is_drop: bool,
+        prompt_len: int,
     ) -> int:
         """
         Calculates the exact visible length of the prefix without invisible ANSI color codes.
 
         Args:
             msg_type (ChatMessageType): The category of the message.
+            tone (Optional[StatusTone]): The tone for status lines.
             alias (Optional[str]): The associated remote alias.
             is_drop (bool): True if the message has the [Drop] suffix.
             prompt_len (int): The length of the base prompt signature.
@@ -72,12 +78,12 @@ class ChatPresenter:
         """
         drop_len: int = len(' [Drop]') if is_drop else 0
 
-        if msg_type == ChatMessageType.INFO:
-            return 4 + prompt_len
-        if msg_type == ChatMessageType.SYSTEM:
+        if msg_type == ChatMessageType.STATUS:
+            if tone == StatusTone.INFO:
+                return 4 + prompt_len
+            if tone == StatusTone.ERROR:
+                return 5 + prompt_len
             return 6 + prompt_len
-        if msg_type == ChatMessageType.ERROR:
-            return 5 + prompt_len
         if msg_type == ChatMessageType.RAW:
             return 0
         if msg_type == ChatMessageType.SELF:
@@ -116,12 +122,13 @@ class ChatPresenter:
         prefix: str = ''
         drop_tag: str = ' [Drop]' if msg.is_drop else ''
 
-        if msg.msg_type == ChatMessageType.INFO:
-            prefix = f'{Theme.YELLOW}info{initial_prompt}{Theme.RESET}'
-        elif msg.msg_type == ChatMessageType.SYSTEM:
-            prefix = f'{Theme.CYAN}system{initial_prompt}{Theme.RESET}'
-        elif msg.msg_type == ChatMessageType.ERROR:
-            prefix = f'{Theme.RED}error{initial_prompt}{Theme.RESET}'
+        if msg.msg_type == ChatMessageType.STATUS:
+            if msg.tone == StatusTone.INFO:
+                prefix = f'{Theme.YELLOW}info{initial_prompt}{Theme.RESET}'
+            elif msg.tone == StatusTone.ERROR:
+                prefix = f'{Theme.RED}error{initial_prompt}{Theme.RESET}'
+            else:
+                prefix = f'{Theme.CYAN}system{initial_prompt}{Theme.RESET}'
         elif msg.msg_type != ChatMessageType.RAW:
             is_focused: bool = (msg.alias == current_focus) if msg.alias else False
 
@@ -156,7 +163,11 @@ class ChatPresenter:
 
         if '\n' in text and msg.msg_type != ChatMessageType.RAW:
             pad_len: int = ChatPresenter.get_visible_prefix_len(
-                msg.msg_type, msg.alias, msg.is_drop, len(initial_prompt)
+                msg.msg_type,
+                msg.tone,
+                msg.alias,
+                msg.is_drop,
+                len(initial_prompt),
             )
             padding: str = ' ' * pad_len
             lines: List[str] = text.split('\n')

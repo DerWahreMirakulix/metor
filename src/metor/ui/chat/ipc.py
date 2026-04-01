@@ -38,6 +38,9 @@ class IpcClient:
 
         self._socket: Optional[socket.socket] = None
         self._stop_flag: threading.Event = threading.Event()
+        self._listener_thread: Optional[threading.Thread] = None
+        self._disconnect_lock: threading.Lock = threading.Lock()
+        self._disconnect_notified: bool = False
 
     def connect(self) -> bool:
         """
@@ -50,11 +53,19 @@ class IpcClient:
             bool: True if connection is successful, False otherwise.
         """
         try:
+            self._stop_flag.clear()
+            with self._disconnect_lock:
+                self._disconnect_notified = False
+
             self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self._socket.connect((Constants.LOCALHOST, self._port))
-            threading.Thread(target=self._listener_thread, daemon=True).start()
+            self._listener_thread = threading.Thread(
+                target=self._listener_thread_main, daemon=True
+            )
+            self._listener_thread.start()
             return True
         except Exception:
+            self.stop()
             return False
 
     def stop(self) -> None:
@@ -68,11 +79,25 @@ class IpcClient:
             None
         """
         self._stop_flag.set()
-        if self._socket:
+        sock: Optional[socket.socket] = self._socket
+        self._socket = None
+
+        if sock:
             try:
-                self._socket.close()
+                sock.shutdown(socket.SHUT_RDWR)
             except Exception:
                 pass
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+        if (
+            self._listener_thread
+            and self._listener_thread.is_alive()
+            and threading.current_thread() is not self._listener_thread
+        ):
+            self._listener_thread.join(timeout=Constants.THREAD_POLL_TIMEOUT)
 
     def send_command(self, cmd: IpcCommand) -> None:
         """
@@ -93,7 +118,27 @@ class IpcClient:
         except Exception:
             pass
 
-    def _listener_thread(self) -> None:
+    def _notify_disconnect(self) -> None:
+        """
+        Fires the disconnect callback once for unexpected IPC loss.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if self._stop_flag.is_set():
+            return
+
+        with self._disconnect_lock:
+            if self._disconnect_notified:
+                return
+            self._disconnect_notified = True
+
+        self._on_disconnect()
+
+    def _listener_thread_main(self) -> None:
         """
         Background worker that continuously pulls bytes from the IPC stream.
         Utilizes byte buffering to prevent UTF-8 fragmentation corruption.
@@ -112,13 +157,13 @@ class IpcClient:
 
                 data: bytes = self._socket.recv(Constants.TCP_BUFFER_SIZE)
                 if not data:
-                    self._on_disconnect()
+                    self._notify_disconnect()
                     break
 
                 buffer.extend(data)
 
                 if len(buffer) > Constants.MAX_IPC_BYTES:
-                    self._on_disconnect()
+                    self._notify_disconnect()
                     break
 
                 while b'\n' in buffer:
@@ -136,4 +181,4 @@ class IpcClient:
                     except Exception:
                         pass
         except Exception:
-            self._on_disconnect()
+            self._notify_disconnect()

@@ -5,12 +5,13 @@ Parses incoming data streams and delegates payloads to the Application Layer (Ro
 
 import socket
 import threading
-import base64
 from typing import Optional, Callable, List, cast, TYPE_CHECKING
 
 from metor.core.api import (
     IpcEvent,
     ConnectedEvent,
+    ConnectionPendingEvent,
+    RetunnelSuccessEvent,
 )
 from metor.core.daemon.models import TorCommand
 from metor.data import (
@@ -77,7 +78,11 @@ class StreamReceiver:
         )
 
     def start_receiving(
-        self, onion: str, conn: socket.socket, initial_buffer: str = ''
+        self,
+        onion: str,
+        conn: socket.socket,
+        initial_buffer: str = '',
+        awaiting_acceptance: bool = False,
     ) -> None:
         """
         Starts a background thread to listen for data securely.
@@ -86,18 +91,23 @@ class StreamReceiver:
             onion (str): The connected remote onion.
             conn (socket.socket): The active socket connection.
             initial_buffer (str): Leftover TCP stream buffer.
+            awaiting_acceptance (bool): Whether the socket is still waiting for live acceptance.
 
         Returns:
             None
         """
         threading.Thread(
             target=self._receiver_target,
-            args=(onion, conn, initial_buffer),
+            args=(onion, conn, initial_buffer, awaiting_acceptance),
             daemon=True,
         ).start()
 
     def _receiver_target(
-        self, onion: str, conn: socket.socket, initial_buffer: str = ''
+        self,
+        onion: str,
+        conn: socket.socket,
+        initial_buffer: str = '',
+        awaiting_acceptance: bool = False,
     ) -> None:
         """
         Target processing incoming live messages via the memory-safe reader.
@@ -106,6 +116,7 @@ class StreamReceiver:
             onion (str): The remote onion.
             conn (socket.socket): The active socket connection.
             initial_buffer (str): Leftover TCP stream buffer.
+            awaiting_acceptance (bool): Whether the socket is still waiting for live acceptance.
 
         Returns:
             None
@@ -114,7 +125,12 @@ class StreamReceiver:
         remote_disconnected: bool = False
 
         idle_timeout: float = self._config.get_float(SettingKey.STREAM_IDLE_TIMEOUT)
-        conn.settimeout(idle_timeout)
+        late_acceptance_timeout: float = self._config.get_float(
+            SettingKey.LATE_ACCEPTANCE_TIMEOUT
+        )
+        conn.settimeout(
+            late_acceptance_timeout if awaiting_acceptance else idle_timeout
+        )
 
         stream: TcpStreamReader = TcpStreamReader(conn, initial_buffer)
 
@@ -123,16 +139,32 @@ class StreamReceiver:
                 try:
                     msg: Optional[str] = stream.read_line()
                 except socket.timeout:
+                    if awaiting_acceptance:
+                        break
                     continue
 
                 if not msg:
                     break
 
                 if msg == TorCommand.ACCEPTED.value:
+                    awaiting_acceptance = False
+                    conn.settimeout(idle_timeout)
                     self._state.add_active_connection(onion, conn)
-                    alias: str = cast(str, self._cm.get_alias_by_onion(onion))
+                    alias: str = cast(str, self._cm.ensure_alias_for_onion(onion))
                     self._hm.log_event(HistoryEvent.LIVE_CONNECTED, onion)
-                    self._broadcast(ConnectedEvent(alias=alias, onion=onion))
+                    if self._state.consume_retunnel_reconnect(onion):
+                        self._hm.log_event(HistoryEvent.LIVE_RETUNNEL_SUCCESS, onion)
+                        self._state.clear_retunnel_flow(onion)
+                        self._broadcast(RetunnelSuccessEvent(alias=alias))
+                    else:
+                        self._broadcast(ConnectedEvent(alias=alias, onion=onion))
+
+                elif msg == TorCommand.PENDING.value:
+                    awaiting_acceptance = True
+                    conn.settimeout(late_acceptance_timeout)
+                    if not self._state.is_retunneling(onion):
+                        alias = cast(str, self._cm.ensure_alias_for_onion(onion))
+                        self._broadcast(ConnectionPendingEvent(alias=alias))
 
                 elif msg.startswith(f'{TorCommand.DISCONNECT.value} '):
                     remote_disconnected = True
@@ -148,7 +180,7 @@ class StreamReceiver:
                     parts: List[str] = msg.split(' ', 2)
                     if len(parts) == 3:
                         msg_id = parts[1]
-                        content: str = base64.b64decode(parts[2]).decode('utf-8')
+                        content: str = parts[2]
 
                         should_disconnect: bool = self._router.process_incoming_msg(
                             conn, onion, msg_id, content

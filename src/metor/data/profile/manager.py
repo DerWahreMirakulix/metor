@@ -5,16 +5,20 @@ Enforces validation checks to prevent runtime operation on tampered profiles.
 
 import shutil
 from pathlib import Path
-from typing import List, Tuple, Optional, Set, Dict
+from typing import List, Optional, Set, Dict
 
-from metor.core.api import DomainCode, UiCode, DbCode, JsonValue
+from metor.core.api import JsonValue
 from metor.data import SettingKey, Settings, SqlManager
 from metor.utils import Constants
 
 # Local Package Imports
 from metor.data.profile.config import Config
 from metor.data.profile.paths import Paths
-from metor.data.profile.models import ProfileConfigKey
+from metor.data.profile.models import (
+    ProfileConfigKey,
+    ProfileOperationResult,
+    ProfileOperationType,
+)
 
 
 class ProfileManager:
@@ -231,9 +235,7 @@ class ProfileManager:
         return Settings.get_str(SettingKey.DEFAULT_PROFILE)
 
     @classmethod
-    def set_default_profile(
-        cls, profile_name: str
-    ) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
+    def set_default_profile(cls, profile_name: str) -> ProfileOperationResult:
         """
         Sets a new default profile.
 
@@ -241,15 +243,19 @@ class ProfileManager:
             profile_name (str): New profile name.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, JsonValue]]: A success flag, domain state code, and parameters.
+            ProfileOperationResult: Structured local outcome for the CLI layer.
         """
         safe_name: str = ''.join(
             c for c in profile_name if c.isalnum() or c in ('-', '_')
         )
         if not safe_name:
-            return False, UiCode.INVALID_PROFILE_NAME, {}
+            return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
         Settings.set(SettingKey.DEFAULT_PROFILE, safe_name)
-        return True, UiCode.PROFILE_SET_DEFAULT, {'profile': safe_name}
+        return ProfileOperationResult(
+            True,
+            ProfileOperationType.DEFAULT_SET,
+            {'profile': safe_name},
+        )
 
     @staticmethod
     def get_all_profiles() -> List[str]:
@@ -309,7 +315,7 @@ class ProfileManager:
     @staticmethod
     def add_profile_folder(
         name: str, is_remote: bool = False, port: Optional[int] = None
-    ) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
+    ) -> ProfileOperationResult:
         """
         Creates a new profile directory safely.
 
@@ -319,18 +325,26 @@ class ProfileManager:
             port (Optional[int]): Static port.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, JsonValue]]: A success flag, domain state code, and parameters.
+            ProfileOperationResult: Structured local outcome for the CLI layer.
         """
         safe_name: str = ''.join(c for c in name if c.isalnum() or c in ('-', '_'))
         if not safe_name:
-            return False, UiCode.INVALID_PROFILE_NAME, {}
+            return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
 
         if is_remote and not port:
-            return False, UiCode.REMOTE_REQUIRES_PORT, {}
+            return ProfileOperationResult(
+                False,
+                ProfileOperationType.REMOTE_PORT_REQUIRED,
+                {},
+            )
 
         target_dir: Path = Constants.DATA / safe_name
         if target_dir.exists():
-            return False, UiCode.PROFILE_EXISTS, {'profile': safe_name}
+            return ProfileOperationResult(
+                False,
+                ProfileOperationType.PROFILE_EXISTS,
+                {'profile': safe_name},
+            )
 
         pm: 'ProfileManager' = ProfileManager(safe_name)
         pm.initialize()
@@ -342,18 +356,22 @@ class ProfileManager:
                 pm.config.set(ProfileConfigKey.DAEMON_PORT, port)
 
             remote_tag: str = 'Remote ' if is_remote else 'Static '
-            return (
+            return ProfileOperationResult(
                 True,
-                UiCode.PROFILE_CREATED_PORT,
+                ProfileOperationType.PROFILE_CREATED_WITH_PORT,
                 {'remote_tag': remote_tag, 'profile': safe_name, 'port': port},
             )
 
-        return True, UiCode.PROFILE_CREATED, {'profile': safe_name}
+        return ProfileOperationResult(
+            True,
+            ProfileOperationType.PROFILE_CREATED,
+            {'profile': safe_name},
+        )
 
     @classmethod
     def remove_profile_folder(
         cls, name: str, active_profile: Optional[str] = None
-    ) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
+    ) -> ProfileOperationResult:
         """
         Removes a profile completely.
 
@@ -362,43 +380,55 @@ class ProfileManager:
             active_profile (Optional[str]): The currently running profile to prevent deletion.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, JsonValue]]: A success flag, domain state code, and parameters.
+            ProfileOperationResult: Structured local outcome for the CLI layer.
         """
         default: str = cls.load_default_profile()
         active: str = active_profile if active_profile else default
         safe_name: str = ''.join(c for c in name if c.isalnum() or c in ('-', '_'))
 
         if not safe_name:
-            return False, UiCode.INVALID_PROFILE_NAME, {}
+            return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
 
         target_dir: Path = Constants.DATA / safe_name
 
         if active == safe_name:
-            return (
+            return ProfileOperationResult(
                 False,
-                UiCode.CANT_REMOVE_ACTIVE_PROFILE,
+                ProfileOperationType.CANNOT_REMOVE_ACTIVE,
                 {},
             )
         if default == safe_name:
-            return False, UiCode.CANT_REMOVE_DEFAULT_PROFILE, {}
+            return ProfileOperationResult(
+                False,
+                ProfileOperationType.CANNOT_REMOVE_DEFAULT,
+                {},
+            )
         if not target_dir.exists():
-            return False, UiCode.PROFILE_NOT_FOUND, {'profile': safe_name}
+            return ProfileOperationResult(
+                False,
+                ProfileOperationType.PROFILE_NOT_FOUND,
+                {'profile': safe_name},
+            )
 
         pm: 'ProfileManager' = cls(safe_name)
         if pm.is_daemon_running() and not pm.is_remote():
-            return (
+            return ProfileOperationResult(
                 False,
-                UiCode.DAEMON_RUNNING_CANT_REMOVE,
+                ProfileOperationType.CANNOT_REMOVE_RUNNING,
                 {'profile': safe_name},
             )
 
         shutil.rmtree(target_dir)
-        return True, UiCode.PROFILE_REMOVED, {'profile': safe_name}
+        return ProfileOperationResult(
+            True,
+            ProfileOperationType.PROFILE_REMOVED,
+            {'profile': safe_name},
+        )
 
     @classmethod
     def rename_profile_folder(
         cls, old_name: str, new_name: str
-    ) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
+    ) -> ProfileOperationResult:
         """
         Renames an existing profile directory.
 
@@ -407,7 +437,7 @@ class ProfileManager:
             new_name (str): New name.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, JsonValue]]: A success flag, domain state code, and parameters.
+            ProfileOperationResult: Structured local outcome for the CLI layer.
         """
         safe_old: str = ''.join(c for c in old_name if c.isalnum() or c in ('-', '_'))
         safe_new: str = ''.join(c for c in new_name if c.isalnum() or c in ('-', '_'))
@@ -416,29 +446,35 @@ class ProfileManager:
         new_dir: Path = Constants.DATA / safe_new
 
         if not old_dir.exists():
-            return False, UiCode.PROFILE_NOT_FOUND, {'profile': safe_old}
+            return ProfileOperationResult(
+                False,
+                ProfileOperationType.PROFILE_NOT_FOUND,
+                {'profile': safe_old},
+            )
         if new_dir.exists():
-            return False, UiCode.PROFILE_EXISTS, {'profile': safe_new}
+            return ProfileOperationResult(
+                False,
+                ProfileOperationType.PROFILE_EXISTS,
+                {'profile': safe_new},
+            )
 
         pm: 'ProfileManager' = cls(safe_old)
         if pm.is_daemon_running() and not pm.is_remote():
-            return (
+            return ProfileOperationResult(
                 False,
-                UiCode.DAEMON_RUNNING_CANT_RENAME,
+                ProfileOperationType.CANNOT_RENAME_RUNNING,
                 {'old_profile': safe_old},
             )
 
         old_dir.rename(new_dir)
-        return (
+        return ProfileOperationResult(
             True,
-            UiCode.PROFILE_RENAMED,
+            ProfileOperationType.PROFILE_RENAMED,
             {'old_profile': safe_old, 'new_profile': safe_new},
         )
 
     @classmethod
-    def clear_profile_db(
-        cls, name: str
-    ) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
+    def clear_profile_db(cls, name: str) -> ProfileOperationResult:
         """
         Clears the SQLite database for a profile.
 
@@ -446,32 +482,48 @@ class ProfileManager:
             name (str): The profile name.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, JsonValue]]: A success flag, domain state code, and parameters.
+            ProfileOperationResult: Structured local outcome for the CLI layer.
         """
         safe_name: str = ''.join(c for c in name if c.isalnum() or c in ('-', '_'))
         if not safe_name:
-            return False, UiCode.INVALID_PROFILE_NAME, {}
+            return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
 
         pm: 'ProfileManager' = cls(safe_name)
         if not pm.exists():
-            return False, UiCode.PROFILE_NOT_FOUND, {'profile': safe_name}
+            return ProfileOperationResult(
+                False,
+                ProfileOperationType.PROFILE_NOT_FOUND,
+                {'profile': safe_name},
+            )
 
         if pm.is_daemon_running() and not pm.is_remote():
-            return (
+            return ProfileOperationResult(
                 False,
-                UiCode.DAEMON_RUNNING_CANT_CLEAR_DB,
+                ProfileOperationType.CANNOT_CLEAR_RUNNING_DB,
                 {'profile': safe_name},
             )
 
         db_path: Path = pm.paths.get_db_file()
         if not db_path.exists():
-            return False, DbCode.NO_DB_FOUND, {'profile': safe_name}
+            return ProfileOperationResult(
+                False,
+                ProfileOperationType.DATABASE_NOT_FOUND,
+                {'profile': safe_name},
+            )
 
         try:
             sql: SqlManager = SqlManager(db_path, pm.config)
             sql.execute('DELETE FROM history')
             sql.execute('DELETE FROM messages')
             sql.execute('DELETE FROM contacts')
-            return True, DbCode.DB_CLEARED, {'profile': safe_name}
+            return ProfileOperationResult(
+                True,
+                ProfileOperationType.DATABASE_CLEARED,
+                {'profile': safe_name},
+            )
         except Exception:
-            return False, DbCode.DB_CLEAR_FAILED, {}
+            return ProfileOperationResult(
+                False,
+                ProfileOperationType.DATABASE_CLEAR_FAILED,
+                {},
+            )

@@ -8,7 +8,7 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 
-from metor.core.api import DomainCode, DbCode
+from metor.core.api import EventType
 from metor.utils import Constants, clean_onion
 
 # Local Package Imports
@@ -161,7 +161,7 @@ class HistoryManager:
 
     def clear_history(
         self, filter_onion: Optional[str] = None
-    ) -> Tuple[bool, DomainCode, Dict[str, str]]:
+    ) -> Tuple[bool, EventType, Dict[str, str]]:
         """
         Wipes event logs from the history table strictly maintaining domain boundaries.
 
@@ -169,24 +169,24 @@ class HistoryManager:
             filter_onion (Optional[str]): The target onion identity. If None, deletes all.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, str]]: A success flag, domain state code, and parameters.
+            Tuple[bool, EventType, Dict[str, str]]: A success flag, strict event type, and payload.
         """
         try:
             if filter_onion:
                 self._sql.execute(
                     'DELETE FROM history WHERE onion = ?', (filter_onion,)
                 )
-                return True, DbCode.HISTORY_CLEARED, {'target': filter_onion}
+                return True, EventType.HISTORY_CLEARED, {'target': filter_onion}
             else:
                 self._sql.execute('DELETE FROM history')
                 return (
                     True,
-                    DbCode.HISTORY_CLEARED_ALL,
+                    EventType.HISTORY_CLEARED_ALL,
                     {'profile': self._pm.profile_name},
                 )
 
         except Exception:
-            return False, DbCode.HISTORY_CLEAR_FAILED, {}
+            return False, EventType.HISTORY_CLEAR_FAILED, {}
 
     def update_alias(self, old_alias: str, new_alias: str) -> None:
         """

@@ -6,18 +6,18 @@ Handles RAM buffering, JSON Payload Parsing (UUID mapping), Drop & Go fallback c
 import socket
 import base64
 import json
+from datetime import datetime, timezone
 from typing import List, Tuple, Dict, Callable, Optional, TYPE_CHECKING
 
 from metor.core.api import (
+    EventType,
     IpcEvent,
     InboxDataEvent,
     FallbackSuccessEvent,
     AckEvent,
     RemoteMsgEvent,
     InboxNotificationEvent,
-    DomainCode,
-    ContactCode,
-    NetworkCode,
+    UnreadMessageEntry,
     JsonValue,
 )
 from metor.core.daemon.models import TorCommand
@@ -86,23 +86,27 @@ class MessageRouter:
         Returns:
             None
         """
-        buffered_msgs: List[Tuple[str, str]] = self._state.pop_ram_buffer(onion)
+        buffered_msgs: List[Tuple[str, str, str]] = self._state.pop_ram_buffer(onion)
         conn: Optional[socket.socket] = self._state.get_connection(onion)
 
         if not buffered_msgs or not conn:
             return
 
-        alias: Optional[str] = self._cm.get_alias_by_onion(onion)
-        messages_data: List[Dict[str, JsonValue]] = [
-            {'id': msg_id, 'payload': content, 'type': 'text', 'timestamp': ''}
-            for msg_id, content in buffered_msgs
+        alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
+        messages_data: List[UnreadMessageEntry] = [
+            UnreadMessageEntry(timestamp=timestamp, payload=content)
+            for _, content, timestamp in buffered_msgs
         ]
 
         self._broadcast(
-            InboxDataEvent(alias=alias, messages=messages_data, is_live_flush=True)  # type: ignore
+            InboxDataEvent(
+                alias=str(alias),
+                messages=messages_data,
+                is_live_flush=True,
+            )
         )
 
-        for msg_id, _ in buffered_msgs:
+        for msg_id, _, _ in buffered_msgs:
             try:
                 conn.sendall(f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8'))
             except Exception:
@@ -110,7 +114,7 @@ class MessageRouter:
 
     def force_fallback(
         self, target: str
-    ) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
+    ) -> Tuple[bool, EventType, Dict[str, JsonValue]]:
         """
         Forces all unacknowledged outgoing live messages to the drop queue.
 
@@ -118,17 +122,17 @@ class MessageRouter:
             target (str): The target alias or onion address.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, JsonValue]]: A success flag, response code, and params.
+            Tuple[bool, EventType, Dict[str, JsonValue]]: A success flag, strict event type, and payload.
         """
         resolved: Optional[Tuple[str, str]] = self._cm.resolve_target(target)
         if not resolved:
-            return False, ContactCode.PEER_NOT_FOUND, {'target': target}
+            return False, EventType.PEER_NOT_FOUND, {'target': target}
         alias, onion = resolved
 
         unacked: Dict[str, str] = self._state.pop_unacked_messages(onion)
 
         if not unacked:
-            return False, NetworkCode.NO_PENDING_LIVE_MSGS, {'alias': alias}
+            return False, EventType.NO_PENDING_LIVE_MSGS, {'alias': alias}
 
         for msg_id, content in unacked.items():
             self._mm.queue_message(
@@ -145,8 +149,7 @@ class MessageRouter:
 
         self._broadcast(
             FallbackSuccessEvent(
-                code=NetworkCode.FALLBACK_SUCCESS,
-                alias=str(alias or onion),
+                alias=alias,
                 count=len(unacked),
                 msg_ids=list(unacked.keys()),
             )
@@ -154,8 +157,8 @@ class MessageRouter:
 
         return (
             True,
-            NetworkCode.FALLBACK_SUCCESS,
-            {'alias': alias, 'count': len(unacked)},
+            EventType.FALLBACK_SUCCESS,
+            {'alias': alias, 'count': len(unacked), 'msg_ids': list(unacked.keys())},
         )
 
     def send_message(self, target: str, msg: str, msg_id: str) -> None:
@@ -192,8 +195,7 @@ class MessageRouter:
                 )
                 self._broadcast(
                     FallbackSuccessEvent(
-                        code=NetworkCode.FALLBACK_SUCCESS,
-                        alias=str(alias or onion),
+                        alias=alias,
                         count=1,
                         msg_ids=[msg_id],
                     )
@@ -203,9 +205,10 @@ class MessageRouter:
         self._state.add_unacked_message(onion, msg_id, msg)
 
         try:
+            timestamp: str = datetime.now(timezone.utc).isoformat()
             envelope: Dict[str, JsonValue] = {
                 'id': msg_id,
-                'timestamp': '',
+                'timestamp': timestamp,
                 'text': msg,
             }
             envelope_str: str = json.dumps(envelope)
@@ -232,28 +235,37 @@ class MessageRouter:
         Returns:
             bool: True if the connection should be terminated due to buffer overflow.
         """
-        alias: Optional[str] = self._cm.get_alias_by_onion(onion)
+        alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
 
         msg_id: str = payload_id
         content: str = b64_payload
+        timestamp: str = ''
 
         try:
             raw_text = base64.b64decode(b64_payload).decode('utf-8')
             envelope = json.loads(raw_text)
             msg_id = str(envelope.get('id', payload_id))
             content = str(envelope.get('text', raw_text))
+            timestamp = str(envelope.get('timestamp') or '')
         except Exception:
             pass
 
         if self._has_clients_callback():
             try:
                 conn.sendall(f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8'))
-                self._broadcast(RemoteMsgEvent(alias=alias or onion, text=content))
+                self._broadcast(
+                    RemoteMsgEvent(alias=str(alias), text=content, timestamp=timestamp)
+                )
             except Exception:
                 pass
             return False
         else:
-            buffer_size: int = self._state.push_ram_buffer(onion, msg_id, content)
+            buffer_size: int = self._state.push_ram_buffer(
+                onion,
+                msg_id,
+                content,
+                timestamp,
+            )
             max_limit: int = self._config.get_int(SettingKey.MAX_UNSEEN_LIVE_MSGS)
             if buffer_size >= max_limit:
                 return True
@@ -294,6 +306,10 @@ class MessageRouter:
                 pass
             return
 
+        alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
+        unread_count: int = 0
+        is_focused: bool = self._state.is_focused_by_ui(onion)
+
         try:
             while True:
                 msg: Optional[str] = stream.read_line()
@@ -323,8 +339,11 @@ class MessageRouter:
                         is_ephemeral: bool = self._config.get_bool(
                             SettingKey.EPHEMERAL_MESSAGES
                         )
+                        should_mark_read: bool = is_ephemeral or is_focused
                         status: MessageStatus = (
-                            MessageStatus.READ if is_ephemeral else MessageStatus.UNREAD
+                            MessageStatus.READ
+                            if should_mark_read
+                            else MessageStatus.UNREAD
                         )
 
                         self._mm.queue_message(
@@ -342,16 +361,31 @@ class MessageRouter:
                             f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8')
                         )
 
-                        alias: Optional[str] = self._cm.get_alias_by_onion(onion)
-                        self._broadcast(
-                            InboxNotificationEvent(
-                                alias=alias,
-                                count=1,
+                        if is_focused and alias:
+                            self._broadcast(
+                                InboxDataEvent(
+                                    alias=alias,
+                                    messages=[
+                                        UnreadMessageEntry(
+                                            timestamp=timestamp or '',
+                                            payload=content,
+                                        )
+                                    ],
+                                    is_live_flush=False,
+                                )
                             )
-                        )
+                        else:
+                            unread_count += 1
         except Exception:
             pass
         finally:
+            if alias and unread_count > 0:
+                self._broadcast(
+                    InboxNotificationEvent(
+                        alias=alias,
+                        count=unread_count,
+                    )
+                )
             try:
                 conn.close()
             except Exception:

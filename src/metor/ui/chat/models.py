@@ -1,18 +1,16 @@
-"""
-Module defining the data models and enumerations for the Chat UI.
-"""
+"""Module defining the data models and render roles for the Chat UI."""
 
-from enum import Enum
 from dataclasses import dataclass
+from enum import Enum
 from typing import Optional
+
+from metor.ui.models import StatusTone
 
 
 class ChatMessageType(str, Enum):
-    """Enumeration for the different visual routing types of chat messages."""
+    """Enumeration for the different visual routing roles in chat."""
 
-    INFO = 'info'
-    SYSTEM = 'system'
-    ERROR = 'error'
+    STATUS = 'status'
     RAW = 'raw'
     SELF = 'self'
     REMOTE = 'remote'
@@ -24,7 +22,9 @@ class ChatLine:
 
     text: str
     msg_type: ChatMessageType
+    tone: Optional[StatusTone] = None
     alias: Optional[str] = None
+    timestamp: Optional[str] = None
     is_pending: bool = False
     msg_id: Optional[str] = None
     is_drop: bool = False

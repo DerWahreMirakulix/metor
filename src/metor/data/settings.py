@@ -38,6 +38,7 @@ class SettingKey(str, Enum):
     DAEMON_IPC_TIMEOUT = 'daemon.ipc_timeout'
     ENABLE_TOR_LOGGING = 'daemon.enable_tor_logging'
     ENABLE_SQL_LOGGING = 'daemon.enable_sql_logging'
+    ENABLE_RUNTIME_DB_MIRROR = 'daemon.enable_runtime_db_mirror'
     AUTO_ACCEPT_CONTACTS = 'daemon.auto_accept_contacts'
     REQUIRE_LOCAL_AUTH = 'daemon.require_local_auth'
     ALLOW_DROPS = 'daemon.allow_drops'
@@ -49,8 +50,10 @@ class SettingKey(str, Enum):
 
     # 3. Advanced Network Resilience & Constraints
     MAX_CONCURRENT_CONNECTIONS = 'daemon.max_concurrent_connections'
-    DROP_TUNNEL_TTL = 'daemon.drop_tunnel_ttl'
-    AUTO_RECONNECT_LIVE = 'daemon.auto_reconnect_live'
+    DROP_TUNNEL_IDLE_TIMEOUT = 'daemon.drop_tunnel_idle_timeout'
+    ALLOW_DROP_STANDBY_ON_LIVE = 'daemon.allow_drop_standby_on_live'
+    LIVE_RECONNECT_DELAY = 'daemon.live_reconnect_delay'
+    LIVE_RECONNECT_GRACE_TIMEOUT = 'daemon.live_reconnect_grace_timeout'
 
     @property
     def is_ui(self) -> bool:
@@ -98,6 +101,7 @@ class Settings:
         SettingKey.DAEMON_IPC_TIMEOUT.value: 15.0,
         SettingKey.ENABLE_TOR_LOGGING.value: False,
         SettingKey.ENABLE_SQL_LOGGING.value: False,
+        SettingKey.ENABLE_RUNTIME_DB_MIRROR.value: False,
         SettingKey.AUTO_ACCEPT_CONTACTS.value: True,
         SettingKey.REQUIRE_LOCAL_AUTH.value: False,
         SettingKey.ALLOW_DROPS.value: True,
@@ -107,8 +111,10 @@ class Settings:
         SettingKey.FALLBACK_TO_DROP.value: True,
         SettingKey.MAX_UNSEEN_LIVE_MSGS.value: 20,
         SettingKey.MAX_CONCURRENT_CONNECTIONS.value: 50,
-        SettingKey.DROP_TUNNEL_TTL.value: 30.0,
-        SettingKey.AUTO_RECONNECT_LIVE.value: True,
+        SettingKey.DROP_TUNNEL_IDLE_TIMEOUT.value: 30.0,
+        SettingKey.ALLOW_DROP_STANDBY_ON_LIVE.value: False,
+        SettingKey.LIVE_RECONNECT_DELAY.value: 10,
+        SettingKey.LIVE_RECONNECT_GRACE_TIMEOUT.value: 10,
     }
 
     @staticmethod

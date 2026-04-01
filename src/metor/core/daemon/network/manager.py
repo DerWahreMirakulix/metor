@@ -5,10 +5,10 @@ the complex interactions between the Listener, Receiver, Controller, and Router.
 """
 
 import threading
-from typing import Dict, List, Callable, Tuple, TYPE_CHECKING
+from typing import Dict, List, Callable, Optional, Tuple, TYPE_CHECKING
 
 from metor.core import TorManager
-from metor.core.api import IpcEvent, DomainCode, JsonValue
+from metor.core.api import EventType, IpcEvent, JsonValue
 from metor.core.daemon.crypto import Crypto
 from metor.data import HistoryManager, ContactManager, MessageManager
 
@@ -37,6 +37,7 @@ class NetworkManager:
         has_clients_callback: Callable[[], bool],
         stop_flag: threading.Event,
         config: 'Config',
+        state: Optional[StateTracker] = None,
     ) -> None:
         """
         Initializes the NetworkManager and its isolated sub-components.
@@ -51,12 +52,13 @@ class NetworkManager:
             has_clients_callback (Callable[[], bool]): Callback to check for active UI clients.
             stop_flag (threading.Event): Global daemon termination flag.
             config (Config): The profile configuration instance.
+            state (Optional[StateTracker]): Optional shared transport state.
 
         Returns:
             None
         """
         self._cm: ContactManager = cm
-        self._state: StateTracker = StateTracker()
+        self._state: StateTracker = state or StateTracker()
 
         self._router: MessageRouter = MessageRouter(
             cm=cm,
@@ -194,6 +196,42 @@ class NetworkManager:
         """
         self._controller.retunnel(target)
 
+    def is_connected_or_pending(self, onion: str) -> bool:
+        """
+        Checks whether a peer currently has a live or pending session state.
+
+        Args:
+            onion (str): The strict onion identity.
+
+        Returns:
+            bool: True if the peer is currently active or pending.
+        """
+        return self._state.is_connected_or_pending(onion)
+
+    def add_ui_focus(self, onion: str) -> None:
+        """
+        Registers that a connected UI client is actively focused on a peer.
+
+        Args:
+            onion (str): The strict onion identity.
+
+        Returns:
+            None
+        """
+        self._state.add_ui_focus(onion)
+
+    def remove_ui_focus(self, onion: str) -> None:
+        """
+        Removes one UI focus reference from a peer.
+
+        Args:
+            onion (str): The strict onion identity.
+
+        Returns:
+            None
+        """
+        self._state.remove_ui_focus(onion)
+
     def flush_ram_buffer(self, onion: str) -> None:
         """
         Flushes the headless RAM buffer to the UI and fires pending ACKs.
@@ -208,7 +246,7 @@ class NetworkManager:
 
     def force_fallback(
         self, target: str
-    ) -> Tuple[bool, DomainCode, Dict[str, JsonValue]]:
+    ) -> Tuple[bool, EventType, Dict[str, JsonValue]]:
         """
         Forces all unacknowledged outgoing live messages to the drop queue.
 
@@ -216,7 +254,7 @@ class NetworkManager:
             target (str): The target alias or onion address.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, JsonValue]]: A success flag, domain code and params.
+            Tuple[bool, EventType, Dict[str, JsonValue]]: A success flag, strict event type, and payload.
         """
         return self._router.force_fallback(target)
 
@@ -257,7 +295,7 @@ class NetworkManager:
             List[str]: Active connection aliases.
         """
         return [
-            self._cm.get_alias_by_onion(onion) or onion
+            self._cm.require_alias_by_onion(onion)
             for onion in self._state.get_active_connections_keys()
         ]
 
@@ -272,6 +310,6 @@ class NetworkManager:
             List[str]: Pending connection aliases.
         """
         return [
-            self._cm.get_alias_by_onion(onion) or onion
+            self._cm.require_alias_by_onion(onion)
             for onion in self._state.get_pending_connections_keys()
         ]

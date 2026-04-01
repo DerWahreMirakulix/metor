@@ -49,7 +49,11 @@ class Display:
 
         clean_text: str = self._ansi_escape.sub('', text)
         prefix_len: int = ChatPresenter.get_visible_prefix_len(
-            msg.msg_type, msg.alias, msg.is_drop, len(self._initial_prompt)
+            msg.msg_type,
+            msg.tone,
+            msg.alias,
+            msg.is_drop,
+            len(self._initial_prompt),
         )
 
         lines: List[str] = clean_text.split('\n')

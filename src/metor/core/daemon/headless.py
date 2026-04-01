@@ -13,11 +13,11 @@ from typing import Dict, Optional, Type
 
 from metor.core import KeyManager, TorManager
 from metor.core.api import (
+    EventType,
     JsonValue,
     IpcEvent,
     IpcCommand,
-    SystemCode,
-    ActionErrorEvent,
+    create_event,
     GetContactsListCommand,
     AddContactCommand,
     RemoveContactCommand,
@@ -371,7 +371,4 @@ class HeadlessDaemon:
         elif isinstance(cmd, (GetAddressCommand, GenerateAddressCommand)):
             self._send(conn, self._sys_handler.handle(cmd))
         else:
-            self._send(
-                conn,
-                ActionErrorEvent(action=cmd.action, code=SystemCode.DAEMON_OFFLINE),
-            )
+            self._send(conn, create_event(EventType.DAEMON_OFFLINE))

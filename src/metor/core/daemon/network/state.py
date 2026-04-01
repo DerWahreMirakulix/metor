@@ -6,7 +6,15 @@ Implements Reference Counting to track IPC clients focusing on specific peers fo
 
 import socket
 import threading
+import time
 from typing import Dict, List, Optional, Set, Tuple
+
+from metor.core.daemon.models import (
+    DropTunnelState,
+    LiveTransportState,
+    PeerTransportState,
+    PrimaryTransport,
+)
 
 
 class StateTracker:
@@ -27,9 +35,14 @@ class StateTracker:
         self._pending_connections: Dict[str, socket.socket] = {}
         self._unauthenticated_connections: Set[socket.socket] = set()
         self._outbound_attempts: Set[str] = set()
+        self._outbound_sockets: Dict[str, socket.socket] = {}
         self._initial_buffers: Dict[str, str] = {}
         self._unacked_messages: Dict[str, Dict[str, str]] = {}
-        self._ram_buffers: Dict[str, List[Tuple[str, str]]] = {}
+        self._ram_buffers: Dict[str, List[Tuple[str, str, str]]] = {}
+        self._drop_tunnels: Dict[str, DropTunnelState] = {}
+        self._live_reconnect_grace: Dict[str, float] = {}
+        self._retunnel_reconnects: Set[str] = set()
+        self._retunnel_in_progress: Set[str] = set()
 
         # Reference counting for UI clients currently focusing an onion
         self._ui_focus_counts: Dict[str, int] = {}
@@ -88,6 +101,40 @@ class StateTracker:
         with self._lock:
             return onion in self._connections or onion in self._pending_connections
 
+    def is_live_active(self, onion: str) -> bool:
+        """
+        Checks whether a peer currently has an active live socket.
+
+        Args:
+            onion (str): The target onion identity.
+
+        Returns:
+            bool: True if the peer is fully connected.
+        """
+        with self._lock:
+            return onion in self._connections
+
+    def get_live_state(self, onion: str) -> LiveTransportState:
+        """
+        Derives the live transport lifecycle state for one peer.
+
+        Args:
+            onion (str): The target onion identity.
+
+        Returns:
+            LiveTransportState: The derived live state.
+        """
+        with self._lock:
+            if onion in self._connections:
+                return LiveTransportState.CONNECTED
+            if onion in self._pending_connections:
+                return LiveTransportState.PENDING
+            if onion in self._retunnel_in_progress:
+                return LiveTransportState.RETUNNELING
+            if onion in self._outbound_attempts:
+                return LiveTransportState.CONNECTING
+            return LiveTransportState.DISCONNECTED
+
     def has_outbound_attempt(self, onion: str) -> bool:
         """
         Checks if an outbound connection attempt is currently in flight for the onion.
@@ -126,6 +173,36 @@ class StateTracker:
         """
         with self._lock:
             self._outbound_attempts.discard(onion)
+            self._outbound_sockets.pop(onion, None)
+
+    def bind_outbound_socket(self, onion: str, conn: socket.socket) -> None:
+        """
+        Associates the current outbound attempt with its concrete socket instance.
+
+        Args:
+            onion (str): The target onion identity.
+            conn (socket.socket): The in-flight outbound socket.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            self._outbound_attempts.add(onion)
+            self._outbound_sockets[onion] = conn
+
+    def is_current_outbound_socket(self, onion: str, sock: socket.socket) -> bool:
+        """
+        Checks whether a socket is the current tracked outbound attempt.
+
+        Args:
+            onion (str): The target onion identity.
+            sock (socket.socket): The socket instance to compare.
+
+        Returns:
+            bool: True if the socket is the currently tracked outbound attempt.
+        """
+        with self._lock:
+            return self._outbound_sockets.get(onion) == sock
 
     def add_active_connection(self, onion: str, conn: socket.socket) -> None:
         """
@@ -141,8 +218,10 @@ class StateTracker:
         with self._lock:
             self._connections[onion] = conn
             self._outbound_attempts.discard(onion)
+            self._outbound_sockets.pop(onion, None)
             if onion in self._pending_connections:
                 self._pending_connections.pop(onion)
+            self._initial_buffers.pop(onion, None)
 
     def add_pending_connection(
         self, onion: str, conn: socket.socket, initial_buffer: str
@@ -161,6 +240,8 @@ class StateTracker:
         with self._lock:
             self._pending_connections[onion] = conn
             self._initial_buffers[onion] = initial_buffer
+            self._outbound_attempts.discard(onion)
+            self._outbound_sockets.pop(onion, None)
 
     def pop_pending_connection(self, onion: str) -> Tuple[Optional[socket.socket], str]:
         """
@@ -176,6 +257,41 @@ class StateTracker:
             conn: Optional[socket.socket] = self._pending_connections.pop(onion, None)
             buf: str = self._initial_buffers.pop(onion, '')
             return conn, buf
+
+    def is_pending_socket(self, onion: str, sock: socket.socket) -> bool:
+        """
+        Checks whether a socket is the currently tracked pending connection.
+
+        Args:
+            onion (str): The target onion identity.
+            sock (socket.socket): The socket instance to compare.
+
+        Returns:
+            bool: True if the socket is the current pending entry.
+        """
+        with self._lock:
+            return self._pending_connections.get(onion) == sock
+
+    def remove_pending_connection_if_socket(
+        self, onion: str, sock: socket.socket
+    ) -> bool:
+        """
+        Removes a pending connection only if the tracked socket still matches.
+
+        Args:
+            onion (str): The target onion identity.
+            sock (socket.socket): The socket expected to be pending.
+
+        Returns:
+            bool: True if the pending connection was removed.
+        """
+        with self._lock:
+            if self._pending_connections.get(onion) != sock:
+                return False
+
+            self._pending_connections.pop(onion, None)
+            self._initial_buffers.pop(onion, None)
+            return True
 
     def get_connection(self, onion: str) -> Optional[socket.socket]:
         """
@@ -205,6 +321,7 @@ class StateTracker:
             conn: Optional[socket.socket] = self._connections.pop(
                 onion, None
             ) or self._pending_connections.pop(onion, None)
+            self._outbound_sockets.pop(onion, None)
             self._initial_buffers.pop(onion, None)
             self._ram_buffers.pop(onion, None)
             return conn
@@ -252,7 +369,7 @@ class StateTracker:
             if onion in self._unacked_messages:
                 self._unacked_messages[onion].pop(msg_id, None)
 
-    def pop_ram_buffer(self, onion: str) -> List[Tuple[str, str]]:
+    def pop_ram_buffer(self, onion: str) -> List[Tuple[str, str, str]]:
         """
         Retrieves and removes the headless RAM buffer containing unseen messages.
 
@@ -260,12 +377,14 @@ class StateTracker:
             onion (str): The peer's onion identity.
 
         Returns:
-            List[Tuple[str, str]]: A list of (msg_id, content) tuples.
+            List[Tuple[str, str, str]]: A list of (msg_id, content, timestamp) tuples.
         """
         with self._lock:
             return self._ram_buffers.pop(onion, [])
 
-    def push_ram_buffer(self, onion: str, msg_id: str, content: str) -> int:
+    def push_ram_buffer(
+        self, onion: str, msg_id: str, content: str, timestamp: str = ''
+    ) -> int:
         """
         Adds a newly received message to the headless RAM buffer for deferred display.
 
@@ -273,6 +392,7 @@ class StateTracker:
             onion (str): The peer's onion identity.
             msg_id (str): The unique message identifier.
             content (str): The message payload.
+            timestamp (str): The sender timestamp carried with the message.
 
         Returns:
             int: The current size of the RAM buffer.
@@ -280,7 +400,7 @@ class StateTracker:
         with self._lock:
             if onion not in self._ram_buffers:
                 self._ram_buffers[onion] = []
-            self._ram_buffers[onion].append((msg_id, content))
+            self._ram_buffers[onion].append((msg_id, content, timestamp))
             return len(self._ram_buffers[onion])
 
     def is_known_socket(self, onion: str, sock: socket.socket) -> bool:
@@ -354,6 +474,19 @@ class StateTracker:
         with self._lock:
             self._ui_focus_counts[onion] = self._ui_focus_counts.get(onion, 0) + 1
 
+    def get_focus_count(self, onion: str) -> int:
+        """
+        Returns the current number of UI clients focusing one peer.
+
+        Args:
+            onion (str): The target onion identity.
+
+        Returns:
+            int: The focus reference count.
+        """
+        with self._lock:
+            return self._ui_focus_counts.get(onion, 0)
+
     def remove_ui_focus(self, onion: str) -> None:
         """
         Decrements the reference count of UI clients focusing on a specific peer.
@@ -382,3 +515,258 @@ class StateTracker:
         """
         with self._lock:
             return self._ui_focus_counts.get(onion, 0) > 0
+
+    def mark_drop_tunnel_open(
+        self, onion: str, opened_at: Optional[float] = None
+    ) -> None:
+        """
+        Marks a cached drop tunnel as active for one peer.
+
+        Args:
+            onion (str): The target onion identity.
+            opened_at (Optional[float]): Optional timestamp override.
+
+        Returns:
+            None
+        """
+        timestamp: float = opened_at if opened_at is not None else time.time()
+        with self._lock:
+            self._drop_tunnels[onion] = DropTunnelState(
+                opened_at=timestamp,
+                last_used_at=timestamp,
+            )
+
+    def touch_drop_tunnel(self, onion: str, touched_at: Optional[float] = None) -> None:
+        """
+        Updates the last-used timestamp for a cached drop tunnel.
+
+        Args:
+            onion (str): The target onion identity.
+            touched_at (Optional[float]): Optional timestamp override.
+
+        Returns:
+            None
+        """
+        timestamp: float = touched_at if touched_at is not None else time.time()
+        with self._lock:
+            tunnel: Optional[DropTunnelState] = self._drop_tunnels.get(onion)
+            if not tunnel:
+                self._drop_tunnels[onion] = DropTunnelState(
+                    opened_at=timestamp,
+                    last_used_at=timestamp,
+                )
+                return
+
+            self._drop_tunnels[onion] = DropTunnelState(
+                opened_at=tunnel.opened_at,
+                last_used_at=timestamp,
+            )
+
+    def clear_drop_tunnel(self, onion: str) -> None:
+        """
+        Removes cached drop tunnel metadata for one peer.
+
+        Args:
+            onion (str): The target onion identity.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            self._drop_tunnels.pop(onion, None)
+
+    def has_drop_tunnel(self, onion: str) -> bool:
+        """
+        Checks whether a cached drop tunnel exists for one peer.
+
+        Args:
+            onion (str): The target onion identity.
+
+        Returns:
+            bool: True if a cached drop tunnel exists.
+        """
+        with self._lock:
+            return onion in self._drop_tunnels
+
+    def get_drop_tunnel_state(self, onion: str) -> Optional[DropTunnelState]:
+        """
+        Returns the cached drop tunnel metadata for one peer.
+
+        Args:
+            onion (str): The target onion identity.
+
+        Returns:
+            Optional[DropTunnelState]: The cached tunnel metadata if present.
+        """
+        with self._lock:
+            return self._drop_tunnels.get(onion)
+
+    def get_primary_transport(
+        self, onion: str, standby_drop_allowed: bool = False
+    ) -> PrimaryTransport:
+        """
+        Derives the primary transport for one peer.
+
+        Args:
+            onion (str): The target onion identity.
+            standby_drop_allowed (bool): Whether drop standby is enabled while live exists.
+
+        Returns:
+            PrimaryTransport: The derived primary transport.
+        """
+        live_state: LiveTransportState = self.get_live_state(onion)
+        if live_state is not LiveTransportState.DISCONNECTED:
+            return PrimaryTransport.LIVE
+
+        if self.has_drop_tunnel(onion):
+            return PrimaryTransport.DROP
+
+        return PrimaryTransport.NONE
+
+    def get_peer_transport_state(
+        self, onion: str, standby_drop_allowed: bool = False
+    ) -> PeerTransportState:
+        """
+        Returns a derived peer transport snapshot.
+
+        Args:
+            onion (str): The target onion identity.
+            standby_drop_allowed (bool): Whether drop standby is enabled while live exists.
+
+        Returns:
+            PeerTransportState: The derived snapshot.
+        """
+        return PeerTransportState(
+            onion=onion,
+            live_state=self.get_live_state(onion),
+            primary_transport=self.get_primary_transport(
+                onion,
+                standby_drop_allowed=standby_drop_allowed,
+            ),
+            has_drop_tunnel=self.has_drop_tunnel(onion),
+            focus_count=self.get_focus_count(onion),
+            standby_drop_allowed=standby_drop_allowed,
+            is_retunneling=self.is_retunneling(onion),
+        )
+
+    def mark_live_reconnect_grace(self, onion: str, grace_timeout_sec: float) -> None:
+        """
+        Marks a peer as eligible for a short incoming auto-accept reconnect window.
+
+        Args:
+            onion (str): The remote onion identity.
+            grace_timeout_sec (float): Grace duration in seconds, where 0 disables grace.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            if grace_timeout_sec <= 0:
+                self._live_reconnect_grace.pop(onion, None)
+                return
+
+            self._live_reconnect_grace[onion] = time.time() + grace_timeout_sec
+
+    def consume_live_reconnect_grace(self, onion: str) -> bool:
+        """
+        Consumes an incoming reconnect grace window if it is still valid.
+
+        Args:
+            onion (str): The remote onion identity.
+
+        Returns:
+            bool: True if the reconnect should be auto-accepted.
+        """
+        with self._lock:
+            expires_at: Optional[float] = self._live_reconnect_grace.get(onion)
+            if expires_at is None:
+                return False
+
+            if expires_at < time.time():
+                del self._live_reconnect_grace[onion]
+                return False
+
+            del self._live_reconnect_grace[onion]
+            return True
+
+    def mark_retunnel_reconnect(self, onion: str) -> None:
+        """
+        Marks that the next successful connection should finalize a retunnel flow.
+
+        Args:
+            onion (str): The remote onion identity.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            self._retunnel_reconnects.add(onion)
+
+    def mark_retunnel_started(self, onion: str) -> None:
+        """
+        Marks a peer as currently executing a retunnel flow.
+
+        Args:
+            onion (str): The remote onion identity.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            self._retunnel_in_progress.add(onion)
+
+    def is_retunneling(self, onion: str) -> bool:
+        """
+        Checks whether a peer is currently inside a retunnel flow.
+
+        Args:
+            onion (str): The remote onion identity.
+
+        Returns:
+            bool: True if the peer is retunneling.
+        """
+        with self._lock:
+            return onion in self._retunnel_in_progress
+
+    def consume_retunnel_reconnect(self, onion: str) -> bool:
+        """
+        Consumes a pending retunnel completion marker.
+
+        Args:
+            onion (str): The remote onion identity.
+
+        Returns:
+            bool: True if the connection finalizes a retunnel.
+        """
+        with self._lock:
+            if onion not in self._retunnel_reconnects:
+                return False
+            self._retunnel_reconnects.discard(onion)
+            return True
+
+    def discard_retunnel_reconnect(self, onion: str) -> None:
+        """
+        Clears a pending retunnel completion marker.
+
+        Args:
+            onion (str): The remote onion identity.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            self._retunnel_reconnects.discard(onion)
+
+    def clear_retunnel_flow(self, onion: str) -> None:
+        """
+        Clears all retunnel markers for one peer.
+
+        Args:
+            onion (str): The remote onion identity.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            self._retunnel_reconnects.discard(onion)
+            self._retunnel_in_progress.discard(onion)

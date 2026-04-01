@@ -5,5 +5,6 @@ Exports the main Daemon orchestrator and the ephemeral HeadlessDaemon for CLI da
 
 from metor.core.daemon.engine import Daemon
 from metor.core.daemon.headless import HeadlessDaemon
+from metor.core.daemon.models import DaemonStatus
 
-__all__ = ['Daemon', 'HeadlessDaemon']
+__all__ = ['Daemon', 'HeadlessDaemon', 'DaemonStatus']

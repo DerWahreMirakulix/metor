@@ -6,13 +6,18 @@ Prettier formatting to the final output.
 """
 
 import sys
+import json
+import inspect
 import subprocess
 import dataclasses
 from enum import Enum
 from pathlib import Path
-from typing import List, Type
+from typing import TYPE_CHECKING, Dict, List, Type, Any, get_args, get_origin
 
-from metor.core.api import CMD_MAP, EVENT_MAP, IpcMessage
+from metor.core.api import CMD_MAP, EVENT_MAP
+
+if TYPE_CHECKING:
+    from metor.core.api import IpcMessage
 
 
 # Dynamically resolve paths to support execution from any directory
@@ -51,6 +56,23 @@ class ApiDocGenerator:
         Returns:
             str: The formatted stringified type.
         """
+        origin: Any = get_origin(field_type)
+        args: tuple[Any, ...] = get_args(field_type)
+
+        if origin is list and args:
+            return f'List[{self._get_type_name(args[0])}]'
+        if origin is dict and len(args) == 2:
+            return (
+                f'Dict[{self._get_type_name(args[0])}, {self._get_type_name(args[1])}]'
+            )
+        if origin is tuple and args:
+            joined_args: str = ', '.join(self._get_type_name(arg) for arg in args)
+            return f'Tuple[{joined_args}]'
+        if origin is not None and args:
+            origin_name: str = getattr(origin, '__name__', str(origin))
+            joined_args = ', '.join(self._get_type_name(arg) for arg in args)
+            return f'{origin_name}[{joined_args}]'
+
         type_str: str = str(field_type)
 
         # Explicitly catch the complex JsonValue resolution
@@ -72,16 +94,76 @@ class ApiDocGenerator:
         type_str = type_str.replace('metor.core.api.codes.', '')
         type_str = type_str.replace('metor.core.api.base.', '')
 
-        # Coerce the expanded Union back to DomainCode for readability
-        if 'SystemCode, NetworkCode, DbCode, ContactCode, UiCode' in type_str:
-            type_str = type_str.replace(
-                'Union[SystemCode, NetworkCode, DbCode, ContactCode, UiCode]',
-                'DomainCode',
-            )
-
         return type_str
 
-    def _format_dataclass(self, cls: Type[IpcMessage]) -> str:
+    def _sample_value(self, field_type: object) -> Any:
+        """
+        Builds a compact example value for a dataclass field annotation.
+
+        Args:
+            field_type (object): The dataclass field annotation.
+
+        Returns:
+            Any: A JSON-serializable sample value.
+        """
+        origin: Any = get_origin(field_type)
+        args: tuple[Any, ...] = get_args(field_type)
+
+        if origin is list and args:
+            return [self._sample_value(args[0])]
+        if origin is dict and len(args) == 2:
+            return {'key': self._sample_value(args[1])}
+        if origin is tuple and args:
+            return [self._sample_value(arg) for arg in args]
+        if origin is not None and args:
+            non_none_args: List[Any] = [arg for arg in args if arg is not type(None)]
+            return self._sample_value(non_none_args[0]) if non_none_args else None
+        if isinstance(field_type, type) and issubclass(field_type, Enum):
+            return next(iter(field_type)).value
+        if field_type is str:
+            return 'string'
+        if field_type is int:
+            return 0
+        if field_type is float:
+            return 0.0
+        if field_type is bool:
+            return False
+        if field_type is type(None):
+            return None
+        return 'value'
+
+    def _build_example_payload(
+        self,
+        cls: Type['IpcMessage'],
+        route_key: str,
+        route_value: str,
+    ) -> str:
+        """
+        Builds a compact JSON example for one command or event DTO.
+
+        Args:
+            cls (Type[IpcMessage]): The dataclass type to introspect.
+            route_key (str): The envelope routing key.
+            route_value (str): The concrete routing value.
+
+        Returns:
+            str: A formatted JSON example string.
+        """
+        payload: Dict[str, Any] = {route_key: route_value}
+
+        for field in dataclasses.fields(cls):
+            if field.name in ('command_type', 'event_type'):
+                continue
+
+            if (
+                field.default is dataclasses.MISSING
+                and field.default_factory is dataclasses.MISSING
+            ):
+                payload[field.name] = self._sample_value(field.type)
+
+        return json.dumps(payload, indent=2)
+
+    def _format_dataclass(self, cls: Type['IpcMessage']) -> str:
         """
         Extracts the fields, types, and defaults from a dataclass into a Markdown table.
         Filters out internal routing constants to reduce documentation noise.
@@ -92,11 +174,11 @@ class ApiDocGenerator:
         Returns:
             str: The formatted Markdown string for the class.
         """
-        docstring: str = cls.__doc__ or 'No description provided.'
+        docstring: str = inspect.getdoc(cls) or 'No description provided.'
         lines: List[str] = [
             f'### `{cls.__name__}`',
             '',
-            f'{docstring.strip()}',
+            f'{docstring}',
             '',
             '| Field | Type | Default |',
             '|---|---|---|',
@@ -104,9 +186,7 @@ class ApiDocGenerator:
 
         field_count: int = 0
         for f in dataclasses.fields(cls):
-            # We expose 'code' now since it defines the strict DomainCode return type.
-            # Only the static routing constants 'action' and 'type' are skipped.
-            if f.name in ('action', 'type'):
+            if f.name in ('command_type', 'event_type'):
                 continue
 
             field_count += 1
@@ -141,42 +221,76 @@ class ApiDocGenerator:
         Returns:
             None
         """
+        sorted_commands = sorted(CMD_MAP.items(), key=lambda item: item[0].value)
+        sorted_events = sorted(EVENT_MAP.items(), key=lambda item: item[0].value)
+
         lines: List[str] = [
             '# Metor IPC API Documentation',
             '',
             'This document is auto-generated by introspecting the `metor.core.api.registry`.',
-            'It details the strict Data Transfer Objects (DTOs) used over the local IPC socket.',
+            'It describes the strict newline-delimited JSON protocol used over the local IPC socket.',
+            '',
+            '## Protocol Notes',
+            '',
+            '- Commands sent from the UI to the daemon must include a top-level `command_type` field.',
+            '- Events sent from the daemon to the UI must include a top-level `event_type` field.',
+            '- Every payload is a single JSON object followed by a newline (`\\n`).',
+            '- The daemon emits structured data only. Human-readable text is resolved in the UI from `event_type`.',
             '',
             '## Table of Contents',
             '',
             '**Commands (UI -> Daemon)**',
         ]
 
-        for cmd_cls in CMD_MAP.values():
+        for _, cmd_cls in sorted_commands:
             cmd_anchor: str = cmd_cls.__name__.lower()
             lines.append(f'- [{cmd_cls.__name__}](#{cmd_anchor})')
 
         lines.extend(['', '**Events (Daemon -> UI)**'])
 
-        for event_cls in EVENT_MAP.values():
+        for _, event_cls in sorted_events:
             evt_anchor: str = event_cls.__name__.lower()
             lines.append(f'- [{event_cls.__name__}](#{evt_anchor})')
 
         lines.extend(['', '## 1. Commands (UI -> Daemon)', ''])
 
-        for index, (action, cmd_cls) in enumerate(CMD_MAP.items()):
+        for index, (command_type, cmd_cls) in enumerate(sorted_commands):
             lines.append(self._format_dataclass(cmd_cls))
-            lines.append(f'**Action Code:** `{action.value}`')
-            if index < len(CMD_MAP) - 1:
+            lines.append(f'**Wire Value:** `{command_type.value}`')
+            lines.append('')
+            lines.append('**Example JSON**')
+            lines.append('')
+            lines.append('```json')
+            lines.append(
+                self._build_example_payload(
+                    cmd_cls,
+                    'command_type',
+                    command_type.value,
+                )
+            )
+            lines.append('```')
+            if index < len(sorted_commands) - 1:
                 lines.append('')
                 lines.append('---')
 
         lines.extend(['', '## 2. Events (Daemon -> UI)', ''])
 
-        for index, (event_type, event_cls) in enumerate(EVENT_MAP.items()):
+        for index, (event_type, event_cls) in enumerate(sorted_events):
             lines.append(self._format_dataclass(event_cls))
-            lines.append(f'**Event Type Code:** `{event_type.value}`')
-            if index < len(EVENT_MAP) - 1:
+            lines.append(f'**Wire Value:** `{event_type.value}`')
+            lines.append('')
+            lines.append('**Example JSON**')
+            lines.append('')
+            lines.append('```json')
+            lines.append(
+                self._build_example_payload(
+                    event_cls,
+                    'event_type',
+                    event_type.value,
+                )
+            )
+            lines.append('```')
+            if index < len(sorted_events) - 1:
                 lines.append('')
                 lines.append('---')
 

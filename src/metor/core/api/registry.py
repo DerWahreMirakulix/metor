@@ -1,12 +1,9 @@
-"""
-Module providing the central routing registries for IPC deserialization factories.
-Utilizes a dynamic Decorator-Pattern to register commands and events, upholding the Open-Closed Principle (OCP).
-"""
+"""Registries used by the IPC DTO factory methods."""
 
 from typing import Dict, Type, Callable, TypeVar
 
 # Local Package Imports
-from metor.core.api.codes import Action, EventType
+from metor.core.api.codes import CommandType, EventType
 from metor.core.api.base import IpcCommand, IpcEvent
 
 
@@ -16,23 +13,23 @@ E = TypeVar('E', bound=IpcEvent)
 
 
 # Global Registries
-CMD_MAP: Dict[Action, Type[IpcCommand]] = {}
+CMD_MAP: Dict[CommandType, Type[IpcCommand]] = {}
 EVENT_MAP: Dict[EventType, Type[IpcEvent]] = {}
 
 
-def register_command(action: Action) -> Callable[[Type[C]], Type[C]]:
+def register_command(command_type: CommandType) -> Callable[[Type[C]], Type[C]]:
     """
-    Decorator to dynamically register an IpcCommand DTO to a specific Action enum.
+    Registers an IPC command DTO for a concrete command type.
 
     Args:
-        action (Action): The strict IPC action code.
+        command_type (CommandType): The top-level command routing value.
 
     Returns:
-        Callable[[Type[C]], Type[C]]: The decorated class.
+        Callable[[Type[C]], Type[C]]: The class decorator that stores the DTO.
     """
 
     def wrapper(cls: Type[C]) -> Type[C]:
-        CMD_MAP[action] = cls
+        CMD_MAP[command_type] = cls
         return cls
 
     return wrapper
@@ -40,13 +37,13 @@ def register_command(action: Action) -> Callable[[Type[C]], Type[C]]:
 
 def register_event(event_type: EventType) -> Callable[[Type[E]], Type[E]]:
     """
-    Decorator to dynamically register an IpcEvent DTO to a specific EventType enum.
+    Registers an IPC event DTO for a concrete event type.
 
     Args:
-        event_type (EventType): The strict IPC event type code.
+        event_type (EventType): The top-level event routing value.
 
     Returns:
-        Callable[[Type[E]], Type[E]]: The decorated class.
+        Callable[[Type[E]], Type[E]]: The class decorator that stores the DTO.
     """
 
     def wrapper(cls: Type[E]) -> Type[E]:

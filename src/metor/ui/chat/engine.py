@@ -3,11 +3,9 @@ Module providing the interactive Chat User Interface Engine.
 Acts as a clean Facade, orchestrating the Session, Renderer, Commands, and Events.
 """
 
-import sys
-import os
-import signal
 import threading
 import secrets
+from datetime import datetime, timezone
 from typing import Optional
 
 from metor.core.api import (
@@ -21,6 +19,7 @@ from metor.core.api import (
 from metor.data.profile import ProfileManager
 from metor.data.settings import SettingKey
 from metor.ui import Help, Theme
+from metor.ui.models import StatusTone
 from metor.utils import clean_onion, Constants
 
 # Local Package Imports
@@ -53,6 +52,7 @@ class Chat:
 
         self._init_event: threading.Event = threading.Event()
         self._conn_event: threading.Event = threading.Event()
+        self._disconnect_event: threading.Event = threading.Event()
 
         self._handler: Optional[EventHandler] = None
         self._dispatcher: Optional[CommandDispatcher] = None
@@ -68,10 +68,13 @@ class Chat:
             None
         """
         ipc_port: Optional[int] = self._pm.get_daemon_port()
+        self._disconnect_event.clear()
+
         if not ipc_port:
             self._renderer.print_message(
                 "Daemon is not running! Use 'metor daemon' to start it.",
-                msg_type=ChatMessageType.SYSTEM,
+                msg_type=ChatMessageType.STATUS,
+                tone=StatusTone.SYSTEM,
             )
             return
 
@@ -84,7 +87,8 @@ class Chat:
         if not self._ipc.connect():
             self._renderer.print_message(
                 'Could not connect to Daemon. Is it running?',
-                msg_type=ChatMessageType.SYSTEM,
+                msg_type=ChatMessageType.STATUS,
+                tone=StatusTone.SYSTEM,
             )
             return
 
@@ -98,9 +102,26 @@ class Chat:
         ipc_timeout: float = self._pm.config.get_float(SettingKey.IPC_TIMEOUT)
 
         if not self._init_event.wait(timeout=ipc_timeout):
+            if self._disconnect_event.is_set():
+                self._renderer.print_message(
+                    f'{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}',
+                    msg_type=ChatMessageType.RAW,
+                )
+                self._shutdown()
+                return
+
             self._renderer.print_message(
                 f'{Theme.RED}IPC Timeout:{Theme.RESET} The daemon is not responding. If this is a remote profile, check your SSH tunnel.',
-                msg_type=ChatMessageType.ERROR,
+                msg_type=ChatMessageType.STATUS,
+                tone=StatusTone.ERROR,
+            )
+            self._shutdown()
+            return
+
+        if self._disconnect_event.is_set():
+            self._renderer.print_message(
+                f'{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}',
+                msg_type=ChatMessageType.RAW,
             )
             self._shutdown()
             return
@@ -109,7 +130,19 @@ class Chat:
 
         try:
             while True:
-                user_input: str = self._renderer.read_line()
+                user_input: Optional[str] = self._renderer.read_line(
+                    self._disconnect_event
+                )
+
+                if user_input is None:
+                    if self._disconnect_event.is_set():
+                        self._renderer.print_divider()
+                        self._renderer.print_message(
+                            f'{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}',
+                            msg_type=ChatMessageType.RAW,
+                        )
+                        break
+                    continue
 
                 if user_input == '':
                     self._renderer.print_prompt()
@@ -123,7 +156,8 @@ class Chat:
                         if not command_found:
                             self._renderer.print_message(
                                 f"Unknown command: '{user_input}'",
-                                msg_type=ChatMessageType.SYSTEM,
+                                msg_type=ChatMessageType.STATUS,
+                                tone=StatusTone.SYSTEM,
                             )
                 else:
                     self._send_chat_message(user_input)
@@ -137,6 +171,7 @@ class Chat:
         """
         Safely shuts down the IPC client and exits the UI process.
         Propagates focus removal to ensure Daemon TTL Keep-Alives update correctly.
+        Avoids sys.exit(0) core dumps by cleanly terminating thread loops.
 
         Args:
             None
@@ -148,11 +183,6 @@ class Chat:
             if self._session.focused_alias:
                 self._ipc.send_command(SwitchCommand(target=None))
             self._ipc.stop()
-
-        if threading.current_thread() is threading.main_thread():
-            sys.exit(0)
-        else:
-            os.kill(os.getpid(), signal.SIGINT)
 
     def _send_chat_message(self, msg_text: str) -> None:
         """
@@ -167,12 +197,14 @@ class Chat:
         if not self._session.focused_alias or not self._ipc:
             self._renderer.print_message(
                 'No active focus. Use /switch or /connect.',
-                msg_type=ChatMessageType.SYSTEM,
+                msg_type=ChatMessageType.STATUS,
+                tone=StatusTone.SYSTEM,
             )
             return
 
         msg_id: str = secrets.token_hex(Constants.UUID_CHAT_BYTES)
-        is_live: bool = self._session.focused_alias in self._session.active_connections
+        is_live: bool = self._session.is_connected(self._session.focused_alias)
+        timestamp: str = datetime.now(timezone.utc).isoformat()
 
         if is_live:
             self._ipc.send_command(
@@ -186,6 +218,7 @@ class Chat:
                 msg_text,
                 msg_type=ChatMessageType.SELF,
                 alias=self._session.focused_alias,
+                timestamp=timestamp,
                 msg_id=msg_id,
                 is_drop=False,
             )
@@ -200,6 +233,7 @@ class Chat:
                 msg_text,
                 msg_type=ChatMessageType.SELF,
                 alias=self._session.focused_alias,
+                timestamp=timestamp,
                 msg_id=msg_id,
                 is_drop=True,
                 is_pending=True,
@@ -215,13 +249,7 @@ class Chat:
         Returns:
             None
         """
-        self._renderer.print_divider()
-        self._renderer.print_message(
-            f'{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}',
-            msg_type=ChatMessageType.RAW,
-        )
-        self._renderer.clear_input_area()
-        self._shutdown()
+        self._disconnect_event.set()
 
     def _on_ipc_event(self, event: IpcEvent) -> None:
         """

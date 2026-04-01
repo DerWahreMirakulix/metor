@@ -3,12 +3,12 @@ Module defining domain-agnostic UI types and models.
 Ensures that the generic UI layer does not depend on specific sub-modules like Chat or CLI.
 """
 
-from enum import Enum
 from dataclasses import dataclass
+from enum import Enum
 
 
-class UISeverity(str, Enum):
-    """Standardized severity levels for UI translations across the application."""
+class StatusTone(str, Enum):
+    """Standardized tone levels for translated daemon status messages."""
 
     INFO = 'info'
     SYSTEM = 'system'
@@ -22,8 +22,8 @@ class TranslationDef:
 
     Attributes:
         text (str): The raw translation string with optional formatting placeholders.
-        severity (UISeverity): The severity routing level for the presenter.
+        tone (StatusTone): The tone used by the consuming UI.
     """
 
     text: str
-    severity: UISeverity
+    tone: StatusTone

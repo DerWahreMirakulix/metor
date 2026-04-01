@@ -5,13 +5,12 @@ Encapsulates profile-level system operations such as Tor address generation.
 
 from metor.core import TorManager
 from metor.core.api import (
+    EventType,
     IpcCommand,
     IpcEvent,
-    SystemCode,
+    create_event,
     GetAddressCommand,
     GenerateAddressCommand,
-    AddressDataEvent,
-    ActionErrorEvent,
 )
 from metor.data.profile import ProfileManager
 
@@ -44,36 +43,11 @@ class SystemCommandHandler:
             IpcEvent: The strictly typed response event (Success or Error DTO).
         """
         if isinstance(cmd, GetAddressCommand):
-            success, code, params = self._tm.get_address()
-            if success:
-                return AddressDataEvent(
-                    action=cmd.action,
-                    code=code,
-                    profile=str(params['profile']),
-                    onion=str(params['onion']),
-                )
-            return ActionErrorEvent(
-                action=cmd.action,
-                code=code,
-                target=str(params.get('profile', '')),
-            )
+            _, event_type, params = self._tm.get_address()
+            return create_event(event_type, params)
 
         if isinstance(cmd, GenerateAddressCommand):
-            success, code, params = self._tm.generate_address()
-            if success:
-                return AddressDataEvent(
-                    action=cmd.action,
-                    code=code,
-                    profile=str(params['profile']),
-                    onion=str(params['onion']),
-                )
-            return ActionErrorEvent(
-                action=cmd.action,
-                code=code,
-                target=str(params.get('profile', '')),
-            )
+            _, event_type, params = self._tm.generate_address()
+            return create_event(event_type, params)
 
-        return ActionErrorEvent(
-            action=cmd.action,
-            code=SystemCode.UNKNOWN_COMMAND,
-        )
+        return create_event(EventType.UNKNOWN_COMMAND)

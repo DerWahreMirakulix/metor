@@ -6,13 +6,14 @@ Emits strictly typed Domain Transfer Objects via IPC.
 
 import socket
 import threading
-from typing import Callable, Optional, cast, List, Tuple, TYPE_CHECKING
+from typing import Callable, Dict, Optional, Tuple, TYPE_CHECKING
 
 from metor.core import TorManager
 from metor.core.api import (
+    EventType,
     IpcCommand,
     IpcEvent,
-    NetworkCode,
+    create_event,
     InitCommand,
     InitEvent,
     GetConnectionsCommand,
@@ -27,9 +28,6 @@ from metor.core.api import (
     SwitchCommand,
     SwitchSuccessEvent,
     RetunnelCommand,
-    ActionErrorEvent,
-    TargetActionSuccessEvent,
-    FallbackSuccessEvent,
 )
 from metor.core.daemon.network import NetworkManager
 from metor.data import (
@@ -43,6 +41,9 @@ from metor.data import (
     SettingKey,
 )
 from metor.utils import clean_onion
+
+# Local Package Imports
+from metor.core.daemon.outbox import OutboxWorker
 
 if TYPE_CHECKING:
     from metor.data.profile.config import Config
@@ -58,6 +59,7 @@ class NetworkCommandHandler:
         hm: HistoryManager,
         mm: MessageManager,
         network: NetworkManager,
+        outbox: OutboxWorker,
         broadcast_cb: Callable[[IpcEvent], None],
         send_to_cb: Callable[[socket.socket, IpcEvent], None],
         config: 'Config',
@@ -71,6 +73,7 @@ class NetworkCommandHandler:
             hm (HistoryManager): Event logging.
             mm (MessageManager): Offline messages storage.
             network (NetworkManager): The core network orchestrator.
+            outbox (OutboxWorker): The offline drop tunnel worker.
             broadcast_cb (Callable[[IpcEvent], None]): Hook to broadcast IPC events.
             send_to_cb (Callable[[socket.socket, IpcEvent], None]): Hook to send an IPC event to a specific client.
             config (Config): The profile configuration instance.
@@ -83,9 +86,69 @@ class NetworkCommandHandler:
         self._hm: HistoryManager = hm
         self._mm: MessageManager = mm
         self._network: NetworkManager = network
+        self._outbox: OutboxWorker = outbox
         self._broadcast: Callable[[IpcEvent], None] = broadcast_cb
         self._send_to: Callable[[socket.socket, IpcEvent], None] = send_to_cb
         self._config: 'Config' = config
+        self._client_focuses: Dict[socket.socket, str] = {}
+        self._focus_lock: threading.Lock = threading.Lock()
+
+    def _set_client_focus(self, conn: socket.socket, onion: Optional[str]) -> None:
+        """
+        Synchronizes one IPC client's active peer focus with the daemon state.
+
+        Args:
+            conn (socket.socket): The IPC client socket.
+            onion (Optional[str]): The newly focused onion or None to clear focus.
+
+        Returns:
+            None
+        """
+        with self._focus_lock:
+            previous_onion: Optional[str] = self._client_focuses.get(conn)
+
+            if previous_onion and previous_onion != onion:
+                self._network.remove_ui_focus(previous_onion)
+
+            if onion is None:
+                self._client_focuses.pop(conn, None)
+                return
+
+            if previous_onion != onion:
+                self._network.add_ui_focus(onion)
+
+            self._client_focuses[conn] = onion
+
+    def clear_client_focus(self, conn: socket.socket) -> None:
+        """
+        Removes any tracked focus for a disconnected IPC client.
+
+        Args:
+            conn (socket.socket): The disconnected IPC client socket.
+
+        Returns:
+            None
+        """
+        self._set_client_focus(conn, None)
+
+    def _retunnel_target(self, alias: str, onion: str) -> None:
+        """
+        Routes retunnel requests to the live controller or the drop tunnel worker.
+
+        Args:
+            alias (str): The strict alias resolved for the peer.
+            onion (str): The strict onion identity.
+
+        Returns:
+            None
+        """
+        self._outbox.reset_tunnel(onion)
+
+        if self._network.is_connected_or_pending(onion):
+            self._network.retunnel(onion)
+            return
+
+        self._outbox.retunnel(onion, alias)
 
     def _is_self_target(self, target: str) -> bool:
         """
@@ -142,23 +205,16 @@ class NetworkCommandHandler:
 
         elif isinstance(cmd, ConnectCommand):
             if self._is_self_target(cmd.target):
-                self._send_to(
-                    conn,
-                    ActionErrorEvent(
-                        action=cmd.action,
-                        code=NetworkCode.CANNOT_CONNECT_SELF,
-                    ),
-                )
+                self._send_to(conn, create_event(EventType.CANNOT_CONNECT_SELF))
                 return
 
-            resolved = self._cm.resolve_target(cmd.target, auto_create=True)
+            resolved = self._cm.resolve_target_for_interaction(cmd.target)
             if not resolved:
                 self._send_to(
                     conn,
-                    ActionErrorEvent(
-                        action=cmd.action,
-                        code=NetworkCode.INVALID_TARGET,
-                        target=cmd.target,
+                    create_event(
+                        EventType.INVALID_TARGET,
+                        {'target': cmd.target},
                     ),
                 )
                 return
@@ -180,56 +236,38 @@ class NetworkCommandHandler:
             self._network.send_message(cmd.target, cmd.text, cmd.msg_id)
 
         elif isinstance(cmd, FallbackCommand):
-            success, code, params = self._network.force_fallback(cmd.target)
-            if success:
-                self._send_to(
-                    conn,
-                    FallbackSuccessEvent(
-                        action=cmd.action,
-                        code=code,
-                        alias=str(params.get('alias', '')),
-                        count=int(cast(int, params.get('count', 0))),
-                        msg_ids=cast(List[str], params.get('msg_ids', [])),
-                    ),
-                )
-            else:
-                self._send_to(
-                    conn,
-                    ActionErrorEvent(
-                        action=cmd.action,
-                        code=code,
-                        alias=str(params.get('alias', '')),
-                        target=str(params.get('target', '')),
-                    ),
-                )
+            _, event_type, params = self._network.force_fallback(cmd.target)
+            self._send_to(conn, create_event(event_type, params))
 
         elif isinstance(cmd, RetunnelCommand):
+            resolved = self._cm.resolve_target_for_interaction(cmd.target)
+            if not resolved:
+                self._send_to(
+                    conn,
+                    create_event(
+                        EventType.INVALID_TARGET,
+                        {'target': cmd.target},
+                    ),
+                )
+                return
+
+            alias, onion = resolved
             threading.Thread(
-                target=self._network.retunnel, args=(cmd.target,), daemon=True
+                target=self._retunnel_target,
+                args=(alias, onion),
+                daemon=True,
             ).start()
 
         elif isinstance(cmd, SendDropCommand):
             if not self._config.get_bool(SettingKey.ALLOW_DROPS):
-                self._send_to(
-                    conn,
-                    ActionErrorEvent(
-                        action=cmd.action,
-                        code=NetworkCode.DROPS_DISABLED,
-                    ),
-                )
+                self._send_to(conn, create_event(EventType.DROPS_DISABLED))
                 return
 
             if self._is_self_target(cmd.target):
-                self._send_to(
-                    conn,
-                    ActionErrorEvent(
-                        action=cmd.action,
-                        code=NetworkCode.CANNOT_DROP_SELF,
-                    ),
-                )
+                self._send_to(conn, create_event(EventType.CANNOT_DROP_SELF))
                 return
 
-            resolved = self._cm.resolve_target(cmd.target, auto_create=True)
+            resolved = self._cm.resolve_target_for_interaction(cmd.target)
 
             if resolved:
                 alias, onion = resolved
@@ -243,51 +281,42 @@ class NetworkCommandHandler:
                 if self._config.get_bool(SettingKey.RECORD_DROP_EVENTS):
                     self._hm.log_event(HistoryEvent.DROP_QUEUED, onion)
 
-                if cmd.cli_mode:
-                    self._send_to(
-                        conn,
-                        TargetActionSuccessEvent(
-                            action=cmd.action,
-                            code=NetworkCode.DROP_QUEUED,
-                            target=alias,
-                        ),
-                    )
+                self._send_to(
+                    conn,
+                    create_event(EventType.DROP_QUEUED, {'alias': alias}),
+                )
             else:
-                if cmd.cli_mode:
-                    self._send_to(
-                        conn,
-                        ActionErrorEvent(
-                            action=cmd.action,
-                            code=NetworkCode.INVALID_TARGET,
-                            target=cmd.target,
-                        ),
-                    )
+                self._send_to(
+                    conn,
+                    create_event(
+                        EventType.INVALID_TARGET,
+                        {'target': cmd.target},
+                    ),
+                )
 
         elif isinstance(cmd, SwitchCommand):
             if cmd.target is None or cmd.target == '..':
+                self._set_client_focus(conn, None)
                 self._send_to(conn, SwitchSuccessEvent(alias=None))
             else:
                 if self._is_self_target(cmd.target):
                     self._send_to(
                         conn,
-                        ActionErrorEvent(
-                            action=cmd.action,
-                            code=NetworkCode.CANNOT_SWITCH_SELF,
-                        ),
+                        create_event(EventType.CANNOT_SWITCH_SELF),
                     )
                     return
 
-                resolved = self._cm.resolve_target(cmd.target, auto_create=True)
+                resolved = self._cm.resolve_target_for_interaction(cmd.target)
                 if not resolved:
                     self._send_to(
                         conn,
-                        ActionErrorEvent(
-                            action=cmd.action,
-                            code=NetworkCode.INVALID_TARGET,
-                            target=cmd.target,
+                        create_event(
+                            EventType.INVALID_TARGET,
+                            {'target': cmd.target},
                         ),
                     )
                     return
 
                 alias, onion = resolved
+                self._set_client_focus(conn, onion)
                 self._send_to(conn, SwitchSuccessEvent(alias=alias))

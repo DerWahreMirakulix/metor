@@ -23,6 +23,8 @@ from typing import (
 )
 from pathlib import Path
 
+from metor.utils import Constants
+
 # Local Package Imports
 from metor.data.settings import SettingKey
 
@@ -150,6 +152,73 @@ class SqlManager:
             SqlManager._connections[path_str] = conn
             return conn
 
+    def _get_runtime_db_path(self) -> Path:
+        """
+        Resolves the plaintext runtime mirror path for external inspection tools.
+
+        Args:
+            None
+
+        Returns:
+            Path: The runtime mirror database path.
+        """
+        return self.db_path.parent / Constants.DB_RUNTIME_FILE
+
+    def _refresh_runtime_mirror(self, conn: sqlite3.Connection) -> None:
+        """
+        Exports the encrypted SQLCipher database to a plaintext runtime mirror.
+
+        Args:
+            conn (sqlite3.Connection): The active encrypted database connection.
+
+        Returns:
+            None
+        """
+        if not self._password:
+            return
+
+        if not self._config.get_bool(SettingKey.ENABLE_RUNTIME_DB_MIRROR):
+            self.cleanup_runtime_mirror()
+            return
+
+        runtime_db_path: Path = self._get_runtime_db_path()
+        runtime_db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        safe_runtime_path: str = str(runtime_db_path.absolute()).replace("'", "''")
+        cursor = conn.cursor()
+        self._detach_runtime_mirror(cursor)
+
+        if runtime_db_path.exists():
+            runtime_db_path.unlink()
+
+        cursor.execute(f"ATTACH DATABASE '{safe_runtime_path}' AS runtime KEY ''")
+        try:
+            cursor.execute("SELECT sqlcipher_export('runtime')")
+        finally:
+            self._detach_runtime_mirror(cursor)
+
+    def _detach_runtime_mirror(self, cursor: sqlite3.Cursor) -> None:
+        """
+        Detaches an existing runtime mirror alias from the active SQLCipher connection.
+
+        Args:
+            cursor (sqlite3.Cursor): The active cursor bound to the encrypted connection.
+
+        Returns:
+            None
+        """
+        try:
+            rows: List[Tuple[object, ...]] = cast(
+                List[Tuple[object, ...]],
+                cursor.execute('PRAGMA database_list').fetchall(),
+            )
+            for row in rows:
+                if len(row) >= 2 and str(row[1]) == 'runtime':
+                    cursor.execute('DETACH DATABASE runtime')
+                    break
+        except Exception:
+            pass
+
     def _ensure_tables(self) -> None:
         """
         Creates necessary tables if they do not exist yet.
@@ -193,6 +262,10 @@ class SqlManager:
 
                         cursor.execute(contacts_query)
                         cursor.execute(history_query)
+                        try:
+                            self._refresh_runtime_mirror(conn)
+                        except Exception:
+                            pass
         except (sqlite3.DatabaseError, sqlite3.OperationalError, MemoryError) as e:
             path_str: str = str(self.db_path.absolute())
             with SqlManager._pool_lock:
@@ -219,6 +292,27 @@ class SqlManager:
             with conn:
                 cursor = conn.cursor()
                 cursor.execute(query, params)
+                try:
+                    self._refresh_runtime_mirror(conn)
+                except Exception:
+                    pass
+
+    def cleanup_runtime_mirror(self) -> None:
+        """
+        Removes the plaintext runtime mirror if one exists.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if not self._config.get_bool(SettingKey.ENABLE_RUNTIME_DB_MIRROR):
+            return
+
+        runtime_db_path: Path = self._get_runtime_db_path()
+        if runtime_db_path.exists():
+            runtime_db_path.unlink()
 
     def fetchall(
         self, query: str, params: Tuple[SqlParam, ...] = ()

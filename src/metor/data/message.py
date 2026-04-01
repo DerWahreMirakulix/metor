@@ -11,7 +11,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import List, Tuple, Dict, Optional
 
-from metor.core.api import DomainCode, DbCode
+from metor.core.api import EventType
 from metor.utils import Constants, clean_onion
 
 # Local Package Imports
@@ -313,7 +313,7 @@ class MessageManager:
 
     def clear_messages(
         self, onion: Optional[str] = None, non_contacts_only: bool = False
-    ) -> Tuple[bool, DomainCode, Dict[str, str]]:
+    ) -> Tuple[bool, EventType, Dict[str, str]]:
         """
         Wipes the message table completely or just for a specific contact.
         Maintains domain boundaries by leaving contact deletion to the Daemon orchestrator.
@@ -323,7 +323,7 @@ class MessageManager:
             non_contacts_only (bool): If True, only deletes messages from unsaved peers.
 
         Returns:
-            Tuple[bool, DomainCode, Dict[str, str]]: A success flag, domain state code, and parameters.
+            Tuple[bool, EventType, Dict[str, str]]: A success flag, strict event type, and payload.
         """
         try:
             if non_contacts_only:
@@ -336,7 +336,7 @@ class MessageManager:
                     self._sql.execute(query, (onion,))
                     return (
                         True,
-                        DbCode.MESSAGES_CLEARED_NON_CONTACTS,
+                        EventType.MESSAGES_CLEARED_NON_CONTACTS,
                         {'target': onion},
                     )
                 else:
@@ -347,22 +347,22 @@ class MessageManager:
                     self._sql.execute(delete_all_query)
                     return (
                         True,
-                        DbCode.MESSAGES_CLEARED_NON_CONTACTS,
-                        {'target': self._pm.profile_name},
+                        EventType.MESSAGES_CLEARED_NON_CONTACTS_ALL,
+                        {'profile': self._pm.profile_name},
                     )
             else:
                 if onion:
                     self._sql.execute(
                         'DELETE FROM messages WHERE contact_onion = ?', (onion,)
                     )
-                    return True, DbCode.MESSAGES_CLEARED, {'target': onion}
+                    return True, EventType.MESSAGES_CLEARED, {'target': onion}
                 else:
                     self._sql.execute('DELETE FROM messages')
                     return (
                         True,
-                        DbCode.MESSAGES_CLEARED_ALL,
+                        EventType.MESSAGES_CLEARED_ALL,
                         {'profile': self._pm.profile_name},
                     )
 
         except Exception:
-            return False, DbCode.MESSAGES_CLEAR_FAILED, {}
+            return False, EventType.MESSAGES_CLEAR_FAILED, {}

@@ -105,9 +105,9 @@ class Config:
                 for k, v in raw_data.items():
                     if isinstance(v, dict):
                         for sub_k, sub_v in v.items():
-                            flat_data[f'{k}.{sub_k}'] = cast(ProfileConfigValue, sub_v)
+                            flat_data[f'{k}.{sub_k}'] = sub_v
                     else:
-                        flat_data[k] = cast(ProfileConfigValue, v)
+                        flat_data[k] = v
                 return flat_data
             except (json.JSONDecodeError, IOError):
                 pass

@@ -26,13 +26,25 @@ class Constants:
     UNIX_TOR_TIMEOUT: int = 45  # Process launch timeout for Unix Tor binaries
     TOR_BOOTSTRAP_POLL_SEC: float = 1.0
     TOR_BOOTSTRAP_RETRY_SEC: float = 2.0
+    TOR_CONTROL_RETRY_SEC: float = 1.0  # Delay between Tor control-port retry attempts
+    TOR_PROXY_READY_RETRY_SEC: float = (
+        1.0  # Delay between local Tor SOCKS readiness probes
+    )
     TOR_HOSTNAME_POLL_RETRIES: int = 10
+    TOR_CONTROL_RETRY_ATTEMPTS: int = 5  # Retry budget for NEWNYM control calls
+    TOR_PROXY_READY_ATTEMPTS: int = (
+        5  # Retry budget for local Tor SOCKS readiness checks
+    )
+    TOR_PROXY_READY_TIMEOUT_SEC: float = (
+        1.0  # Timeout for local SOCKS readiness probe connections
+    )
     TOR_KILL_TIMEOUT_SEC: float = 2.0  # Timeout for Tor process termination
 
     # Application & UI Constraints
     DEFAULT_COLS: int = 80  # Fallback terminal width
     UUID_MSG_BYTES: int = 8  # Byte length for persistent message UUIDs
     UUID_CHAT_BYTES: int = 4  # Byte length for ephemeral live-chat UUIDs
+    INPUT_SELECT_TIMEOUT_SEC: float = 0.0  # Non-blocking POSIX stdin poll
 
     # Thread Constraints & Timing
     THREAD_POLL_TIMEOUT: float = 1.0  # Timeout for non-blocking accept/recv loops
@@ -41,14 +53,18 @@ class Constants:
     LOCK_SLEEP_SEC: float = 0.05  # Sleep interval for FileLock spinlocks
     INPUT_SLEEP_SEC: float = 0.02  # UI non-blocking input thread sleep
     TCP_CLOSE_LINGER_SEC: float = 0.2  # Socket linger before shutdown
+    CONNECT_RETRY_BACKOFF_SEC: float = 3.0  # Delay between explicit connect retries
+    RETUNNEL_RECONNECT_DELAY_SEC: float = (
+        1.0  # Delay before reconnecting after a live retunnel disconnect
+    )
 
     # Network Backoff Jitter (Algorithmic Constants)
-    RECONNECT_BACKOFF_BASE_SEC: float = 10.0
-    RECONNECT_BACKOFF_JITTER_MAX_MS: int = 2001
-    RECONNECT_BACKOFF_JITTER_DIVISOR: float = 100.0
+    LIVE_RECONNECT_JITTER_MAX_MS: int = 2001
+    LIVE_RECONNECT_JITTER_DIVISOR: float = 100.0
 
     # File Names
     DB_FILE: str = 'storage.db'
+    DB_RUNTIME_FILE: str = 'storage.runtime.db'
     CONTACTS_FILE: str = 'contacts.json'
     DAEMON_PORT_FILE: str = 'daemon.port'
     SETTINGS_FILE: str = 'settings.json'

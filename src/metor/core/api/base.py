@@ -1,8 +1,4 @@
-"""
-Module defining the abstract base classes and factory logic for IPC communication.
-Implements runtime type validation to protect daemon deserialization from malformed payloads.
-Enforces the Zero-Any policy by mapping introspection meta-types to 'object'.
-"""
+"""Base IPC DTO types and strict JSON factory helpers."""
 
 import json
 import dataclasses
@@ -10,6 +6,8 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 from typing import (
     Dict,
+    Mapping,
+    Optional,
     Type,
     Set,
     Union,
@@ -22,7 +20,7 @@ from typing import (
 )
 
 # Local Package Imports
-from metor.core.api.codes import Action, EventType
+from metor.core.api.codes import CommandType, EventType
 
 
 # Types
@@ -141,19 +139,14 @@ class IpcMessage:
 
 @dataclass
 class IpcCommand(IpcMessage):
-    """
-    Base class for all commands sent to the Daemon.
+    """Base class for all commands sent to the daemon."""
 
-    Attributes:
-        action (Action): Provided by subclasses to identify the routing command.
-    """
-
-    action: Action = dataclasses.field(init=False)
+    command_type: CommandType = dataclasses.field(init=False)
 
     @classmethod
     def from_dict(cls, data: Dict[str, JsonValue]) -> 'IpcCommand':
         """
-        Factory method to instantiate the correct strict subclass based on the Action enum.
+        Factory method to instantiate the correct strict subclass based on the command type.
 
         Args:
             data (Dict[str, JsonValue]): The deserialized JSON payload from the IPC socket.
@@ -166,13 +159,13 @@ class IpcCommand(IpcMessage):
         """
         from metor.core.api.registry import CMD_MAP
 
-        action_val: str = str(data.get('action', ''))
-        action: Action = Action(action_val)
-        target_cls: Type['IpcCommand'] = CMD_MAP[action]
+        command_type_val: str = str(data.get('command_type', ''))
+        command_type: CommandType = CommandType(command_type_val)
+        target_cls: Type['IpcCommand'] = CMD_MAP[command_type]
 
         valid_keys: Set[str] = {f.name for f in dataclasses.fields(target_cls)}
         kwargs: Dict[str, JsonValue] = {
-            k: v for k, v in data.items() if k in valid_keys and k != 'action'
+            k: v for k, v in data.items() if k in valid_keys and k != 'command_type'
         }
 
         coerced_kwargs: Dict[str, object] = _coerce_and_validate(target_cls, kwargs)
@@ -181,19 +174,14 @@ class IpcCommand(IpcMessage):
 
 @dataclass
 class IpcEvent(IpcMessage):
-    """
-    Base class for all events emitted by the Daemon.
+    """Base class for all events emitted by the daemon."""
 
-    Attributes:
-        type (EventType): Provided by subclasses to identify the event.
-    """
-
-    type: EventType = dataclasses.field(init=False)
+    event_type: EventType = dataclasses.field(init=False)
 
     @classmethod
     def from_dict(cls, data: Dict[str, JsonValue]) -> 'IpcEvent':
         """
-        Factory method to instantiate the correct strict subclass based on the EventType enum.
+        Factory method to instantiate the correct strict subclass based on the event type.
 
         Args:
             data (Dict[str, JsonValue]): The deserialized JSON payload from the IPC socket.
@@ -206,14 +194,34 @@ class IpcEvent(IpcMessage):
         """
         from metor.core.api.registry import EVENT_MAP
 
-        type_val: str = str(data.get('type', ''))
-        event_type: EventType = EventType(type_val)
+        event_type_val: str = str(data.get('event_type', ''))
+        event_type: EventType = EventType(event_type_val)
         target_cls: Type['IpcEvent'] = EVENT_MAP[event_type]
 
         valid_keys: Set[str] = {f.name for f in dataclasses.fields(target_cls)}
         kwargs: Dict[str, JsonValue] = {
-            k: v for k, v in data.items() if k in valid_keys and k != 'type'
+            k: v for k, v in data.items() if k in valid_keys and k != 'event_type'
         }
 
         coerced_kwargs: Dict[str, object] = _coerce_and_validate(target_cls, kwargs)
         return target_cls(**coerced_kwargs)
+
+
+def create_event(
+    event_type: EventType,
+    params: Optional[Mapping[str, JsonValue]] = None,
+) -> IpcEvent:
+    """
+    Builds a strict IPC event instance from an event type and payload.
+
+    Args:
+        event_type (EventType): The concrete event identifier.
+        params (Optional[Mapping[str, JsonValue]]): The payload to hydrate into the event DTO.
+
+    Returns:
+        IpcEvent: The instantiated strict event DTO.
+    """
+    payload: Dict[str, JsonValue] = {'event_type': event_type.value}
+    if params:
+        payload.update(dict(params))
+    return IpcEvent.from_dict(payload)

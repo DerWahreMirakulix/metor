@@ -6,11 +6,11 @@ Isolates interactive prompts and subsystem orchestration from the generic router
 import sys
 import shutil
 import getpass
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 
 from metor.core import KeyManager, TorManager
-from metor.core.api import SystemCode, UiCode, DomainCode, JsonValue
-from metor.core.daemon import Daemon
+from metor.core.api import EventType, JsonValue
+from metor.core.daemon import Daemon, DaemonStatus
 from metor.data import HistoryManager, ContactManager, MessageManager, SqlManager
 from metor.data.profile import ProfileManager
 from metor.ui import Theme, Translator
@@ -25,6 +25,30 @@ class CommandHandlers:
     """Encapsulates the execution logic for multi-step CLI commands."""
 
     @staticmethod
+    def _format_daemon_status(
+        status: DaemonStatus, params: Dict[str, JsonValue]
+    ) -> str:
+        """
+        Formats local daemon startup statuses for the CLI.
+
+        Args:
+            status (DaemonStatus): The local daemon startup status.
+            params (Dict[str, JsonValue]): Supplemental formatting values.
+
+        Returns:
+            str: The rendered CLI line.
+        """
+        if status is DaemonStatus.LOCKED_MODE:
+            return 'Daemon running in LOCKED mode... Waiting for IPC unlock.'
+
+        onion: str = str(params.get('onion', ''))
+        port: str = str(params.get('port', 'unknown'))
+        return (
+            f'Daemon active. Onion: {Theme.YELLOW}{onion}{Theme.RESET}.onion | '
+            f'IPC Port: {Theme.YELLOW}{port}{Theme.RESET}'
+        )
+
+    @staticmethod
     def handle_daemon(pm: ProfileManager) -> None:
         """
         Authenticates the user and starts the background Daemon subsystem.
@@ -37,27 +61,20 @@ class CommandHandlers:
             None
         """
         if pm.is_remote():
-            msg, _ = Translator.get(UiCode.DAEMON_REMOTE_NO_START)
-            print(msg)
+            print('Cannot start a daemon on a remote profile!')
             return
         if pm.is_daemon_running():
-            msg, _ = Translator.get(
-                UiCode.DAEMON_ALREADY_RUNNING, {'profile': pm.profile_name}
-            )
-            print(msg)
+            print(f"Daemon for profile '{pm.profile_name}' is already running!")
             return
 
-        startup_msg, _ = Translator.get(
-            UiCode.DAEMON_STARTING, {'profile': pm.profile_name}
-        )
-        print(startup_msg)
+        print(f"Starting daemon for profile '{pm.profile_name}'...")
 
-        prompt, _ = Translator.get(UiCode.ENTER_MASTER_PASSWORD)
-        password: str = getpass.getpass(prompt)
+        password: str = getpass.getpass(
+            f'{Theme.GREEN}Enter Master Password: {Theme.RESET}'
+        )
 
         if not password:
-            msg, _ = Translator.get(UiCode.DAEMON_EMPTY_PASSWORD)
-            print(msg)
+            print('Master password cannot be empty.')
             return
 
         # Secure directory initialization before accessing any databases
@@ -73,11 +90,15 @@ class CommandHandlers:
             sys.stdout.flush()
 
         def status_cb(
-            code: DomainCode, params: Optional[Dict[str, JsonValue]] = None
+            code: Union[EventType, DaemonStatus],
+            params: Optional[Dict[str, JsonValue]] = None,
         ) -> None:
             if params is None:
                 params = {}
-            msg, _ = Translator.get(code, params)
+            if isinstance(code, EventType):
+                msg, _ = Translator.get(code, params)
+            else:
+                msg = CommandHandlers._format_daemon_status(code, params)
             sys.stdout.write(f'{msg}\n')
             sys.stdout.flush()
 
@@ -91,11 +112,15 @@ class CommandHandlers:
             cm: ContactManager = ContactManager(pm, password)
             hm: HistoryManager = HistoryManager(pm, password)
             mm: MessageManager = MessageManager(pm, password)
-        except ValueError:
-            print(
-                f'{Theme.RED}The database is corrupted from a previous crash or syntax error.{Theme.RESET}\n'
-                "You need to run 'metor purge' or manually delete the storage.db."
-            )
+        except ValueError as e:
+            error_text: str = str(e)
+            if error_text.startswith('Invalid master password'):
+                print(f'{Theme.RED}Invalid master password.{Theme.RESET}')
+            else:
+                print(
+                    f'{Theme.RED}The database is corrupted from a previous crash or syntax error.{Theme.RESET}\n'
+                    "You need to run 'metor purge' or manually delete the storage.db."
+                )
             return
 
         daemon: Daemon = Daemon(pm, km, tm, cm, hm, mm, status_callback=status_cb)
@@ -113,14 +138,11 @@ class CommandHandlers:
             None
         """
         if not pm.exists():
-            msg, _ = Translator.get(
-                UiCode.PROFILE_NOT_FOUND, {'profile': pm.profile_name}
-            )
-            print(msg)
+            print(f"Profile '{pm.profile_name}' does not exist.")
             return
 
         if not pm.is_daemon_running():
-            msg, _ = Translator.get(SystemCode.DAEMON_OFFLINE)
+            msg, _ = Translator.get(EventType.DAEMON_OFFLINE)
             print(msg)
             return
 
@@ -139,8 +161,7 @@ class CommandHandlers:
         Returns:
             None
         """
-        msg, _ = Translator.get(UiCode.CLEANUP_START)
-        print(msg)
+        print('Cleaning up Metor processes and locks...')
         killed: int = ProcessManager.cleanup_processes()
 
         for profile_name in ProfileManager.get_all_profiles():
@@ -148,8 +169,7 @@ class CommandHandlers:
             if not temp_pm.is_remote():
                 temp_pm.clear_daemon_port()
 
-        result_msg, _ = Translator.get(UiCode.CLEANUP_COMPLETE, {'killed': killed})
-        print(result_msg)
+        print(f'Killed {killed} Tor process(es) and cleared locks.')
 
     @staticmethod
     def handle_purge(is_nuke_remote: bool) -> None:
@@ -162,14 +182,19 @@ class CommandHandlers:
         Returns:
             None
         """
-        message, _ = Translator.get(UiCode.PURGE_WARNING)
+        message: str = (
+            f'You are about to {Theme.RED}PERMANENTLY WIPE{Theme.RESET} '
+            'the entire Metor directory!'
+        )
         if is_nuke_remote:
-            remote_warn, _ = Translator.get(UiCode.PURGE_WARNING_REMOTE)
+            remote_warn: str = (
+                f'This includes {Theme.RED}ALL REMOTE PROFILES{Theme.RESET} '
+                'and their data!'
+            )
             message += f' {remote_warn}'
 
         print(message)
-        prompt, _ = Translator.get(UiCode.PURGE_PROMPT)
-        confirmation: str = input(prompt)
+        confirmation: str = input("Type 'yes' to proceed: ")
 
         if confirmation.strip().lower() == 'yes':
             if is_nuke_remote:
@@ -179,18 +204,15 @@ class CommandHandlers:
                     if ProfileManager(p).is_remote()
                 ]
                 if not CommandHandlers._nuke_remote_profiles(remotes):
-                    abort_msg, _ = Translator.get(UiCode.PURGE_ABORTED)
-                    print(abort_msg)
+                    print('Purge aborted.')
                     return
 
             ProcessManager.cleanup_processes()
             if Constants.DATA.exists():
                 shutil.rmtree(str(Constants.DATA))
-                complete_msg, _ = Translator.get(UiCode.PURGE_COMPLETE)
-                print(complete_msg)
+                print(f'{Theme.GREEN}Purge complete. All data destroyed.{Theme.RESET}')
         else:
-            abort_msg, _ = Translator.get(UiCode.PURGE_ABORTED)
-            print(abort_msg)
+            print(f'{Theme.YELLOW}Purge aborted.{Theme.RESET}')
 
     @staticmethod
     def _nuke_remote_profiles(profile_names: List[str]) -> bool:
@@ -204,8 +226,10 @@ class CommandHandlers:
         Returns:
             bool: True if successful or user overridden, False if aborted.
         """
-        warning_msg, _ = Translator.get(UiCode.REMOTE_NUKE_WARNING)
-        print(warning_msg)
+        print(
+            f'Data shredding may be {Theme.YELLOW}INEFFECTIVE ON MODERN{Theme.RESET} '
+            'SSDs due to wear-leveling.\n'
+        )
         failed_remotes: List[str] = []
 
         for r in profile_names:
@@ -221,20 +245,22 @@ class CommandHandlers:
             if 'Error' in res or 'Failed' in res:
                 failed_remotes.append(r)
             else:
-                success_msg, _ = Translator.get(
-                    UiCode.REMOTE_NUKE_SUCCESS, {'profile': r}
-                )
-                print(success_msg)
+                print(f"Remote daemon for profile '{r}' nuked successfully.")
 
         if failed_remotes:
-            fail_msg, _ = Translator.get(
-                UiCode.REMOTE_NUKE_FAILED,
-                {'failed_remotes': f'{Theme.RESET}, {Theme.CYAN}'.join(failed_remotes)},
+            failed_text: str = (
+                Theme.CYAN
+                + f'{Theme.RESET}, {Theme.CYAN}'.join(failed_remotes)
+                + Theme.RESET
             )
-            print(f'\n{fail_msg}\n')
+            print(
+                f'\n{Theme.RED}Failed to reach remote daemons for profiles:{Theme.RESET} '
+                f'{failed_text}\n'
+            )
 
-            prompt, _ = Translator.get(UiCode.REMOTE_NUKE_OVERRIDE)
-            override: str = input(prompt)
+            override: str = input(
+                'You will lock yourself out of these remotes! Proceed with local wipe anyway? y/N: '
+            )
             if override.strip().lower() != 'y':
                 return False
         return True

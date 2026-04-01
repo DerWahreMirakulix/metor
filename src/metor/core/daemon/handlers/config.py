@@ -1,26 +1,24 @@
 """
 Module defining the ConfigCommandHandler.
 Encapsulates operations routing global settings and profile configurations.
+Enforces the Zero-Text Policy by eliminating raw string errors from DTOs.
 """
 
+from typing import Union
+
 from metor.core.api import (
+    EventType,
     IpcCommand,
     IpcEvent,
-    SystemCode,
+    create_event,
     SetSettingCommand,
     GetSettingCommand,
     SetConfigCommand,
     GetConfigCommand,
     SyncConfigCommand,
-    ActionErrorEvent,
-    SettingUpdatedEvent,
-    SettingDataEvent,
-    ConfigUpdatedEvent,
-    ConfigDataEvent,
-    ConfigSyncedEvent,
 )
 from metor.data import Settings, SettingKey
-from metor.data.profile import ProfileManager
+from metor.data.profile import ProfileManager, ProfileConfigKey
 
 
 class ConfigCommandHandler:
@@ -50,143 +48,93 @@ class ConfigCommandHandler:
         """
         if isinstance(cmd, SetSettingCommand):
             try:
-                key_enum = SettingKey(cmd.setting_key)
+                setting_key = SettingKey(cmd.setting_key)
             except ValueError:
-                return ActionErrorEvent(
-                    action=cmd.action,
-                    code=SystemCode.INVALID_SETTING_KEY,
-                )
+                return create_event(EventType.INVALID_SETTING_KEY)
 
-            if key_enum.is_ui:
-                return ActionErrorEvent(
-                    action=cmd.action,
-                    code=SystemCode.DAEMON_CANNOT_MANAGE_UI,
-                )
+            if setting_key.is_ui:
+                return create_event(EventType.DAEMON_CANNOT_MANAGE_UI)
 
             try:
-                Settings.set(key_enum, cmd.setting_value)
-                return SettingUpdatedEvent(
-                    action=cmd.action,
-                    code=SystemCode.SETTING_UPDATED,
-                    key=cmd.setting_key,
+                Settings.set(setting_key, cmd.setting_value)
+                return create_event(
+                    EventType.SETTING_UPDATED,
+                    {'key': cmd.setting_key},
                 )
-            except TypeError as e:
-                return ActionErrorEvent(
-                    action=cmd.action,
-                    code=SystemCode.SETTING_TYPE_ERROR,
-                    reason=str(e),
-                )
-            except Exception as e:
-                return ActionErrorEvent(
-                    action=cmd.action,
-                    code=SystemCode.SETTING_UPDATE_FAILED,
-                    reason=str(e),
-                )
+            except TypeError:
+                return create_event(EventType.SETTING_TYPE_ERROR)
+            except Exception:
+                return create_event(EventType.SETTING_UPDATE_FAILED)
 
         if isinstance(cmd, GetSettingCommand):
             try:
-                key_enum = SettingKey(cmd.setting_key)
+                setting_key = SettingKey(cmd.setting_key)
             except ValueError:
-                return ActionErrorEvent(
-                    action=cmd.action,
-                    code=SystemCode.INVALID_SETTING_KEY,
-                )
+                return create_event(EventType.INVALID_SETTING_KEY)
 
-            if key_enum.is_ui:
-                return ActionErrorEvent(
-                    action=cmd.action,
-                    code=SystemCode.DAEMON_CANNOT_MANAGE_UI,
-                )
+            if setting_key.is_ui:
+                return create_event(EventType.DAEMON_CANNOT_MANAGE_UI)
 
             try:
-                val: str = Settings.get_str(key_enum)
-                return SettingDataEvent(
-                    key=cmd.setting_key,
-                    value=val,
+                val: str = Settings.get_str(setting_key)
+                return create_event(
+                    EventType.SETTING_DATA,
+                    {'key': cmd.setting_key, 'value': val},
                 )
             except ValueError:
-                return ActionErrorEvent(
-                    action=cmd.action,
-                    code=SystemCode.INVALID_SETTING_KEY,
-                )
+                return create_event(EventType.INVALID_SETTING_KEY)
 
         if isinstance(cmd, SetConfigCommand):
+            set_config_key: Union[SettingKey, ProfileConfigKey]
             try:
-                key_enum = SettingKey(cmd.setting_key)
+                set_config_key = SettingKey(cmd.setting_key)
             except ValueError:
-                return ActionErrorEvent(
-                    action=cmd.action,
-                    code=SystemCode.INVALID_CONFIG_KEY,
-                )
+                try:
+                    set_config_key = ProfileConfigKey(cmd.setting_key)
+                except ValueError:
+                    return create_event(EventType.INVALID_CONFIG_KEY)
 
-            if key_enum.is_ui:
-                return ActionErrorEvent(
-                    action=cmd.action,
-                    code=SystemCode.DAEMON_CANNOT_MANAGE_UI,
-                )
+            if getattr(set_config_key, 'is_ui', False):
+                return create_event(EventType.DAEMON_CANNOT_MANAGE_UI)
 
             try:
-                self._pm.config.set(key_enum, cmd.setting_value)
-                return ConfigUpdatedEvent(
-                    action=cmd.action,
-                    code=SystemCode.CONFIG_UPDATED,
-                    key=cmd.setting_key,
+                self._pm.config.set(set_config_key, cmd.setting_value)
+                return create_event(
+                    EventType.CONFIG_UPDATED,
+                    {'key': cmd.setting_key},
                 )
-            except TypeError as e:
-                return ActionErrorEvent(
-                    action=cmd.action,
-                    code=SystemCode.SETTING_TYPE_ERROR,
-                    reason=str(e),
-                )
-            except Exception as e:
-                return ActionErrorEvent(
-                    action=cmd.action,
-                    code=SystemCode.CONFIG_UPDATE_FAILED,
-                    reason=str(e),
-                )
+            except TypeError:
+                return create_event(EventType.SETTING_TYPE_ERROR)
+            except Exception:
+                return create_event(EventType.CONFIG_UPDATE_FAILED)
 
         if isinstance(cmd, GetConfigCommand):
+            get_config_key: Union[SettingKey, ProfileConfigKey]
             try:
-                key_enum = SettingKey(cmd.setting_key)
+                get_config_key = SettingKey(cmd.setting_key)
             except ValueError:
-                return ActionErrorEvent(
-                    action=cmd.action,
-                    code=SystemCode.INVALID_CONFIG_KEY,
-                )
+                try:
+                    get_config_key = ProfileConfigKey(cmd.setting_key)
+                except ValueError:
+                    return create_event(EventType.INVALID_CONFIG_KEY)
 
-            if key_enum.is_ui:
-                return ActionErrorEvent(
-                    action=cmd.action,
-                    code=SystemCode.DAEMON_CANNOT_MANAGE_UI,
-                )
+            if getattr(get_config_key, 'is_ui', False):
+                return create_event(EventType.DAEMON_CANNOT_MANAGE_UI)
 
             try:
-                val = self._pm.config.get_str(key_enum)
-                return ConfigDataEvent(
-                    key=cmd.setting_key,
-                    value=val,
+                val = self._pm.config.get_str(get_config_key)
+                return create_event(
+                    EventType.CONFIG_DATA,
+                    {'key': cmd.setting_key, 'value': val},
                 )
             except ValueError:
-                return ActionErrorEvent(
-                    action=cmd.action,
-                    code=SystemCode.INVALID_CONFIG_KEY,
-                )
+                return create_event(EventType.INVALID_CONFIG_KEY)
 
         if isinstance(cmd, SyncConfigCommand):
             try:
                 self._pm.config.sync_with_global()
-                return ConfigSyncedEvent(
-                    action=cmd.action,
-                    code=SystemCode.CONFIG_SYNCED,
-                )
-            except Exception as e:
-                return ActionErrorEvent(
-                    action=cmd.action,
-                    code=SystemCode.CONFIG_UPDATE_FAILED,
-                    reason=str(e),
-                )
+                return create_event(EventType.CONFIG_SYNCED)
+            except Exception:
+                return create_event(EventType.CONFIG_UPDATE_FAILED)
 
-        return ActionErrorEvent(
-            action=cmd.action,
-            code=SystemCode.UNKNOWN_COMMAND,
-        )
+        return create_event(EventType.UNKNOWN_COMMAND)
