@@ -2462,9 +2462,10 @@ Synchronizes a peer alias rename across UIs.
 
 Signals that retunneling failed for a peer.
 
-| Field   | Type  | Default  |
-| ------- | ----- | -------- |
-| `alias` | `str` | Required |
+| Field   | Type               | Default  |
+| ------- | ------------------ | -------- |
+| `alias` | `str`              | Required |
+| `error` | `Union[str, None]` | `None`   |
 
 **Wire Value:** `retunnel_failed`
 
