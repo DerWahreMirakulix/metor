@@ -49,7 +49,7 @@ class CommandDef:
 class Help:
     """Static help generator utilizing a DRY data-driven command registry."""
 
-    DESC_COLUMN: int = 45
+    DESC_COLUMN: int = 50
 
     CLI_CATEGORIES: List[str] = [
         'Global Options',
@@ -82,14 +82,14 @@ class Help:
         ),
         'daemon': CommandDef(
             name='daemon',
-            usage='metor daemon',
-            description='Start the background Tor & IPC engine.',
+            usage='metor daemon [--locked]',
+            description='Start the Tor & IPC engine, optionally locked (IPC-only).',
             category='Core Operations',
         ),
         'unlock': CommandDef(
             name='unlock',
-            usage='metor unlock <password>',
-            description='Unlock a remote daemon instance over IPC.',
+            usage='metor unlock',
+            description='Unlock a locked daemon instance over IPC.',
             category='Core Operations',
         ),
         'chat': CommandDef(
@@ -107,18 +107,22 @@ class Help:
         'inbox': CommandDef(
             name='inbox',
             usage='metor inbox [onion|alias]',
-            description='Check for unread offline messages or read them.',
+            description='Check unread message counts or read them.',
             category='Messaging & History',
         ),
         'messages': CommandDef(
             name='messages',
             usage='metor messages',
-            description='View or delete chat history with a contact.',
+            description='View or delete stored message history with a contact.',
             category='Messaging & History',
             subcommands=[
-                SubCommandDef('show <onion|alias> [limit]', 'View past chat history.'),
                 SubCommandDef(
-                    'clear <onion|alias> [--non-contacts]', 'Delete message history.'
+                    'show <onion|alias> [limit]',
+                    'View stored message history.',
+                ),
+                SubCommandDef(
+                    'clear [onion|alias] [--non-contacts]',
+                    'Delete message history.',
                 ),
             ],
         ),
@@ -161,7 +165,12 @@ class Help:
             subcommands=[
                 SubCommandDef('list', 'List all isolated profiles.'),
                 SubCommandDef(
-                    'add <name> [--remote] [--port]', 'Create a new isolated profile.'
+                    'add <name> [--remote] [--port] [--plaintext]',
+                    'Create a new isolated profile.',
+                ),
+                SubCommandDef(
+                    'migrate <name> --to <encrypted|plaintext>',
+                    'Migrate a local profile between encrypted and plaintext.',
                 ),
                 SubCommandDef(
                     'rm <name> [--nuke-remote]',
@@ -211,8 +220,8 @@ class Help:
         ),
         'cleanup': CommandDef(
             name='cleanup',
-            usage='metor cleanup',
-            description='Kill zombie Tor processes and clear locks.',
+            usage='metor cleanup [--force]',
+            description='Kill managed daemon/Tor processes and clear daemon state; `--force` also rescues untracked daemons when local runtime-state files are missing or corrupted.',
             category='System & Settings',
         ),
         'purge': CommandDef(
@@ -275,7 +284,7 @@ class Help:
         'inbox': CommandDef(
             name='inbox',
             usage='/inbox [onion|alias]',
-            description='Check inbox counts or read drops from an alias.',
+            description='Check inbox counts or read unread messages from an alias.',
             category='Messaging & Display',
         ),
         'clear': CommandDef(

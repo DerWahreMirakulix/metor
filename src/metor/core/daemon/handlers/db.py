@@ -35,7 +35,7 @@ from metor.core.api import (
     UnreadMessagesEvent,
     create_event,
 )
-from metor.data import ContactManager, HistoryManager, MessageManager
+from metor.data import ContactManager, HistoryManager, MessageManager, MessageType
 from metor.data.profile import ProfileManager
 
 
@@ -135,18 +135,23 @@ class DatabaseCommandHandler:
                 self._cm.remove_contact(cmd.alias, active_onions)
             )
             if rm_success:
-                for old, new, was_saved in rm_renames:
+                for old, new, onion, was_saved in rm_renames:
                     self._broadcast(
                         RenameSuccessEvent(
                             old_alias=old,
                             new_alias=new,
+                            onion=onion,
                             is_demotion=True,
                             was_saved=was_saved,
                         )
                     )
-                for a in rm_removed:
+                for alias, onion in rm_removed:
                     self._broadcast(
-                        ContactRemovedEvent(alias=a, profile=self._pm.profile_name)
+                        ContactRemovedEvent(
+                            alias=alias,
+                            onion=onion,
+                            profile=self._pm.profile_name,
+                        )
                     )
 
             self._cm.cleanup_orphans(active_onions)
@@ -160,7 +165,11 @@ class DatabaseCommandHandler:
             )
             if rn_success:
                 self._broadcast(
-                    RenameSuccessEvent(old_alias=cmd.old_alias, new_alias=cmd.new_alias)
+                    RenameSuccessEvent(
+                        old_alias=cmd.old_alias,
+                        new_alias=cmd.new_alias,
+                        onion=str(rn_params.get('onion') or '') or None,
+                    )
                 )
             return create_event(rn_event_type, rn_params)
 
@@ -170,18 +179,23 @@ class DatabaseCommandHandler:
                 self._cm.clear_contacts(active_onions)
             )
             if clr_success:
-                for old, new, was_saved in clr_renames:
+                for old, new, onion, was_saved in clr_renames:
                     self._broadcast(
                         RenameSuccessEvent(
                             old_alias=old,
                             new_alias=new,
+                            onion=onion,
                             is_demotion=True,
                             was_saved=was_saved,
                         )
                     )
-                for a in clr_removed:
+                for alias, onion in clr_removed:
                     self._broadcast(
-                        ContactRemovedEvent(alias=a, profile=self._pm.profile_name)
+                        ContactRemovedEvent(
+                            alias=alias,
+                            onion=onion,
+                            profile=self._pm.profile_name,
+                        )
                     )
 
             self._cm.cleanup_orphans(active_onions)
@@ -199,18 +213,23 @@ class DatabaseCommandHandler:
             )
 
             if success_c:
-                for old, new, was_saved in renames:
+                for old, new, onion, was_saved in renames:
                     self._broadcast(
                         RenameSuccessEvent(
                             old_alias=old,
                             new_alias=new,
+                            onion=onion,
                             is_demotion=True,
                             was_saved=was_saved,
                         )
                     )
-                for a in removed:
+                for alias, onion in removed:
                     self._broadcast(
-                        ContactRemovedEvent(alias=a, profile=self._pm.profile_name)
+                        ContactRemovedEvent(
+                            alias=alias,
+                            onion=onion,
+                            profile=self._pm.profile_name,
+                        )
                     )
 
             return create_event(event_type, {'profile': self._pm.profile_name})
@@ -245,6 +264,7 @@ class DatabaseCommandHandler:
                 history=history_data,
                 profile=self._pm.profile_name,
                 alias=alias,
+                onion=onion,
             )
 
         if isinstance(cmd, ClearHistoryCommand):
@@ -264,11 +284,19 @@ class DatabaseCommandHandler:
             ch_success, ch_event_type, ch_params = self._hm.clear_history(onion)
             if ch_success and ch_event_type is EventType.HISTORY_CLEARED and alias:
                 ch_params = {'alias': alias}
+                if onion:
+                    ch_params['onion'] = onion
 
-            deleted_aliases: List[str] = self._cm.cleanup_orphans(active_onions)
-            for a in deleted_aliases:
+            history_deleted_peers: List[Tuple[str, str]] = self._cm.cleanup_orphans(
+                active_onions
+            )
+            for removed_alias, removed_onion in history_deleted_peers:
                 self._broadcast(
-                    ContactRemovedEvent(alias=a, profile=self._pm.profile_name)
+                    ContactRemovedEvent(
+                        alias=removed_alias,
+                        onion=removed_onion,
+                        profile=self._pm.profile_name,
+                    )
                 )
 
             return create_event(ch_event_type, ch_params)
@@ -292,6 +320,7 @@ class DatabaseCommandHandler:
             return MessagesDataEvent(
                 messages=messages,
                 alias=alias,
+                onion=onion,
             )
 
         if isinstance(cmd, ClearMessagesCommand):
@@ -313,17 +342,27 @@ class DatabaseCommandHandler:
             )
             if cm_success and cm_event_type is EventType.MESSAGES_CLEARED and alias:
                 cm_params = {'alias': alias}
+                if onion:
+                    cm_params['onion'] = onion
             if (
                 cm_success
                 and cm_event_type is EventType.MESSAGES_CLEARED_NON_CONTACTS
                 and alias
             ):
                 cm_params = {'alias': alias}
+                if onion:
+                    cm_params['onion'] = onion
 
-            deleted_aliases = self._cm.cleanup_orphans(active_onions)
-            for a in deleted_aliases:
+            messages_deleted_peers: List[Tuple[str, str]] = self._cm.cleanup_orphans(
+                active_onions
+            )
+            for removed_alias, removed_onion in messages_deleted_peers:
                 self._broadcast(
-                    ContactRemovedEvent(alias=a, profile=self._pm.profile_name)
+                    ContactRemovedEvent(
+                        alias=removed_alias,
+                        onion=removed_onion,
+                        profile=self._pm.profile_name,
+                    )
                 )
 
             return create_event(cm_event_type, cm_params)
@@ -348,12 +387,17 @@ class DatabaseCommandHandler:
                 onion
             )
             messages_list: List[UnreadMessageEntry] = [
-                UnreadMessageEntry(timestamp=str(m[3]), payload=str(m[2]))
+                UnreadMessageEntry(
+                    timestamp=str(m[3]),
+                    payload=str(m[2]),
+                    is_drop=str(m[1]) != MessageType.LIVE_TEXT.value,
+                )
                 for m in raw_messages
             ]
             return UnreadMessagesEvent(
                 messages=messages_list,
                 alias=alias,
+                onion=onion,
             )
 
         return create_event(EventType.UNKNOWN_COMMAND)

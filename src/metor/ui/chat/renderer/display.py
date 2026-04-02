@@ -5,7 +5,7 @@ Module managing the terminal display buffer and repainting logic.
 import sys
 import re
 import threading
-from typing import List
+from typing import Callable, List, Optional
 
 from metor.ui.chat.models import ChatLine
 from metor.ui.chat.presenter import ChatPresenter
@@ -14,17 +14,23 @@ from metor.ui.chat.presenter import ChatPresenter
 class Display:
     """Manages the terminal output buffer and coordinates thread-safe rendering."""
 
-    def __init__(self, initial_prompt: str) -> None:
+    def __init__(
+        self,
+        initial_prompt: str,
+        alias_resolver: Callable[[ChatLine], Optional[str]],
+    ) -> None:
         """
         Initializes the display manager.
 
         Args:
             initial_prompt (str): The base prompt string (e.g., '$ ').
+            alias_resolver (Callable[[ChatLine], Optional[str]]): Resolves the active alias for one line.
 
         Returns:
             None
         """
         self._initial_prompt: str = initial_prompt
+        self._alias_resolver: Callable[[ChatLine], Optional[str]] = alias_resolver
         self.all_msgs: List[ChatLine] = []
         self.print_lock: threading.Lock = threading.Lock()
 
@@ -43,17 +49,19 @@ class Display:
         Returns:
             int: The number of lines the formatted message consumes.
         """
+        resolved_alias: Optional[str] = self._alias_resolver(msg)
         text: str = msg.text
-        if msg.alias and '{alias}' in text:
-            text = text.replace('{alias}', msg.alias)
+        if resolved_alias and '{alias}' in text:
+            text = text.replace('{alias}', resolved_alias)
 
         clean_text: str = self._ansi_escape.sub('', text)
         prefix_len: int = ChatPresenter.get_visible_prefix_len(
             msg.msg_type,
             msg.tone,
-            msg.alias,
+            resolved_alias,
             msg.is_drop,
             len(self._initial_prompt),
+            msg.timestamp,
         )
 
         lines: List[str] = clean_text.split('\n')

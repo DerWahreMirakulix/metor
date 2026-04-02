@@ -52,10 +52,11 @@ class MessageEntry:
 
 @dataclass
 class UnreadMessageEntry:
-    """Represents a single unread offline message."""
+    """Represents one unread message awaiting explicit consume."""
 
     timestamp: str
     payload: str
+    is_drop: bool
 
 
 @dataclass
@@ -77,12 +78,23 @@ class InitEvent(IpcEvent):
     event_type: EventType = field(default=EventType.INIT, init=False)
 
 
-@register_event(EventType.TOR_KEY_ERROR)
+@register_event(EventType.TOR_KEY_DECRYPT_FAILED)
 @dataclass
-class TorKeyErrorEvent(IpcEvent):
-    """Signals a failure while provisioning Tor runtime keys."""
+class TorKeyDecryptFailedEvent(IpcEvent):
+    """Signals that the encrypted Tor runtime key could not be decrypted."""
 
-    event_type: EventType = field(default=EventType.TOR_KEY_ERROR, init=False)
+    event_type: EventType = field(
+        default=EventType.TOR_KEY_DECRYPT_FAILED,
+        init=False,
+    )
+
+
+@register_event(EventType.TOR_KEY_WRITE_FAILED)
+@dataclass
+class TorKeyWriteFailedEvent(IpcEvent):
+    """Signals that the Tor runtime key could not be written to disk."""
+
+    event_type: EventType = field(default=EventType.TOR_KEY_WRITE_FAILED, init=False)
 
 
 @register_event(EventType.TOR_START_FAILED)
@@ -90,6 +102,7 @@ class TorKeyErrorEvent(IpcEvent):
 class TorStartFailedEvent(IpcEvent):
     """Signals that the Tor process could not be started."""
 
+    error: Optional[str] = None
     event_type: EventType = field(default=EventType.TOR_START_FAILED, init=False)
 
 
@@ -98,6 +111,7 @@ class TorStartFailedEvent(IpcEvent):
 class TorProcessTerminatedEvent(IpcEvent):
     """Signals that Tor terminated unexpectedly during startup."""
 
+    error: Optional[str] = None
     event_type: EventType = field(
         default=EventType.TOR_PROCESS_TERMINATED,
         init=False,
@@ -111,6 +125,7 @@ class RemoteMsgEvent(IpcEvent):
 
     alias: str
     text: str
+    onion: Optional[str] = None
     timestamp: Optional[str] = None
     event_type: EventType = field(default=EventType.REMOTE_MSG, init=False)
 
@@ -122,6 +137,7 @@ class AckEvent(IpcEvent):
 
     msg_id: str
     text: Optional[str] = None
+    timestamp: Optional[str] = None
     event_type: EventType = field(default=EventType.ACK, init=False)
 
 
@@ -150,6 +166,7 @@ class DisconnectedEvent(IpcEvent):
     """Announces a disconnected peer."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.DISCONNECTED, init=False)
 
 
@@ -159,6 +176,7 @@ class ConnectionConnectingEvent(IpcEvent):
     """Signals that an outbound connection attempt has started."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(
         default=EventType.CONNECTION_CONNECTING,
         init=False,
@@ -172,6 +190,7 @@ class RenameSuccessEvent(IpcEvent):
 
     old_alias: str
     new_alias: str
+    onion: Optional[str] = None
     is_demotion: bool = False
     was_saved: bool = True
     event_type: EventType = field(default=EventType.RENAME_SUCCESS, init=False)
@@ -183,6 +202,7 @@ class ContactRemovedEvent(IpcEvent):
     """Announces that a contact or peer was removed from the profile."""
 
     alias: str
+    onion: Optional[str] = None
     profile: Optional[str] = None
     event_type: EventType = field(default=EventType.CONTACT_REMOVED, init=False)
 
@@ -205,6 +225,7 @@ class SwitchSuccessEvent(IpcEvent):
     """Confirms a focus switch or focus clear operation."""
 
     alias: Optional[str] = None
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.SWITCH_SUCCESS, init=False)
 
 
@@ -214,6 +235,7 @@ class ConnectionPendingEvent(IpcEvent):
     """Signals a pending outbound live connection."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.CONNECTION_PENDING, init=False)
 
 
@@ -223,6 +245,7 @@ class ConnectionAutoAcceptedEvent(IpcEvent):
     """Signals that a pending connection was auto-accepted."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(
         default=EventType.CONNECTION_AUTO_ACCEPTED,
         init=False,
@@ -237,6 +260,7 @@ class ConnectionRetryEvent(IpcEvent):
     alias: str
     attempt: int
     max_retries: int
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.CONNECTION_RETRY, init=False)
 
 
@@ -246,6 +270,8 @@ class ConnectionFailedEvent(IpcEvent):
     """Signals that a connection attempt failed permanently."""
 
     alias: str
+    onion: Optional[str] = None
+    error: Optional[str] = None
     event_type: EventType = field(default=EventType.CONNECTION_FAILED, init=False)
 
 
@@ -255,6 +281,7 @@ class IncomingConnectionEvent(IpcEvent):
     """Signals an inbound live connection request."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.INCOMING_CONNECTION, init=False)
 
 
@@ -264,6 +291,7 @@ class ConnectionRejectedEvent(IpcEvent):
     """Signals that a live connection was rejected."""
 
     alias: str
+    onion: Optional[str] = None
     by_remote: bool = False
     event_type: EventType = field(default=EventType.CONNECTION_REJECTED, init=False)
 
@@ -274,6 +302,7 @@ class TiebreakerRejectedEvent(IpcEvent):
     """Signals that a tie-breaker rejected a duplicate connection."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.TIEBREAKER_REJECTED, init=False)
 
 
@@ -283,6 +312,7 @@ class AutoReconnectAttemptEvent(IpcEvent):
     """Signals an automatic reconnect attempt."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(
         default=EventType.AUTO_RECONNECT_ATTEMPT,
         init=False,
@@ -295,6 +325,7 @@ class InboxNotificationEvent(IpcEvent):
     """Signals new unread offline messages for a peer."""
 
     alias: str
+    onion: Optional[str] = None
     count: int = 1
     event_type: EventType = field(default=EventType.INBOX_NOTIFICATION, init=False)
 
@@ -305,6 +336,7 @@ class InboxDataEvent(IpcEvent):
     """Carries buffered or unread offline messages."""
 
     alias: str
+    onion: Optional[str] = None
     messages: List[UnreadMessageEntry] = field(default_factory=list)
     inbox_counts: Dict[str, int] = field(default_factory=dict)
     is_live_flush: bool = False
@@ -339,6 +371,7 @@ class HistoryDataEvent(IpcEvent):
     history: List[HistoryEntry]
     profile: str
     alias: Optional[str] = None
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.HISTORY_DATA, init=False)
 
     def __post_init__(self) -> None:
@@ -353,6 +386,7 @@ class MessagesDataEvent(IpcEvent):
 
     messages: List[MessageEntry]
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.MESSAGES_DATA, init=False)
 
     def __post_init__(self) -> None:
@@ -372,10 +406,11 @@ class InboxCountsEvent(IpcEvent):
 @register_event(EventType.UNREAD_MESSAGES)
 @dataclass
 class UnreadMessagesEvent(IpcEvent):
-    """Returns unread offline messages for a peer."""
+    """Returns unread messages consumed explicitly for a peer."""
 
     messages: List[UnreadMessageEntry]
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.UNREAD_MESSAGES, init=False)
 
     def __post_init__(self) -> None:
@@ -454,6 +489,14 @@ class InvalidPasswordEvent(IpcEvent):
     """Signals that the supplied password was invalid."""
 
     event_type: EventType = field(default=EventType.INVALID_PASSWORD, init=False)
+
+
+@register_event(EventType.DB_CORRUPTED)
+@dataclass
+class DatabaseCorruptedEvent(IpcEvent):
+    """Signals that the profile database is corrupted."""
+
+    event_type: EventType = field(default=EventType.DB_CORRUPTED, init=False)
 
 
 @register_event(EventType.ALREADY_UNLOCKED)
@@ -570,6 +613,8 @@ class SettingUpdateFailedEvent(IpcEvent):
 class SettingTypeErrorEvent(IpcEvent):
     """Signals a type mismatch while applying a setting value."""
 
+    key: Optional[str] = None
+    reason: Optional[str] = None
     event_type: EventType = field(default=EventType.SETTING_TYPE_ERROR, init=False)
 
 
@@ -652,6 +697,7 @@ class NoConnectionToRejectEvent(IpcEvent):
     """Signals that there is no connection to reject."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(
         default=EventType.NO_CONNECTION_TO_REJECT,
         init=False,
@@ -664,6 +710,7 @@ class NoConnectionToDisconnectEvent(IpcEvent):
     """Signals that there is no connection to disconnect."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(
         default=EventType.NO_CONNECTION_TO_DISCONNECT,
         init=False,
@@ -676,6 +723,7 @@ class NoPendingConnectionEvent(IpcEvent):
     """Signals that there is no pending connection to accept."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.NO_PENDING_CONNECTION, init=False)
 
 
@@ -714,6 +762,7 @@ class DropQueuedEvent(IpcEvent):
     """Signals that a drop was queued successfully."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.DROP_QUEUED, init=False)
 
 
@@ -723,6 +772,7 @@ class NoPendingLiveMessagesEvent(IpcEvent):
     """Signals that no pending live messages existed for fallback."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.NO_PENDING_LIVE_MSGS, init=False)
 
 
@@ -734,6 +784,7 @@ class FallbackSuccessEvent(IpcEvent):
     alias: str
     count: int
     msg_ids: List[str]
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.FALLBACK_SUCCESS, init=False)
 
 
@@ -744,6 +795,7 @@ class ContactAddedEvent(IpcEvent):
 
     alias: str
     profile: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.CONTACT_ADDED, init=False)
 
 
@@ -762,6 +814,7 @@ class ContactAlreadySavedEvent(IpcEvent):
     """Signals that a discovered peer was already saved."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(
         default=EventType.CONTACT_ALREADY_SAVED,
         init=False,
@@ -774,6 +827,7 @@ class PeerPromotedEvent(IpcEvent):
     """Signals that a discovered peer was promoted to a contact."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.PEER_PROMOTED, init=False)
 
 
@@ -783,6 +837,7 @@ class AliasInUseEvent(IpcEvent):
     """Signals that an alias is already in use."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.ALIAS_IN_USE, init=False)
 
 
@@ -792,6 +847,7 @@ class OnionInUseEvent(IpcEvent):
     """Signals that an onion is already bound to a saved contact."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.ONION_IN_USE, init=False)
 
 
@@ -819,6 +875,7 @@ class AliasRenamedEvent(IpcEvent):
 
     old_alias: str
     new_alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.ALIAS_RENAMED, init=False)
 
 
@@ -828,6 +885,7 @@ class PeerCantDeleteActiveEvent(IpcEvent):
     """Signals that an active peer cannot be deleted."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(
         default=EventType.PEER_CANT_DELETE_ACTIVE,
         init=False,
@@ -840,6 +898,7 @@ class ContactDowngradedEvent(IpcEvent):
     """Signals that a saved contact was downgraded to unsaved."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.CONTACT_DOWNGRADED, init=False)
 
 
@@ -850,6 +909,7 @@ class ContactRemovedDowngradedEvent(IpcEvent):
 
     alias: str
     new_alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(
         default=EventType.CONTACT_REMOVED_DOWNGRADED,
         init=False,
@@ -863,6 +923,7 @@ class PeerAnonymizedEvent(IpcEvent):
 
     alias: str
     new_alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.PEER_ANONYMIZED, init=False)
 
 
@@ -872,6 +933,7 @@ class PeerRemovedEvent(IpcEvent):
     """Signals that a discovered peer was removed."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.PEER_REMOVED, init=False)
 
 
@@ -901,6 +963,7 @@ class HistoryClearedEvent(IpcEvent):
     """Signals that a peer-specific history was cleared."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.HISTORY_CLEARED, init=False)
 
 
@@ -927,6 +990,7 @@ class MessagesClearedEvent(IpcEvent):
     """Signals that peer-specific messages were cleared."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.MESSAGES_CLEARED, init=False)
 
 
@@ -936,6 +1000,7 @@ class MessagesClearedNonContactsEvent(IpcEvent):
     """Signals that non-contact messages for a peer were cleared."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(
         default=EventType.MESSAGES_CLEARED_NON_CONTACTS,
         init=False,
@@ -994,6 +1059,7 @@ class RetunnelInitiatedEvent(IpcEvent):
     """Signals that retunneling has started for a peer."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.RETUNNEL_INITIATED, init=False)
 
 
@@ -1003,6 +1069,7 @@ class RetunnelSuccessEvent(IpcEvent):
     """Signals that retunneling succeeded for a peer."""
 
     alias: str
+    onion: Optional[str] = None
     event_type: EventType = field(default=EventType.RETUNNEL_SUCCESS, init=False)
 
 
@@ -1012,5 +1079,6 @@ class RetunnelFailedEvent(IpcEvent):
     """Signals that retunneling failed for a peer."""
 
     alias: str
+    onion: Optional[str] = None
     error: Optional[str] = None
     event_type: EventType = field(default=EventType.RETUNNEL_FAILED, init=False)

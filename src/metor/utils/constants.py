@@ -44,6 +44,9 @@ class Constants:
     DEFAULT_COLS: int = 80  # Fallback terminal width
     UUID_MSG_BYTES: int = 8  # Byte length for persistent message UUIDs
     UUID_CHAT_BYTES: int = 4  # Byte length for ephemeral live-chat UUIDs
+    LIVE_MSG_DEDUPE_CACHE_SIZE: int = (
+        256  # Per-peer cache size for recent live message IDs
+    )
     INPUT_SELECT_TIMEOUT_SEC: float = 0.0  # Non-blocking POSIX stdin poll
 
     # Thread Constraints & Timing
@@ -67,6 +70,7 @@ class Constants:
     DB_RUNTIME_FILE: str = 'storage.runtime.db'
     CONTACTS_FILE: str = 'contacts.json'
     DAEMON_PORT_FILE: str = 'daemon.port'
+    DAEMON_PID_FILE: str = 'daemon.pid'
     SETTINGS_FILE: str = 'settings.json'
 
     # Directory Names

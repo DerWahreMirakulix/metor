@@ -33,6 +33,16 @@ class CliParser:
             '--remote', action='store_true', help='Set profile as remote client'
         )
         parser.add_argument('--port', type=int, help='Set static daemon port')
+        parser.add_argument(
+            '--locked',
+            action='store_true',
+            help='Start the daemon in locked mode until unlocked over IPC',
+        )
+        parser.add_argument(
+            '--plaintext',
+            action='store_true',
+            help='Create a local plaintext profile without password protection',
+        )
 
         parser.add_argument('command', nargs='?', default='quickstart')
         parser.add_argument('subcommand', nargs='?')

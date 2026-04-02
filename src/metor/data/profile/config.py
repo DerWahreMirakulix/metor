@@ -11,7 +11,12 @@ from enum import Enum
 from typing import Dict, Union, cast, List
 from pathlib import Path
 
-from metor.data import SettingKey, Settings, SettingValue
+from metor.data.settings import (
+    SettingKey,
+    Settings,
+    SettingValue,
+    SettingValidationError,
+)
 from metor.utils import FileLock, TypeCaster, validate_json_file
 
 # Local Package Imports
@@ -20,11 +25,21 @@ from metor.data.profile.models import (
     ProfileConfigKey,
     ProfileConfigValue,
     NestedConfigDict,
+    PROFILE_CONFIG_SPECS,
+    ProfileConfigSpec,
+    ProfileSecurityMode,
+    ProfileConfigValidationError,
+    validate_profile_config_value,
 )
 
 
 class Config:
     """Manages reading and writing to the profile's configuration JSON."""
+
+    _PLAINTEXT_DISABLED_SETTING_KEYS: tuple[SettingKey, ...] = (
+        SettingKey.REQUIRE_LOCAL_AUTH,
+        SettingKey.ENABLE_RUNTIME_DB_MIRROR,
+    )
 
     def __init__(self, paths: Paths) -> None:
         """
@@ -113,8 +128,7 @@ class Config:
                 pass
 
         default_data: Dict[str, ProfileConfigValue] = {
-            ProfileConfigKey.IS_REMOTE.value: False,
-            ProfileConfigKey.DAEMON_PORT.value: None,
+            spec.key.value: spec.default for spec in PROFILE_CONFIG_SPECS.values()
         }
 
         if self._paths.exists() and not config_file.exists():
@@ -125,6 +139,68 @@ class Config:
                 pass
 
         return default_data
+
+    def _get_profile_security_mode(
+        self,
+        data: Dict[str, ProfileConfigValue],
+    ) -> ProfileSecurityMode:
+        """
+        Resolves the effective structural profile security mode from raw config data.
+
+        Args:
+            data (Dict[str, ProfileConfigValue]): The raw flat config dictionary.
+
+        Returns:
+            ProfileSecurityMode: The normalized profile security mode.
+        """
+        spec: ProfileConfigSpec = PROFILE_CONFIG_SPECS[ProfileConfigKey.SECURITY_MODE]
+        raw_value: ProfileConfigValue = data.get(spec.key.value, spec.default)
+
+        try:
+            normalized = validate_profile_config_value(
+                ProfileConfigKey.SECURITY_MODE,
+                raw_value,
+            )
+            return ProfileSecurityMode(str(normalized))
+        except (ProfileConfigValidationError, TypeError, ValueError):
+            return ProfileSecurityMode.ENCRYPTED
+
+    def get_profile_security_mode(self) -> ProfileSecurityMode:
+        """
+        Returns the effective structural storage security mode for this profile.
+
+        Args:
+            None
+
+        Returns:
+            ProfileSecurityMode: The resolved storage security mode.
+        """
+        return self._get_profile_security_mode(self._load())
+
+    def _apply_profile_security_mode(
+        self,
+        key: SettingKey,
+        value: SettingValue,
+        security_mode: ProfileSecurityMode,
+    ) -> SettingValue:
+        """
+        Applies profile-mode-specific behavior to one resolved setting value.
+
+        Args:
+            key (SettingKey): The setting key.
+            value (SettingValue): The resolved setting value.
+            security_mode (ProfileSecurityMode): The effective profile security mode.
+
+        Returns:
+            SettingValue: The effective value for this profile.
+        """
+        if (
+            security_mode is ProfileSecurityMode.PLAINTEXT
+            and key in self._PLAINTEXT_DISABLED_SETTING_KEYS
+        ):
+            return False
+
+        return value
 
     def get(
         self,
@@ -143,13 +219,46 @@ class Config:
         """
         key_str: str = key.value if isinstance(key, Enum) else key
         data: Dict[str, ProfileConfigValue] = self._load()
+        security_mode: ProfileSecurityMode = self._get_profile_security_mode(data)
 
         if key_str in data:
-            return data[key_str]
+            local_value: ProfileConfigValue = data[key_str]
+
+            try:
+                setting_key: SettingKey = SettingKey(key_str)
+                normalized_setting = Settings.validate_value(
+                    setting_key,
+                    cast(SettingValue, local_value),
+                    for_profile_override=True,
+                )
+                return self._apply_profile_security_mode(
+                    setting_key,
+                    normalized_setting,
+                    security_mode,
+                )
+            except ValueError:
+                pass
+            except TypeError:
+                return default
+
+            try:
+                profile_key: ProfileConfigKey = ProfileConfigKey(key_str)
+                return validate_profile_config_value(profile_key, local_value)
+            except ValueError:
+                return local_value
+            except (ProfileConfigValidationError, TypeError):
+                return default
 
         try:
             global_key: SettingKey = SettingKey(key_str)
-            return Settings.get(global_key)
+            global_value = Settings.get(global_key)
+            if global_value is None:
+                return default
+            return self._apply_profile_security_mode(
+                global_key,
+                global_value,
+                security_mode,
+            )
         except ValueError:
             pass
 
@@ -170,19 +279,8 @@ class Config:
         Returns:
             str: The resolved configuration value as a string.
         """
-        key_str: str = key.value if isinstance(key, Enum) else key
-        data: Dict[str, ProfileConfigValue] = self._load()
-
-        if key_str in data and data[key_str] is not None:
-            return TypeCaster.to_str(data[key_str])
-
-        try:
-            global_key: SettingKey = SettingKey(key_str)
-            return Settings.get_str(global_key)
-        except ValueError:
-            pass
-
-        return TypeCaster.to_str(default)
+        value: Union[ProfileConfigValue, SettingValue] = self.get(key, default)
+        return TypeCaster.to_str(value)
 
     def get_int(
         self,
@@ -199,19 +297,8 @@ class Config:
         Returns:
             int: The resolved configuration value as an integer.
         """
-        key_str: str = key.value if isinstance(key, Enum) else key
-        data: Dict[str, ProfileConfigValue] = self._load()
-
-        if key_str in data and data[key_str] is not None:
-            return TypeCaster.to_int(data[key_str])
-
-        try:
-            global_key: SettingKey = SettingKey(key_str)
-            return Settings.get_int(global_key)
-        except ValueError:
-            pass
-
-        return TypeCaster.to_int(default)
+        value: Union[ProfileConfigValue, SettingValue] = self.get(key, default)
+        return TypeCaster.to_int(value)
 
     def get_float(
         self,
@@ -228,19 +315,8 @@ class Config:
         Returns:
             float: The resolved configuration value as a float.
         """
-        key_str: str = key.value if isinstance(key, Enum) else key
-        data: Dict[str, ProfileConfigValue] = self._load()
-
-        if key_str in data and data[key_str] is not None:
-            return TypeCaster.to_float(data[key_str])
-
-        try:
-            global_key: SettingKey = SettingKey(key_str)
-            return Settings.get_float(global_key)
-        except ValueError:
-            pass
-
-        return TypeCaster.to_float(default)
+        value: Union[ProfileConfigValue, SettingValue] = self.get(key, default)
+        return TypeCaster.to_float(value)
 
     def get_bool(
         self,
@@ -257,22 +333,15 @@ class Config:
         Returns:
             bool: The resolved configuration value as a boolean.
         """
-        key_str: str = key.value if isinstance(key, Enum) else key
-        data: Dict[str, ProfileConfigValue] = self._load()
-
-        if key_str in data and data[key_str] is not None:
-            return TypeCaster.to_bool(data[key_str])
-
-        try:
-            global_key: SettingKey = SettingKey(key_str)
-            return Settings.get_bool(global_key)
-        except ValueError:
-            pass
-
-        return TypeCaster.to_bool(default)
+        value: Union[ProfileConfigValue, SettingValue] = self.get(key, default)
+        return TypeCaster.to_bool(value)
 
     def set(
-        self, key: Union[ProfileConfigKey, SettingKey, str], value: ProfileConfigValue
+        self,
+        key: Union[ProfileConfigKey, SettingKey, str],
+        value: ProfileConfigValue,
+        *,
+        allow_mutating_structural_keys: bool = False,
     ) -> None:
         """
         Writes a setting safely using a file lock, applying nested formatting.
@@ -289,11 +358,55 @@ class Config:
             self._paths.create_directories()
 
         key_str: str = key.value if isinstance(key, Enum) else key
+        normalized_value: ProfileConfigValue
+        data: Dict[str, ProfileConfigValue] = self._load()
+        security_mode: ProfileSecurityMode = self._get_profile_security_mode(data)
+
+        try:
+            setting_key: SettingKey = SettingKey(key_str)
+        except ValueError:
+            try:
+                profile_key: ProfileConfigKey = ProfileConfigKey(key_str)
+                normalized_value = validate_profile_config_value(profile_key, value)
+                spec: ProfileConfigSpec = PROFILE_CONFIG_SPECS[profile_key]
+                if (
+                    not spec.mutable_after_creation
+                    and not allow_mutating_structural_keys
+                ):
+                    current_value: ProfileConfigValue = data.get(key_str, spec.default)
+                    try:
+                        normalized_current = validate_profile_config_value(
+                            profile_key,
+                            current_value,
+                        )
+                    except (ProfileConfigValidationError, TypeError):
+                        normalized_current = spec.default
+
+                    if normalized_current != normalized_value:
+                        raise ProfileConfigValidationError(
+                            f"Setting '{key_str}' is immutable after profile creation. Use the dedicated profile migration workflow instead."
+                        )
+            except ValueError as exc:
+                raise ValueError(f"Invalid configuration key '{key_str}'.") from exc
+        else:
+            normalized_value = Settings.validate_value(
+                setting_key,
+                cast(SettingValue, value),
+                for_profile_override=True,
+            )
+            if (
+                security_mode is ProfileSecurityMode.PLAINTEXT
+                and setting_key in self._PLAINTEXT_DISABLED_SETTING_KEYS
+                and normalized_value is True
+            ):
+                raise SettingValidationError(
+                    f"Setting '{key_str}' is not supported for plaintext profiles."
+                )
+
         config_file: Path = self._paths.get_config_file()
 
         with FileLock(config_file):
-            data: Dict[str, ProfileConfigValue] = self._load()
-            data[key_str] = value
+            data[key_str] = normalized_value
             self._write_nested(data)
 
     def sync_with_global(self) -> None:

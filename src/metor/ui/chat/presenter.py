@@ -4,7 +4,7 @@ Module providing stateless text formatting and ANSI color logic for the interact
 
 from typing import Optional, List
 
-from metor.ui import Theme
+from metor.ui import Theme, UIPresenter
 from metor.ui.models import StatusTone
 
 # Local Package Imports
@@ -62,6 +62,7 @@ class ChatPresenter:
         alias: Optional[str],
         is_drop: bool,
         prompt_len: int,
+        timestamp: Optional[str] = None,
     ) -> int:
         """
         Calculates the exact visible length of the prefix without invisible ANSI color codes.
@@ -72,37 +73,46 @@ class ChatPresenter:
             alias (Optional[str]): The associated remote alias.
             is_drop (bool): True if the message has the [Drop] suffix.
             prompt_len (int): The length of the base prompt signature.
+            timestamp (Optional[str]): Optional visible timestamp prefix.
 
         Returns:
             int: The visible character count of the prefix.
         """
-        drop_len: int = len(' [Drop]') if is_drop else 0
+        _, timestamp_visible = UIPresenter.build_timestamp_prefix(
+            timestamp,
+            is_drop=(msg_type in (ChatMessageType.SELF, ChatMessageType.REMOTE))
+            and is_drop,
+            compact=True,
+        )
 
         if msg_type == ChatMessageType.STATUS:
             if tone == StatusTone.INFO:
-                return 4 + prompt_len
+                return len(timestamp_visible) + 4 + prompt_len
             if tone == StatusTone.ERROR:
-                return 5 + prompt_len
-            return 6 + prompt_len
+                return len(timestamp_visible) + 5 + prompt_len
+            return len(timestamp_visible) + 6 + prompt_len
         if msg_type == ChatMessageType.RAW:
             return 0
         if msg_type == ChatMessageType.SELF:
             return (
-                len(f'To {alias}') + drop_len + prompt_len
+                len(timestamp_visible) + len(f'To {alias}') + prompt_len
                 if alias
-                else 4 + drop_len + prompt_len
+                else len(timestamp_visible) + 4 + prompt_len
             )
         if msg_type == ChatMessageType.REMOTE:
             return (
-                len(f'From {alias}') + drop_len + prompt_len
+                len(timestamp_visible) + len(f'From {alias}') + prompt_len
                 if alias
-                else 6 + drop_len + prompt_len
+                else len(timestamp_visible) + 6 + prompt_len
             )
         return 0
 
     @staticmethod
     def format_msg(
-        msg: ChatLine, initial_prompt: str, current_focus: Optional[str]
+        msg: ChatLine,
+        initial_prompt: str,
+        current_focus: Optional[str],
+        resolved_alias: Optional[str] = None,
     ) -> str:
         """
         Formats a strictly typed ChatLine into a colorized CLI string.
@@ -111,66 +121,91 @@ class ChatPresenter:
             msg (ChatLine): The data object containing message metadata.
             initial_prompt (str): The base prompt string (e.g., '$ ').
             current_focus (Optional[str]): The alias the user is currently focused on.
+            resolved_alias (Optional[str]): The alias resolved for the current redraw.
 
         Returns:
             str: The fully formatted string ready for stdout.
         """
+        active_alias: Optional[str] = resolved_alias if resolved_alias else msg.alias
         text: str = msg.text
-        if msg.alias and '{alias}' in text:
-            text = text.replace('{alias}', msg.alias)
+        if active_alias and '{alias}' in text:
+            text = text.replace('{alias}', active_alias)
 
         prefix: str = ''
-        drop_tag: str = ' [Drop]' if msg.is_drop else ''
+        visible_prefix: str = ''
+
+        timestamp_prefix: str = ''
+        timestamp_visible: str = ''
+        if msg.msg_type == ChatMessageType.STATUS:
+            timestamp_prefix, timestamp_visible = UIPresenter.build_timestamp_prefix(
+                msg.timestamp,
+                compact=True,
+            )
+        elif msg.msg_type in (ChatMessageType.SELF, ChatMessageType.REMOTE):
+            timestamp_prefix, timestamp_visible = UIPresenter.build_timestamp_prefix(
+                msg.timestamp,
+                is_drop=msg.is_drop,
+                compact=True,
+            )
 
         if msg.msg_type == ChatMessageType.STATUS:
+            prefix_raw: str
             if msg.tone == StatusTone.INFO:
-                prefix = f'{Theme.YELLOW}info{initial_prompt}{Theme.RESET}'
+                prefix_raw = f'info{initial_prompt}'
+                prefix = f'{timestamp_prefix}{Theme.YELLOW}{prefix_raw}{Theme.RESET}'
             elif msg.tone == StatusTone.ERROR:
-                prefix = f'{Theme.RED}error{initial_prompt}{Theme.RESET}'
+                prefix_raw = f'error{initial_prompt}'
+                prefix = f'{timestamp_prefix}{Theme.RED}{prefix_raw}{Theme.RESET}'
             else:
-                prefix = f'{Theme.CYAN}system{initial_prompt}{Theme.RESET}'
+                prefix_raw = f'system{initial_prompt}'
+                prefix = f'{timestamp_prefix}{Theme.CYAN}{prefix_raw}{Theme.RESET}'
+            visible_prefix = f'{timestamp_visible}{prefix_raw}'
         elif msg.msg_type != ChatMessageType.RAW:
-            is_focused: bool = (msg.alias == current_focus) if msg.alias else False
+            is_focused: bool = (
+                (active_alias == current_focus) if active_alias else False
+            )
 
             if msg.msg_type == ChatMessageType.SELF:
-                prefix_raw: str = (
-                    f'To {msg.alias}{drop_tag}{initial_prompt}'
-                    if msg.alias
-                    else f'self{drop_tag}{initial_prompt}'
+                prefix_raw = (
+                    f'To {active_alias}{initial_prompt}'
+                    if active_alias
+                    else f'self{initial_prompt}'
                 )
+                visible_prefix = f'{timestamp_visible}{prefix_raw}'
 
                 if not is_focused:
-                    prefix = f'{Theme.DARK_GREY}{prefix_raw}{Theme.RESET}'
+                    prefix = (
+                        f'{timestamp_prefix}{Theme.DARK_GREY}{prefix_raw}{Theme.RESET}'
+                    )
                 else:
                     if msg.is_failed:
-                        prefix = f'{Theme.RED}{prefix_raw}{Theme.RESET}'
+                        prefix = (
+                            f'{timestamp_prefix}{Theme.RED}{prefix_raw}{Theme.RESET}'
+                        )
                     elif msg.is_pending:
-                        prefix = prefix_raw
+                        prefix = f'{timestamp_prefix}{prefix_raw}'
                     else:
-                        prefix = f'{Theme.GREEN}{prefix_raw}{Theme.RESET}'
+                        prefix = (
+                            f'{timestamp_prefix}{Theme.GREEN}{prefix_raw}{Theme.RESET}'
+                        )
 
             elif msg.msg_type == ChatMessageType.REMOTE:
                 prefix_raw = (
-                    f'From {msg.alias}{drop_tag}{initial_prompt}'
-                    if msg.alias
-                    else f'remote{drop_tag}{initial_prompt}'
+                    f'From {active_alias}{initial_prompt}'
+                    if active_alias
+                    else f'remote{initial_prompt}'
                 )
+                visible_prefix = f'{timestamp_visible}{prefix_raw}'
                 prefix = (
-                    f'{Theme.PURPLE}{prefix_raw}{Theme.RESET}'
+                    f'{timestamp_prefix}{Theme.PURPLE}{prefix_raw}{Theme.RESET}'
                     if is_focused
-                    else f'{Theme.DARK_GREY}{prefix_raw}{Theme.RESET}'
+                    else f'{timestamp_prefix}{Theme.DARK_GREY}{prefix_raw}{Theme.RESET}'
                 )
 
         if '\n' in text and msg.msg_type != ChatMessageType.RAW:
-            pad_len: int = ChatPresenter.get_visible_prefix_len(
-                msg.msg_type,
-                msg.tone,
-                msg.alias,
-                msg.is_drop,
-                len(initial_prompt),
+            text = UIPresenter.indent_multiline_text(
+                text,
+                len(visible_prefix),
             )
-            padding: str = ' ' * pad_len
-            lines: List[str] = text.split('\n')
-            text = f'\n{padding}'.join(lines)
 
         return f'{prefix}{text}'

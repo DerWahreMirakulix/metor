@@ -24,6 +24,7 @@ from metor.core.api import (
     RejectCommand,
     MsgCommand,
     FallbackCommand,
+    RegisterLiveConsumerCommand,
     SendDropCommand,
     SwitchCommand,
     SwitchSuccessEvent,
@@ -62,6 +63,7 @@ class NetworkCommandHandler:
         outbox: OutboxWorker,
         broadcast_cb: Callable[[IpcEvent], None],
         send_to_cb: Callable[[socket.socket, IpcEvent], None],
+        register_live_consumer_cb: Callable[[socket.socket], None],
         config: 'Config',
     ) -> None:
         """
@@ -76,6 +78,7 @@ class NetworkCommandHandler:
             outbox (OutboxWorker): The offline drop tunnel worker.
             broadcast_cb (Callable[[IpcEvent], None]): Hook to broadcast IPC events.
             send_to_cb (Callable[[socket.socket, IpcEvent], None]): Hook to send an IPC event to a specific client.
+            register_live_consumer_cb (Callable[[socket.socket], None]): Hook to mark one IPC session as an interactive live consumer.
             config (Config): The profile configuration instance.
 
         Returns:
@@ -89,6 +92,9 @@ class NetworkCommandHandler:
         self._outbox: OutboxWorker = outbox
         self._broadcast: Callable[[IpcEvent], None] = broadcast_cb
         self._send_to: Callable[[socket.socket, IpcEvent], None] = send_to_cb
+        self._register_live_consumer: Callable[[socket.socket], None] = (
+            register_live_consumer_cb
+        )
         self._config: 'Config' = config
         self._client_focuses: Dict[socket.socket, str] = {}
         self._focus_lock: threading.Lock = threading.Lock()
@@ -142,10 +148,22 @@ class NetworkCommandHandler:
         Returns:
             None
         """
-        self._outbox.reset_tunnel(onion)
-
         if self._network.is_connected_or_pending(onion):
+            self._outbox.reset_tunnel(onion)
             self._network.retunnel(onion)
+            return
+
+        if not self._network.has_drop_tunnel(onion):
+            self._broadcast(
+                create_event(
+                    EventType.RETUNNEL_FAILED,
+                    {
+                        'alias': alias,
+                        'onion': onion,
+                        'error': 'No cached drop tunnel exists',
+                    },
+                )
+            )
             return
 
         self._outbox.retunnel(onion, alias)
@@ -189,6 +207,9 @@ class NetworkCommandHandler:
             self._send_to(conn, InitEvent(onion=self._tm.onion))
             for active_onion in self._network.get_active_onions():
                 self._network.flush_ram_buffer(active_onion)
+
+        elif isinstance(cmd, RegisterLiveConsumerCommand):
+            self._register_live_consumer(conn)
 
         elif isinstance(cmd, GetConnectionsCommand):
             self._send_to(
@@ -274,16 +295,20 @@ class NetworkCommandHandler:
                 self._mm.queue_message(
                     contact_onion=str(onion),
                     direction=MessageDirection.OUT,
-                    msg_type=MessageType.TEXT,
+                    msg_type=MessageType.DROP_TEXT,
                     payload=cmd.text,
                     status=MessageStatus.PENDING,
+                    msg_id=cmd.msg_id,
                 )
                 if self._config.get_bool(SettingKey.RECORD_DROP_EVENTS):
                     self._hm.log_event(HistoryEvent.DROP_QUEUED, onion)
 
                 self._send_to(
                     conn,
-                    create_event(EventType.DROP_QUEUED, {'alias': alias}),
+                    create_event(
+                        EventType.DROP_QUEUED,
+                        {'alias': alias, 'onion': onion},
+                    ),
                 )
             else:
                 self._send_to(
@@ -319,4 +344,4 @@ class NetworkCommandHandler:
 
                 alias, onion = resolved
                 self._set_client_focus(conn, onion)
-                self._send_to(conn, SwitchSuccessEvent(alias=alias))
+                self._send_to(conn, SwitchSuccessEvent(alias=alias, onion=onion))

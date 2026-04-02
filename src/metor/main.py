@@ -46,7 +46,11 @@ def main() -> None:
         sys.exit(1)
 
     dispatcher: CliDispatcher = CliDispatcher(args, extra, pm)
-    dispatcher.dispatch()
+    try:
+        dispatcher.dispatch()
+    except (EOFError, KeyboardInterrupt):
+        sys.stderr.write('\n')
+        sys.exit(130)
 
 
 if __name__ == '__main__':

@@ -155,7 +155,7 @@ class StreamReceiver:
                     if self._state.consume_retunnel_reconnect(onion):
                         self._hm.log_event(HistoryEvent.LIVE_RETUNNEL_SUCCESS, onion)
                         self._state.clear_retunnel_flow(onion)
-                        self._broadcast(RetunnelSuccessEvent(alias=alias))
+                        self._broadcast(RetunnelSuccessEvent(alias=alias, onion=onion))
                     else:
                         self._broadcast(ConnectedEvent(alias=alias, onion=onion))
 
@@ -164,7 +164,9 @@ class StreamReceiver:
                     conn.settimeout(late_acceptance_timeout)
                     if not self._state.is_retunneling(onion):
                         alias = cast(str, self._cm.ensure_alias_for_onion(onion))
-                        self._broadcast(ConnectionPendingEvent(alias=alias))
+                        self._broadcast(
+                            ConnectionPendingEvent(alias=alias, onion=onion)
+                        )
 
                 elif msg.startswith(f'{TorCommand.DISCONNECT.value} '):
                     remote_disconnected = True

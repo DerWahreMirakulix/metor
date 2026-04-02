@@ -4,6 +4,16 @@
 
 Built on a robust **Client-Daemon Architecture** and structured via **Domain-Driven Design (DDD)**, the user interface is completely stateless. You can manage multiple secure connections simultaneously, maintain an address book, queue offline messages, and view connection history — all seamlessly from the console, whether running locally or remotely.
 
+## 📚 Repository Guide
+
+Use this README as the landing page, then jump to the specialized documents below:
+
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md): Canonical architecture decisions guide covering system boundaries, config routing, IPC contracts, OPSEC guardrails, and transport invariants.
+- [SETTINGS.md](docs/SETTINGS.md): Generated reference for all supported `settings` and profile `config` keys, including defaults, constraints, and security notes.
+- [API.md](docs/API.md): Generated IPC contract reference for all daemon commands and events.
+- [AUDIT.md](docs/AUDIT.md): Security and architecture audit checklist used for every critical change.
+- [CONTRIBUTE.md](docs/CONTRIBUTE.md): Coding standards, import rules, docstring requirements, and security-focused contribution constraints.
+
 ## 🌟 Key Features
 
 - **Client-Daemon Architecture (Stateless UI):**
@@ -27,7 +37,12 @@ Built on a robust **Client-Daemon Architecture** and structured via **Domain-Dri
 
 Metor strictly separates presentation (UI) from domain logic (Core/Data). Communication between the CLI and the background process occurs via rigidly defined **Data Transfer Objects (DTOs)**.
 
-🔗 **Full API Reference:** Please review [API_DOCS.md](API_DOCS.md) for a comprehensive overview of all IPC Commands (UI -> Daemon) and Events (Daemon -> UI).
+Recommended reading order:
+
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) for the high-level design and long-lived decisions.
+- [SETTINGS.md](docs/SETTINGS.md) for all supported settings, defaults, constraints, and security notes.
+- [API.md](docs/API.md) for the exact IPC schema used between UI and daemon.
+- [AUDIT.md](docs/AUDIT.md) and [CONTRIBUTE.md](docs/CONTRIBUTE.md) if you are reviewing or changing code.
 
 ### OPSEC & Security Concepts
 
@@ -74,13 +89,27 @@ _Tip: Append `-p <profile_name>` to any command to use an isolated identity._
 
 ### 1. Start the Daemon
 
-Before chatting, the background daemon must be started (and unlocked with a master password):
+Before chatting, the background daemon must be started:
 
 ```bash
 metor daemon
 ```
 
 _Leave this terminal window running in the background, or use `tmux`/`screen`._
+
+If you want the daemon to expose IPC first and defer all key/database access until later, start it in locked mode:
+
+```bash
+metor daemon --locked
+```
+
+Use `metor unlock` only to unlock a daemon that was explicitly started in locked mode:
+
+```bash
+metor unlock
+```
+
+If `daemon.require_local_auth` is enabled for an encrypted profile, every CLI command and every chat window authenticates on its own persistent IPC session. Chat and one-shot CLI commands prompt automatically on the same socket that will execute the real command.
 
 ### 2. The Live Chat (Multiplexed UI)
 
@@ -112,13 +141,24 @@ You don't need to enter the Chat UI to use Metor. It can act as an asynchronous 
 | Command                               | Description                                                                  |
 | :------------------------------------ | :--------------------------------------------------------------------------- |
 | `metor send <onion\|alias> "Message"` | Queues a message in the outbox (sent automatically when the peer is online). |
-| `metor inbox [onion\|alias]`          | Checks for new unread offline messages or reads them for a specific peer.    |
+| `metor inbox [onion\|alias]`          | Checks for new unread messages or consumes them for a specific peer.         |
 | `metor address show`                  | Displays your current `.onion` hidden service address.                       |
 | `metor contacts list`                 | Lists your saved contacts.                                                   |
 | `metor history show [onion\|alias]`   | Shows the connection event log globally or for a specific peer.              |
 | `metor messages show <onion\|alias>`  | Prints the chat history with a contact directly to the console.              |
 
 ### 4. Profile Management & Remote Setup
+
+Local profiles support two structural storage modes:
+
+- `encrypted` (default): keys and the SQLite database stay encrypted at rest and support daemon lock plus per-session local auth.
+- `plaintext`: create with `metor profiles add <name> --plaintext` when you intentionally do not want password protection at rest.
+
+Security mode is structural profile metadata, not a normal `config set` key. To change it later, use the dedicated migration flow:
+
+```bash
+metor profiles migrate <name> --to <encrypted|plaintext>
+```
 
 Want to run Metor on a server and connect securely from your laptop?
 
@@ -135,6 +175,8 @@ Want to run Metor on a server and connect securely from your laptop?
 ## ⚙️ Settings & Configuration
 
 Metor's configuration system uses a cascading architecture. You can define **global settings** that apply to all profiles, or create **profile-specific overrides**.
+
+🔗 **Full Settings Reference:** See [SETTINGS.md](docs/SETTINGS.md) for the generated key-by-key reference, including defaults, constraints, scope, and security notes.
 
 ### Global Settings (`settings`)
 
@@ -159,12 +201,27 @@ When interacting with a remote daemon over SSH, Metor's CLI acts as a smart rout
 - **Daemon Settings (`daemon.*`):** Commands like `metor config set daemon.tor_timeout 30` are securely transmitted via IPC and stored directly on the **remote server's** disk.
 - **Config Sync:** Running `metor config sync` intelligently wipes UI overrides on your local machine _and_ instructs the remote daemon to wipe its overrides simultaneously.
 
-**Important Configuration Keys:**
+**Common Security-Relevant Keys:**
 
-- `daemon.ephemeral_messages` (bool): If true, unread inbox messages are securely shredded from disk immediately upon reading.
-- `daemon.require_local_auth` (bool): Requires the master password to unlock the UI even if the daemon is already running (crucial for remote SSH setups).
+- `daemon.ephemeral_messages` (bool): If true, consumed drop-message payloads are shredded from disk instead of being retained in visible message history.
+- `daemon.enable_runtime_db_mirror` (bool): If true, a plaintext runtime mirror of the encrypted database is written to disk for debugging and external inspection tools. Plaintext profiles force this off because the primary database is already plaintext.
+- `daemon.auto_accept_contacts` (bool): If true, saved contacts may be auto-accepted for inbound live sessions.
+- `daemon.require_local_auth` (bool): Requires each new local encrypted IPC session to authenticate before it can issue runtime commands. Plaintext profiles force this off because no password exists to validate.
 - `daemon.allow_drops` (bool): Globally allows or blocks the reception of asynchronous offline messages.
+- `daemon.max_unseen_live_msgs` (int): Caps unread crash-safe live backlog per peer. `0` disables headless live backlog, `-1` removes the limit.
+- `ui.inbox_notification_delay` (float): Delays and aggregates unread-message notifications for unfocused peers on this local UI.
 - `ui.chat_limit` (int): Maximum number of messages kept in the UI's volatile RAM display buffer.
+
+The full list, including all network and transport tuning knobs, is documented in [SETTINGS.md](docs/SETTINGS.md).
+
+## 🧰 Development Workflow
+
+Generated documentation is part of the project maintenance pipeline.
+
+- `npm run docs`: Regenerates [API.md](docs/API.md) and [SETTINGS.md](docs/SETTINGS.md).
+- `npm run ready`: Formats code and markdown, runs linting and type checking, then regenerates the generated docs.
+
+Before changing architecture, security boundaries, or contributor-facing workflows, review [ARCHITECTURE.md](ARCHITECTURE.md), [AUDIT.md](AUDIT.md), and [CONTRIBUTE.md](CONTRIBUTE.md).
 
 ## 🛡️ Security Disclaimer
 

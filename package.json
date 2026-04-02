@@ -7,7 +7,7 @@
     "format:py": "ruff format src/metor/ scripts/",
     "lint": "ruff check --fix src/metor/ scripts/",
     "typecheck": "mypy src/metor/ scripts/",
-    "docs": "python scripts/generate_api_docs.py",
+    "docs": "python scripts/generate_api_docs.py && python scripts/generate_settings_docs.py",
     "ready": "npm run format:py && npm run format:md && npm run lint && npm run typecheck && npm run docs"
   },
   "repository": {

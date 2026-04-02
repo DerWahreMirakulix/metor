@@ -9,17 +9,21 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from metor.core.api import (
+    AuthenticateSessionCommand,
+    EventType,
     IpcEvent,
     InitCommand,
     MsgCommand,
+    RegisterLiveConsumerCommand,
     SendDropCommand,
     GetConnectionsCommand,
     SwitchCommand,
+    UnlockCommand,
 )
 from metor.data.profile import ProfileManager
 from metor.data.settings import SettingKey
-from metor.ui import Help, Theme
-from metor.ui.models import StatusTone
+from metor.ui import Help, PromptAbortedError, Theme, prompt_hidden
+from metor.ui.models import AliasPolicy, StatusTone
 from metor.utils import clean_onion, Constants
 
 # Local Package Imports
@@ -48,11 +52,14 @@ class Chat:
         self._pm: ProfileManager = pm
         self._renderer: Renderer = Renderer(self._pm.config)
         self._session: Session = Session()
+        self._renderer.set_alias_resolver(self._session.get_peer_alias)
         self._ipc: Optional[IpcClient] = None
 
         self._init_event: threading.Event = threading.Event()
         self._conn_event: threading.Event = threading.Event()
         self._disconnect_event: threading.Event = threading.Event()
+        self._startup_gate_event: threading.Event = threading.Event()
+        self._startup_gate_type: Optional[EventType] = None
 
         self._handler: Optional[EventHandler] = None
         self._dispatcher: Optional[CommandDispatcher] = None
@@ -93,38 +100,20 @@ class Chat:
             return
 
         self._handler = EventHandler(
-            self._ipc, self._session, self._renderer, self._init_event, self._conn_event
+            self._ipc,
+            self._session,
+            self._renderer,
+            self._init_event,
+            self._conn_event,
+            lambda: self._pm.config.get_float(SettingKey.INBOX_NOTIFICATION_DELAY),
         )
         self._dispatcher = CommandDispatcher(self._ipc, self._session, self._renderer)
 
-        self._ipc.send_command(InitCommand())
-
-        ipc_timeout: float = self._pm.config.get_float(SettingKey.IPC_TIMEOUT)
-
-        if not self._init_event.wait(timeout=ipc_timeout):
-            if self._disconnect_event.is_set():
-                self._renderer.print_message(
-                    f'{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}',
-                    msg_type=ChatMessageType.RAW,
-                )
-                self._shutdown()
-                return
-
-            self._renderer.print_message(
-                f'{Theme.RED}IPC Timeout:{Theme.RESET} The daemon is not responding. If this is a remote profile, check your SSH tunnel.',
-                msg_type=ChatMessageType.STATUS,
-                tone=StatusTone.ERROR,
-            )
+        if not self._bootstrap_ipc_session():
             self._shutdown()
             return
 
-        if self._disconnect_event.is_set():
-            self._renderer.print_message(
-                f'{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}',
-                msg_type=ChatMessageType.RAW,
-            )
-            self._shutdown()
-            return
+        self._ipc.send_command(RegisterLiveConsumerCommand())
 
         self._print_header()
 
@@ -202,9 +191,15 @@ class Chat:
             )
             return
 
-        msg_id: str = secrets.token_hex(Constants.UUID_CHAT_BYTES)
+        msg_id: str = secrets.token_hex(Constants.UUID_MSG_BYTES)
         is_live: bool = self._session.is_connected(self._session.focused_alias)
         timestamp: str = datetime.now(timezone.utc).isoformat()
+        peer_onion: Optional[str] = self._session.get_peer_onion(
+            self._session.focused_alias
+        )
+        alias_policy: AliasPolicy = (
+            AliasPolicy.DYNAMIC if peer_onion else AliasPolicy.STATIC
+        )
 
         if is_live:
             self._ipc.send_command(
@@ -218,6 +213,8 @@ class Chat:
                 msg_text,
                 msg_type=ChatMessageType.SELF,
                 alias=self._session.focused_alias,
+                peer_onion=peer_onion,
+                alias_policy=alias_policy,
                 timestamp=timestamp,
                 msg_id=msg_id,
                 is_drop=False,
@@ -227,12 +224,15 @@ class Chat:
                 SendDropCommand(
                     target=self._session.focused_alias,
                     text=msg_text,
+                    msg_id=msg_id,
                 )
             )
             self._renderer.print_message(
                 msg_text,
                 msg_type=ChatMessageType.SELF,
                 alias=self._session.focused_alias,
+                peer_onion=peer_onion,
+                alias_policy=alias_policy,
                 timestamp=timestamp,
                 msg_id=msg_id,
                 is_drop=True,
@@ -261,8 +261,114 @@ class Chat:
         Returns:
             None
         """
+        if not self._init_event.is_set() and event.event_type in (
+            EventType.INIT,
+            EventType.AUTH_REQUIRED,
+            EventType.DAEMON_LOCKED,
+            EventType.DAEMON_UNLOCKED,
+            EventType.SESSION_AUTHENTICATED,
+            EventType.INVALID_PASSWORD,
+        ):
+            if event.event_type is EventType.INIT and self._handler:
+                self._handler.handle(event)
+
+            self._startup_gate_type = event.event_type
+            self._startup_gate_event.set()
+
+            return
+
         if self._handler:
             self._handler.handle(event)
+
+    def _bootstrap_ipc_session(self) -> bool:
+        """
+        Completes any required daemon unlock or per-session auth before chat init.
+
+        Args:
+            None
+
+        Returns:
+            bool: True when the persistent IPC session is ready for chat init.
+        """
+        if self._ipc is None:
+            return False
+
+        self._init_event.clear()
+        self._startup_gate_event.clear()
+        self._startup_gate_type = None
+        self._ipc.send_command(InitCommand())
+
+        ipc_timeout: float = self._pm.config.get_float(SettingKey.IPC_TIMEOUT)
+        pending_gate: Optional[EventType] = None
+
+        while not self._init_event.is_set():
+            if self._disconnect_event.is_set():
+                self._renderer.print_message(
+                    f'{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}',
+                    msg_type=ChatMessageType.RAW,
+                )
+                return False
+
+            if not self._startup_gate_event.wait(timeout=ipc_timeout):
+                self._renderer.print_message(
+                    f'{Theme.RED}IPC Timeout:{Theme.RESET} The daemon is not responding. If this is a remote profile, check your SSH tunnel.',
+                    msg_type=ChatMessageType.STATUS,
+                    tone=StatusTone.ERROR,
+                )
+                return False
+
+            self._startup_gate_event.clear()
+            gate: Optional[EventType] = self._startup_gate_type
+            self._startup_gate_type = None
+
+            if self._init_event.is_set():
+                return True
+
+            if gate is EventType.INVALID_PASSWORD:
+                self._renderer.print_message(
+                    'Invalid master password.',
+                    msg_type=ChatMessageType.STATUS,
+                    tone=StatusTone.ERROR,
+                )
+                gate = pending_gate
+
+            if gate is EventType.DAEMON_UNLOCKED:
+                pending_gate = None
+                self._ipc.send_command(InitCommand())
+                continue
+
+            if gate is EventType.SESSION_AUTHENTICATED:
+                pending_gate = None
+                self._ipc.send_command(InitCommand())
+                continue
+
+            if gate not in (EventType.AUTH_REQUIRED, EventType.DAEMON_LOCKED):
+                continue
+
+            pending_gate = gate
+            prompt: str = (
+                'Enter Master Password to unlock daemon: '
+                if gate is EventType.DAEMON_LOCKED
+                else 'Enter Master Password: '
+            )
+            try:
+                password: str = prompt_hidden(f'{Theme.GREEN}{prompt}{Theme.RESET}')
+            except PromptAbortedError:
+                return False
+            if not password:
+                self._renderer.print_message(
+                    'Master password cannot be empty.',
+                    msg_type=ChatMessageType.STATUS,
+                    tone=StatusTone.ERROR,
+                )
+                return False
+
+            if gate is EventType.DAEMON_LOCKED:
+                self._ipc.send_command(UnlockCommand(password=password))
+            else:
+                self._ipc.send_command(AuthenticateSessionCommand(password=password))
+
+        return True
 
     def _print_header(self, clear_screen: bool = False) -> None:
         """

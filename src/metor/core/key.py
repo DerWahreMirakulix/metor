@@ -31,7 +31,7 @@ class KeyManager:
             None
         """
         self._pm: ProfileManager = pm
-        self._hs_dir: Path = Path(self._pm.get_hidden_service_dir())
+        self._hs_dir: Path = self._pm.paths.get_hidden_service_dir()
         self._password: Optional[str] = password
         self._salt_file: Path = self._hs_dir / 'crypto.salt'
 
@@ -82,12 +82,9 @@ class KeyManager:
         tor_sec_enc_path: Path = self._hs_dir / f'{Constants.TOR_SECRET_KEY}.enc'
         tor_pub_path: Path = self._hs_dir / Constants.TOR_PUBLIC_KEY
 
-        # Fallback for older databases during migration
-        legacy_tor_sec_path: Path = self._hs_dir / Constants.TOR_SECRET_KEY
-
         if (
             metor_key_path.exists()
-            and (tor_sec_enc_path.exists() or legacy_tor_sec_path.exists())
+            and tor_sec_enc_path.exists()
             and tor_pub_path.exists()
         ):
             return
@@ -144,6 +141,108 @@ class KeyManager:
             return box.decrypt(data)
         return data
 
+    def has_metor_key(self) -> bool:
+        """
+        Checks whether the encrypted Metor secret key already exists on disk.
+
+        Args:
+            None
+
+        Returns:
+            bool: True if the key file exists.
+        """
+        key_path: Path = self._hs_dir / Constants.METOR_SECRET_KEY
+        return key_path.exists()
+
+    def has_any_key_material(self) -> bool:
+        """
+        Checks whether any persisted key material already exists on disk.
+
+        Args:
+            None
+
+        Returns:
+            bool: True if any key file exists.
+        """
+        key_paths: tuple[Path, ...] = (
+            self._hs_dir / Constants.METOR_SECRET_KEY,
+            self._hs_dir / f'{Constants.TOR_SECRET_KEY}.enc',
+            self._hs_dir / Constants.TOR_PUBLIC_KEY,
+            self._salt_file,
+        )
+        return any(path.exists() for path in key_paths)
+
+    def has_complete_key_material(self) -> bool:
+        """
+        Checks whether the full persisted key set exists on disk.
+
+        Args:
+            None
+
+        Returns:
+            bool: True if all required persisted key files exist.
+        """
+        required_paths: tuple[Path, ...] = (
+            self._hs_dir / Constants.METOR_SECRET_KEY,
+            self._hs_dir / f'{Constants.TOR_SECRET_KEY}.enc',
+            self._hs_dir / Constants.TOR_PUBLIC_KEY,
+        )
+        return all(path.exists() for path in required_paths)
+
+    def rewrite_password_protection(self, new_password: Optional[str]) -> None:
+        """
+        Rewrites the persisted key material using a new storage protection mode.
+
+        Args:
+            new_password (Optional[str]): The target password, or None for plaintext storage.
+
+        Raises:
+            ValueError: If key material is incomplete.
+
+        Returns:
+            None
+        """
+        if not self.has_any_key_material():
+            return
+        if not self.has_complete_key_material():
+            raise ValueError('Incomplete key material cannot be migrated safely.')
+
+        metor_key_path: Path = self._hs_dir / Constants.METOR_SECRET_KEY
+        tor_key_path: Path = self._hs_dir / f'{Constants.TOR_SECRET_KEY}.enc'
+        tor_pub_path: Path = self._hs_dir / Constants.TOR_PUBLIC_KEY
+
+        metor_secret: bytes = self.get_metor_key()
+        tor_secret: bytes = self.get_decrypted_tor_key()
+        tor_public: bytes = tor_pub_path.read_bytes()
+
+        self._salt_file.unlink(missing_ok=True)
+        target_box: Optional[nacl.secret.SecretBox] = KeyManager(
+            self._pm,
+            new_password,
+        )._get_encryption_box()
+
+        persisted_metor: bytes = (
+            target_box.encrypt(metor_secret) if target_box else metor_secret
+        )
+        persisted_tor: bytes = (
+            target_box.encrypt(tor_secret) if target_box else tor_secret
+        )
+
+        with metor_key_path.open('wb') as handle:
+            handle.write(persisted_metor)
+        metor_key_path.chmod(0o600)
+
+        with tor_key_path.open('wb') as handle:
+            handle.write(persisted_tor)
+        tor_key_path.chmod(0o600)
+
+        with tor_pub_path.open('wb') as handle:
+            handle.write(tor_public)
+        tor_pub_path.chmod(0o600)
+
+        if new_password is None:
+            self._salt_file.unlink(missing_ok=True)
+
     def get_decrypted_tor_key(self) -> bytes:
         """
         Retrieves and decrypts the Tor secret key.
@@ -156,9 +255,6 @@ class KeyManager:
             bytes: The decrypted raw Tor secret key format.
         """
         key_path: Path = self._hs_dir / f'{Constants.TOR_SECRET_KEY}.enc'
-        if not key_path.exists():
-            # Support legacy paths if the `.enc` suffix hasn't been migrated
-            key_path = self._hs_dir / Constants.TOR_SECRET_KEY
 
         with key_path.open('rb') as f:
             data: bytes = f.read()

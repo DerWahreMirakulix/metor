@@ -160,19 +160,20 @@ class OutboxWorker:
         Returns:
             None
         """
-        self._broadcast(RetunnelInitiatedEvent(alias=alias))
+        self._broadcast(RetunnelInitiatedEvent(alias=alias, onion=onion))
         self._close_tunnel(onion)
 
         success, event_type, params = self._tm.rotate_circuits()
         if not success:
             failure_params: Dict[str, JsonValue] = {'alias': alias}
+            failure_params['onion'] = onion
             failure_params.update(params)
             self._broadcast(
                 create_event(event_type or EventType.RETUNNEL_FAILED, failure_params)
             )
             return
 
-        self._broadcast(RetunnelSuccessEvent(alias=alias))
+        self._broadcast(RetunnelSuccessEvent(alias=alias, onion=onion))
 
     def _loop(self) -> None:
         """

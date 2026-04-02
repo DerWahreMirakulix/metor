@@ -90,7 +90,7 @@ class TorManager:
         Returns:
             Tuple[bool, Optional[EventType], Dict[str, JsonValue]]: Success flag, optional event type, and payload.
         """
-        hs_dir: Path = Path(self._pm.get_hidden_service_dir())
+        hs_dir: Path = self._pm.paths.get_hidden_service_dir()
         try:
             decrypted_tor_key: bytes = self._km.get_decrypted_tor_key()
             tor_sec_path: Path = hs_dir / Constants.TOR_SECRET_KEY
@@ -101,14 +101,14 @@ class TorManager:
         except nacl.exceptions.CryptoError:
             return (
                 False,
-                EventType.TOR_KEY_ERROR,
-                {'error': 'Invalid master password.'},
+                EventType.TOR_KEY_DECRYPT_FAILED,
+                {},
             )
         except Exception:
             return (
                 False,
-                EventType.TOR_KEY_ERROR,
-                {'error': 'Filesystem error during key injection.'},
+                EventType.TOR_KEY_WRITE_FAILED,
+                {},
             )
 
     def _reserve_ports(self) -> None:
@@ -261,8 +261,8 @@ class TorManager:
         Returns:
             Tuple[bool, Optional[EventType], Dict[str, JsonValue]]: Success flag, optional event type, and payload.
         """
-        hs_dir: Path = Path(self._pm.get_hidden_service_dir())
-        data_dir: Path = Path(self._pm.get_tor_data_dir())
+        hs_dir: Path = self._pm.paths.get_hidden_service_dir()
+        data_dir: Path = self._pm.paths.get_tor_data_dir()
 
         self._reserve_ports()
 
@@ -329,7 +329,7 @@ class TorManager:
                     continue
                 return (
                     False,
-                    EventType.TOR_PROCESS_TERMINATED,
+                    EventType.TOR_START_FAILED,
                     {'error': f'Failed to launch Tor: {last_error}'},
                 )
 
@@ -339,7 +339,7 @@ class TorManager:
             return (
                 False,
                 EventType.TOR_START_FAILED,
-                {'error': 'Failed to launch the Tor binary.'},
+                {'error': 'Failed to launch the Tor binary'},
             )
 
         if not self._wait_for_proxy_listener():
@@ -347,7 +347,7 @@ class TorManager:
             return (
                 False,
                 EventType.TOR_PROCESS_TERMINATED,
-                {'error': 'Tor SOCKS proxy did not become ready.'},
+                {'error': 'Tor SOCKS proxy did not become ready'},
             )
 
         return True, None, {}
@@ -403,7 +403,7 @@ class TorManager:
         Returns:
             None
         """
-        hs_dir: Path = Path(self._pm.get_hidden_service_dir())
+        hs_dir: Path = self._pm.paths.get_hidden_service_dir()
         secure_shred_file(hs_dir / Constants.TOR_SECRET_KEY)
 
     def start(self) -> Tuple[bool, Optional[EventType], Dict[str, JsonValue]]:
@@ -536,7 +536,7 @@ class TorManager:
         Returns:
             Tuple[bool, EventType, Dict[str, JsonValue]]: A success flag, strict event type, and payload.
         """
-        hs_dir: Path = Path(self._pm.get_hidden_service_dir())
+        hs_dir: Path = self._pm.paths.get_hidden_service_dir()
         hostname_file: Path = hs_dir / Constants.HOSTNAME_FILE
         if hostname_file.exists():
             with hostname_file.open('r') as f:

@@ -4,13 +4,14 @@ Implements the Command Pattern to direct parsed inputs to the correct proxy or h
 """
 
 import argparse
-from typing import List, Optional, Dict
+from typing import List, Optional, Tuple
 
-from metor.core.api import JsonValue
+from metor.core.api import ProfilesDataEvent
 from metor.data.profile import (
     ProfileManager,
     ProfileOperationResult,
     ProfileOperationType,
+    ProfileSecurityMode,
 )
 from metor.ui import Help, UIPresenter
 
@@ -21,6 +22,128 @@ from metor.ui.cli.proxy import CliProxy
 
 class CliDispatcher:
     """Routes parsed CLI arguments to the corresponding application logic."""
+
+    @staticmethod
+    def _collect_command_args(
+        sub: Optional[str],
+        extra: List[str],
+        reserved_subcommands: Tuple[str, ...],
+    ) -> List[str]:
+        """
+        Collects positional arguments while supporting shorthand target invocation.
+
+        Args:
+            sub (Optional[str]): Parsed subcommand token.
+            extra (List[str]): Additional raw positional arguments.
+            reserved_subcommands (Tuple[str, ...]): Reserved subcommand keywords.
+
+        Returns:
+            List[str]: Ordered positional arguments for the command action.
+        """
+        args: List[str] = list(extra)
+        if sub and sub not in reserved_subcommands:
+            args.insert(0, sub)
+        return args
+
+    @staticmethod
+    def _parse_optional_limit(limit_raw: Optional[str]) -> Optional[int]:
+        """
+        Parses a decimal limit argument.
+
+        Args:
+            limit_raw (Optional[str]): Raw CLI token.
+
+        Returns:
+            Optional[int]: Parsed limit, or None if absent or invalid.
+        """
+        if limit_raw is None:
+            return None
+        if not limit_raw.isdigit():
+            return None
+        return int(limit_raw)
+
+    def _dispatch_messages(self, sub: Optional[str]) -> None:
+        """
+        Validates and routes the `messages` command.
+
+        Args:
+            sub (Optional[str]): Parsed subcommand token.
+
+        Returns:
+            None
+        """
+        non_contacts_only: bool = '--non-contacts' in self._extra
+        clean_args: List[str] = [x for x in self._extra if x != '--non-contacts']
+
+        if sub == 'clear':
+            if len(clean_args) > 1:
+                print(Help.show_command_help('messages'))
+                return
+
+            target: Optional[str] = clean_args[0] if clean_args else None
+            print(self._proxy.clear_messages(target, non_contacts_only))
+            return
+
+        if non_contacts_only:
+            print(Help.show_command_help('messages'))
+            return
+
+        message_args: List[str] = self._collect_command_args(
+            sub,
+            clean_args,
+            ('show', 'clear'),
+        )
+        if not message_args or len(message_args) > 2:
+            print(Help.show_command_help('messages'))
+            return
+
+        limit: Optional[int] = None
+        if len(message_args) == 2:
+            limit = self._parse_optional_limit(message_args[1])
+            if limit is None:
+                print(Help.show_command_help('messages'))
+                return
+
+        print(self._proxy.get_messages(message_args[0], limit))
+
+    def _dispatch_history(self, sub: Optional[str]) -> None:
+        """
+        Validates and routes the `history` command.
+
+        Args:
+            sub (Optional[str]): Parsed subcommand token.
+
+        Returns:
+            None
+        """
+        history_args: List[str] = self._collect_command_args(
+            sub,
+            self._extra,
+            ('show', 'clear'),
+        )
+
+        if sub == 'clear':
+            if len(history_args) > 1:
+                print(Help.show_command_help('history'))
+                return
+
+            clear_target: Optional[str] = history_args[0] if history_args else None
+            print(self._proxy.clear_history(clear_target))
+            return
+
+        if len(history_args) > 2:
+            print(Help.show_command_help('history'))
+            return
+
+        target: Optional[str] = history_args[0] if history_args else None
+        limit: Optional[int] = None
+        if len(history_args) == 2:
+            limit = self._parse_optional_limit(history_args[1])
+            if limit is None:
+                print(Help.show_command_help('history'))
+                return
+
+        print(self._proxy.get_history(target, limit))
 
     @staticmethod
     def _format_profile_result(result: ProfileOperationResult) -> str:
@@ -41,15 +164,51 @@ class CliDispatcher:
             return f"Default profile permanently set to '{params['profile']}'."
         if result.operation_type is ProfileOperationType.REMOTE_PORT_REQUIRED:
             return 'A remote profile requires a static port (--port <int>).'
+        if (
+            result.operation_type
+            is ProfileOperationType.PASSWORDLESS_REMOTE_NOT_ALLOWED
+        ):
+            return 'Remote profiles cannot be created without password protection.'
         if result.operation_type is ProfileOperationType.PROFILE_EXISTS:
             return f"Profile '{params['profile']}' already exists."
         if result.operation_type is ProfileOperationType.PROFILE_CREATED:
+            if params.get('security_mode') == ProfileSecurityMode.PLAINTEXT.value:
+                return (
+                    f"Profile '{params['profile']}' successfully created without "
+                    'password protection.'
+                )
             return f"Profile '{params['profile']}' successfully created."
         if result.operation_type is ProfileOperationType.PROFILE_CREATED_WITH_PORT:
+            storage_suffix: str = ''
+            if params.get('security_mode') == ProfileSecurityMode.PLAINTEXT.value:
+                storage_suffix = ' without password protection'
             return (
                 f"{params['remote_tag']}profile '{params['profile']}' successfully "
-                f'created (Port {params["port"]}).'
+                f'created{storage_suffix} (Port {params["port"]}).'
             )
+        if (
+            result.operation_type
+            is ProfileOperationType.SECURITY_MIGRATION_REMOTE_NOT_ALLOWED
+        ):
+            return 'Remote profiles cannot migrate local storage security mode.'
+        if result.operation_type is ProfileOperationType.CANNOT_MIGRATE_RUNNING:
+            return (
+                f"Cannot migrate security mode for '{params['profile']}' while its "
+                'daemon is running.'
+            )
+        if result.operation_type is ProfileOperationType.SECURITY_MODE_UNCHANGED:
+            return (
+                f"Profile '{params['profile']}' is already using "
+                f'{params["security_mode"]} storage.'
+            )
+        if result.operation_type is ProfileOperationType.SECURITY_MODE_MIGRATED:
+            return (
+                f"Profile '{params['profile']}' successfully migrated to "
+                f'{params["security_mode"]} storage.'
+            )
+        if result.operation_type is ProfileOperationType.SECURITY_MIGRATION_FAILED:
+            reason: str = str(params.get('reason') or 'Security migration failed.')
+            return reason
         if result.operation_type is ProfileOperationType.PROFILE_NOT_FOUND:
             return f"Profile '{params['profile']}' does not exist."
         if result.operation_type is ProfileOperationType.CANNOT_REMOVE_ACTIVE:
@@ -135,13 +294,19 @@ class CliDispatcher:
             print(Help.show_main_help())
 
         elif cmd == 'daemon':
-            CommandHandlers.handle_daemon(self._pm)
-
-        elif cmd == 'unlock':
-            if not sub:
+            if sub or self._extra:
                 print(Help.show_command_help(cmd))
             else:
-                print(self._proxy.unlock_daemon(sub))
+                CommandHandlers.handle_daemon(
+                    self._pm,
+                    start_locked=getattr(self._args, 'locked', False),
+                )
+
+        elif cmd == 'unlock':
+            if sub or self._extra:
+                print(Help.show_command_help(cmd))
+            else:
+                print(self._proxy.unlock_daemon())
 
         elif cmd == 'settings':
             if sub == 'set' and len(self._extra) >= 2:
@@ -165,7 +330,18 @@ class CliDispatcher:
             CommandHandlers.handle_chat(self._pm)
 
         elif cmd == 'cleanup':
-            CommandHandlers.handle_cleanup()
+            cleanup_tokens: List[str] = []
+            if sub:
+                cleanup_tokens.append(sub)
+            cleanup_tokens.extend(self._extra)
+
+            invalid_tokens: List[str] = [
+                token for token in cleanup_tokens if token != '--force'
+            ]
+            if invalid_tokens:
+                print(Help.show_command_help(cmd))
+            else:
+                CommandHandlers.handle_cleanup(force='--force' in cleanup_tokens)
 
         elif cmd == 'purge':
             is_nuke_remote: bool = (
@@ -183,52 +359,16 @@ class CliDispatcher:
             print(self._proxy.handle_inbox(sub))
 
         elif cmd == 'messages':
-            action: str = 'clear' if sub == 'clear' else 'show'
-            non_contacts_only: bool = '--non-contacts' in self._extra
-            clean_ext: List[str] = [x for x in self._extra if x != '--non-contacts']
-
-            target: Optional[str] = (
-                clean_ext[0]
-                if clean_ext
-                else (sub if sub not in ('show', 'clear') else None)
-            )
-            limit_str: Optional[str] = (
-                clean_ext[1]
-                if len(clean_ext) > 1
-                else (
-                    clean_ext[0]
-                    if clean_ext and action == 'show' and sub != 'show'
-                    else None
-                )
-            )
-            limit: Optional[int] = (
-                int(limit_str) if limit_str and limit_str.isdigit() else None
-            )
-
-            print(self._proxy.handle_messages(action, target, limit, non_contacts_only))
+            self._dispatch_messages(sub)
 
         elif cmd == 'history':
-            action = 'clear' if sub == 'clear' else 'show'
-            target = (
-                self._extra[0]
-                if self._extra
-                else (sub if sub not in ('show', 'clear') else None)
-            )
-            limit_str = (
-                self._extra[1]
-                if len(self._extra) > 1
-                else (
-                    self._extra[0]
-                    if self._extra and action == 'show' and sub != 'show'
-                    else None
-                )
-            )
-            limit = int(limit_str) if limit_str and limit_str.isdigit() else None
-
-            print(self._proxy.handle_history(action, target, limit))
+            self._dispatch_history(sub)
 
         elif cmd == 'address':
-            print(self._proxy.get_address(generate=(sub == 'generate')))
+            if sub in (None, 'show', 'generate'):
+                print(self._proxy.get_address(generate=(sub == 'generate')))
+            else:
+                print(Help.show_command_help(cmd))
 
         elif cmd == 'contacts':
             if sub == 'add':
@@ -261,10 +401,42 @@ class CliDispatcher:
                 if len(self._extra) < 1:
                     print(Help.show_command_help(cmd))
                 else:
+                    security_mode: ProfileSecurityMode = (
+                        ProfileSecurityMode.PLAINTEXT
+                        if getattr(self._args, 'no_password', False)
+                        else ProfileSecurityMode.ENCRYPTED
+                    )
                     result: ProfileOperationResult = ProfileManager.add_profile_folder(
                         self._extra[0],
                         is_remote=getattr(self._args, 'remote', False),
                         port=getattr(self._args, 'port', None),
+                        security_mode=security_mode,
+                    )
+                    print(self._format_profile_result(result))
+            elif sub == 'migrate':
+                profile_args: List[str] = list(self._extra)
+                target_mode_value: Optional[str] = None
+
+                if '--to' in profile_args:
+                    to_index: int = profile_args.index('--to')
+                    if to_index + 1 < len(profile_args):
+                        target_mode_value = profile_args[to_index + 1]
+                        del profile_args[to_index : to_index + 2]
+
+                if len(profile_args) != 1 or target_mode_value is None:
+                    print(Help.show_command_help(cmd, sub))
+                else:
+                    try:
+                        target_mode = ProfileSecurityMode(
+                            target_mode_value.strip().lower()
+                        )
+                    except ValueError:
+                        print(Help.show_command_help(cmd, sub))
+                        return
+
+                    result = CommandHandlers.handle_profile_security_migration(
+                        profile_args[0],
+                        target_mode,
                     )
                     print(self._format_profile_result(result))
             elif sub in ('rm', 'remove'):
@@ -312,10 +484,10 @@ class CliDispatcher:
                     target_proxy: CliProxy = CliProxy(target_pm)
                     print(target_proxy.clear_profile_db())
             elif sub in ('list', None):
-                data: Dict[str, JsonValue] = ProfileManager.get_profiles_data(
+                profiles_event: ProfilesDataEvent = ProfileManager.get_profiles_data(
                     self._pm.profile_name
                 )
-                print(UIPresenter.format_profiles(data))  # type: ignore
+                print(UIPresenter.format_profiles(profiles_event))
             else:
                 print(Help.show_command_help(cmd))
 

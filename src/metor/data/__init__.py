@@ -4,8 +4,14 @@ Exposes core data managers, settings, parsers, and domain enums via a unified Fa
 """
 
 # 1. Base Data Layer
-from metor.data.settings import Settings, SettingKey, SettingValue
-from metor.data.sql import SqlManager, SqlParam
+from metor.data.settings import (
+    Settings,
+    SettingKey,
+    SettingSpec,
+    SettingValue,
+    SettingValidationError,
+)
+from metor.data.sql import DatabaseCorruptedError, SqlManager, SqlParam
 
 # 2. Application Data Layer (Depends on Base Layer)
 from metor.data.contact import ContactManager
@@ -27,7 +33,10 @@ __all__ = [
     'MessageType',
     'Settings',
     'SettingKey',
+    'SettingSpec',
     'SettingValue',
+    'SettingValidationError',
+    'DatabaseCorruptedError',
     'SqlManager',
     'SqlParam',
 ]

@@ -8,11 +8,12 @@ Prevents structural ProfileConfigKey mutability vulnerabilities via strict prope
 
 import socket
 import json
-import getpass
 import dataclasses
+import secrets
 from typing import Optional, Dict, Union
 
 from metor.core.api import (
+    AuthenticateSessionCommand,
     EventType,
     JsonValue,
     IpcCommand,
@@ -49,7 +50,13 @@ from metor.core.api import (
 from metor.core.daemon import HeadlessDaemon
 from metor.data import Settings, SettingKey
 from metor.data.profile import ProfileManager, ProfileConfigKey
-from metor.ui import Theme, Translator, UIPresenter
+from metor.ui import (
+    PromptAbortedError,
+    Theme,
+    Translator,
+    UIPresenter,
+    prompt_hidden,
+)
 from metor.utils import Constants, TypeCaster
 
 
@@ -122,6 +129,98 @@ class CliProxy:
             return f'{Theme.PURPLE}[Remote]{Theme.RESET} {text}'
         return text
 
+    def _prompt_password(
+        self,
+        prompt: str = 'Enter Master Password: ',
+    ) -> Optional[str]:
+        """
+        Prompts interactively for one password and normalizes empty input to None.
+
+        Args:
+            prompt (str): The prompt text shown to the user.
+
+        Returns:
+            Optional[str]: The entered password, or None when empty.
+        """
+        password: str = prompt_hidden(f'{Theme.GREEN}{prompt}{Theme.RESET}')
+        if not password:
+            return None
+        return password
+
+    @staticmethod
+    def _send_socket_command(sock: socket.socket, cmd: IpcCommand) -> None:
+        """
+        Serializes one typed IPC command onto an already connected socket.
+
+        Args:
+            sock (socket.socket): The connected IPC socket.
+            cmd (IpcCommand): The outbound command DTO.
+
+        Returns:
+            None
+        """
+        sock.sendall((cmd.to_json() + '\n').encode('utf-8'))
+
+    def _read_socket_event(self, sock: socket.socket) -> Optional[IpcEvent]:
+        """
+        Reads one strictly typed newline-delimited IPC event from the socket.
+
+        Args:
+            sock (socket.socket): The connected IPC socket.
+
+        Returns:
+            Optional[IpcEvent]: The decoded event, or None when the stream ends.
+        """
+        buffer: bytearray = bytearray()
+        while True:
+            chunk: bytes = sock.recv(Constants.TCP_BUFFER_SIZE)
+            if not chunk:
+                return None
+
+            buffer.extend(chunk)
+            if len(buffer) > Constants.MAX_IPC_BYTES:
+                raise ValueError('Daemon response exceeded the IPC size limit.')
+
+            if b'\n' in buffer:
+                break
+
+        line: str = bytes(buffer).split(b'\n', 1)[0].decode('utf-8')
+        resp_dict: Dict[str, JsonValue] = json.loads(line)
+        return IpcEvent.from_dict(resp_dict)
+
+    def _format_ipc_event(self, event: IpcEvent) -> str:
+        """
+        Formats one typed IPC event for CLI output.
+
+        Args:
+            event (IpcEvent): The incoming daemon event DTO.
+
+        Returns:
+            str: The rendered CLI text.
+        """
+        if isinstance(
+            event,
+            (
+                ContactsDataEvent,
+                HistoryDataEvent,
+                MessagesDataEvent,
+                InboxCountsEvent,
+                UnreadMessagesEvent,
+                ProfilesDataEvent,
+            ),
+        ):
+            text_fmt: str = UIPresenter.format_response(event, chat_mode=False)
+            return self._prefix_remote(text_fmt)
+
+        params_raw: Dict[str, object] = dataclasses.asdict(event)
+        params: Dict[str, JsonValue] = {
+            k: v
+            for k, v in params_raw.items()
+            if isinstance(v, (str, int, float, bool, type(None), list, dict))
+        }
+        text: str = self._translate_event(event.event_type, params)
+        return self._prefix_remote(text)
+
     def _request_ipc(self, cmd: IpcCommand, wait_for_response: bool = True) -> str:
         """
         Helper to safely route IPC commands to the active Tor daemon or a temporary headless instance.
@@ -134,37 +233,38 @@ class CliProxy:
         Returns:
             str: The translated response text or formatted DTO output.
         """
-        port: Optional[int] = self._pm.get_daemon_port()
+        try:
+            port: Optional[int] = self._pm.get_daemon_port()
 
-        if not port:
-            if self.is_remote:
-                return self._prefix_remote(
-                    f'Cannot reach remote Daemon on port '
-                    f'{Theme.YELLOW}{self._pm.get_static_port()}{Theme.RESET}. '
-                    'Did you forget the SSH tunnel?'
-                )
+            if not port:
+                if self.is_remote:
+                    return self._prefix_remote(
+                        f'Cannot reach remote Daemon on port '
+                        f'{Theme.YELLOW}{self._pm.get_static_port()}{Theme.RESET}. '
+                        'Did you forget the SSH tunnel?'
+                    )
 
-            password: Optional[str] = None
-            if not isinstance(
-                cmd,
-                (
-                    GetAddressCommand,
-                    GenerateAddressCommand,
-                    GetSettingCommand,
-                    SetSettingCommand,
-                    GetConfigCommand,
-                    SetConfigCommand,
-                    SyncConfigCommand,
-                ),
-            ):
-                password = getpass.getpass(
-                    f'{Theme.GREEN}Enter Master Password: {Theme.RESET}'
-                )
+                password: Optional[str] = None
+                if self._pm.supports_password_auth() and not isinstance(
+                    cmd,
+                    (
+                        GetSettingCommand,
+                        SetSettingCommand,
+                        GetConfigCommand,
+                        SetConfigCommand,
+                        SyncConfigCommand,
+                    ),
+                ):
+                    password = self._prompt_password()
+                    if password is None:
+                        return 'Master password cannot be empty.'
 
-            with HeadlessDaemon(self._pm, password) as hd:
-                return self._send_to_port(hd.port, cmd, wait_for_response)
+                with HeadlessDaemon(self._pm, password) as hd:
+                    return self._send_to_port(hd.port, cmd, wait_for_response)
 
-        return self._send_to_port(port, cmd, wait_for_response)
+            return self._send_to_port(port, cmd, wait_for_response)
+        except PromptAbortedError:
+            return self._prefix_remote('Aborted.')
 
     def _send_to_port(self, port: int, cmd: IpcCommand, wait_for_response: bool) -> str:
         """
@@ -181,59 +281,105 @@ class CliProxy:
         """
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(Settings.get_float(SettingKey.IPC_TIMEOUT))
+                s.settimeout(self._pm.config.get_float(SettingKey.IPC_TIMEOUT))
                 s.connect((Constants.LOCALHOST, port))
-                s.sendall((cmd.to_json() + '\n').encode('utf-8'))
+                self._send_socket_command(s, cmd)
 
                 if not wait_for_response:
                     return self._prefix_remote('Command executed successfully.')
 
-                buffer: str = ''
+                pending_resume_event: Optional[EventType] = None
+                auth_failures: int = 0
+                unlock_failures: int = 0
+
                 while True:
-                    chunk: bytes = s.recv(Constants.TCP_BUFFER_SIZE)
-                    if not chunk:
-                        break
-                    buffer += chunk.decode('utf-8')
-                    if '\n' in buffer:
+                    event: Optional[IpcEvent] = self._read_socket_event(s)
+                    if event is None:
                         break
 
-            if buffer:
-                resp_dict: Dict[str, JsonValue] = json.loads(buffer.split('\n')[0])
-                event: IpcEvent = IpcEvent.from_dict(resp_dict)
+                    if event.event_type is EventType.AUTH_REQUIRED:
+                        password = self._prompt_password('Enter Master Password: ')
+                        if password is None:
+                            return 'Master password cannot be empty.'
 
-                if isinstance(
-                    event,
-                    (
-                        ContactsDataEvent,
-                        HistoryDataEvent,
-                        MessagesDataEvent,
-                        InboxCountsEvent,
-                        UnreadMessagesEvent,
-                        ProfilesDataEvent,
-                    ),
-                ):
-                    text_fmt: str = UIPresenter.format_response(event, chat_mode=False)
-                    return self._prefix_remote(text_fmt)
+                        pending_resume_event = EventType.SESSION_AUTHENTICATED
+                        self._send_socket_command(
+                            s,
+                            AuthenticateSessionCommand(password=password),
+                        )
+                        continue
 
-                params_raw: Dict[str, object] = dataclasses.asdict(event)
-                params: Dict[str, JsonValue] = {
-                    k: v
-                    for k, v in params_raw.items()
-                    if isinstance(v, (str, int, float, bool, type(None), list, dict))
-                }
-                text: str = self._translate_event(event.event_type, params)
-                return self._prefix_remote(text)
+                    if event.event_type is EventType.DAEMON_LOCKED:
+                        password = self._prompt_password(
+                            'Enter Master Password to unlock daemon: '
+                        )
+                        if password is None:
+                            return 'Master password cannot be empty.'
+
+                        pending_resume_event = EventType.DAEMON_UNLOCKED
+                        self._send_socket_command(
+                            s,
+                            UnlockCommand(password=password),
+                        )
+                        continue
+
+                    if event.event_type is EventType.INVALID_PASSWORD:
+                        if pending_resume_event is EventType.SESSION_AUTHENTICATED:
+                            auth_failures += 1
+                            if auth_failures >= 3:
+                                return self._format_ipc_event(event)
+
+                            password = self._prompt_password('Enter Master Password: ')
+                            if password is None:
+                                return 'Master password cannot be empty.'
+
+                            self._send_socket_command(
+                                s,
+                                AuthenticateSessionCommand(password=password),
+                            )
+                            continue
+
+                        if pending_resume_event is EventType.DAEMON_UNLOCKED:
+                            unlock_failures += 1
+                            if unlock_failures >= 3:
+                                return self._format_ipc_event(event)
+
+                            password = self._prompt_password(
+                                'Enter Master Password to unlock daemon: '
+                            )
+                            if password is None:
+                                return 'Master password cannot be empty.'
+
+                            self._send_socket_command(
+                                s,
+                                UnlockCommand(password=password),
+                            )
+                            continue
+
+                    if (
+                        pending_resume_event is not None
+                        and event.event_type is pending_resume_event
+                    ):
+                        pending_resume_event = None
+                        self._send_socket_command(s, cmd)
+                        continue
+
+                    return self._format_ipc_event(event)
 
             return self._prefix_remote('Command executed successfully.')
+        except PromptAbortedError:
+            return self._prefix_remote('Aborted.')
+        except ValueError as exc:
+            return self._prefix_remote(str(exc))
         except Exception:
             return self._prefix_remote('Failed to communicate with the daemon.')
 
-    def unlock_daemon(self, password: str) -> str:
+    def unlock_daemon(self, password: Optional[str] = None) -> str:
         """
-        Sends the master password to unlock a remote daemon.
+        Prompts for the master password and unlocks a daemon session.
 
         Args:
-            password (str): The master password.
+            password (Optional[str]): Optional injected password for non-interactive callers.
 
         Returns:
             str: Status message.
@@ -241,7 +387,17 @@ class CliProxy:
         err: Optional[str] = self._ensure_profile_exists()
         if err:
             return err
-        return self._request_ipc(UnlockCommand(password=password))
+
+        actual_password: Optional[str] = password
+        if actual_password is None:
+            try:
+                actual_password = self._prompt_password()
+            except PromptAbortedError:
+                return self._prefix_remote('Aborted.')
+
+        if not actual_password:
+            return 'Master password cannot be empty.'
+        return self._request_ipc(UnlockCommand(password=actual_password))
 
     def nuke_daemon(self) -> str:
         """
@@ -272,7 +428,7 @@ class CliProxy:
         try:
             key_enum: SettingKey = SettingKey(key)
         except ValueError:
-            return 'Invalid setting key provided.'
+            return self._translate_event(EventType.INVALID_SETTING_KEY)
 
         parsed_value: Union[str, int, float, bool] = TypeCaster.infer_from_string(value)
 
@@ -283,8 +439,11 @@ class CliProxy:
                     f"Global setting '{Theme.YELLOW}{key}{Theme.RESET}' updated "
                     'successfully.'
                 )
-            except TypeError:
-                return 'Type parsing error.'
+            except (TypeError, ValueError) as exc:
+                return self._translate_event(
+                    EventType.SETTING_TYPE_ERROR,
+                    {'key': key, 'reason': str(exc)},
+                )
 
         return self._request_ipc(
             SetSettingCommand(setting_key=key, setting_value=parsed_value)
@@ -303,7 +462,7 @@ class CliProxy:
         try:
             key_enum: SettingKey = SettingKey(key)
         except ValueError:
-            return 'Invalid setting key provided.'
+            return self._translate_event(EventType.INVALID_SETTING_KEY)
 
         if key_enum.is_ui:
             val: str = Settings.get_str(key_enum)
@@ -338,7 +497,7 @@ class CliProxy:
             try:
                 key_enum = ProfileConfigKey(key)
             except ValueError:
-                return 'Invalid profile config key provided.'
+                return self._translate_event(EventType.INVALID_CONFIG_KEY)
 
         parsed_value: Union[str, int, float, bool] = TypeCaster.infer_from_string(value)
 
@@ -350,8 +509,11 @@ class CliProxy:
                     f"Profile configuration override for '{Theme.YELLOW}{key}{Theme.RESET}' "
                     'updated successfully.'
                 )
-            except TypeError:
-                return 'Type parsing error.'
+            except (TypeError, ValueError) as exc:
+                return self._translate_event(
+                    EventType.SETTING_TYPE_ERROR,
+                    {'key': key, 'reason': str(exc)},
+                )
 
         # Daemon-level settings go through IPC
         return self._request_ipc(
@@ -374,7 +536,7 @@ class CliProxy:
             try:
                 key_enum = ProfileConfigKey(key)
             except ValueError:
-                return 'Invalid profile config key provided.'
+                return self._translate_event(EventType.INVALID_CONFIG_KEY)
 
         if isinstance(key_enum, ProfileConfigKey) or key_enum.is_ui:
             val: str = self._pm.config.get_str(key_enum)
@@ -448,18 +610,21 @@ class CliProxy:
             return 'The daemon must be running to send drops.'
 
         return self._request_ipc(
-            SendDropCommand(target=target_alias, text=text),
+            SendDropCommand(
+                target=target_alias,
+                text=text,
+                msg_id=secrets.token_hex(Constants.UUID_MSG_BYTES),
+            ),
             wait_for_response=True,
         )
 
-    def handle_history(
-        self, action: str, target: Optional[str] = None, limit: Optional[int] = None
+    def get_history(
+        self, target: Optional[str] = None, limit: Optional[int] = None
     ) -> str:
         """
-        Views or clears the event history.
+        Views the event history.
 
         Args:
-            action (str): The action to perform ('show' or 'clear').
             target (Optional[str]): The specific alias to filter by, if any.
             limit (Optional[int]): Maximum number of events to fetch.
 
@@ -470,28 +635,35 @@ class CliProxy:
         if err:
             return err
 
-        cmd: IpcCommand = (
-            ClearHistoryCommand(target=target)
-            if action == 'clear'
-            else GetHistoryCommand(target=target, limit=limit)
-        )
-        return self._request_ipc(cmd)
+        return self._request_ipc(GetHistoryCommand(target=target, limit=limit))
 
-    def handle_messages(
-        self,
-        action: str,
-        target: Optional[str] = None,
-        limit: Optional[int] = None,
-        non_contacts_only: bool = False,
-    ) -> str:
+    def clear_history(self, target: Optional[str] = None) -> str:
         """
-        Views or clears past messages.
+        Clears event history.
 
         Args:
-            action (str): The action to perform ('show' or 'clear').
+            target (Optional[str]): The specific alias to clear, if any.
+
+        Returns:
+            str: The formatted status message.
+        """
+        err: Optional[str] = self._ensure_profile_exists()
+        if err:
+            return err
+
+        return self._request_ipc(ClearHistoryCommand(target=target))
+
+    def get_messages(
+        self,
+        target: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> str:
+        """
+        Views past messages.
+
+        Args:
             target (Optional[str]): The specific alias to target.
             limit (Optional[int]): Maximum number of messages to fetch.
-            non_contacts_only (bool): Restrict clear operation to unsaved peers.
 
         Returns:
             str: The formatted message output or a status message.
@@ -500,12 +672,30 @@ class CliProxy:
         if err:
             return err
 
-        cmd: IpcCommand = (
+        return self._request_ipc(GetMessagesCommand(target=target, limit=limit))
+
+    def clear_messages(
+        self,
+        target: Optional[str] = None,
+        non_contacts_only: bool = False,
+    ) -> str:
+        """
+        Clears stored messages.
+
+        Args:
+            target (Optional[str]): The specific alias to target.
+            non_contacts_only (bool): Restrict clear operation to unsaved peers.
+
+        Returns:
+            str: The formatted status message.
+        """
+        err: Optional[str] = self._ensure_profile_exists()
+        if err:
+            return err
+
+        return self._request_ipc(
             ClearMessagesCommand(target=target, non_contacts_only=non_contacts_only)
-            if action == 'clear'
-            else GetMessagesCommand(target=target, limit=limit)
         )
-        return self._request_ipc(cmd)
 
     def handle_inbox(self, target: Optional[str] = None) -> str:
         """

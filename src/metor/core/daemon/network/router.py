@@ -1,6 +1,7 @@
 """
 Module responsible for routing application-layer messages.
-Handles RAM buffering, JSON Payload Parsing (UUID mapping), Drop & Go fallback conversion.
+Handles crash-safe inbound message persistence, JSON payload parsing (UUID mapping),
+and Live-to-Drop fallback conversion.
 """
 
 import socket
@@ -12,12 +13,9 @@ from typing import List, Tuple, Dict, Callable, Optional, TYPE_CHECKING
 from metor.core.api import (
     EventType,
     IpcEvent,
-    InboxDataEvent,
     FallbackSuccessEvent,
     AckEvent,
-    RemoteMsgEvent,
     InboxNotificationEvent,
-    UnreadMessageEntry,
     JsonValue,
 )
 from metor.core.daemon.models import TorCommand
@@ -51,6 +49,7 @@ class MessageRouter:
         state: StateTracker,
         broadcast_callback: Callable[[IpcEvent], None],
         has_clients_callback: Callable[[], bool],
+        has_live_consumers_callback: Callable[[], bool],
         config: 'Config',
     ) -> None:
         """
@@ -63,6 +62,7 @@ class MessageRouter:
             state (StateTracker): The thread-safe connection state tracker.
             broadcast_callback (Callable[[IpcEvent], None]): Callback to emit IPC events.
             has_clients_callback (Callable[[], bool]): Callback to check for active UI clients.
+            has_live_consumers_callback (Callable[[], bool]): Callback to check for interactive live consumers.
             config (Config): The profile configuration instance.
 
         Returns:
@@ -74,11 +74,14 @@ class MessageRouter:
         self._state: StateTracker = state
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
         self._has_clients_callback: Callable[[], bool] = has_clients_callback
+        self._has_live_consumers_callback: Callable[[], bool] = (
+            has_live_consumers_callback
+        )
         self._config: 'Config' = config
 
     def flush_ram_buffer(self, onion: str) -> None:
         """
-        Flushes the headless RAM buffer to the UI and fires pending Tor ACKs.
+        Compatibility no-op kept for older call sites.
 
         Args:
             onion (str): The target onion to flush.
@@ -86,31 +89,7 @@ class MessageRouter:
         Returns:
             None
         """
-        buffered_msgs: List[Tuple[str, str, str]] = self._state.pop_ram_buffer(onion)
-        conn: Optional[socket.socket] = self._state.get_connection(onion)
-
-        if not buffered_msgs or not conn:
-            return
-
-        alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
-        messages_data: List[UnreadMessageEntry] = [
-            UnreadMessageEntry(timestamp=timestamp, payload=content)
-            for _, content, timestamp in buffered_msgs
-        ]
-
-        self._broadcast(
-            InboxDataEvent(
-                alias=str(alias),
-                messages=messages_data,
-                is_live_flush=True,
-            )
-        )
-
-        for msg_id, _, _ in buffered_msgs:
-            try:
-                conn.sendall(f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8'))
-            except Exception:
-                pass
+        return
 
     def force_fallback(
         self, target: str
@@ -129,12 +108,17 @@ class MessageRouter:
             return False, EventType.PEER_NOT_FOUND, {'target': target}
         alias, onion = resolved
 
-        unacked: Dict[str, str] = self._state.pop_unacked_messages(onion)
+        unacked: Dict[str, Tuple[str, str]] = self._state.pop_unacked_messages(onion)
 
         if not unacked:
-            return False, EventType.NO_PENDING_LIVE_MSGS, {'alias': alias}
+            return (
+                False,
+                EventType.NO_PENDING_LIVE_MSGS,
+                {'alias': alias, 'onion': onion},
+            )
 
-        for msg_id, content in unacked.items():
+        for msg_id, pending_msg in unacked.items():
+            content, timestamp = pending_msg
             self._mm.queue_message(
                 contact_onion=onion,
                 direction=MessageDirection.OUT,
@@ -142,6 +126,7 @@ class MessageRouter:
                 payload=content,
                 status=MessageStatus.PENDING,
                 msg_id=msg_id,
+                timestamp=timestamp,
             )
             self._hm.log_event(
                 HistoryEvent.DROP_QUEUED, onion, 'Manual fallback to drop'
@@ -150,6 +135,7 @@ class MessageRouter:
         self._broadcast(
             FallbackSuccessEvent(
                 alias=alias,
+                onion=onion,
                 count=len(unacked),
                 msg_ids=list(unacked.keys()),
             )
@@ -158,7 +144,12 @@ class MessageRouter:
         return (
             True,
             EventType.FALLBACK_SUCCESS,
-            {'alias': alias, 'count': len(unacked), 'msg_ids': list(unacked.keys())},
+            {
+                'alias': alias,
+                'onion': onion,
+                'count': len(unacked),
+                'msg_ids': list(unacked.keys()),
+            },
         )
 
     def send_message(self, target: str, msg: str, msg_id: str) -> None:
@@ -185,7 +176,7 @@ class MessageRouter:
                 self._mm.queue_message(
                     contact_onion=onion,
                     direction=MessageDirection.OUT,
-                    msg_type=MessageType.TEXT,
+                    msg_type=MessageType.DROP_TEXT,
                     payload=msg,
                     status=MessageStatus.PENDING,
                     msg_id=msg_id,
@@ -196,16 +187,16 @@ class MessageRouter:
                 self._broadcast(
                     FallbackSuccessEvent(
                         alias=alias,
+                        onion=onion,
                         count=1,
                         msg_ids=[msg_id],
                     )
                 )
             return
 
-        self._state.add_unacked_message(onion, msg_id, msg)
-
         try:
             timestamp: str = datetime.now(timezone.utc).isoformat()
+            self._state.add_unacked_message(onion, msg_id, msg, timestamp)
             envelope: Dict[str, JsonValue] = {
                 'id': msg_id,
                 'timestamp': timestamp,
@@ -224,7 +215,7 @@ class MessageRouter:
         self, conn: socket.socket, onion: str, payload_id: str, b64_payload: str
     ) -> bool:
         """
-        Processes an incoming JSON-enveloped live message, routing it to the UI or RAM buffer.
+        Processes an incoming JSON-enveloped live message, persisting it durably before ACK.
 
         Args:
             conn (socket.socket): The active socket connection.
@@ -233,7 +224,7 @@ class MessageRouter:
             b64_payload (str): The Base64 encoded JSON text payload.
 
         Returns:
-            bool: True if the connection should be terminated due to buffer overflow.
+            bool: True if the connection should be terminated due to live backlog pressure.
         """
         alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
 
@@ -250,26 +241,50 @@ class MessageRouter:
         except Exception:
             pass
 
-        if self._has_clients_callback():
+        if self._mm.has_inbound_message(onion, msg_id):
             try:
                 conn.sendall(f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8'))
-                self._broadcast(
-                    RemoteMsgEvent(alias=str(alias), text=content, timestamp=timestamp)
-                )
             except Exception:
                 pass
             return False
-        else:
-            buffer_size: int = self._state.push_ram_buffer(
-                onion,
-                msg_id,
-                content,
-                timestamp,
-            )
-            max_limit: int = self._config.get_int(SettingKey.MAX_UNSEEN_LIVE_MSGS)
-            if buffer_size >= max_limit:
+
+        has_clients: bool = self._has_clients_callback()
+        has_live_consumers: bool = self._has_live_consumers_callback()
+        unread_live_limit: int = self._config.get_int(SettingKey.MAX_UNSEEN_LIVE_MSGS)
+        if unread_live_limit == 0:
+            if not has_live_consumers:
                 return True
+        elif self._mm.get_unread_live_count(onion) >= unread_live_limit:
+            return True
+
+        queue_result = self._mm.queue_message(
+            contact_onion=onion,
+            direction=MessageDirection.IN,
+            msg_type=MessageType.LIVE_TEXT,
+            payload=content,
+            status=MessageStatus.UNREAD,
+            msg_id=msg_id,
+            timestamp=timestamp or None,
+        )
+
+        try:
+            conn.sendall(f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8'))
+        except Exception:
+            pass
+
+        if queue_result.was_duplicate:
             return False
+
+        if alias and has_clients:
+            self._broadcast(
+                InboxNotificationEvent(
+                    alias=alias,
+                    onion=onion,
+                    count=1,
+                )
+            )
+
+        return False
 
     def process_incoming_ack(self, onion: str, msg_id: str) -> None:
         """
@@ -282,8 +297,11 @@ class MessageRouter:
         Returns:
             None
         """
-        self._state.remove_unacked_message(onion, msg_id)
-        self._broadcast(AckEvent(msg_id=msg_id))
+        acked_msg: Optional[Tuple[str, str]] = self._state.remove_unacked_message(
+            onion, msg_id
+        )
+        timestamp: Optional[str] = acked_msg[1] if acked_msg else None
+        self._broadcast(AckEvent(msg_id=msg_id, timestamp=timestamp))
 
     def process_async_drop(
         self, conn: socket.socket, stream: TcpStreamReader, onion: str
@@ -307,9 +325,6 @@ class MessageRouter:
             return
 
         alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
-        unread_count: int = 0
-        is_focused: bool = self._state.is_focused_by_ui(onion)
-
         try:
             while True:
                 msg: Optional[str] = stream.read_line()
@@ -336,56 +351,35 @@ class MessageRouter:
                             content = base64.b64decode(parts[2]).decode('utf-8')
                             timestamp = None
 
-                        is_ephemeral: bool = self._config.get_bool(
-                            SettingKey.EPHEMERAL_MESSAGES
-                        )
-                        should_mark_read: bool = is_ephemeral or is_focused
-                        status: MessageStatus = (
-                            MessageStatus.READ
-                            if should_mark_read
-                            else MessageStatus.UNREAD
-                        )
-
-                        self._mm.queue_message(
+                        queue_result = self._mm.queue_message(
                             contact_onion=onion,
                             direction=MessageDirection.IN,
-                            msg_type=MessageType.TEXT,
+                            msg_type=MessageType.DROP_TEXT,
                             payload=content,
-                            status=status,
+                            status=MessageStatus.UNREAD,
                             msg_id=msg_id,
                             timestamp=timestamp,
                         )
-
-                        self._hm.log_event(HistoryEvent.DROP_RECEIVED, onion)
                         conn.sendall(
                             f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8')
                         )
 
-                        if is_focused and alias:
+                        if queue_result.was_duplicate:
+                            continue
+
+                        self._hm.log_event(HistoryEvent.DROP_RECEIVED, onion)
+
+                        if alias and self._has_clients_callback():
                             self._broadcast(
-                                InboxDataEvent(
+                                InboxNotificationEvent(
                                     alias=alias,
-                                    messages=[
-                                        UnreadMessageEntry(
-                                            timestamp=timestamp or '',
-                                            payload=content,
-                                        )
-                                    ],
-                                    is_live_flush=False,
+                                    onion=onion,
+                                    count=1,
                                 )
                             )
-                        else:
-                            unread_count += 1
         except Exception:
             pass
         finally:
-            if alias and unread_count > 0:
-                self._broadcast(
-                    InboxNotificationEvent(
-                        alias=alias,
-                        count=unread_count,
-                    )
-                )
             try:
                 conn.close()
             except Exception:

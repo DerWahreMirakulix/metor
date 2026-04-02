@@ -23,7 +23,7 @@ from typing import (
 )
 from pathlib import Path
 
-from metor.utils import Constants
+from metor.utils import Constants, secure_shred_file
 
 # Local Package Imports
 from metor.data.settings import SettingKey
@@ -34,6 +34,10 @@ if TYPE_CHECKING:
 
 # Types
 SqlParam = Union[str, int, float, bytes, None]
+
+
+class DatabaseCorruptedError(ValueError):
+    """Raised when the profile database cannot be opened safely."""
 
 
 @contextmanager
@@ -101,6 +105,99 @@ class SqlManager:
             None
         """
         cls._log_callback = callback
+
+    @classmethod
+    def close_connection(cls, db_path: str | Path) -> None:
+        """
+        Closes one pooled connection explicitly so offline migration workflows can replace the file.
+
+        Args:
+            db_path (str | Path): The database path whose connection should be closed.
+
+        Returns:
+            None
+        """
+        path_str: str = str(Path(db_path).absolute())
+        with cls._pool_lock:
+            conn: Optional[sqlite3.Connection] = cls._connections.pop(path_str, None)
+
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    @classmethod
+    def export_database_copy(
+        cls,
+        source_path: str | Path,
+        target_path: str | Path,
+        current_password: Optional[str] = None,
+        target_password: Optional[str] = None,
+    ) -> None:
+        """
+        Exports one profile database into a new database file with the target encryption mode.
+
+        Args:
+            source_path (str | Path): The current database path.
+            target_path (str | Path): The destination database path.
+            current_password (Optional[str]): The current SQLCipher password, if any.
+            target_password (Optional[str]): The target SQLCipher password, if any.
+
+        Raises:
+            DatabaseCorruptedError: If the source database cannot be opened or exported safely.
+
+        Returns:
+            None
+        """
+        source_db: Path = Path(source_path)
+        target_db: Path = Path(target_path)
+
+        if not source_db.exists():
+            return
+
+        cls.close_connection(source_db)
+        target_db.parent.mkdir(parents=True, exist_ok=True)
+        target_db.unlink(missing_ok=True)
+
+        conn = sqlite3.connect(str(source_db.absolute()), check_same_thread=False)
+        try:
+            if current_password:
+                safe_current_password: str = current_password.replace("'", "''")
+                conn.execute(f"PRAGMA key = '{safe_current_password}'")
+
+            cursor = conn.cursor()
+            cursor.execute('SELECT count(*) FROM sqlite_master;')
+            cursor.fetchone()
+
+            safe_target_path: str = str(target_db.absolute()).replace("'", "''")
+            safe_target_password: str = (
+                target_password.replace("'", "''") if target_password else ''
+            )
+
+            cursor.execute(
+                f"ATTACH DATABASE '{safe_target_path}' AS migrated KEY '{safe_target_password}'"
+            )
+            try:
+                cursor.execute("SELECT sqlcipher_export('migrated')")
+            finally:
+                try:
+                    cursor.execute('DETACH DATABASE migrated')
+                except Exception:
+                    pass
+
+            conn.commit()
+        except (sqlite3.DatabaseError, sqlite3.OperationalError, MemoryError) as e:
+            target_db.unlink(missing_ok=True)
+            error_text: str = str(e).strip() or e.__class__.__name__
+            raise DatabaseCorruptedError(
+                f'Profile database could not be migrated safely. Details: {error_text}'
+            ) from e
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def __init__(
         self, db_path: str | Path, config: 'Config', password: Optional[str] = None
@@ -175,6 +272,7 @@ class SqlManager:
             None
         """
         if not self._password:
+            self.cleanup_runtime_mirror()
             return
 
         if not self._config.get_bool(SettingKey.ENABLE_RUNTIME_DB_MIRROR):
@@ -228,7 +326,7 @@ class SqlManager:
             None
 
         Raises:
-            ValueError: If the database is corrupted or the password is wrong.
+            DatabaseCorruptedError: If the database cannot be opened safely.
 
         Returns:
             None
@@ -272,8 +370,9 @@ class SqlManager:
                 if path_str in SqlManager._connections:
                     SqlManager._connections[path_str].close()
                     del SqlManager._connections[path_str]
-            raise ValueError(
-                f'Invalid master password or corrupted database. Details: {str(e)}'
+            error_text: str = str(e).strip() or e.__class__.__name__
+            raise DatabaseCorruptedError(
+                f'Profile database could not be opened safely. Details: {error_text}'
             ) from e
 
     def execute(self, query: str, params: Tuple[SqlParam, ...] = ()) -> None:
@@ -307,12 +406,9 @@ class SqlManager:
         Returns:
             None
         """
-        if not self._config.get_bool(SettingKey.ENABLE_RUNTIME_DB_MIRROR):
-            return
-
         runtime_db_path: Path = self._get_runtime_db_path()
         if runtime_db_path.exists():
-            runtime_db_path.unlink()
+            secure_shred_file(runtime_db_path)
 
     def fetchall(
         self, query: str, params: Tuple[SqlParam, ...] = ()

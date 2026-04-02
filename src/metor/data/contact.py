@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Tuple, Optional, List, Dict, Union
 
 from metor.core.api import EventType
-from metor.utils import Constants, clean_onion
+from metor.utils import clean_onion
 
 # Local Package Imports
 from metor.data.profile import ProfileManager
@@ -29,7 +29,7 @@ class ContactManager:
             None
         """
         self._pm: ProfileManager = pm
-        self._db_path: Path = Path(self._pm.get_config_dir()) / Constants.DB_FILE
+        self._db_path: Path = self._pm.paths.get_db_file()
         self._sql: SqlManager = SqlManager(self._db_path, self._pm.config, password)
 
     def get_all_contacts(self) -> List[str]:
@@ -80,7 +80,7 @@ class ContactManager:
         onion = clean_onion(onion)
 
         if self._sql.fetchall('SELECT onion FROM contacts WHERE alias = ?', (alias,)):
-            return False, EventType.ALIAS_IN_USE, {'alias': alias}
+            return False, EventType.ALIAS_IN_USE, {'alias': alias, 'onion': onion}
 
         res: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
             'SELECT alias FROM contacts WHERE onion = ? AND is_saved = 1', (onion,)
@@ -89,7 +89,7 @@ class ContactManager:
             return (
                 False,
                 EventType.ONION_IN_USE,
-                {'alias': str(res[0][0])},
+                {'alias': str(res[0][0]), 'onion': onion},
             )
 
         if self._sql.fetchall('SELECT alias FROM contacts WHERE onion = ?', (onion,)):
@@ -107,7 +107,7 @@ class ContactManager:
         return (
             True,
             EventType.CONTACT_ADDED,
-            {'alias': alias, 'profile': self._pm.profile_name},
+            {'alias': alias, 'onion': onion, 'profile': self._pm.profile_name},
         )
 
     def promote_discovered_peer(
@@ -129,13 +129,21 @@ class ContactManager:
 
         if not res:
             return False, EventType.PEER_NOT_FOUND, {'target': alias}
+
+        onion: Optional[str] = self.get_onion_by_alias(alias)
         if res[0][0] == 1:
-            return False, EventType.CONTACT_ALREADY_SAVED, {'alias': alias}
+            params: Dict[str, str] = {'alias': alias}
+            if onion:
+                params['onion'] = onion
+            return False, EventType.CONTACT_ALREADY_SAVED, params
 
         self._sql.execute('UPDATE contacts SET is_saved = 1 WHERE alias = ?', (alias,))
 
         # We intentionally don't resolve the alias since it is dynamically inserted in the UI
-        return True, EventType.PEER_PROMOTED, {'alias': alias}
+        params = {'alias': alias}
+        if onion:
+            params['onion'] = onion
+        return True, EventType.PEER_PROMOTED, params
 
     def rename_contact(
         self, old_alias: str, new_alias: str
@@ -156,10 +164,15 @@ class ContactManager:
         if old_alias == new_alias:
             return False, EventType.ALIAS_SAME, {}
 
+        onion: Optional[str] = self.get_onion_by_alias(old_alias)
+
         if self._sql.fetchall(
             'SELECT onion FROM contacts WHERE alias = ?', (new_alias,)
         ):
-            return False, EventType.ALIAS_IN_USE, {'alias': new_alias}
+            params: Dict[str, str] = {'alias': new_alias}
+            if onion:
+                params['onion'] = onion
+            return False, EventType.ALIAS_IN_USE, params
 
         if not self._sql.fetchall(
             'SELECT onion FROM contacts WHERE alias = ?', (old_alias,)
@@ -169,15 +182,27 @@ class ContactManager:
         self._sql.execute(
             'UPDATE contacts SET alias = ? WHERE alias = ?', (new_alias, old_alias)
         )
+        result_params: Dict[str, str] = {
+            'old_alias': old_alias,
+            'new_alias': new_alias,
+        }
+        if onion:
+            result_params['onion'] = onion
         return (
             True,
             EventType.ALIAS_RENAMED,
-            {'old_alias': old_alias, 'new_alias': new_alias},
+            result_params,
         )
 
     def remove_contact(
         self, alias: str, active_onions: Optional[List[str]] = None
-    ) -> Tuple[bool, EventType, Dict[str, str], List[Tuple[str, str, bool]], List[str]]:
+    ) -> Tuple[
+        bool,
+        EventType,
+        Dict[str, str],
+        List[Tuple[str, str, str, bool]],
+        List[Tuple[str, str]],
+    ]:
         """
         Removes a saved contact or anonymizes a renamed discovered peer.
         Refuses to physically delete peers tied to active states, demotes instead.
@@ -187,7 +212,7 @@ class ContactManager:
             active_onions (Optional[List[str]]): Currently connected onions functioning as a shield.
 
         Returns:
-            Tuple[bool, EventType, Dict[str, str], List[Tuple[str, str, bool]], List[str]]: A success flag, strict event type, payload, UI renames, and UI deletions.
+            Tuple[bool, EventType, Dict[str, str], List[Tuple[str, str, str, bool]], List[Tuple[str, str]]]: A success flag, strict event type, payload, UI renames, and UI deletions.
         """
         active_onions = active_onions or []
         alias = alias.strip().lower()
@@ -221,7 +246,7 @@ class ContactManager:
                     return (
                         True,
                         EventType.CONTACT_DOWNGRADED,
-                        {'alias': alias},
+                        {'alias': alias, 'onion': onion},
                         [],
                         [],
                     )
@@ -229,7 +254,7 @@ class ContactManager:
                     return (
                         False,
                         EventType.PEER_CANT_DELETE_ACTIVE,
-                        {'alias': alias},
+                        {'alias': alias, 'onion': onion},
                         [],
                         [],
                     )
@@ -243,16 +268,16 @@ class ContactManager:
                 return (
                     True,
                     EventType.CONTACT_REMOVED_DOWNGRADED,
-                    {'alias': alias, 'new_alias': new_alias},
-                    [(alias, new_alias, was_saved)],
+                    {'alias': alias, 'new_alias': new_alias, 'onion': onion},
+                    [(alias, new_alias, onion, was_saved)],
                     [],
                 )
             else:
                 return (
                     True,
                     EventType.PEER_ANONYMIZED,
-                    {'alias': alias, 'new_alias': new_alias},
-                    [(alias, new_alias, was_saved)],
+                    {'alias': alias, 'new_alias': new_alias, 'onion': onion},
+                    [(alias, new_alias, onion, was_saved)],
                     [],
                 )
         else:
@@ -262,16 +287,32 @@ class ContactManager:
                 return (
                     True,
                     EventType.CONTACT_REMOVED,
-                    {'alias': alias, 'profile': self._pm.profile_name},
+                    {
+                        'alias': alias,
+                        'onion': onion,
+                        'profile': self._pm.profile_name,
+                    },
                     [],
-                    [alias],
+                    [(alias, onion)],
                 )
             else:
-                return True, EventType.PEER_REMOVED, {'alias': alias}, [], [alias]
+                return (
+                    True,
+                    EventType.PEER_REMOVED,
+                    {'alias': alias, 'onion': onion},
+                    [],
+                    [(alias, onion)],
+                )
 
     def clear_contacts(
         self, active_onions: Optional[List[str]] = None
-    ) -> Tuple[bool, EventType, Dict[str, str], List[Tuple[str, str, bool]], List[str]]:
+    ) -> Tuple[
+        bool,
+        EventType,
+        Dict[str, str],
+        List[Tuple[str, str, str, bool]],
+        List[Tuple[str, str]],
+    ]:
         """
         Wipes the address book, demoting saved contacts to discovered peers if they
         are still tied to history, messages, or active network connections.
@@ -280,15 +321,15 @@ class ContactManager:
             active_onions (Optional[List[str]]): Currently connected onions functioning as a shield.
 
         Returns:
-            Tuple[bool, EventType, Dict[str, str], List[Tuple[str, str, bool]], List[str]]: A success flag, strict event type, payload, UI renames, and UI deletions.
+            Tuple[bool, EventType, Dict[str, str], List[Tuple[str, str, str, bool]], List[Tuple[str, str]]]: A success flag, strict event type, payload, UI renames, and UI deletions.
         """
         active_onions = active_onions or []
         try:
             saved: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
                 'SELECT alias, onion FROM contacts WHERE is_saved = 1'
             )
-            renames: List[Tuple[str, str, bool]] = []
-            removed: List[str] = []
+            renames: List[Tuple[str, str, str, bool]] = []
+            removed: List[Tuple[str, str]] = []
 
             for raw_alias, raw_onion in saved:
                 alias = str(raw_alias)
@@ -308,10 +349,10 @@ class ContactManager:
                         (new_alias, onion),
                     )
                     # All elements fetched here are was_saved=True
-                    renames.append((alias, new_alias, True))
+                    renames.append((alias, new_alias, onion, True))
                 else:
                     self._sql.execute('DELETE FROM contacts WHERE onion = ?', (onion,))
-                    removed.append(alias)
+                    removed.append((alias, onion))
 
             return (
                 True,
@@ -323,16 +364,18 @@ class ContactManager:
         except Exception:
             return False, EventType.CONTACTS_CLEAR_FAILED, {}, [], []
 
-    def cleanup_orphans(self, active_onions: Optional[List[str]] = None) -> List[str]:
+    def cleanup_orphans(
+        self, active_onions: Optional[List[str]] = None
+    ) -> List[Tuple[str, str]]:
         """
         Executes a zero-trace wipe of all temporary peers that no longer have a
-        live connection, chat history, or pending messages. Returns deleted aliases.
+        live connection, chat history, or pending messages. Returns deleted peers.
 
         Args:
             active_onions (Optional[List[str]]): Active Tor connection onions to preserve.
 
         Returns:
-            List[str]: List of cleanly removed aliases for UI sync.
+            List[Tuple[str, str]]: List of removed alias/onion pairs for UI sync.
         """
         active_onions = active_onions or []
 
@@ -344,16 +387,18 @@ class ContactManager:
         params = tuple(active_onions) if active_onions else ()
 
         query_select: str = f"""
-            SELECT alias FROM contacts 
+            SELECT alias, onion FROM contacts 
             WHERE is_saved = 0 
             AND onion NOT IN (SELECT onion FROM history WHERE onion IS NOT NULL)
             AND onion NOT IN (SELECT contact_onion FROM messages)
             {condition}
         """
         rows: List[Tuple[SqlParam, ...]] = self._sql.fetchall(query_select, params)
-        deleted_aliases: List[str] = [str(r[0]) for r in rows]
+        deleted_peers: List[Tuple[str, str]] = [
+            (str(row[0]), str(row[1])) for row in rows
+        ]
 
-        if deleted_aliases:
+        if deleted_peers:
             query_delete: str = f"""
                 DELETE FROM contacts 
                 WHERE is_saved = 0 
@@ -363,7 +408,7 @@ class ContactManager:
             """
             self._sql.execute(query_delete, params)
 
-        return deleted_aliases
+        return deleted_peers
 
     def resolve_target(self, target: Optional[str]) -> Optional[Tuple[str, str]]:
         """

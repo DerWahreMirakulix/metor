@@ -5,6 +5,7 @@ Enforces strict typing using Enums for configuration keys and strongly-typed acc
 Prevents silent overwrites of corrupted JSON configurations.
 """
 
+from dataclasses import dataclass
 import json
 from enum import Enum
 from pathlib import Path
@@ -27,6 +28,7 @@ class SettingKey(str, Enum):
     HISTORY_LIMIT = 'ui.history_limit'
     MESSAGES_LIMIT = 'ui.messages_limit'
     CHAT_BUFFER_PADDING = 'ui.chat_buffer_padding'
+    INBOX_NOTIFICATION_DELAY = 'ui.inbox_notification_delay'
     IPC_TIMEOUT = 'ui.ipc_timeout'
 
     # 2. Core Daemon (Server - Network, Persistence & Security)
@@ -82,40 +84,385 @@ class SettingKey(str, Enum):
         return self.value.startswith('daemon.')
 
 
+class SettingValidationError(ValueError):
+    """Raised when a setting value violates semantic constraints."""
+
+
+@dataclass(frozen=True)
+class SettingSpec:
+    """Describes one supported setting and its documentation metadata."""
+
+    key: SettingKey
+    default: SettingValue
+    category: str
+    description: str
+    constraints: str
+    security_note: Optional[str] = None
+    allow_profile_override: bool = True
+    allow_empty_string: bool = True
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
+
+
 class Settings:
     """Dynamic application settings manager reading from and writing to a nested global JSON file."""
 
-    _DEFAULTS: Dict[str, SettingValue] = {
-        SettingKey.DEFAULT_PROFILE.value: 'default',
-        SettingKey.PROMPT_SIGN.value: '$',
-        SettingKey.CHAT_LIMIT.value: 50,
-        SettingKey.HISTORY_LIMIT.value: 50,
-        SettingKey.MESSAGES_LIMIT.value: 50,
-        SettingKey.CHAT_BUFFER_PADDING.value: 20,
-        SettingKey.IPC_TIMEOUT.value: 15.0,
-        SettingKey.MAX_TOR_RETRIES.value: 3,
-        SettingKey.MAX_CONNECT_RETRIES.value: 3,
-        SettingKey.TOR_TIMEOUT.value: 10.0,
-        SettingKey.STREAM_IDLE_TIMEOUT.value: 60.0,
-        SettingKey.LATE_ACCEPTANCE_TIMEOUT.value: 60.0,
-        SettingKey.DAEMON_IPC_TIMEOUT.value: 15.0,
-        SettingKey.ENABLE_TOR_LOGGING.value: False,
-        SettingKey.ENABLE_SQL_LOGGING.value: False,
-        SettingKey.ENABLE_RUNTIME_DB_MIRROR.value: False,
-        SettingKey.AUTO_ACCEPT_CONTACTS.value: True,
-        SettingKey.REQUIRE_LOCAL_AUTH.value: False,
-        SettingKey.ALLOW_DROPS.value: True,
-        SettingKey.EPHEMERAL_MESSAGES.value: False,
-        SettingKey.RECORD_LIVE_EVENTS.value: True,
-        SettingKey.RECORD_DROP_EVENTS.value: True,
-        SettingKey.FALLBACK_TO_DROP.value: True,
-        SettingKey.MAX_UNSEEN_LIVE_MSGS.value: 20,
-        SettingKey.MAX_CONCURRENT_CONNECTIONS.value: 50,
-        SettingKey.DROP_TUNNEL_IDLE_TIMEOUT.value: 30.0,
-        SettingKey.ALLOW_DROP_STANDBY_ON_LIVE.value: False,
-        SettingKey.LIVE_RECONNECT_DELAY.value: 10,
-        SettingKey.LIVE_RECONNECT_GRACE_TIMEOUT.value: 10,
+    SETTING_SPECS: Dict[SettingKey, SettingSpec] = {
+        SettingKey.DEFAULT_PROFILE: SettingSpec(
+            key=SettingKey.DEFAULT_PROFILE,
+            default='default',
+            category='User Interface',
+            description='Selects the profile used when the CLI is started without `-p`.',
+            constraints='Non-empty profile name using letters, numbers, `-`, or `_`.',
+            allow_profile_override=False,
+            allow_empty_string=False,
+        ),
+        SettingKey.PROMPT_SIGN: SettingSpec(
+            key=SettingKey.PROMPT_SIGN,
+            default='$',
+            category='User Interface',
+            description='Sets the prompt prefix shown in the interactive chat UI.',
+            constraints='Non-empty string.',
+            allow_empty_string=False,
+        ),
+        SettingKey.CHAT_LIMIT: SettingSpec(
+            key=SettingKey.CHAT_LIMIT,
+            default=50,
+            category='User Interface',
+            description='Limits the number of rendered chat lines kept in volatile UI memory.',
+            constraints='Integer >= 1.',
+            min_value=1,
+        ),
+        SettingKey.HISTORY_LIMIT: SettingSpec(
+            key=SettingKey.HISTORY_LIMIT,
+            default=50,
+            category='User Interface',
+            description='Default number of history events shown per request.',
+            constraints='Integer >= 1.',
+            min_value=1,
+        ),
+        SettingKey.MESSAGES_LIMIT: SettingSpec(
+            key=SettingKey.MESSAGES_LIMIT,
+            default=50,
+            category='User Interface',
+            description='Default number of stored messages shown per request.',
+            constraints='Integer >= 1.',
+            min_value=1,
+        ),
+        SettingKey.CHAT_BUFFER_PADDING: SettingSpec(
+            key=SettingKey.CHAT_BUFFER_PADDING,
+            default=20,
+            category='User Interface',
+            description='Keeps extra renderer lines around the viewport to reduce redraw churn.',
+            constraints='Integer >= 0.',
+            min_value=0,
+        ),
+        SettingKey.INBOX_NOTIFICATION_DELAY: SettingSpec(
+            key=SettingKey.INBOX_NOTIFICATION_DELAY,
+            default=0.0,
+            category='User Interface',
+            description='Delays and aggregates unread-message notifications while the peer is unfocused. `0` disables buffering.',
+            constraints='Float >= 0 seconds.',
+            min_value=0.0,
+        ),
+        SettingKey.IPC_TIMEOUT: SettingSpec(
+            key=SettingKey.IPC_TIMEOUT,
+            default=15.0,
+            category='User Interface',
+            description='Client-side timeout for CLI and chat IPC requests.',
+            constraints='Float >= 0.1 seconds.',
+            min_value=0.1,
+        ),
+        SettingKey.MAX_TOR_RETRIES: SettingSpec(
+            key=SettingKey.MAX_TOR_RETRIES,
+            default=3,
+            category='Core Daemon',
+            description='Controls how many times Tor launch is attempted before startup fails.',
+            constraints='Integer >= 1.',
+            min_value=1,
+        ),
+        SettingKey.MAX_CONNECT_RETRIES: SettingSpec(
+            key=SettingKey.MAX_CONNECT_RETRIES,
+            default=3,
+            category='Core Daemon',
+            description='Controls how many additional live connect retries run after the initial attempt.',
+            constraints='Integer >= 0.',
+            min_value=0,
+        ),
+        SettingKey.TOR_TIMEOUT: SettingSpec(
+            key=SettingKey.TOR_TIMEOUT,
+            default=10.0,
+            category='Core Daemon',
+            description='Timeout for outbound Tor socket operations and readiness checks.',
+            constraints='Float >= 0.1 seconds.',
+            min_value=0.1,
+        ),
+        SettingKey.STREAM_IDLE_TIMEOUT: SettingSpec(
+            key=SettingKey.STREAM_IDLE_TIMEOUT,
+            default=60.0,
+            category='Core Daemon',
+            description='Idle timeout for active live and drop sockets.',
+            constraints='Float >= 0.1 seconds.',
+            min_value=0.1,
+        ),
+        SettingKey.LATE_ACCEPTANCE_TIMEOUT: SettingSpec(
+            key=SettingKey.LATE_ACCEPTANCE_TIMEOUT,
+            default=60.0,
+            category='Core Daemon',
+            description='Window during which pending live sessions may still be accepted.',
+            constraints='Float >= 0 seconds.',
+            min_value=0.0,
+        ),
+        SettingKey.DAEMON_IPC_TIMEOUT: SettingSpec(
+            key=SettingKey.DAEMON_IPC_TIMEOUT,
+            default=15.0,
+            category='Core Daemon',
+            description='Server-side timeout for daemon IPC sockets.',
+            constraints='Float >= 0.1 seconds.',
+            min_value=0.1,
+        ),
+        SettingKey.ENABLE_TOR_LOGGING: SettingSpec(
+            key=SettingKey.ENABLE_TOR_LOGGING,
+            default=False,
+            category='Core Daemon',
+            description='Emits Tor process logs to the terminal.',
+            constraints='Boolean.',
+            security_note='Can reveal operational timing and local environment details in terminal logs.',
+        ),
+        SettingKey.ENABLE_SQL_LOGGING: SettingSpec(
+            key=SettingKey.ENABLE_SQL_LOGGING,
+            default=False,
+            category='Core Daemon',
+            description='Emits SQLCipher and SQLite diagnostics to the terminal.',
+            constraints='Boolean.',
+            security_note='Can expose local schema, file, and corruption details in logs.',
+        ),
+        SettingKey.ENABLE_RUNTIME_DB_MIRROR: SettingSpec(
+            key=SettingKey.ENABLE_RUNTIME_DB_MIRROR,
+            default=False,
+            category='Core Daemon',
+            description='Exports a plaintext runtime copy of the encrypted database for local inspection tools.',
+            constraints='Boolean.',
+            security_note='Creates a plaintext database on disk while enabled. Keep disabled unless you explicitly need local inspection tooling.',
+        ),
+        SettingKey.AUTO_ACCEPT_CONTACTS: SettingSpec(
+            key=SettingKey.AUTO_ACCEPT_CONTACTS,
+            default=True,
+            category='Core Daemon',
+            description='Automatically accepts incoming live sessions from saved contacts.',
+            constraints='Boolean.',
+            security_note='Improves convenience for known contacts, but reduces explicit confirmation on inbound reconnects.',
+        ),
+        SettingKey.REQUIRE_LOCAL_AUTH: SettingSpec(
+            key=SettingKey.REQUIRE_LOCAL_AUTH,
+            default=False,
+            category='Core Daemon',
+            description='Requires every UI session to authenticate even when the daemon is already running.',
+            constraints='Boolean.',
+            security_note='Recommended for remote, shared, or physically exposed hosts.',
+        ),
+        SettingKey.ALLOW_DROPS: SettingSpec(
+            key=SettingKey.ALLOW_DROPS,
+            default=True,
+            category='Core Daemon',
+            description='Enables reception and processing of offline drop messages.',
+            constraints='Boolean.',
+        ),
+        SettingKey.EPHEMERAL_MESSAGES: SettingSpec(
+            key=SettingKey.EPHEMERAL_MESSAGES,
+            default=False,
+            category='Core Daemon',
+            description='Shreds consumed drop-message payloads after they are read instead of retaining them in message history.',
+            constraints='Boolean.',
+            security_note='Improves local deniability by removing consumed drop content while preserving minimal delivery metadata for deduplication.',
+        ),
+        SettingKey.RECORD_LIVE_EVENTS: SettingSpec(
+            key=SettingKey.RECORD_LIVE_EVENTS,
+            default=True,
+            category='Core Daemon',
+            description='Persists live connection events in the history log.',
+            constraints='Boolean.',
+            security_note='Disabling reduces local metadata retention for live sessions.',
+        ),
+        SettingKey.RECORD_DROP_EVENTS: SettingSpec(
+            key=SettingKey.RECORD_DROP_EVENTS,
+            default=True,
+            category='Core Daemon',
+            description='Persists offline drop transport events in the history log.',
+            constraints='Boolean.',
+            security_note='Disabling reduces local metadata retention for drop delivery attempts.',
+        ),
+        SettingKey.FALLBACK_TO_DROP: SettingSpec(
+            key=SettingKey.FALLBACK_TO_DROP,
+            default=True,
+            category='Core Daemon',
+            description='Falls back unacknowledged live messages into the offline drop queue when possible.',
+            constraints='Boolean.',
+        ),
+        SettingKey.MAX_UNSEEN_LIVE_MSGS: SettingSpec(
+            key=SettingKey.MAX_UNSEEN_LIVE_MSGS,
+            default=20,
+            category='Core Daemon',
+            description='Caps unread crash-safe live backlog per peer. `0` disables headless live backlog, while `-1` removes the limit entirely.',
+            constraints='Integer >= -1.',
+            min_value=-1,
+        ),
+        SettingKey.MAX_CONCURRENT_CONNECTIONS: SettingSpec(
+            key=SettingKey.MAX_CONCURRENT_CONNECTIONS,
+            default=50,
+            category='Advanced Network Resilience',
+            description='Limits simultaneous authenticated and unauthenticated live sockets handled by the daemon.',
+            constraints='Integer >= 1.',
+            min_value=1,
+        ),
+        SettingKey.DROP_TUNNEL_IDLE_TIMEOUT: SettingSpec(
+            key=SettingKey.DROP_TUNNEL_IDLE_TIMEOUT,
+            default=30.0,
+            category='Advanced Network Resilience',
+            description='Controls cached drop tunnel lifetime. `0` disables caching completely.',
+            constraints='Float >= 0 seconds.',
+            min_value=0.0,
+        ),
+        SettingKey.ALLOW_DROP_STANDBY_ON_LIVE: SettingSpec(
+            key=SettingKey.ALLOW_DROP_STANDBY_ON_LIVE,
+            default=False,
+            category='Advanced Network Resilience',
+            description='Keeps a cached drop tunnel warm while live remains the primary transport.',
+            constraints='Boolean.',
+        ),
+        SettingKey.LIVE_RECONNECT_DELAY: SettingSpec(
+            key=SettingKey.LIVE_RECONNECT_DELAY,
+            default=10,
+            category='Advanced Network Resilience',
+            description='Base delay before automatic live reconnect attempts. `0` disables automatic reconnect.',
+            constraints='Integer >= 0 seconds.',
+            min_value=0,
+        ),
+        SettingKey.LIVE_RECONNECT_GRACE_TIMEOUT: SettingSpec(
+            key=SettingKey.LIVE_RECONNECT_GRACE_TIMEOUT,
+            default=10,
+            category='Advanced Network Resilience',
+            description='Reconnect grace window for silently accepting a recent peer reconnect. `0` disables reconnect grace.',
+            constraints='Integer >= 0 seconds.',
+            min_value=0,
+        ),
     }
+
+    _DEFAULTS: Dict[str, SettingValue] = {
+        spec.key.value: spec.default for spec in SETTING_SPECS.values()
+    }
+
+    @classmethod
+    def get_specs(cls) -> tuple[SettingSpec, ...]:
+        """
+        Returns the ordered setting specifications for documentation and validation.
+
+        Args:
+            None
+
+        Returns:
+            tuple[SettingSpec, ...]: All supported setting specifications.
+        """
+        return tuple(cls.SETTING_SPECS.values())
+
+    @classmethod
+    def get_spec(cls, key: SettingKey) -> SettingSpec:
+        """
+        Returns the metadata for one setting key.
+
+        Args:
+            key (SettingKey): The setting key.
+
+        Returns:
+            SettingSpec: The matching setting specification.
+        """
+        return cls.SETTING_SPECS[key]
+
+    @classmethod
+    def validate_value(
+        cls,
+        key: SettingKey,
+        value: SettingValue,
+        *,
+        for_profile_override: bool = False,
+    ) -> SettingValue:
+        """
+        Validates and normalizes one setting value against the declared schema.
+
+        Args:
+            key (SettingKey): The setting key to validate.
+            value (SettingValue): The candidate value.
+            for_profile_override (bool): Whether the value is written as a profile override.
+
+        Raises:
+            TypeError: If the value type is invalid.
+            SettingValidationError: If the value violates semantic constraints.
+
+        Returns:
+            SettingValue: The normalized value.
+        """
+        spec: SettingSpec = cls.get_spec(key)
+
+        if for_profile_override and not spec.allow_profile_override:
+            raise SettingValidationError(
+                f"Setting '{key.value}' can only be changed globally."
+            )
+
+        expected_type: type = type(spec.default)
+        normalized: SettingValue
+
+        if expected_type is bool:
+            if type(value) is not bool:
+                raise TypeError(
+                    f"Invalid type for '{key.value}'. Expected bool, got {type(value).__name__}."
+                )
+            normalized = value
+        elif expected_type is int:
+            if type(value) is not int:
+                raise TypeError(
+                    f"Invalid type for '{key.value}'. Expected int, got {type(value).__name__}."
+                )
+            normalized = value
+        elif expected_type is float:
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise TypeError(
+                    f"Invalid type for '{key.value}'. Expected float, got {type(value).__name__}."
+                )
+            normalized = float(value)
+        elif expected_type is str:
+            if type(value) is not str:
+                raise TypeError(
+                    f"Invalid type for '{key.value}'. Expected str, got {type(value).__name__}."
+                )
+
+            normalized = value.strip() if key is SettingKey.DEFAULT_PROFILE else value
+            if not spec.allow_empty_string and not normalized:
+                raise SettingValidationError(
+                    f"Setting '{key.value}' must not be empty."
+                )
+
+            if key is SettingKey.DEFAULT_PROFILE:
+                safe_name: str = ''.join(
+                    c for c in normalized if c.isalnum() or c in ('-', '_')
+                )
+                if safe_name != normalized:
+                    raise SettingValidationError(
+                        f"Setting '{key.value}' must contain only letters, numbers, '-' or '_'."
+                    )
+        else:
+            normalized = value
+
+        if isinstance(normalized, (int, float)) and not isinstance(normalized, bool):
+            if spec.min_value is not None and float(normalized) < spec.min_value:
+                raise SettingValidationError(
+                    f"Setting '{key.value}' must be >= {spec.min_value:g}."
+                )
+            if spec.max_value is not None and float(normalized) > spec.max_value:
+                raise SettingValidationError(
+                    f"Setting '{key.value}' must be <= {spec.max_value:g}."
+                )
+
+        return normalized
 
     @staticmethod
     def get_global_settings_path() -> Path:
@@ -207,7 +554,11 @@ class Settings:
         category, sub_key = key.value.split('.', 1)
 
         if category in data and sub_key in data[category]:
-            return data[category][sub_key]
+            candidate: SettingValue = data[category][sub_key]
+            try:
+                return cls.validate_value(key, candidate)
+            except (TypeError, SettingValidationError):
+                return cls._DEFAULTS.get(key.value)
 
         return cls._DEFAULTS.get(key.value)
 
@@ -299,19 +650,7 @@ class Settings:
         Returns:
             None
         """
-        default_val: Optional[SettingValue] = cls._DEFAULTS.get(key.value)
-        if default_val is not None:
-            expected_type: type = type(default_val)
-            if (
-                expected_type is float
-                and isinstance(value, (int, float))
-                and not isinstance(value, bool)
-            ):
-                value = float(value)
-            elif type(value) is not expected_type:
-                raise TypeError(
-                    f"Invalid type for '{key.value}'. Expected {expected_type.__name__}, got {type(value).__name__}."
-                )
+        value = cls.validate_value(key, value)
 
         path: Path = cls.get_global_settings_path()
 

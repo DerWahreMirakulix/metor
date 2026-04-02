@@ -17,6 +17,17 @@ class InitCommand(IpcCommand):
     command_type: CommandType = field(default=CommandType.INIT, init=False)
 
 
+@register_command(CommandType.REGISTER_LIVE_CONSUMER)
+@dataclass
+class RegisterLiveConsumerCommand(IpcCommand):
+    """Marks the current IPC session as an interactive live consumer."""
+
+    command_type: CommandType = field(
+        default=CommandType.REGISTER_LIVE_CONSUMER,
+        init=False,
+    )
+
+
 @register_command(CommandType.GET_CONNECTIONS)
 @dataclass
 class GetConnectionsCommand(IpcCommand):
@@ -150,6 +161,7 @@ class SendDropCommand(IpcCommand):
 
     target: str
     text: str
+    msg_id: str
     command_type: CommandType = field(default=CommandType.SEND_DROP, init=False)
 
 
@@ -314,10 +326,22 @@ class SelfDestructCommand(IpcCommand):
 @register_command(CommandType.UNLOCK)
 @dataclass
 class UnlockCommand(IpcCommand):
-    """Unlocks the daemon or authenticates the current session."""
+    """Unlocks a daemon that was started in locked mode."""
 
     password: str
     command_type: CommandType = field(default=CommandType.UNLOCK, init=False)
+
+
+@register_command(CommandType.AUTHENTICATE_SESSION)
+@dataclass
+class AuthenticateSessionCommand(IpcCommand):
+    """Authenticates the current IPC session when local auth is required."""
+
+    password: str
+    command_type: CommandType = field(
+        default=CommandType.AUTHENTICATE_SESSION,
+        init=False,
+    )
 
 
 @register_command(CommandType.RETUNNEL)

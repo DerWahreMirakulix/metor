@@ -34,7 +34,7 @@ from metor.data import (
 from metor.utils import Constants
 
 # Local Package Imports
-from metor.core.daemon.network.state import StateTracker
+from metor.core.daemon.network.state import PendingConnectionReason, StateTracker
 from metor.core.daemon.network.stream import TcpStreamReader
 from metor.core.daemon.network.handshake import HandshakeProtocol
 from metor.core.daemon.network.router import MessageRouter
@@ -57,6 +57,7 @@ class InboundListener:
         router: MessageRouter,
         receiver: 'StreamReceiver',
         broadcast_callback: Callable[[IpcEvent], None],
+        has_live_consumers_callback: Callable[[], bool],
         stop_flag: threading.Event,
         config: 'Config',
     ) -> None:
@@ -72,6 +73,7 @@ class InboundListener:
             router (MessageRouter): The application-layer message router.
             receiver (StreamReceiver): The stream receiver to instantiate upon acceptance.
             broadcast_callback (Callable): IPC broadcaster.
+            has_live_consumers_callback (Callable[[], bool]): Callback to check whether an interactive live consumer is attached.
             stop_flag (threading.Event): Global daemon termination flag.
             config (Config): The profile configuration instance.
 
@@ -86,8 +88,21 @@ class InboundListener:
         self._router: MessageRouter = router
         self._receiver: 'StreamReceiver' = receiver
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
+        self._has_live_consumers: Callable[[], bool] = has_live_consumers_callback
         self._stop_flag: threading.Event = stop_flag
         self._config: 'Config' = config
+
+    def _allows_headless_live_backlog(self) -> bool:
+        """
+        Determines whether inbound live may be auto-accepted without an interactive consumer.
+
+        Args:
+            None
+
+        Returns:
+            bool: True if headless live backlog is allowed.
+        """
+        return self._config.get_int(SettingKey.MAX_UNSEEN_LIVE_MSGS) != 0
 
     def start_listener(self) -> None:
         """
@@ -274,12 +289,13 @@ class InboundListener:
 
         if self._state.is_retunneling(onion):
             self._state.clear_retunnel_flow(onion)
-            self._broadcast(DisconnectedEvent(alias=alias))
+            self._broadcast(DisconnectedEvent(alias=alias, onion=onion))
             self._broadcast(
                 create_event(
                     EventType.RETUNNEL_FAILED,
                     {
                         'alias': alias,
+                        'onion': onion,
                         'error': 'Pending acceptance expired',
                     },
                 )
@@ -309,7 +325,7 @@ class InboundListener:
             self._tm.onion, onion, is_outbound_attempt
         )
 
-        grace_reconnect: bool = self._state.consume_live_reconnect_grace(onion)
+        grace_reconnect: bool = self._state.has_live_reconnect_grace(onion)
 
         if self._state.is_connected_or_pending(onion) and not grace_reconnect:
             should_reject = True
@@ -328,17 +344,25 @@ class InboundListener:
                 onion,
                 'Mutual connection collision resolved',
             )
-            self._broadcast(TiebreakerRejectedEvent(alias=alias))
+            self._broadcast(TiebreakerRejectedEvent(alias=alias, onion=onion))
             return
 
+        should_auto_accept_now: bool = (
+            grace_reconnect
+            or is_mutual_winner
+            or (
+                (alias in self._cm.get_all_contacts())
+                and self._config.get_bool(SettingKey.AUTO_ACCEPT_CONTACTS)
+            )
+        )
+
         accepted_now: bool = False
-        if grace_reconnect:
-            self._state.add_active_connection(onion, conn)
-            accepted_now = True
-        elif is_mutual_winner or (
-            (alias in self._cm.get_all_contacts())
-            and self._config.get_bool(SettingKey.AUTO_ACCEPT_CONTACTS)
+        pending_reason: PendingConnectionReason = PendingConnectionReason.USER_ACCEPT
+        if should_auto_accept_now and (
+            self._has_live_consumers() or self._allows_headless_live_backlog()
         ):
+            if grace_reconnect:
+                self._state.consume_live_reconnect_grace(onion)
             self._state.add_active_connection(onion, conn)
             accepted_now = True
         else:
@@ -346,7 +370,14 @@ class InboundListener:
                 conn.sendall(f'{TorCommand.PENDING.value}\n'.encode('utf-8'))
             except Exception:
                 pass
-            self._state.add_pending_connection(onion, conn, stream.get_buffer())
+            if should_auto_accept_now:
+                pending_reason = PendingConnectionReason.CONSUMER_ABSENT
+            self._state.add_pending_connection(
+                onion,
+                conn,
+                stream.get_buffer(),
+                reason=pending_reason,
+            )
             threading.Thread(
                 target=self._watch_pending_connection,
                 args=(onion, alias, conn),
@@ -363,7 +394,7 @@ class InboundListener:
             if self._state.consume_retunnel_reconnect(onion):
                 self._hm.log_event(HistoryEvent.LIVE_RETUNNEL_SUCCESS, onion)
                 self._state.clear_retunnel_flow(onion)
-                self._broadcast(RetunnelSuccessEvent(alias=alias))
+                self._broadcast(RetunnelSuccessEvent(alias=alias, onion=onion))
             else:
                 self._broadcast(ConnectedEvent(alias=alias, onion=onion))
 
@@ -371,4 +402,5 @@ class InboundListener:
                 self._receiver.start_receiving(onion, conn, stream.get_buffer())
         else:
             self._hm.log_event(HistoryEvent.LIVE_REQUESTED_BY_REMOTE, onion)
-            self._broadcast(IncomingConnectionEvent(alias=alias))
+            if pending_reason is PendingConnectionReason.USER_ACCEPT:
+                self._broadcast(IncomingConnectionEvent(alias=alias, onion=onion))

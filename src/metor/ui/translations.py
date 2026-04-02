@@ -1,7 +1,7 @@
 """
 Module managing the centralized IPC event translation registry.
 Ensures the Daemon remains UI-agnostic by resolving strict EventTypes locally.
-Preserves the '{alias}' placeholder only for info-tone status lines.
+Preserves the '{alias}' placeholder according to the translation's alias policy.
 Utilizes generic status tones instead of chat-specific routing types.
 """
 
@@ -11,7 +11,18 @@ from metor.core.api import EventType, JsonValue
 
 # Local Package Imports
 from metor.ui.theme import Theme
-from metor.ui.models import StatusTone, TranslationDef
+from metor.ui.models import AliasPolicy, StatusTone, TranslationDef
+
+ERROR_DETAIL_CODES: set[EventType] = {
+    EventType.CONNECTION_FAILED,
+    EventType.RETUNNEL_FAILED,
+    EventType.TOR_PROCESS_TERMINATED,
+    EventType.TOR_START_FAILED,
+}
+
+VALIDATION_DETAIL_CODES: set[EventType] = {
+    EventType.SETTING_TYPE_ERROR,
+}
 
 
 TRANSLATIONS: Dict[EventType, TranslationDef] = {
@@ -26,6 +37,9 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
     ),
     EventType.INVALID_PASSWORD: TranslationDef(
         'Invalid master password.', StatusTone.ERROR
+    ),
+    EventType.DB_CORRUPTED: TranslationDef(
+        'Profile database is corrupted.', StatusTone.ERROR
     ),
     EventType.ALREADY_UNLOCKED: TranslationDef(
         'Daemon is already unlocked.', StatusTone.SYSTEM
@@ -51,7 +65,7 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         'Failed to update profile config.', StatusTone.ERROR
     ),
     EventType.SETTING_TYPE_ERROR: TranslationDef(
-        'Type parsing error.', StatusTone.ERROR
+        'Invalid value{key}{reason}.', StatusTone.ERROR
     ),
     EventType.INVALID_SETTING_KEY: TranslationDef(
         'Invalid setting key provided.', StatusTone.ERROR
@@ -75,12 +89,17 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         StatusTone.SYSTEM,
     ),
     EventType.UNKNOWN_COMMAND: TranslationDef('Unknown command.', StatusTone.ERROR),
-    EventType.TOR_KEY_ERROR: TranslationDef('Tor key error.', StatusTone.ERROR),
+    EventType.TOR_KEY_DECRYPT_FAILED: TranslationDef(
+        'Failed to decrypt Tor runtime key.', StatusTone.ERROR
+    ),
+    EventType.TOR_KEY_WRITE_FAILED: TranslationDef(
+        'Failed to provision Tor runtime key on disk.', StatusTone.ERROR
+    ),
     EventType.TOR_START_FAILED: TranslationDef(
-        'Tor failed to start.', StatusTone.ERROR
+        'Tor failed to start{error}.', StatusTone.ERROR
     ),
     EventType.TOR_PROCESS_TERMINATED: TranslationDef(
-        'Tor process terminated unexpectedly.', StatusTone.ERROR
+        'Tor process terminated unexpectedly{error}.', StatusTone.ERROR
     ),
     EventType.ADDRESS_CURRENT: TranslationDef(
         "Current onion address for profile '{profile}': {onion}.onion",
@@ -114,13 +133,19 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         'You cannot switch focus to yourself.', StatusTone.SYSTEM
     ),
     EventType.NO_CONNECTION_TO_REJECT: TranslationDef(
-        "No connection with '{alias}' to reject.", StatusTone.SYSTEM
+        "No connection with '{alias}' to reject.",
+        StatusTone.SYSTEM,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.NO_CONNECTION_TO_DISCONNECT: TranslationDef(
-        "No active connection with '{alias}' to disconnect.", StatusTone.SYSTEM
+        "No active connection with '{alias}' to disconnect.",
+        StatusTone.SYSTEM,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.NO_PENDING_CONNECTION: TranslationDef(
-        "No pending connection from '{alias}' to accept.", StatusTone.INFO
+        "No pending connection from '{alias}' to accept.",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.MAX_CONNECTIONS_REACHED: TranslationDef(
         "Cannot connect to '{target}'. Maximum concurrent connections ({max_conn}) reached.",
@@ -133,55 +158,84 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         'You cannot send offline drops to yourself.', StatusTone.SYSTEM
     ),
     EventType.DROP_QUEUED: TranslationDef(
-        "Message successfully queued for '{alias}'.", StatusTone.INFO
+        "Message successfully queued for '{alias}'.",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.NO_PENDING_LIVE_MSGS: TranslationDef(
-        "No pending live messages found for '{alias}'.", StatusTone.SYSTEM
+        "No pending live messages found for '{alias}'.",
+        StatusTone.SYSTEM,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.FALLBACK_SUCCESS: TranslationDef(
         "Successfully converted {count} unacked message(s) to '{alias}' into drops.",
         StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
-    EventType.CONNECTED: TranslationDef("Connected to '{alias}'.", StatusTone.INFO),
+    EventType.CONNECTED: TranslationDef(
+        "Connected to '{alias}'.",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
+    ),
     EventType.DISCONNECTED: TranslationDef(
-        "Disconnected from '{alias}'.", StatusTone.INFO
+        "Disconnected from '{alias}'.",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.CONNECTION_CONNECTING: TranslationDef(
-        "Connecting to '{alias}'...", StatusTone.INFO
+        "Connecting to '{alias}'...",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.INCOMING_CONNECTION: TranslationDef(
         f"Incoming connection from '{{alias}}'. Type '{Theme.GREEN}/accept {{alias}}{Theme.RESET}' or '{Theme.RED}/reject {{alias}}{Theme.RESET}'.",
         StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.CONNECTION_PENDING: TranslationDef(
-        "Request sent to '{alias}'. Waiting for acceptance...", StatusTone.INFO
+        "Request sent to '{alias}'. Waiting for acceptance...",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.CONNECTION_AUTO_ACCEPTED: TranslationDef(
         "Pending request found. Auto-accepting connection with '{alias}'...",
         StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.CONNECTION_RETRY: TranslationDef(
         "Connecting to '{alias}' failed. Retrying ({attempt}/{max_retries})...",
         StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.CONNECTION_FAILED: TranslationDef(
-        "Failed to connect to '{alias}'.", StatusTone.ERROR
+        "Failed to connect to '{alias}'{error}.",
+        StatusTone.ERROR,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.CONNECTION_REJECTED: TranslationDef(
-        "Connection with '{alias}' rejected.", StatusTone.INFO
+        "Connection with '{alias}' rejected.",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.INBOX_NOTIFICATION: TranslationDef(
-        "Received {count} new offline message(s) from '{alias}'.", StatusTone.INFO
+        "Received {count} new unread message(s) from '{alias}'.",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.AUTO_RECONNECT_ATTEMPT: TranslationDef(
-        "Attempting automatic reconnect to '{alias}'...", StatusTone.INFO
+        "Attempting automatic reconnect to '{alias}'...",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.RETUNNEL_INITIATED: TranslationDef(
         "Initiating Tor circuit rotation and retunneling for '{alias}'...",
         StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.RETUNNEL_SUCCESS: TranslationDef(
-        "Successfully retunneled connection to '{alias}'.", StatusTone.INFO
+        "Successfully retunneled connection to '{alias}'.",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.ALIAS_IN_USE: TranslationDef(
         "Alias '{alias}' is already in use.", StatusTone.SYSTEM
@@ -189,18 +243,25 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
     EventType.ONION_IN_USE: TranslationDef(
         "The onion is already associated with saved contact '{alias}'.",
         StatusTone.SYSTEM,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.CONTACT_ADDED: TranslationDef(
-        "Contact '{alias}' added successfully to profile '{profile}'.", StatusTone.INFO
+        "Contact '{alias}' added successfully to profile '{profile}'.",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.PEER_NOT_FOUND: TranslationDef(
         "Target '{target}' not found.", StatusTone.ERROR
     ),
     EventType.CONTACT_ALREADY_SAVED: TranslationDef(
-        "Alias '{alias}' is already saved.", StatusTone.SYSTEM
+        "Alias '{alias}' is already saved.",
+        StatusTone.SYSTEM,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.PEER_PROMOTED: TranslationDef(
-        "Discovered peer '{alias}' saved permanently to address book.", StatusTone.INFO
+        "Discovered peer '{alias}' saved permanently to address book.",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.ALIAS_SAME: TranslationDef(
         'The new alias must be different from the old one.', StatusTone.SYSTEM
@@ -214,9 +275,12 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
     EventType.PEER_CANT_DELETE_ACTIVE: TranslationDef(
         "Discovered peer '{alias}' cannot be deleted manually as it is tied to active states.",
         StatusTone.SYSTEM,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.CONTACT_DOWNGRADED: TranslationDef(
-        "Contact '{alias}' is now unsaved.", StatusTone.INFO
+        "Contact '{alias}' is now unsaved.",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.CONTACT_REMOVED_DOWNGRADED: TranslationDef(
         "Contact '{alias}' removed. Session downgraded to '{new_alias}'.",
@@ -226,10 +290,14 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         "Discovered peer '{alias}' anonymized to '{new_alias}'.", StatusTone.SYSTEM
     ),
     EventType.CONTACT_REMOVED: TranslationDef(
-        "Contact '{alias}' removed from profile '{profile}'.", StatusTone.INFO
+        "Contact '{alias}' removed from profile '{profile}'.",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.PEER_REMOVED: TranslationDef(
-        "Discovered peer '{alias}' removed.", StatusTone.INFO
+        "Discovered peer '{alias}' removed.",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.CONTACTS_CLEARED: TranslationDef(
         "All contacts cleared and active peers anonymized for profile '{profile}'.",
@@ -239,7 +307,9 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         'Failed to clear contacts.', StatusTone.ERROR
     ),
     EventType.HISTORY_CLEARED: TranslationDef(
-        "History for '{alias}' cleared.", StatusTone.INFO
+        "History for '{alias}' cleared.",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.HISTORY_CLEARED_ALL: TranslationDef(
         "History for profile '{profile}' cleared.", StatusTone.SYSTEM
@@ -248,10 +318,14 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         'Failed to clear history.', StatusTone.ERROR
     ),
     EventType.MESSAGES_CLEARED: TranslationDef(
-        "All messages for '{alias}' cleared.", StatusTone.INFO
+        "All messages for '{alias}' cleared.",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.MESSAGES_CLEARED_NON_CONTACTS: TranslationDef(
-        "Messages for non-contact '{alias}' cleared.", StatusTone.INFO
+        "Messages for non-contact '{alias}' cleared.",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
     ),
     EventType.MESSAGES_CLEARED_NON_CONTACTS_ALL: TranslationDef(
         "Messages for non-contacts in profile '{profile}' cleared.",
@@ -276,12 +350,28 @@ class Translator:
     """Provides dynamic text translations based on strict daemon EventTypes."""
 
     @staticmethod
+    def get_alias_policy(code: EventType) -> AliasPolicy:
+        """
+        Returns the alias binding policy for one translated event.
+
+        Args:
+            code (EventType): The rigid daemon event identifier.
+
+        Returns:
+            AliasPolicy: The alias binding policy for the event.
+        """
+        entry: Optional[TranslationDef] = TRANSLATIONS.get(code)
+        if not entry:
+            return AliasPolicy.NONE
+        return entry.alias_policy
+
+    @staticmethod
     def get(
         code: EventType, params: Optional[Dict[str, JsonValue]] = None
     ) -> Tuple[str, StatusTone]:
         """
         Resolves a translation code to its localized string and status tone.
-        Preserves the '{alias}' placeholder only for info-tone chat rendering.
+        Preserves the '{alias}' placeholder according to the translation alias policy.
 
         Args:
             code (EventType): The rigid daemon event identifier.
@@ -296,13 +386,23 @@ class Translator:
 
         safe_params: Dict[str, JsonValue] = params.copy() if params else {}
 
-        if code is EventType.RETUNNEL_FAILED:
+        if code in ERROR_DETAIL_CODES:
             error_text: str = str(safe_params.get('error') or '').strip()
+            error_text = error_text.rstrip('.')
             safe_params['error'] = f': {error_text}' if error_text else ''
 
-        # Preserve '{alias}' only for info-tone chat rendering so later alias
-        # renames can still rehydrate informational status lines dynamically.
-        if entry.tone is StatusTone.INFO:
+        if code in VALIDATION_DETAIL_CODES:
+            key_text: str = str(safe_params.get('key') or '').strip()
+            reason_text: str = str(safe_params.get('reason') or '').strip()
+            reason_text = reason_text.rstrip('.')
+            safe_params['key'] = (
+                f" for '{Theme.YELLOW}{key_text}{Theme.RESET}'" if key_text else ''
+            )
+            safe_params['reason'] = f': {reason_text}' if reason_text else ''
+
+        # Preserve '{alias}' only for messages that explicitly opt into
+        # dynamic peer-bound alias redraws.
+        if entry.alias_policy is AliasPolicy.DYNAMIC:
             if 'alias' in safe_params and safe_params['alias']:
                 safe_params['alias'] = '{alias}'
             else:

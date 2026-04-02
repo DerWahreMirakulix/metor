@@ -4,7 +4,8 @@ Transforms strictly typed DTOs into formatted strings for both CLI and Chat inte
 Enforces the Zero-Text Policy by offloading formatting from the backend.
 """
 
-from typing import List
+from datetime import datetime
+from typing import List, Optional, Tuple
 
 from metor.core.api import (
     IpcEvent,
@@ -23,6 +24,110 @@ from metor.ui.theme import Theme
 
 class UIPresenter:
     """Formats strongly typed DTOs into standardized UI strings."""
+
+    @staticmethod
+    def format_timestamp_label(
+        timestamp: Optional[str],
+        is_drop: bool = False,
+        compact: bool = False,
+    ) -> str:
+        """
+        Formats one timestamp for CLI or chat timeline rendering.
+
+        Args:
+            timestamp (Optional[str]): The raw timestamp string.
+            is_drop (bool): Whether to append the drop transport suffix.
+            compact (bool): Whether to collapse the timestamp to a short time-only form.
+
+        Returns:
+            str: The formatted timestamp label without surrounding brackets.
+        """
+        label: str = str(timestamp or '').strip()
+        if label and compact:
+            try:
+                parsed = datetime.fromisoformat(label.replace('Z', '+00:00'))
+                label = parsed.strftime('%H:%M:%S')
+            except ValueError:
+                if 'T' in label:
+                    label = label.split('T', 1)[1]
+                elif ' ' in label:
+                    label = label.split(' ', 1)[1]
+
+                for separator in ('.', '+'):
+                    if separator in label:
+                        label = label.split(separator, 1)[0]
+
+                time_parts: List[str] = label.split(':')
+                if len(time_parts) >= 3:
+                    label = ':'.join(time_parts[:3])
+
+        if is_drop:
+            label = f'{label} | Drop' if label else 'Drop'
+
+        return label
+
+    @staticmethod
+    def build_timestamp_prefix(
+        timestamp: Optional[str],
+        is_drop: bool = False,
+        compact: bool = False,
+    ) -> Tuple[str, str]:
+        """
+        Builds the rendered and visible timestamp prefix for one timeline line.
+
+        Args:
+            timestamp (Optional[str]): The raw timestamp string.
+            is_drop (bool): Whether the line represents a drop transport.
+            compact (bool): Whether to shorten the visible timestamp.
+
+        Returns:
+            Tuple[str, str]: The ANSI-rendered prefix and its visible plain-text equivalent.
+        """
+        label: str = UIPresenter.format_timestamp_label(timestamp, is_drop, compact)
+        if not label:
+            return '', ''
+
+        visible_prefix: str = f'[{label}] '
+        rendered_prefix: str = f'{Theme.DARK_GREY}{visible_prefix}{Theme.RESET}'
+        return rendered_prefix, visible_prefix
+
+    @staticmethod
+    def indent_multiline_text(text: str, prefix_len: int) -> str:
+        """
+        Indents continuation lines so they align with the first payload column.
+
+        Args:
+            text (str): The payload to format.
+            prefix_len (int): The visible prefix length before the payload begins.
+
+        Returns:
+            str: The payload with aligned continuation lines.
+        """
+        if '\n' not in text:
+            return text
+
+        padding: str = ' ' * prefix_len
+        return f'\n{padding}'.join(text.split('\n'))
+
+    @staticmethod
+    def format_prefixed_message(
+        rendered_prefix: str,
+        visible_prefix: str,
+        text: str,
+    ) -> str:
+        """
+        Formats one possibly multiline message behind an already prepared prefix.
+
+        Args:
+            rendered_prefix (str): The ANSI-rendered prefix.
+            visible_prefix (str): The visible plain-text prefix.
+            text (str): The payload text.
+
+        Returns:
+            str: The fully formatted line including multiline indentation.
+        """
+        padded_text: str = UIPresenter.indent_multiline_text(text, len(visible_prefix))
+        return f'{rendered_prefix}{padded_text}'
 
     @staticmethod
     def get_header_string(text: str) -> str:
@@ -159,17 +264,34 @@ class UIPresenter:
         if not event.messages:
             return f"No chat history found for '{event.alias}'."
 
-        out: str = f'{UIPresenter.get_header_string(f"Chat History with {Theme.CYAN}{event.alias}{Theme.RESET} (Last {len(event.messages)})")}\n'
+        out: str = f'{UIPresenter.get_header_string(f"Chat History with {Theme.PURPLE}{event.alias}{Theme.RESET} (Last {len(event.messages)})")}\n'
         for msg in event.messages:
             if msg.direction == MessageDirection.OUT.value:
                 if msg.status == MessageStatus.DELIVERED.value:
-                    prefix: str = f'{Theme.GREEN}To {event.alias}{Theme.RESET}'
+                    prefix_text: str = f'To {event.alias}: '
+                    rendered_prefix_text: str = (
+                        f'{Theme.GREEN}To {event.alias}{Theme.RESET}: '
+                    )
                 else:
-                    prefix = f'To {event.alias}'
+                    prefix_text = f'To {event.alias}: '
+                    rendered_prefix_text = prefix_text
             else:
-                prefix = f'{Theme.PURPLE}From {event.alias}{Theme.RESET}'
+                prefix_text = f'From {event.alias}: '
+                rendered_prefix_text = (
+                    f'{Theme.PURPLE}From {event.alias}{Theme.RESET}: '
+                )
 
-            out += f'[{msg.timestamp}] {prefix}: {msg.payload}\n'
+            timestamp_prefix, timestamp_visible = UIPresenter.build_timestamp_prefix(
+                msg.timestamp,
+            )
+            out += (
+                UIPresenter.format_prefixed_message(
+                    f'{timestamp_prefix}{rendered_prefix_text}',
+                    f'{timestamp_visible}{prefix_text}',
+                    msg.payload,
+                )
+                + '\n'
+            )
 
         return out
 
@@ -187,9 +309,9 @@ class UIPresenter:
         if not event.inbox:
             return 'Inbox is empty.'
 
-        out: str = 'Unread Offline Messages:\n'
+        out: str = 'Unread messages:\n'
         for alias, count in event.inbox.items():
-            out += f' - {Theme.CYAN}{alias}{Theme.RESET}: {Theme.YELLOW}{count}{Theme.RESET} new message(s)\n'
+            out += f' - {Theme.PURPLE}{alias}{Theme.RESET}: {Theme.YELLOW}{count}{Theme.RESET} new message(s)\n'
 
         return out.strip()
 
@@ -207,10 +329,24 @@ class UIPresenter:
         if not event.messages:
             return f"No unread messages from '{event.alias}'."
 
-        out: str = f'{UIPresenter.get_header_string(f"Messages from {Theme.CYAN}{event.alias}{Theme.RESET}")}\n'
+        out: str = f'{UIPresenter.get_header_string(f"Unread messages from {Theme.PURPLE}{event.alias}{Theme.RESET}")}\n'
         for msg in event.messages:
-            prefix: str = f'{Theme.PURPLE}From {event.alias}{Theme.RESET}'
-            out += f'[{msg.timestamp}] {prefix}: {msg.payload}\n'
+            prefix_text: str = f'From {event.alias}: '
+            rendered_prefix_text: str = (
+                f'{Theme.PURPLE}From {event.alias}{Theme.RESET}: '
+            )
+            timestamp_prefix, timestamp_visible = UIPresenter.build_timestamp_prefix(
+                msg.timestamp,
+                is_drop=msg.is_drop,
+            )
+            out += (
+                UIPresenter.format_prefixed_message(
+                    f'{timestamp_prefix}{rendered_prefix_text}',
+                    f'{timestamp_visible}{prefix_text}',
+                    msg.payload,
+                )
+                + '\n'
+            )
 
         return out
 

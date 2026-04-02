@@ -37,14 +37,17 @@ class CommandType(str, Enum):
     SYNC_CONFIG = 'sync_config'
     SELF_DESTRUCT = 'self_destruct'
     UNLOCK = 'unlock'
+    AUTHENTICATE_SESSION = 'authenticate_session'
     RETUNNEL = 'retunnel'
+    REGISTER_LIVE_CONSUMER = 'register_live_consumer'
 
 
 class EventType(str, Enum):
     """Enumeration of strict daemon-to-UI events."""
 
     INIT = 'init'
-    TOR_KEY_ERROR = 'tor_key_error'
+    TOR_KEY_DECRYPT_FAILED = 'tor_key_decrypt_failed'
+    TOR_KEY_WRITE_FAILED = 'tor_key_write_failed'
     TOR_START_FAILED = 'tor_start_failed'
     TOR_PROCESS_TERMINATED = 'tor_process_terminated'
     REMOTE_MSG = 'remote_msg'
@@ -79,6 +82,7 @@ class EventType(str, Enum):
     PROFILES_DATA = 'profiles_data'
     AUTH_REQUIRED = 'auth_required'
     INVALID_PASSWORD = 'invalid_password'
+    DB_CORRUPTED = 'db_corrupted'
     ALREADY_UNLOCKED = 'already_unlocked'
     SESSION_AUTHENTICATED = 'session_authenticated'
     SELF_DESTRUCT_INITIATED = 'self_destruct_initiated'

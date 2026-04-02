@@ -93,6 +93,18 @@ class Paths:
         """
         return self.get_config_dir() / Constants.DAEMON_PORT_FILE
 
+    def get_daemon_pid_file(self) -> Path:
+        """
+        Returns the path to the daemon process-ID file.
+
+        Args:
+            None
+
+        Returns:
+            Path: The PID file path.
+        """
+        return self.get_config_dir() / Constants.DAEMON_PID_FILE
+
     def get_hidden_service_dir(self) -> Path:
         """
         Retrieves the Tor hidden service directory path without auto-creating it.

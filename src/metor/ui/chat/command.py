@@ -45,6 +45,61 @@ class CommandDispatcher:
         self._session: Session = session
         self._renderer: Renderer = renderer
 
+    def _remember_pending_connect_focus(self, target: str) -> None:
+        """
+        Stores the next successful outbound connect target for auto-focus.
+
+        Args:
+            target (str): The requested alias or onion.
+
+        Returns:
+            None
+        """
+        if self._session.focused_alias is not None:
+            return
+
+        if self._session.pending_focus_target not in (None, target):
+            return
+
+        self._session.pending_focus_target = target
+
+    def _remember_pending_accept_focus(self, target: str) -> None:
+        """
+        Stores the next successful accept target for auto-focus.
+
+        Args:
+            target (str): The requested alias.
+
+        Returns:
+            None
+        """
+        if self._session.focused_alias is not None:
+            return
+
+        if self._session.pending_accept_focus_target not in (None, target):
+            return
+
+        self._session.pending_accept_focus_target = target
+
+    def _resolve_pending_target(self) -> Optional[str]:
+        """
+        Resolves one implicit pending-session target when the command omits it.
+
+        Args:
+            None
+
+        Returns:
+            Optional[str]: The inferred alias, or None when ambiguous.
+        """
+        focused_alias: Optional[str] = self._session.focused_alias
+        if focused_alias and focused_alias in self._session.pending_connections:
+            return focused_alias
+
+        if len(self._session.pending_connections) == 1:
+            return self._session.pending_connections[0]
+
+        return None
+
     def _print_system(self, text: str) -> None:
         """Prints a chat status line with system tone.
 
@@ -80,24 +135,19 @@ class CommandDispatcher:
             target: Optional[str] = arg if arg else self._session.focused_alias
             if target:
                 self._ipc.send_command(DisconnectCommand(target=target))
-                if target == self._session.focused_alias:
-                    self._ipc.send_command(SwitchCommand(target=None))
-                    self._session.focused_alias = None
-                    self._renderer.set_focus(None)
             else:
                 self._print_system('No focused session to end.')
         elif cmd == '/connect':
             if arg:
-                if self._session.focused_alias is None:
-                    self._session.pending_focus_target = arg
+                self._remember_pending_connect_focus(arg)
                 self._ipc.send_command(ConnectCommand(target=arg))
             else:
                 self._print_system(Help.show_command_help(cmd).strip())
         elif cmd == '/accept':
-            if arg:
-                if self._session.focused_alias is None:
-                    self._session.pending_focus_target = arg
-                self._ipc.send_command(AcceptCommand(target=arg))
+            target = arg if arg else self._resolve_pending_target()
+            if target:
+                self._remember_pending_accept_focus(target)
+                self._ipc.send_command(AcceptCommand(target=target))
             else:
                 self._print_system(Help.show_command_help(cmd).strip())
         elif cmd == '/reject':

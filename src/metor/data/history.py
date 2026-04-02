@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 
 from metor.core.api import EventType
-from metor.utils import Constants, clean_onion
+from metor.utils import clean_onion
 
 # Local Package Imports
 from metor.data.profile import ProfileManager
@@ -93,7 +93,7 @@ class HistoryManager:
             None
         """
         self._pm: ProfileManager = pm
-        self._db_path: Path = Path(self._pm.get_config_dir()) / Constants.DB_FILE
+        self._db_path: Path = self._pm.paths.get_db_file()
         self._sql: SqlManager = SqlManager(self._db_path, self._pm.config, password)
 
     def log_event(
@@ -187,16 +187,3 @@ class HistoryManager:
 
         except Exception:
             return False, EventType.HISTORY_CLEAR_FAILED, {}
-
-    def update_alias(self, old_alias: str, new_alias: str) -> None:
-        """
-        No-op method kept for API compatibility, since history is strictly indexed by onion.
-
-        Args:
-            old_alias (str): The old alias.
-            new_alias (str): The new alias.
-
-        Returns:
-            None
-        """
-        pass

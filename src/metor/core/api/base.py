@@ -30,6 +30,35 @@ JsonValue = Union[
 T = TypeVar('T')
 
 
+def _reject_unknown_fields(
+    cls: Type[T],
+    data: Dict[str, JsonValue],
+    valid_keys: Set[str],
+    route_key: str,
+) -> None:
+    """
+    Rejects unknown payload fields to keep the IPC schema strict.
+
+    Args:
+        cls (Type[T]): The target DTO type.
+        data (Dict[str, JsonValue]): The incoming payload.
+        valid_keys (Set[str]): Allowed dataclass field names.
+        route_key (str): The routing field name to ignore.
+
+    Raises:
+        TypeError: If unknown fields are present.
+
+    Returns:
+        None
+    """
+    unknown_fields: List[str] = sorted(
+        key for key in data.keys() if key != route_key and key not in valid_keys
+    )
+    if unknown_fields:
+        joined_fields: str = ', '.join(unknown_fields)
+        raise TypeError(f'Unknown fields for {cls.__name__}: {joined_fields}.')
+
+
 def _coerce_and_validate(
     cls: Type[T], kwargs: Dict[str, JsonValue]
 ) -> Dict[str, object]:
@@ -164,6 +193,7 @@ class IpcCommand(IpcMessage):
         target_cls: Type['IpcCommand'] = CMD_MAP[command_type]
 
         valid_keys: Set[str] = {f.name for f in dataclasses.fields(target_cls)}
+        _reject_unknown_fields(target_cls, data, valid_keys, 'command_type')
         kwargs: Dict[str, JsonValue] = {
             k: v for k, v in data.items() if k in valid_keys and k != 'command_type'
         }
@@ -199,6 +229,7 @@ class IpcEvent(IpcMessage):
         target_cls: Type['IpcEvent'] = EVENT_MAP[event_type]
 
         valid_keys: Set[str] = {f.name for f in dataclasses.fields(target_cls)}
+        _reject_unknown_fields(target_cls, data, valid_keys, 'event_type')
         kwargs: Dict[str, JsonValue] = {
             k: v for k, v in data.items() if k in valid_keys and k != 'event_type'
         }

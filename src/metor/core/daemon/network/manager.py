@@ -35,6 +35,7 @@ class NetworkManager:
         crypto: Crypto,
         broadcast_callback: Callable[[IpcEvent], None],
         has_clients_callback: Callable[[], bool],
+        has_live_consumers_callback: Callable[[], bool],
         stop_flag: threading.Event,
         config: 'Config',
         state: Optional[StateTracker] = None,
@@ -50,6 +51,7 @@ class NetworkManager:
             crypto (Crypto): Cryptographic challenge/response engine.
             broadcast_callback (Callable[[IpcEvent], None]): Callback to broadcast IPC events.
             has_clients_callback (Callable[[], bool]): Callback to check for active UI clients.
+            has_live_consumers_callback (Callable[[], bool]): Callback to check for interactive live consumers.
             stop_flag (threading.Event): Global daemon termination flag.
             config (Config): The profile configuration instance.
             state (Optional[StateTracker]): Optional shared transport state.
@@ -67,6 +69,7 @@ class NetworkManager:
             state=self._state,
             broadcast_callback=broadcast_callback,
             has_clients_callback=has_clients_callback,
+            has_live_consumers_callback=has_live_consumers_callback,
             config=config,
         )
 
@@ -79,6 +82,7 @@ class NetworkManager:
             state=self._state,
             router=self._router,
             broadcast_callback=broadcast_callback,
+            has_live_consumers_callback=has_live_consumers_callback,
             stop_flag=stop_flag,
             config=config,
         )
@@ -106,6 +110,7 @@ class NetworkManager:
             router=self._router,
             receiver=self._receiver,
             broadcast_callback=broadcast_callback,
+            has_live_consumers_callback=has_live_consumers_callback,
             stop_flag=stop_flag,
             config=config,
         )
@@ -208,6 +213,18 @@ class NetworkManager:
         """
         return self._state.is_connected_or_pending(onion)
 
+    def has_drop_tunnel(self, onion: str) -> bool:
+        """
+        Checks whether a peer currently has one cached drop tunnel.
+
+        Args:
+            onion (str): The strict onion identity.
+
+        Returns:
+            bool: True if a cached drop tunnel exists.
+        """
+        return self._state.has_drop_tunnel(onion)
+
     def add_ui_focus(self, onion: str) -> None:
         """
         Registers that a connected UI client is actively focused on a peer.
@@ -243,6 +260,18 @@ class NetworkManager:
             None
         """
         self._router.flush_ram_buffer(onion)
+
+    def on_live_consumer_available(self) -> None:
+        """
+        Re-evaluates pending inbound live flows when an interactive consumer appears.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self._controller.on_live_consumer_available()
 
     def force_fallback(
         self, target: str

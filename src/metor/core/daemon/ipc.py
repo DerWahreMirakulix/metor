@@ -4,12 +4,13 @@ Handles socket connections between the background Daemon and the Chat UI.
 Enforces strict timeouts to prevent socket blockades and uses robust UTF-8 decoding to thwart DoS.
 """
 
+import os
 import socket
 import threading
 import json
 from typing import List, Callable, Dict, Optional
 
-from metor.core.api import IpcCommand, IpcEvent, JsonValue
+from metor.core.api import IpcCommand, IpcEvent, JsonValue, EventType, create_event
 from metor.data import SettingKey
 from metor.data.profile import ProfileManager
 from metor.utils import Constants
@@ -47,6 +48,7 @@ class IpcServer:
         self._lock: threading.Lock = threading.Lock()
         self._stop_flag: threading.Event = threading.Event()
         self.port: Optional[int] = None
+        self._server: Optional[socket.socket] = None
 
     def has_active_clients(self) -> bool:
         """
@@ -71,6 +73,7 @@ class IpcServer:
         Returns:
             None
         """
+        self._stop_flag.clear()
         server: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
@@ -80,10 +83,11 @@ class IpcServer:
         server.bind((Constants.LOCALHOST, bind_port))
         server.listen(Constants.SERVER_BACKLOG)
 
+        self._server = server
         self.port = server.getsockname()[1]
-        self._pm.set_daemon_port(self.port)
+        self._pm.set_daemon_port(self.port, os.getpid())
 
-        threading.Thread(target=self._acceptor, args=(server,), daemon=True).start()
+        threading.Thread(target=self._acceptor, daemon=True).start()
 
     def stop(self) -> None:
         """
@@ -96,6 +100,12 @@ class IpcServer:
             None
         """
         self._stop_flag.set()
+        if self._server:
+            try:
+                self._server.close()
+            except Exception:
+                pass
+            self._server = None
         with self._lock:
             for c in self._clients:
                 try:
@@ -143,16 +153,20 @@ class IpcServer:
         except Exception:
             pass
 
-    def _acceptor(self, server: socket.socket) -> None:
+    def _acceptor(self) -> None:
         """
         Target loop for accepting new incoming UI connections.
 
         Args:
-            server (socket.socket): The main server socket listening for incoming connections.
+            None
 
         Returns:
             None
         """
+        server: Optional[socket.socket] = self._server
+        if not server:
+            return
+
         while not self._stop_flag.is_set():
             try:
                 server.settimeout(Constants.THREAD_POLL_TIMEOUT)
@@ -164,6 +178,10 @@ class IpcServer:
                 ).start()
             except socket.timeout:
                 continue
+            except OSError:
+                if self._stop_flag.is_set():
+                    break
+                break
             except Exception:
                 break
 
@@ -192,6 +210,7 @@ class IpcServer:
                     buffer.extend(data)
 
                     if len(buffer) > Constants.MAX_IPC_BYTES:
+                        self.send_to(conn, create_event(EventType.UNKNOWN_COMMAND))
                         break
 
                     while b'\n' in buffer:
@@ -206,7 +225,7 @@ class IpcServer:
                             cmd: IpcCommand = IpcCommand.from_dict(cmd_dict)
                             self._command_callback(cmd, conn)
                         except Exception:
-                            pass
+                            self.send_to(conn, create_event(EventType.UNKNOWN_COMMAND))
                 except socket.timeout:
                     continue
         except Exception:

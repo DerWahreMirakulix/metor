@@ -15,6 +15,14 @@ class StatusTone(str, Enum):
     ERROR = 'error'
 
 
+class AliasPolicy(str, Enum):
+    """Controls whether a rendered UI line binds to no peer, a fixed alias snapshot, or a rename-safe dynamic peer identity."""
+
+    NONE = 'none'
+    STATIC = 'static'
+    DYNAMIC = 'dynamic'
+
+
 @dataclass
 class TranslationDef:
     """
@@ -23,7 +31,9 @@ class TranslationDef:
     Attributes:
         text (str): The raw translation string with optional formatting placeholders.
         tone (StatusTone): The tone used by the consuming UI.
+        alias_policy (AliasPolicy): Whether alias placeholders stay dynamic in chat.
     """
 
     text: str
     tone: StatusTone
+    alias_policy: AliasPolicy = AliasPolicy.NONE

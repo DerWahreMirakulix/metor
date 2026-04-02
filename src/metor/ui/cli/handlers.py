@@ -5,19 +5,28 @@ Isolates interactive prompts and subsystem orchestration from the generic router
 
 import sys
 import shutil
-import getpass
 from typing import List, Dict, Optional, Union
 
-from metor.core import KeyManager, TorManager
+from metor.core import TorManager
 from metor.core.api import EventType, JsonValue
 from metor.core.daemon import Daemon, DaemonStatus
-from metor.data import HistoryManager, ContactManager, MessageManager, SqlManager
+from metor.data import SqlManager
 from metor.data.profile import ProfileManager
-from metor.ui import Theme, Translator
+from metor.ui import PromptAbortedError, Theme, Translator, prompt_hidden, prompt_text
 from metor.ui.chat import Chat
 from metor.utils import Constants, ProcessManager
 
 # Local Package Imports
+from metor.core.daemon.bootstrap import (
+    build_runtime,
+    CorruptedStorageError,
+    InvalidMasterPasswordError,
+)
+from metor.data.profile import (
+    ProfileOperationResult,
+    ProfileOperationType,
+    ProfileSecurityMode,
+)
 from metor.ui.cli.proxy import CliProxy
 
 
@@ -49,13 +58,14 @@ class CommandHandlers:
         )
 
     @staticmethod
-    def handle_daemon(pm: ProfileManager) -> None:
+    def handle_daemon(pm: ProfileManager, start_locked: bool = False) -> None:
         """
         Authenticates the user and starts the background Daemon subsystem.
         Injects the UI logger callbacks to enforce UI-Agnostic Core domains.
 
         Args:
             pm (ProfileManager): The active profile configuration.
+            start_locked (bool): Whether to expose only the IPC server until unlock.
 
         Returns:
             None
@@ -69,13 +79,22 @@ class CommandHandlers:
 
         print(f"Starting daemon for profile '{pm.profile_name}'...")
 
-        password: str = getpass.getpass(
-            f'{Theme.GREEN}Enter Master Password: {Theme.RESET}'
-        )
-
-        if not password:
-            print('Master password cannot be empty.')
+        if start_locked and pm.uses_plaintext_storage():
+            print('Plaintext profiles cannot be started in locked mode.')
             return
+
+        password: Optional[str] = None
+        if pm.uses_encrypted_storage() and not start_locked:
+            try:
+                password = prompt_hidden(
+                    f'{Theme.GREEN}Enter Master Password: {Theme.RESET}'
+                )
+            except PromptAbortedError:
+                return
+
+            if not password:
+                print('Master password cannot be empty.')
+                return
 
         # Secure directory initialization before accessing any databases
         pm.initialize()
@@ -105,26 +124,149 @@ class CommandHandlers:
         SqlManager.set_log_callback(sql_log_cb)
         TorManager.set_log_callback(tor_log_cb)
 
-        km: KeyManager = KeyManager(pm, password)
-        tm: TorManager = TorManager(pm, km)
-
-        try:
-            cm: ContactManager = ContactManager(pm, password)
-            hm: HistoryManager = HistoryManager(pm, password)
-            mm: MessageManager = MessageManager(pm, password)
-        except ValueError as e:
-            error_text: str = str(e)
-            if error_text.startswith('Invalid master password'):
-                print(f'{Theme.RED}Invalid master password.{Theme.RESET}')
-            else:
+        daemon: Daemon
+        if start_locked:
+            daemon = Daemon(
+                pm,
+                status_callback=status_cb,
+                start_locked=True,
+            )
+        else:
+            try:
+                runtime = build_runtime(pm, password)
+            except InvalidMasterPasswordError:
+                msg, _ = Translator.get(EventType.INVALID_PASSWORD)
+                print(msg)
+                return
+            except CorruptedStorageError:
+                msg, _ = Translator.get(EventType.DB_CORRUPTED)
                 print(
-                    f'{Theme.RED}The database is corrupted from a previous crash or syntax error.{Theme.RESET}\n'
-                    "You need to run 'metor purge' or manually delete the storage.db."
+                    f"{msg}\nYou need to run 'metor purge' or manually delete the storage.db."
                 )
-            return
+                return
 
-        daemon: Daemon = Daemon(pm, km, tm, cm, hm, mm, status_callback=status_cb)
+            daemon = Daemon(
+                pm,
+                runtime.km,
+                runtime.tm,
+                runtime.cm,
+                runtime.hm,
+                runtime.mm,
+                status_callback=status_cb,
+            )
+
         daemon.run()
+
+    @staticmethod
+    def handle_profile_security_migration(
+        name: str,
+        target_mode: ProfileSecurityMode,
+    ) -> ProfileOperationResult:
+        """
+        Interactively migrates one local profile between encrypted and plaintext storage.
+
+        Args:
+            name (str): Target profile name.
+            target_mode (ProfileSecurityMode): The requested storage mode.
+
+        Returns:
+            ProfileOperationResult: Structured local outcome for the CLI layer.
+        """
+        pm: ProfileManager = ProfileManager(name)
+        if not pm.exists():
+            return ProfileManager.migrate_profile_security(name, target_mode)
+
+        current_mode: ProfileSecurityMode = pm.get_security_mode()
+        if current_mode is target_mode:
+            return ProfileManager.migrate_profile_security(name, target_mode)
+
+        if target_mode is ProfileSecurityMode.PLAINTEXT:
+            print(
+                f'This will store the profile database and local keys in '
+                f'{Theme.RED}plaintext at rest{Theme.RESET}.'
+            )
+            try:
+                confirm: str = prompt_text("Type 'yes' to continue: ")
+            except PromptAbortedError:
+                return ProfileOperationResult(
+                    False,
+                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
+                    {'profile': name, 'reason': 'Security migration aborted.'},
+                )
+            if confirm.strip().lower() != 'yes':
+                return ProfileOperationResult(
+                    False,
+                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
+                    {'profile': name, 'reason': 'Security migration aborted.'},
+                )
+
+        current_password: Optional[str] = None
+        if current_mode is ProfileSecurityMode.ENCRYPTED:
+            try:
+                current_password = prompt_hidden(
+                    f'{Theme.GREEN}Enter Current Master Password: {Theme.RESET}'
+                )
+            except PromptAbortedError:
+                return ProfileOperationResult(
+                    False,
+                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
+                    {'profile': name, 'reason': 'Security migration aborted.'},
+                )
+            if not current_password:
+                return ProfileOperationResult(
+                    False,
+                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
+                    {
+                        'profile': name,
+                        'reason': 'Current master password cannot be empty.',
+                    },
+                )
+
+        new_password: Optional[str] = None
+        if target_mode is ProfileSecurityMode.ENCRYPTED:
+            try:
+                new_password = prompt_hidden(
+                    f'{Theme.GREEN}Enter New Master Password: {Theme.RESET}'
+                )
+            except PromptAbortedError:
+                return ProfileOperationResult(
+                    False,
+                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
+                    {'profile': name, 'reason': 'Security migration aborted.'},
+                )
+            if not new_password:
+                return ProfileOperationResult(
+                    False,
+                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
+                    {
+                        'profile': name,
+                        'reason': 'New master password cannot be empty.',
+                    },
+                )
+
+            try:
+                confirm_password: str = prompt_hidden(
+                    f'{Theme.GREEN}Confirm New Master Password: {Theme.RESET}'
+                )
+            except PromptAbortedError:
+                return ProfileOperationResult(
+                    False,
+                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
+                    {'profile': name, 'reason': 'Security migration aborted.'},
+                )
+            if new_password != confirm_password:
+                return ProfileOperationResult(
+                    False,
+                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
+                    {'profile': name, 'reason': 'New master passwords do not match.'},
+                )
+
+        return ProfileManager.migrate_profile_security(
+            name,
+            target_mode,
+            current_password=current_password,
+            new_password=new_password,
+        )
 
     @staticmethod
     def handle_chat(pm: ProfileManager) -> None:
@@ -150,26 +292,53 @@ class CommandHandlers:
         chat.run()
 
     @staticmethod
-    def handle_cleanup() -> None:
+    def handle_cleanup(force: bool = False) -> None:
         """
-        Executes OS-level process cleanup, clears daemon locks, and reports the result.
+        Executes OS-level process cleanup, clears daemon state, and reports the result.
         Strictly ignores remote profiles as cleanup is a host-local OS operation.
 
         Args:
-            None
+            force (bool): Enables an explicit rescue scan when runtime-state files are missing or corrupted.
 
         Returns:
             None
         """
-        print('Cleaning up Metor processes and locks...')
-        killed: int = ProcessManager.cleanup_processes()
+        if force:
+            print('Cleaning up Metor processes and daemon state (force mode)...')
+        else:
+            print('Cleaning up Metor processes and daemon state...')
+
+        killed: int = ProcessManager.cleanup_processes(force=force)
+        cleared_runtime_state: int = 0
 
         for profile_name in ProfileManager.get_all_profiles():
             temp_pm: ProfileManager = ProfileManager(profile_name)
             if not temp_pm.is_remote():
+                had_runtime_state: bool = (
+                    temp_pm.paths.get_daemon_port_file().exists()
+                    or temp_pm.paths.get_daemon_pid_file().exists()
+                )
                 temp_pm.clear_daemon_port()
+                if had_runtime_state:
+                    cleared_runtime_state += 1
 
-        print(f'Killed {killed} Tor process(es) and cleared locks.')
+        if killed > 0:
+            print(
+                'Cleanup completed. Managed processes were terminated and daemon state was cleared.'
+            )
+            return
+
+        if cleared_runtime_state > 0:
+            print('Cleanup completed. Daemon state was cleared.')
+            return
+
+        if force:
+            print('Cleanup completed. No managed processes or daemon state were found.')
+            return
+
+        print(
+            "Cleanup completed. No managed processes or daemon state were found. If the local runtime state is damaged, try 'metor cleanup --force'."
+        )
 
     @staticmethod
     def handle_purge(is_nuke_remote: bool) -> None:
@@ -194,7 +363,11 @@ class CommandHandlers:
             message += f' {remote_warn}'
 
         print(message)
-        confirmation: str = input("Type 'yes' to proceed: ")
+        try:
+            confirmation: str = prompt_text("Type 'yes' to proceed: ")
+        except PromptAbortedError:
+            print(f'{Theme.YELLOW}Purge aborted.{Theme.RESET}')
+            return
 
         if confirmation.strip().lower() == 'yes':
             if is_nuke_remote:
@@ -258,9 +431,12 @@ class CommandHandlers:
                 f'{failed_text}\n'
             )
 
-            override: str = input(
-                'You will lock yourself out of these remotes! Proceed with local wipe anyway? y/N: '
-            )
+            try:
+                override: str = prompt_text(
+                    'You will lock yourself out of these remotes! Proceed with local wipe anyway? y/N: '
+                )
+            except PromptAbortedError:
+                return False
             if override.strip().lower() != 'y':
                 return False
         return True

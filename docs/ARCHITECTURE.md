@@ -15,11 +15,11 @@ Use this document when you need to answer one of these questions:
 
 ## Document Map
 
-- [README.md](README.md): Master entry point for installation, usage, and repository navigation.
-- [SETTINGS.md](docs/SETTINGS.md): Generated reference for user-facing settings and structural profile config keys.
-- [API.md](docs/API.md): Generated reference for the typed IPC contract.
-- [AUDIT.md](docs/AUDIT.md): Review checklist for security, OPSEC, concurrency, and architecture risks.
-- [CONTRIBUTE.md](docs/CONTRIBUTE.md): Coding rules, import boundaries, typing requirements, and formatting standards.
+- [README.md](../README.md): Master entry point for installation, usage, and repository navigation.
+- [SETTINGS.md](./SETTINGS.md): Generated reference for user-facing settings and structural profile config keys.
+- [API.md](./API.md): Generated reference for the typed IPC contract.
+- [AUDIT.md](./AUDIT.md): Review checklist for security, OPSEC, concurrency, and architecture risks.
+- [CONTRIBUTE.md](./CONTRIBUTE.md): Coding rules, import boundaries, typing requirements, and formatting standards.
 
 ## Core System Boundaries
 
@@ -50,7 +50,7 @@ Metor has three configuration classes with different responsibilities:
 
 Configuration should follow these rules:
 
-- User-relevant runtime behavior belongs in documented settings metadata and appears in [SETTINGS.md](docs/SETTINGS.md).
+- User-relevant runtime behavior belongs in documented settings metadata and appears in [SETTINGS.md](./SETTINGS.md).
 - Hard anti-DoS and protocol guardrails may stay in constants when exposing them would weaken safety or contract clarity.
 - Every persisted setting should have one canonical validator and one canonical documentation source.
 - Structural profile metadata must stay immutable through generic `config set` flows; changes such as storage security mode require a dedicated migration workflow.
@@ -165,5 +165,5 @@ When you add a new architecture-relevant behavior:
 
 1. Decide whether it belongs in fixed guardrails, cascading settings, or structural profile config.
 2. Extend the typed IPC contract if the UI must observe or control it.
-3. Update [SETTINGS.md](docs/SETTINGS.md) or [API.md](docs/API.md) via the generators instead of hand-editing generated references.
-4. Update [AUDIT.md](docs/AUDIT.md) and [CONTRIBUTE.md](docs/CONTRIBUTE.md) if the new behavior changes review or implementation rules.
+3. Update [SETTINGS.md](./SETTINGS.md) or [API.md](./API.md) via the generators instead of hand-editing generated references.
+4. Update [AUDIT.md](./AUDIT.md) and [CONTRIBUTE.md](./CONTRIBUTE.md) if the new behavior changes review or implementation rules.

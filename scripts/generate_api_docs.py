@@ -5,6 +5,8 @@ Automatically resolves project paths for the src-layout architecture and applies
 Prettier formatting to the final output.
 """
 
+# ruff: noqa: E402
+
 import sys
 import json
 import inspect
@@ -13,11 +15,6 @@ import dataclasses
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Type, Any, get_args, get_origin
-
-from metor.core.api import CMD_MAP, EVENT_MAP
-
-if TYPE_CHECKING:
-    from metor.core.api import IpcMessage
 
 
 # Dynamically resolve paths to support execution from any directory
@@ -28,6 +25,11 @@ SRC_DIR: Path = PROJECT_ROOT / 'src'
 
 # Inject the src directory into the module search path
 sys.path.insert(0, str(SRC_DIR))
+
+from metor.core.api import CMD_MAP, EVENT_MAP
+
+if TYPE_CHECKING:
+    from metor.core.api import IpcMessage
 
 
 class ApiDocGenerator:
@@ -309,7 +311,7 @@ def main() -> None:
     Returns:
         None
     """
-    output_file: Path = PROJECT_ROOT / 'API_DOCS.md'
+    output_file: Path = PROJECT_ROOT / 'docs' / 'API.md'
     generator: ApiDocGenerator = ApiDocGenerator(output_file)
     generator.generate()
     sys.stdout.write(

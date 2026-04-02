@@ -38,11 +38,21 @@ from metor.core.api import (
     GetConfigCommand,
     SyncConfigCommand,
 )
-from metor.data import ContactManager, HistoryManager, MessageManager
+from metor.data import (
+    ContactManager,
+    DatabaseCorruptedError,
+    HistoryManager,
+    MessageManager,
+    SettingKey,
+)
 from metor.data.profile import ProfileManager
 from metor.utils import Constants
 
 # Local Package Imports
+from metor.core.daemon.bootstrap import (
+    verify_master_password,
+    InvalidMasterPasswordError,
+)
 from metor.core.daemon.handlers import (
     DatabaseCommandHandler,
     SystemCommandHandler,
@@ -283,21 +293,30 @@ class HeadlessDaemon:
         """
         try:
             daemon_ipc_timeout = self._pm.config.get_float(
-                'daemon.ipc_timeout'
-            )  # Resolves via fallback safely
+                SettingKey.DAEMON_IPC_TIMEOUT
+            )
             conn.settimeout(daemon_ipc_timeout)
-            buffer: str = ''
+            buffer: bytearray = bytearray()
             while not self._stop_event.is_set():
                 try:
                     data: bytes = conn.recv(Constants.TCP_BUFFER_SIZE)
                     if not data:
                         break
-                    buffer += data.decode('utf-8', errors='ignore')
-                    if '\n' in buffer:
-                        line: str = buffer.split('\n')[0].strip()
-                        cmd_dict: Dict[str, JsonValue] = json.loads(line)
-                        cmd: IpcCommand = IpcCommand.from_dict(cmd_dict)
-                        self._process_command(cmd, conn)
+
+                    buffer.extend(data)
+                    if len(buffer) > Constants.MAX_IPC_BYTES:
+                        self._send(conn, create_event(EventType.UNKNOWN_COMMAND))
+                        break
+
+                    if b'\n' in buffer:
+                        line_bytes, _, _ = buffer.partition(b'\n')
+                        line: str = line_bytes.decode('utf-8', errors='ignore').strip()
+                        try:
+                            cmd_dict: Dict[str, JsonValue] = json.loads(line)
+                            cmd: IpcCommand = IpcCommand.from_dict(cmd_dict)
+                            self._process_command(cmd, conn)
+                        except Exception:
+                            self._send(conn, create_event(EventType.UNKNOWN_COMMAND))
                         break
                 except socket.timeout:
                     continue
@@ -325,6 +344,29 @@ class HeadlessDaemon:
             conn.sendall(msg)
         except Exception:
             pass
+
+    def _validate_password(self) -> Optional[IpcEvent]:
+        """
+        Validates the provided master password before opening encrypted databases.
+
+        Args:
+            None
+
+        Returns:
+            Optional[IpcEvent]: An error event when validation fails, otherwise None.
+        """
+        if not self._pm.supports_password_auth():
+            return None
+
+        if self._password is None:
+            return create_event(EventType.INVALID_PASSWORD)
+
+        try:
+            verify_master_password(self._km)
+        except InvalidMasterPasswordError:
+            return create_event(EventType.INVALID_PASSWORD)
+
+        return None
 
     def _process_command(self, cmd: IpcCommand, conn: socket.socket) -> None:
         """
@@ -367,8 +409,20 @@ class HeadlessDaemon:
                 MarkReadCommand,
             ),
         ):
-            self._send(conn, self._db_handler.handle(cmd))
+            password_error: Optional[IpcEvent] = self._validate_password()
+            if password_error is not None:
+                self._send(conn, password_error)
+                return
+
+            try:
+                self._send(conn, self._db_handler.handle(cmd))
+            except DatabaseCorruptedError:
+                self._send(conn, create_event(EventType.DB_CORRUPTED))
         elif isinstance(cmd, (GetAddressCommand, GenerateAddressCommand)):
+            password_error = self._validate_password()
+            if password_error is not None:
+                self._send(conn, password_error)
+                return
             self._send(conn, self._sys_handler.handle(cmd))
         else:
             self._send(conn, create_event(EventType.DAEMON_OFFLINE))

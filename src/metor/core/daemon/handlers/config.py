@@ -17,8 +17,12 @@ from metor.core.api import (
     GetConfigCommand,
     SyncConfigCommand,
 )
-from metor.data import Settings, SettingKey
-from metor.data.profile import ProfileManager, ProfileConfigKey
+from metor.data import Settings, SettingKey, SettingValidationError
+from metor.data.profile import (
+    ProfileManager,
+    ProfileConfigKey,
+    ProfileConfigValidationError,
+)
 
 
 class ConfigCommandHandler:
@@ -61,8 +65,11 @@ class ConfigCommandHandler:
                     EventType.SETTING_UPDATED,
                     {'key': cmd.setting_key},
                 )
-            except TypeError:
-                return create_event(EventType.SETTING_TYPE_ERROR)
+            except (TypeError, SettingValidationError) as exc:
+                return create_event(
+                    EventType.SETTING_TYPE_ERROR,
+                    {'key': cmd.setting_key, 'reason': str(exc)},
+                )
             except Exception:
                 return create_event(EventType.SETTING_UPDATE_FAILED)
 
@@ -103,8 +110,15 @@ class ConfigCommandHandler:
                     EventType.CONFIG_UPDATED,
                     {'key': cmd.setting_key},
                 )
-            except TypeError:
-                return create_event(EventType.SETTING_TYPE_ERROR)
+            except (
+                TypeError,
+                SettingValidationError,
+                ProfileConfigValidationError,
+            ) as exc:
+                return create_event(
+                    EventType.SETTING_TYPE_ERROR,
+                    {'key': cmd.setting_key, 'reason': str(exc)},
+                )
             except Exception:
                 return create_event(EventType.CONFIG_UPDATE_FAILED)
 

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-from metor.ui.models import StatusTone
+from metor.ui.models import AliasPolicy, StatusTone
 
 
 class ChatMessageType(str, Enum):
@@ -24,6 +24,8 @@ class ChatLine:
     msg_type: ChatMessageType
     tone: Optional[StatusTone] = None
     alias: Optional[str] = None
+    peer_onion: Optional[str] = None
+    alias_policy: AliasPolicy = AliasPolicy.NONE
     timestamp: Optional[str] = None
     is_pending: bool = False
     msg_id: Optional[str] = None

@@ -9,12 +9,12 @@ import signal
 import time
 import threading
 import types
-from datetime import datetime
-from typing import List, Dict, Optional, TYPE_CHECKING
+from datetime import datetime, timezone
+from typing import Callable, List, Dict, Optional, TYPE_CHECKING
 
 from metor.core.api import JsonValue
 from metor.data.settings import SettingKey
-from metor.ui.models import StatusTone
+from metor.ui.models import AliasPolicy, StatusTone
 from metor.ui import UIPresenter
 from metor.ui.chat.models import ChatMessageType, ChatLine
 from metor.ui.chat.presenter import ChatPresenter
@@ -44,8 +44,14 @@ class Renderer:
         self._config: 'Config' = config
         self._initial_prompt: str = f'{self._config.get_str(SettingKey.PROMPT_SIGN)} '
         self._prompt: str = self._initial_prompt
+        self._alias_resolver: Callable[
+            [Optional[str], Optional[str]], Optional[str]
+        ] = lambda onion, fallback_alias: fallback_alias
 
-        self._display: Display = Display(self._initial_prompt)
+        self._display: Display = Display(
+            self._initial_prompt,
+            self._resolve_line_alias,
+        )
         self._input: InputHandler = InputHandler()
 
         self._current_focus: Optional[str] = None
@@ -57,6 +63,35 @@ class Renderer:
 
         if sys.platform != 'win32':
             signal.signal(signal.SIGWINCH, self._on_resize)
+
+    def set_alias_resolver(
+        self,
+        resolver: Callable[[Optional[str], Optional[str]], Optional[str]],
+    ) -> None:
+        """
+        Injects the alias resolver used for peer-bound redraws.
+
+        Args:
+            resolver (Callable[[Optional[str], Optional[str]], Optional[str]]): Resolves the current alias for one peer onion.
+
+        Returns:
+            None
+        """
+        self._alias_resolver = resolver
+
+    def _resolve_line_alias(self, chat_line: ChatLine) -> Optional[str]:
+        """
+        Resolves the alias that should be rendered for one chat line.
+
+        Args:
+            chat_line (ChatLine): The line to resolve.
+
+        Returns:
+            Optional[str]: The alias to render for the current redraw.
+        """
+        if chat_line.alias_policy is AliasPolicy.DYNAMIC and chat_line.peer_onion:
+            return self._alias_resolver(chat_line.peer_onion, chat_line.alias)
+        return chat_line.alias
 
     def set_focus(self, alias: Optional[str], is_live: bool = False) -> None:
         """
@@ -85,6 +120,8 @@ class Renderer:
         msg_type: ChatMessageType = ChatMessageType.RAW,
         tone: Optional[StatusTone] = None,
         alias: Optional[str] = None,
+        peer_onion: Optional[str] = None,
+        alias_policy: AliasPolicy = AliasPolicy.NONE,
         timestamp: Optional[str] = None,
         skip_prompt: bool = False,
         msg_id: Optional[str] = None,
@@ -99,6 +136,8 @@ class Renderer:
             msg_type (ChatMessageType): The visual routing type of the message.
             tone (Optional[StatusTone]): The tone for status messages.
             alias (Optional[str]): The associated remote alias.
+            peer_onion (Optional[str]): The stable peer onion identity for dynamic alias redraws.
+            alias_policy (AliasPolicy): Whether the alias should be rebound on redraw.
             timestamp (Optional[str]): Optional chronological timestamp for message lines.
             skip_prompt (bool): Flag to skip rendering the prompt after the message.
             msg_id (Optional[str]): Unique identifier for the message.
@@ -113,6 +152,9 @@ class Renderer:
             if cols < 1:
                 cols = Constants.DEFAULT_COLS
 
+            if msg_type is not ChatMessageType.RAW and timestamp is None:
+                timestamp = datetime.now(timezone.utc).isoformat()
+
             self._display.clear_input_area(self._last_visual_lines)
             previous_count: int = len(self._display.all_msgs)
 
@@ -121,6 +163,8 @@ class Renderer:
                 msg_type=msg_type,
                 tone=tone,
                 alias=alias,
+                peer_onion=peer_onion,
+                alias_policy=alias_policy,
                 timestamp=timestamp,
                 is_pending=bool(msg_id) if not is_drop else is_pending,
                 msg_id=msg_id,
@@ -165,16 +209,17 @@ class Renderer:
         self,
         messages_data: List[Dict[str, JsonValue]],
         alias: str,
+        peer_onion: Optional[str] = None,
         is_live_flush: bool = False,
     ) -> None:
         """
         Processes a burst of offline drops or a headless RAM flush in a single redraw.
-        Respects the chat_buffer_padding setting to ensure smooth scrolling and inserts
-        offline batches in chronological order.
+        Respects the chat_buffer_padding setting to ensure smooth scrolling.
 
         Args:
             messages_data (List[Dict[str, JsonValue]]): The list of raw message dictionaries.
             alias (str): The target alias.
+            peer_onion (Optional[str]): The stable peer onion identity.
             is_live_flush (bool): Flag denoting if these messages are a live buffer flush.
 
         Returns:
@@ -190,24 +235,25 @@ class Renderer:
 
             self._display.clear_input_area(self._last_visual_lines)
 
-            sorted_messages: List[Dict[str, JsonValue]] = sorted(
-                messages_data,
-                key=lambda msg_dict: self._get_timestamp_sort_key(
-                    str(msg_dict.get('timestamp') or ''),
-                    str(msg_dict.get('id') or ''),
-                ),
-            )
-
-            for msg_dict in sorted_messages:
+            for msg_dict in messages_data:
+                is_drop_value: object = msg_dict.get('is_drop')
                 chat_line: ChatLine = ChatLine(
                     text=str(msg_dict.get('payload', '')),
                     msg_type=ChatMessageType.REMOTE,
                     tone=None,
                     alias=alias,
+                    peer_onion=peer_onion,
+                    alias_policy=(
+                        AliasPolicy.DYNAMIC if peer_onion else AliasPolicy.STATIC
+                    ),
                     timestamp=str(msg_dict.get('timestamp') or ''),
                     is_pending=False,
                     msg_id=str(msg_dict.get('id', '')),
-                    is_drop=not is_live_flush,
+                    is_drop=(
+                        bool(is_drop_value)
+                        if isinstance(is_drop_value, bool)
+                        else not is_live_flush
+                    ),
                 )
                 self._insert_chat_line(chat_line)
 
@@ -219,47 +265,6 @@ class Renderer:
 
             self._full_redraw_locked(cols)
 
-    @staticmethod
-    def _get_timestamp_sort_key(
-        timestamp: str, tie_breaker: str = ''
-    ) -> tuple[int, str, str]:
-        """
-        Builds a stable chronological sort key for chat lines.
-
-        Args:
-            timestamp (str): The ISO timestamp string.
-            tie_breaker (str): Stable secondary key.
-
-        Returns:
-            tuple[int, str, str]: A normalized sort key.
-        """
-        if not timestamp:
-            return (2, '', tie_breaker)
-
-        try:
-            normalized: str = datetime.fromisoformat(
-                timestamp.replace('Z', '+00:00')
-            ).isoformat()
-            return (0, normalized, tie_breaker)
-        except ValueError:
-            return (1, timestamp, tie_breaker)
-
-    @staticmethod
-    def _is_ordered_chat_line(chat_line: ChatLine) -> bool:
-        """
-        Checks whether a line participates in timestamp-based chat ordering.
-
-        Args:
-            chat_line (ChatLine): The line to inspect.
-
-        Returns:
-            bool: True if the line is a timestamped self or remote chat message.
-        """
-        return bool(chat_line.timestamp) and chat_line.msg_type in (
-            ChatMessageType.SELF,
-            ChatMessageType.REMOTE,
-        )
-
     def _insert_chat_line(self, chat_line: ChatLine) -> int:
         """
         Inserts one chat line into the visible buffer.
@@ -270,30 +275,6 @@ class Renderer:
         Returns:
             int: The final insertion index.
         """
-        if self._is_ordered_chat_line(chat_line):
-            insert_index: int = len(self._display.all_msgs)
-            new_key: tuple[int, str, str] = self._get_timestamp_sort_key(
-                str(chat_line.timestamp or ''),
-                chat_line.msg_id or '',
-            )
-
-            for index in range(len(self._display.all_msgs) - 1, -1, -1):
-                existing_line: ChatLine = self._display.all_msgs[index]
-                if not self._is_ordered_chat_line(existing_line):
-                    break
-
-                existing_key: tuple[int, str, str] = self._get_timestamp_sort_key(
-                    str(existing_line.timestamp or ''),
-                    existing_line.msg_id or '',
-                )
-                if existing_key <= new_key:
-                    insert_index = index + 1
-                    break
-                insert_index = index
-
-            self._display.all_msgs.insert(insert_index, chat_line)
-            return insert_index
-
         self._display.all_msgs.append(chat_line)
         return len(self._display.all_msgs) - 1
 
@@ -311,7 +292,10 @@ class Renderer:
             self._display.all_msgs.pop(0)
 
     def mark_acked(
-        self, msg_id: Optional[str] = None, text: Optional[str] = None
+        self,
+        msg_id: Optional[str] = None,
+        text: Optional[str] = None,
+        timestamp: Optional[str] = None,
     ) -> None:
         """
         Marks a pending message as acknowledged and redraws it in green.
@@ -320,6 +304,7 @@ class Renderer:
         Args:
             msg_id (Optional[str]): The unique message identifier to acknowledge.
             text (Optional[str]): The exact payload text of the message.
+            timestamp (Optional[str]): The authoritative daemon timestamp, if available.
 
         Returns:
             None
@@ -330,6 +315,8 @@ class Renderer:
                 text and msg.text == text and msg.is_drop and msg.is_pending
             ):
                 msg.is_pending = False
+                if timestamp:
+                    msg.timestamp = timestamp
                 if start_idx == -1:
                     start_idx = i
 
@@ -378,25 +365,17 @@ class Renderer:
         if start_idx != -1:
             self._redraw_from_index(start_idx)
 
-    def rename_alias_in_history(self, old_alias: str, new_alias: str) -> None:
+    def refresh_alias_bindings(self) -> None:
         """
-        Updates old alias references to a new one in the UI buffer.
+        Re-renders the chat buffer after alias bindings changed.
 
         Args:
-            old_alias (str): The current alias string.
-            new_alias (str): The new alias string.
+            None
 
         Returns:
             None
         """
-        start_idx: int = -1
-        for i, msg in enumerate(self._display.all_msgs):
-            if msg.alias == old_alias:
-                msg.alias = new_alias
-                if start_idx == -1:
-                    start_idx = i
-        if start_idx != -1:
-            self._redraw_from_index(start_idx)
+        self.full_redraw()
 
     def print_prompt(self) -> None:
         """
@@ -505,7 +484,10 @@ class Renderer:
 
         for i in range(start_idx, len(self._display.all_msgs)):
             formatted: str = ChatPresenter.format_msg(
-                self._display.all_msgs[i], self._initial_prompt, self._current_focus
+                self._display.all_msgs[i],
+                self._initial_prompt,
+                self._current_focus,
+                self._resolve_line_alias(self._display.all_msgs[i]),
             )
             sys.stdout.write(formatted + '\n')
 
@@ -555,7 +537,10 @@ class Renderer:
         sys.stdout.write('\033[2J\033[H')
         for msg in self._display.all_msgs:
             formatted: str = ChatPresenter.format_msg(
-                msg, self._initial_prompt, self._current_focus
+                msg,
+                self._initial_prompt,
+                self._current_focus,
+                self._resolve_line_alias(msg),
             )
             sys.stdout.write(formatted + '\n')
 
