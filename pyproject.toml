@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64", "wheel"]
+requires = ["setuptools==80.10.2", "wheel==0.46.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -10,16 +10,16 @@ authors = [{ name = "LuRex" }]
 requires-python = ">=3.11"
 license = { text = "GPLv3" }
 dependencies = [
-    "stem",
-    "PySocks",
-    "pynacl",
-    "psutil",
-    "python-dotenv",
-    "sqlcipher3-binary",
+    "stem==1.8.2",
+    "PySocks==1.7.1",
+    "pynacl==1.6.2",
+    "psutil==7.2.2",
+    "python-dotenv==1.2.2",
+    "sqlcipher3==0.6.2",
 ]
 
 [project.optional-dependencies]
-dev = ["ruff>=0.3.0", "mypy>=1.9.0"]
+dev = ["ruff==0.15.8", "mypy==1.19.1"]
 
 [project.scripts]
 metor = "metor.main:main"

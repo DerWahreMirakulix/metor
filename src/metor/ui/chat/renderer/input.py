@@ -8,19 +8,6 @@ from typing import Optional, List
 
 from metor.utils import Constants
 
-_TERMINAL_BRACKETED_PASTE_START: str = '\x1b[200~'
-_TERMINAL_BRACKETED_PASTE_END: str = '\x1b[201~'
-_TERMINAL_ARROW_UP: str = '\x1b[A'
-_TERMINAL_ARROW_DOWN: str = '\x1b[B'
-_TERMINAL_ARROW_RIGHT: str = '\x1b[C'
-_TERMINAL_ARROW_LEFT: str = '\x1b[D'
-_TERMINAL_ALT_NEWLINE_CR: str = '\x1b\r'
-_TERMINAL_ALT_NEWLINE_LF: str = '\x1b\n'
-_TERMINAL_CTRL_NEWLINE: str = '\x0e'
-_TERMINAL_ESCAPE: str = '\x1b'
-_TERMINAL_CR: str = '\r'
-_TERMINAL_LF: str = '\n'
-
 try:
     import msvcrt
 except ImportError:
@@ -112,7 +99,7 @@ class InputHandler:
                     elif ch2 == 'M':
                         return 'SPECIAL:RIGHT'
                     return ''
-                if ch == _TERMINAL_CTRL_NEWLINE:
+                if ch == '\x0e':
                     return 'SPECIAL:NEWLINE'
                 return str(ch)
             return None
@@ -149,67 +136,63 @@ class InputHandler:
         """
         tokens: List[str] = []
         index: int = 0
-        paste_start: str = _TERMINAL_BRACKETED_PASTE_START
-        paste_end: str = _TERMINAL_BRACKETED_PASTE_END
         newline_chars: tuple[str, str] = (
-            _TERMINAL_CR,
-            _TERMINAL_LF,
+            '\r',
+            '\n',
         )
         control_chars: tuple[str, ...] = (
-            _TERMINAL_ESCAPE,
-            _TERMINAL_CR,
-            _TERMINAL_LF,
-            _TERMINAL_CTRL_NEWLINE,
+            '\x1b',
+            '\r',
+            '\n',
+            '\x0e',
         )
 
         while index < len(data):
-            if data.startswith(paste_start, index):
-                end_index: int = data.find(paste_end, index + len(paste_start))
+            if data.startswith('\x1b[200~', index):
+                end_index: int = data.find('\x1b[201~', index + len('\x1b[200~'))
                 if end_index != -1:
-                    pasted_text: str = data[index + len(paste_start) : end_index]
+                    pasted_text: str = data[index + len('\x1b[200~') : end_index]
                     if pasted_text:
                         tokens.append(f'PASTE:{pasted_text}')
-                    index = end_index + len(paste_end)
+                    index = end_index + len('\x1b[201~')
                     continue
 
-            if data.startswith(_TERMINAL_ARROW_UP, index):
+            if data.startswith('\x1b[A', index):
                 tokens.append('SPECIAL:UP')
-                index += len(_TERMINAL_ARROW_UP)
+                index += len('\x1b[A')
                 continue
-            if data.startswith(_TERMINAL_ARROW_DOWN, index):
+            if data.startswith('\x1b[B', index):
                 tokens.append('SPECIAL:DOWN')
-                index += len(_TERMINAL_ARROW_DOWN)
+                index += len('\x1b[B')
                 continue
-            if data.startswith(_TERMINAL_ARROW_RIGHT, index):
+            if data.startswith('\x1b[C', index):
                 tokens.append('SPECIAL:RIGHT')
-                index += len(_TERMINAL_ARROW_RIGHT)
+                index += len('\x1b[C')
                 continue
-            if data.startswith(_TERMINAL_ARROW_LEFT, index):
+            if data.startswith('\x1b[D', index):
                 tokens.append('SPECIAL:LEFT')
-                index += len(_TERMINAL_ARROW_LEFT)
+                index += len('\x1b[D')
                 continue
-            if data.startswith(_TERMINAL_ALT_NEWLINE_CR, index) or data.startswith(
-                _TERMINAL_ALT_NEWLINE_LF, index
-            ):
+            if data.startswith('\x1b\r', index) or data.startswith('\x1b\n', index):
                 tokens.append('SPECIAL:NEWLINE')
-                index += len(_TERMINAL_ALT_NEWLINE_CR)
+                index += len('\x1b\r')
                 continue
 
             char: str = data[index]
-            if char == _TERMINAL_CTRL_NEWLINE:
+            if char == '\x0e':
                 tokens.append('SPECIAL:NEWLINE')
                 index += 1
                 continue
 
             if char in newline_chars:
-                tokens.append(_TERMINAL_LF)
+                tokens.append('\n')
                 if index + 1 < len(data) and data[index + 1] in newline_chars:
                     index += 2
                 else:
                     index += 1
                 continue
 
-            if char == _TERMINAL_ESCAPE:
+            if char == '\x1b':
                 tokens.append('ESC')
                 index += 1
                 continue

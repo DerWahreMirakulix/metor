@@ -46,7 +46,7 @@ Recommended reading order:
 
 ### OPSEC & Security Concepts
 
-- **Data-at-Rest Encryption:** All local data (history, address book, queues) are stored in an SQLite database encrypted with `sqlcipher3`. Master keys are heavily derived using Argon2i and protected via NaCL SecretBoxes.
+- **Data-at-Rest Encryption:** All local data (history, address book, queues) are stored in an SQLite database encrypted via `sqlcipher3`. Master keys are heavily derived using Argon2i and protected via NaCL SecretBoxes.
 - **Network Anti-DoS:** Incoming TCP streams (both Tor and local IPC) enforce strict stream framing and length limitations (`MAX_STREAM_BYTES`) to thwart Out-Of-Memory (OOM) and UTF-8 fragmentation attacks.
 - **Thread Safety:** Address book mutations and session state transitions are safeguarded by deterministic locks (`FileLock` across processes, `threading.Lock` in memory) preventing race conditions and database corruption.
 
@@ -75,12 +75,18 @@ cd metor
 Python 3.11 or higher is required.
 
 ```bash
-# Standard installation
-pip install .
+# Recommended security-conscious runtime installation
+python -m pip install --upgrade 'pip==26.0.1'
+pip install -r requirements/runtime.lock
+pip install --no-deps --no-build-isolation .
 
-# For developers (Editable Mode)
-pip install -e .
+# Recommended security-conscious developer installation
+python -m pip install --upgrade 'pip==26.0.1'
+pip install -r requirements/dev.lock
+pip install --no-deps --no-build-isolation -e .
 ```
+
+The lock files pin the full tested dependency set so normal resolver drift does not silently pull newer transitive packages.
 
 ## 💻 Usage & Commands
 
