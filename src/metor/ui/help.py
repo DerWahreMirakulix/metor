@@ -50,6 +50,7 @@ class Help:
     """Static help generator utilizing a DRY data-driven command registry."""
 
     DESC_COLUMN: int = 50
+    SUBCOMMAND_DESC_COLUMN: int = 50
 
     CLI_CATEGORIES: List[str] = [
         'Global Options',
@@ -371,7 +372,12 @@ class Help:
                 out += f'\n{Theme.PURPLE}Subcommands:{Theme.RESET}\n'
                 for subcmd in c.subcommands:
                     base_cmd: str = c.usage.split()[0] if is_chat else c.name
-                    out += f'  {base_cmd} {subcmd.usage:<30} - {subcmd.description}\n'
+                    out += cls._format_line(
+                        '  ',
+                        f'{base_cmd} {subcmd.usage}',
+                        subcmd.description,
+                        cls.SUBCOMMAND_DESC_COLUMN,
+                    )
 
             return out
 
@@ -437,7 +443,7 @@ class Help:
                                 sub_sub_ind + '  ',
                                 subcmd.usage,
                                 subcmd.description,
-                                cls.DESC_COLUMN,
+                                cls.SUBCOMMAND_DESC_COLUMN,
                             )
             out += '\n'
 
@@ -478,7 +484,7 @@ class Help:
                                 sub_sub_ind,
                                 subcmd.usage,
                                 subcmd.description,
-                                cls.DESC_COLUMN,
+                                cls.SUBCOMMAND_DESC_COLUMN,
                             )
             out += '\n'
 

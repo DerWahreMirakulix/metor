@@ -2,9 +2,11 @@
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Mapping
 
 
-ContactResultParams = dict[str, str]
+ContactResultValue = str | int
+ContactResultParams = Mapping[str, ContactResultValue]
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,7 @@ class ContactOperationType(str, Enum):
     CONTACT_REMOVED_DOWNGRADED = 'contact_removed_downgraded'
     CONTACTS_CLEARED = 'contacts_cleared'
     CONTACTS_CLEAR_FAILED = 'contacts_clear_failed'
+    DISCOVERED_PEER_NOT_FOUND = 'discovered_peer_not_found'
     ONION_IN_USE = 'onion_in_use'
     PEER_ANONYMIZED = 'peer_anonymized'
     PEER_CANT_DELETE_ACTIVE = 'peer_cant_delete_active'

@@ -216,7 +216,9 @@ class ConnectionControllerSupportMixin:
         Returns:
             None
         """
-        remaining_sec: float = Constants.CONNECT_RETRY_BACKOFF_SEC
+        remaining_sec: float = self._config.get_float(
+            SettingKey.CONNECT_RETRY_BACKOFF_DELAY
+        )
         while remaining_sec > 0:
             if self._stop_flag.is_set():
                 break

@@ -70,6 +70,8 @@ class HistoryTrigger(str, Enum):
 class HistoryReasonCode(str, Enum):
     """Machine-readable detail codes for raw history rows."""
 
+    AUTO_FALLBACK_TO_DROP = 'auto_fallback_to_drop'
+    MANUAL_FALLBACK_TO_DROP = 'manual_fallback_to_drop'
     RETRY_EXHAUSTED = 'retry_exhausted'
     MAX_CONNECTIONS_REACHED = 'max_connections_reached'
     RETUNNEL_PENDING_CONNECTION_MISSING = 'retunnel_pending_connection_missing'
@@ -82,6 +84,7 @@ class HistoryReasonCode(str, Enum):
     MUTUAL_TIEBREAKER_LOSER = 'mutual_tiebreaker_loser'
     DUPLICATE_INCOMING_CONNECTED = 'duplicate_incoming_connected'
     DUPLICATE_INCOMING_PENDING = 'duplicate_incoming_pending'
+    UNACKED_LIVE_CONVERTED_TO_DROP = 'unacked_live_converted_to_drop'
 
 
 class HistorySummaryCode(str, Enum):

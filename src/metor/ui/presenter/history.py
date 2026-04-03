@@ -13,6 +13,27 @@ from metor.ui.presenter.shared import (
 from metor.ui.theme import Theme
 
 
+SUMMARY_REASON_TEXTS: dict[str, str] = {
+    'auto_fallback_to_drop': 'automatic fallback to drop',
+    'duplicate_incoming_connected': 'peer was already connected',
+    'duplicate_incoming_pending': 'peer already had a pending incoming request',
+    'late_acceptance_timeout': 'late acceptance timed out',
+    'manual_fallback_to_drop': 'manual fallback to drop',
+    'max_connections_reached': 'maximum concurrent connections reached',
+    'mutual_tiebreaker_loser': 'lost the mutual connect tie-break',
+    'outbound_attempt_closed_before_acceptance': (
+        'outbound attempt closed before acceptance'
+    ),
+    'outbound_attempt_rejected': 'outbound attempt rejected',
+    'pending_acceptance_expired': 'pending acceptance expired',
+    'retunnel_pending_connection_missing': 'retunnel pending connection missing',
+    'retry_exhausted': 'retry limit exhausted',
+    'unacked_live_converted_to_drop': (
+        'unacknowledged live messages were converted to drops'
+    ),
+}
+
+
 def _format_scope_label(
     profile: str,
     alias: Optional[str],
@@ -32,15 +53,29 @@ def _format_scope_label(
     return f'profile {Theme.CYAN}{profile}{Theme.RESET}'
 
 
-def _format_peer_label(entry: HistoryEntry) -> str:
+def _format_summary_peer_label(entry: HistoryEntry) -> str:
     """
-    Formats one peer identity label for history output.
+    Formats one peer identity label for projected summary output.
 
     Args:
         entry (HistoryEntry): The history entry.
 
     Returns:
         str: The formatted peer label.
+    """
+    alias_label: str = entry.alias or 'unknown'
+    return f'{Theme.PURPLE}{alias_label}{Theme.RESET}'
+
+
+def _format_raw_peer_label(entry: HistoryEntry) -> str:
+    """
+    Formats one peer identity label for raw ledger output.
+
+    Args:
+        entry (HistoryEntry): The history entry.
+
+    Returns:
+        str: The formatted raw peer label.
     """
     alias_label: str = entry.alias or 'unknown'
     if entry.peer_onion:
@@ -51,9 +86,9 @@ def _format_peer_label(entry: HistoryEntry) -> str:
     return f'{Theme.PURPLE}{alias_label}{Theme.RESET}'
 
 
-def _append_detail_text(base: str, entry: HistoryEntry) -> str:
+def _append_reason(base: str, entry: HistoryEntry) -> str:
     """
-    Appends one concise detail suffix when additional context exists.
+    Appends one humanized machine-readable reason suffix when available.
 
     Args:
         base (str): The base summary sentence.
@@ -62,9 +97,10 @@ def _append_detail_text(base: str, entry: HistoryEntry) -> str:
     Returns:
         str: The augmented summary sentence.
     """
-    if entry.detail_text:
-        return f'{base} {Theme.DARK_GREY}[{entry.detail_text}]{Theme.RESET}'
-    return base
+    reason_text: Optional[str] = SUMMARY_REASON_TEXTS.get(entry.detail_code or '')
+    if not reason_text:
+        return base
+    return f'{base} {Theme.DARK_GREY}Reason:{Theme.RESET} {reason_text}.'
 
 
 def _describe_summary_entry(entry: HistoryEntry) -> str:
@@ -77,7 +113,7 @@ def _describe_summary_entry(entry: HistoryEntry) -> str:
     Returns:
         str: The formatted summary sentence.
     """
-    peer_label: str = _format_peer_label(entry)
+    peer_label: str = _format_summary_peer_label(entry)
     family_prefix: str = f'{Theme.DARK_GREY}{entry.family.upper()}{Theme.RESET} '
 
     if entry.event_code == 'connection_requested':
@@ -90,17 +126,23 @@ def _describe_summary_entry(entry: HistoryEntry) -> str:
 
     if entry.event_code == 'connection_rejected':
         if entry.actor == 'local':
-            return f'{family_prefix}Rejected connection with {peer_label}.'
-        return f'{family_prefix}Connection with {peer_label} rejected.'
+            return _append_reason(
+                f'{family_prefix}Rejected connection with {peer_label}.',
+                entry,
+            )
+        return _append_reason(
+            f'{family_prefix}Connection with {peer_label} rejected.',
+            entry,
+        )
 
     if entry.event_code == 'connection_failed':
-        return _append_detail_text(
+        return _append_reason(
             f'{family_prefix}Connection to {peer_label} failed.',
             entry,
         )
 
     if entry.event_code == 'connection_lost':
-        return _append_detail_text(
+        return _append_reason(
             f'{family_prefix}Connection to {peer_label} lost.',
             entry,
         )
@@ -120,7 +162,7 @@ def _describe_summary_entry(entry: HistoryEntry) -> str:
         return f'{family_prefix}Retunnel completed for {peer_label}.'
 
     if entry.event_code == 'drop_queued':
-        return _append_detail_text(
+        return _append_reason(
             f'{family_prefix}Queued drop for {peer_label}.',
             entry,
         )
@@ -132,7 +174,7 @@ def _describe_summary_entry(entry: HistoryEntry) -> str:
         return f'{family_prefix}Received drop from {peer_label}.'
 
     if entry.event_code == 'drop_failed':
-        return _append_detail_text(
+        return _append_reason(
             f'{family_prefix}Drop delivery for {peer_label} failed.',
             entry,
         )
@@ -180,7 +222,7 @@ def format_raw_history(event: HistoryRawDataEvent) -> str:
     out: str = f'{get_header_string(header_text)}\n'
     for entry in event.entries:
         prefix, prefix_visible = build_timestamp_prefix(entry.timestamp)
-        peer_label: str = _format_peer_label(entry)
+        peer_label: str = _format_raw_peer_label(entry)
         line: str = (
             f'{Theme.DARK_GREY}family:{Theme.RESET} {Theme.CYAN}{entry.family}{Theme.RESET}\n'
             f'{Theme.DARK_GREY}event:{Theme.RESET} {Theme.YELLOW}{entry.event_code}{Theme.RESET}\n'

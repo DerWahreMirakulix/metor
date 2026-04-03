@@ -95,6 +95,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [DatabaseClearedEvent](#databaseclearedevent)
 - [DatabaseCorruptedEvent](#databasecorruptedevent)
 - [DisconnectedEvent](#disconnectedevent)
+- [DiscoveredPeerNotFoundEvent](#discoveredpeernotfoundevent)
 - [DropFailedEvent](#dropfailedevent)
 - [DropQueuedEvent](#dropqueuedevent)
 - [DropsDisabledEvent](#dropsdisabledevent)
@@ -109,6 +110,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [InboxNotificationEvent](#inboxnotificationevent)
 - [IncomingConnectionEvent](#incomingconnectionevent)
 - [InitEvent](#initevent)
+- [InternalErrorEvent](#internalerrorevent)
 - [InvalidConfigKeyEvent](#invalidconfigkeyevent)
 - [InvalidPasswordEvent](#invalidpasswordevent)
 - [InvalidSettingKeyEvent](#invalidsettingkeyevent)
@@ -1601,9 +1603,10 @@ _No additional payload parameters._
 
 Signals that the address book was cleared.
 
-| Field     | Type  | Default  |
-| --------- | ----- | -------- |
-| `profile` | `str` | Required |
+| Field             | Type  | Default  |
+| ----------------- | ----- | -------- |
+| `profile`         | `str` | Required |
+| `preserved_peers` | `int` | `0`      |
 
 **Wire Value:** `contacts_cleared`
 
@@ -1737,9 +1740,10 @@ _No additional payload parameters._
 
 Signals that a profile database was cleared.
 
-| Field     | Type  | Default  |
-| --------- | ----- | -------- |
-| `profile` | `str` | Required |
+| Field             | Type  | Default  |
+| ----------------- | ----- | -------- |
+| `profile`         | `str` | Required |
+| `preserved_peers` | `int` | `0`      |
 
 **Wire Value:** `db_cleared`
 
@@ -1792,6 +1796,27 @@ Announces a disconnected peer.
 {
   "event_type": "disconnected",
   "alias": "string"
+}
+```
+
+---
+
+### `DiscoveredPeerNotFoundEvent`
+
+Signals that no discovered peer matched a requested promotion target.
+
+| Field    | Type  | Default  |
+| -------- | ----- | -------- |
+| `target` | `str` | Required |
+
+**Wire Value:** `discovered_peer_not_found`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "discovered_peer_not_found",
+  "target": "string"
 }
 ```
 
@@ -2105,6 +2130,24 @@ Initializes the UI with the local onion address.
 ```json
 {
   "event_type": "init"
+}
+```
+
+---
+
+### `InternalErrorEvent`
+
+Signals that the daemon hit an unexpected internal error.
+
+_No additional payload parameters._
+
+**Wire Value:** `internal_error`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "internal_error"
 }
 ```
 

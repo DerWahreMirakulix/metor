@@ -1,7 +1,5 @@
 """Contact-specific database command handling."""
 
-from typing import Dict
-
 from metor.core.api import (
     AddContactCommand,
     ClearContactsCommand,
@@ -10,6 +8,7 @@ from metor.core.api import (
     EventType,
     GetContactsListCommand,
     IpcEvent,
+    JsonValue,
     RemoveContactCommand,
     RenameContactCommand,
     create_event,
@@ -34,6 +33,9 @@ CONTACT_EVENT_TYPES: dict[ContactOperationType, EventType] = {
     ),
     ContactOperationType.CONTACTS_CLEARED: EventType.CONTACTS_CLEARED,
     ContactOperationType.CONTACTS_CLEAR_FAILED: EventType.CONTACTS_CLEAR_FAILED,
+    ContactOperationType.DISCOVERED_PEER_NOT_FOUND: (
+        EventType.DISCOVERED_PEER_NOT_FOUND
+    ),
     ContactOperationType.ONION_IN_USE: EventType.ONION_IN_USE,
     ContactOperationType.PEER_ANONYMIZED: EventType.PEER_ANONYMIZED,
     ContactOperationType.PEER_CANT_DELETE_ACTIVE: EventType.PEER_CANT_DELETE_ACTIVE,
@@ -57,9 +59,8 @@ class DatabaseCommandContactsMixin(DatabaseCommandHandlerSupportMixin):
         Returns:
             IpcEvent: The IPC event DTO.
         """
-        return create_event(
-            CONTACT_EVENT_TYPES[result.operation_type], dict(result.params)
-        )
+        params: dict[str, JsonValue] = dict(result.params)
+        return create_event(CONTACT_EVENT_TYPES[result.operation_type], params)
 
     def _handle_get_contacts(self, _: GetContactsListCommand) -> IpcEvent:
         """
@@ -99,10 +100,7 @@ class DatabaseCommandContactsMixin(DatabaseCommandHandlerSupportMixin):
             if cmd.onion
             else self._cm.promote_discovered_peer(cmd.alias)
         )
-        params: Dict[str, str] = dict(result.params)
-        if not result.success and 'alias' not in params and cmd.alias:
-            params['alias'] = cmd.alias
-        return create_event(CONTACT_EVENT_TYPES[result.operation_type], params)
+        return self._create_contact_event(result)
 
     def _handle_remove_contact(self, cmd: RemoveContactCommand) -> IpcEvent:
         """
@@ -123,10 +121,7 @@ class DatabaseCommandContactsMixin(DatabaseCommandHandlerSupportMixin):
             self._emit_contact_side_effects(result.renames, result.removals)
 
         self._emit_orphan_cleanup(self._cm.cleanup_orphans(active_onions))
-        params: Dict[str, str] = dict(result.params)
-        if 'alias' not in params and cmd.alias:
-            params['alias'] = cmd.alias
-        return create_event(CONTACT_EVENT_TYPES[result.operation_type], params)
+        return self._create_contact_event(result)
 
     def _handle_rename_contact(self, cmd: RenameContactCommand) -> IpcEvent:
         """

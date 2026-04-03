@@ -223,9 +223,14 @@ class IpcServer:
                         try:
                             cmd_dict: Dict[str, JsonValue] = json.loads(line)
                             cmd: IpcCommand = IpcCommand.from_dict(cmd_dict)
-                            self._command_callback(cmd, conn)
                         except Exception:
                             self.send_to(conn, create_event(EventType.UNKNOWN_COMMAND))
+                            continue
+
+                        try:
+                            self._command_callback(cmd, conn)
+                        except Exception:
+                            self.send_to(conn, create_event(EventType.INTERNAL_ERROR))
                 except socket.timeout:
                     continue
         except Exception:

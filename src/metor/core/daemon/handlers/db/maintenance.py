@@ -20,9 +20,9 @@ class DatabaseCommandMaintenanceMixin(DatabaseCommandHandlerSupportMixin):
             IpcEvent: The resulting database maintenance event DTO.
         """
         active_onions = self._get_active_onions()
-        contacts_result = self._cm.clear_contacts(active_onions)
         history_result = self._hm.clear_history()
         messages_result = self._mm.clear_messages()
+        contacts_result = self._cm.clear_contacts(active_onions)
 
         if contacts_result.success:
             self._emit_contact_side_effects(
@@ -36,7 +36,15 @@ class DatabaseCommandMaintenanceMixin(DatabaseCommandHandlerSupportMixin):
             and messages_result.success
         )
         if success:
+            preserved_peers_raw: str | int = contacts_result.params.get(
+                'preserved_peers',
+                0,
+            )
             return create_event(
-                EventType.DB_CLEARED, {'profile': self._pm.profile_name}
+                EventType.DB_CLEARED,
+                {
+                    'profile': self._pm.profile_name,
+                    'preserved_peers': int(preserved_peers_raw),
+                },
             )
         return create_event(EventType.DB_CLEAR_FAILED)

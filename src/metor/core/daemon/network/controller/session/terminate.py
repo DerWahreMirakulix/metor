@@ -28,7 +28,6 @@ from metor.data import (
     MessageType,
     SettingKey,
 )
-from metor.utils import Constants
 
 
 def _close_socket(sock: socket.socket) -> None:
@@ -306,7 +305,7 @@ def disconnect(
                 HistoryEvent.DROP_QUEUED,
                 onion,
                 actor=HistoryActor.SYSTEM,
-                detail_text='Unacked msgs converted to drop',
+                detail_code=HistoryReasonCode.UNACKED_LIVE_CONVERTED_TO_DROP,
             )
         if not suppress_events:
             controller._broadcast(
@@ -326,7 +325,11 @@ def disconnect(
                         'utf-8'
                     )
                 )
-                time.sleep(Constants.TCP_CLOSE_LINGER_SEC)
+                linger_timeout_sec: float = controller._config.get_float(
+                    SettingKey.LIVE_DISCONNECT_LINGER_TIMEOUT
+                )
+                if linger_timeout_sec > 0:
+                    time.sleep(linger_timeout_sec)
                 conn.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass

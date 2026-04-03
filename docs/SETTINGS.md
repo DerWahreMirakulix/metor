@@ -645,6 +645,28 @@ Keeps a cached drop tunnel warm while live remains the primary transport.
 
 ---
 
+#### `daemon.connect_retry_backoff_delay`
+
+Delay between explicit live connect retries after the initial attempt. `0` retries immediately.
+
+| Property         | Value                         |
+| ---------------- | ----------------------------- |
+| Type             | `float`                       |
+| Default          | `3.0`                         |
+| Category         | `Advanced Network Resilience` |
+| Scope            | `Daemon runtime`              |
+| Profile Override | `Yes`                         |
+| Constraints      | Float >= 0 seconds.           |
+
+**CLI Examples**
+
+- `metor settings get daemon.connect_retry_backoff_delay`
+- `metor settings set daemon.connect_retry_backoff_delay 3.0`
+- `metor -p <profile> config get daemon.connect_retry_backoff_delay`
+- `metor -p <profile> config set daemon.connect_retry_backoff_delay 3.0`
+
+---
+
 #### `daemon.live_reconnect_delay`
 
 Base delay before automatic live reconnect attempts. `0` disables automatic reconnect.
@@ -686,6 +708,28 @@ Reconnect grace window for silently accepting a recent peer reconnect. `0` disab
 - `metor settings set daemon.live_reconnect_grace_timeout 15`
 - `metor -p <profile> config get daemon.live_reconnect_grace_timeout`
 - `metor -p <profile> config set daemon.live_reconnect_grace_timeout 15`
+
+---
+
+#### `daemon.live_disconnect_linger_timeout`
+
+Keeps a locally initiated live socket open briefly after sending `DISCONNECT` so the control frame can flush through Tor before shutdown. Higher values improve retunnel reliability on slower routes.
+
+| Property         | Value                         |
+| ---------------- | ----------------------------- |
+| Type             | `float`                       |
+| Default          | `1.0`                         |
+| Category         | `Advanced Network Resilience` |
+| Scope            | `Daemon runtime`              |
+| Profile Override | `Yes`                         |
+| Constraints      | Float >= 0 seconds.           |
+
+**CLI Examples**
+
+- `metor settings get daemon.live_disconnect_linger_timeout`
+- `metor settings set daemon.live_disconnect_linger_timeout 1.0`
+- `metor -p <profile> config get daemon.live_disconnect_linger_timeout`
+- `metor -p <profile> config set daemon.live_disconnect_linger_timeout 1.0`
 
 ---
 

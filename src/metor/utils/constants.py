@@ -60,7 +60,6 @@ class Constants:
     )
     INPUT_SLEEP_SEC: float = 0.02  # UI non-blocking input thread sleep
     TCP_CLOSE_LINGER_SEC: float = 0.2  # Socket linger before shutdown
-    CONNECT_RETRY_BACKOFF_SEC: float = 3.0  # Delay between explicit connect retries
     MUTUAL_CONNECT_RACE_WINDOW_SEC: float = 5.0  # Short grace window to recognize the winning inbound side of a simultaneous connect race
     PENDING_EXPIRY_FEEDBACK_WINDOW_SEC: float = 30.0  # How long a recently expired pending live request should produce a dedicated accept-expired UI hint
 

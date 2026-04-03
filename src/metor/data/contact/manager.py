@@ -135,7 +135,7 @@ class ContactManager:
         if not res:
             return ContactOperationResult(
                 False,
-                ContactOperationType.PEER_NOT_FOUND,
+                ContactOperationType.DISCOVERED_PEER_NOT_FOUND,
                 {'target': alias},
             )
 
@@ -376,7 +376,10 @@ class ContactManager:
             return ContactOperationResult(
                 True,
                 ContactOperationType.CONTACTS_CLEARED,
-                {'profile': self._pm.profile_name},
+                {
+                    'profile': self._pm.profile_name,
+                    'preserved_peers': len(renames),
+                },
                 renames=tuple(renames),
                 removals=tuple(removed),
             )

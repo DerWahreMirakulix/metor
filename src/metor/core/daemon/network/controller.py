@@ -285,7 +285,9 @@ class ConnectionController:
         Returns:
             None
         """
-        remaining_sec: float = Constants.CONNECT_RETRY_BACKOFF_SEC
+        remaining_sec: float = self._config.get_float(
+            SettingKey.CONNECT_RETRY_BACKOFF_DELAY
+        )
         while remaining_sec > 0:
             if self._stop_flag.is_set():
                 break
@@ -1031,7 +1033,7 @@ class ConnectionController:
                     HistoryEvent.DROP_QUEUED,
                     onion,
                     actor=HistoryActor.SYSTEM,
-                    detail_text='Unacked msgs converted to drop',
+                    detail_code=HistoryReasonCode.UNACKED_LIVE_CONVERTED_TO_DROP,
                 )
             if not suppress_events:
                 self._broadcast(

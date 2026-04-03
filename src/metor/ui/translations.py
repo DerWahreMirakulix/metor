@@ -96,6 +96,9 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         StatusTone.SYSTEM,
     ),
     EventType.UNKNOWN_COMMAND: TranslationDef('Unknown command.', StatusTone.ERROR),
+    EventType.INTERNAL_ERROR: TranslationDef(
+        'Internal daemon error.', StatusTone.ERROR
+    ),
     EventType.TOR_KEY_DECRYPT_FAILED: TranslationDef(
         'Failed to decrypt Tor runtime key.', StatusTone.ERROR
     ),
@@ -265,10 +268,17 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
     EventType.PEER_NOT_FOUND: TranslationDef(
         "Target '{target}' not found.", StatusTone.ERROR
     ),
+    EventType.DISCOVERED_PEER_NOT_FOUND: TranslationDef(
+        "No discovered peer matching '{target}'.", StatusTone.ERROR
+    ),
     EventType.CONTACT_ALREADY_SAVED: TranslationDef(
         "Alias '{alias}' is already saved.",
         StatusTone.SYSTEM,
         AliasPolicy.DYNAMIC,
+    ),
+    EventType.RENAME_SUCCESS: TranslationDef(
+        "Peer alias synchronized from '{old_alias}' to '{new_alias}'.",
+        StatusTone.SYSTEM,
     ),
     EventType.PEER_PROMOTED: TranslationDef(
         "Discovered peer '{alias}' saved permanently to address book.",
@@ -312,7 +322,7 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         AliasPolicy.DYNAMIC,
     ),
     EventType.CONTACTS_CLEARED: TranslationDef(
-        "All contacts cleared and active peers anonymized for profile '{profile}'.",
+        "Address book for profile '{profile}' cleared{preserved_peers_suffix}.",
         StatusTone.SYSTEM,
     ),
     EventType.CONTACTS_CLEAR_FAILED: TranslationDef(
@@ -350,7 +360,8 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         'Failed to clear messages.', StatusTone.ERROR
     ),
     EventType.DB_CLEARED: TranslationDef(
-        "Database for profile '{profile}' successfully cleared.", StatusTone.SYSTEM
+        "Database for profile '{profile}' cleared{preserved_peers_suffix}.",
+        StatusTone.SYSTEM,
     ),
     EventType.DB_CLEAR_FAILED: TranslationDef(
         'Error clearing database.', StatusTone.ERROR
@@ -360,6 +371,50 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
 
 class Translator:
     """Provides dynamic text translations based on strict daemon EventTypes."""
+
+    @staticmethod
+    def _build_preserved_peers_suffix(
+        code: EventType,
+        preserved_peers_raw: Optional[JsonValue],
+    ) -> str:
+        """
+        Builds one partial-clear suffix when anonymized discovered peers remain.
+
+        Args:
+            code (EventType): The clear-result event code.
+            preserved_peers_raw (Optional[JsonValue]): The raw preserved-peer count.
+
+        Returns:
+            str: One localized suffix including the leading separator when needed.
+        """
+        preserved_peers: int = 0
+        if isinstance(preserved_peers_raw, int):
+            preserved_peers = max(0, preserved_peers_raw)
+        elif (
+            isinstance(preserved_peers_raw, float) and preserved_peers_raw.is_integer()
+        ):
+            preserved_peers = max(0, int(preserved_peers_raw))
+        elif isinstance(preserved_peers_raw, str) and preserved_peers_raw.isdigit():
+            preserved_peers = max(0, int(preserved_peers_raw))
+
+        if preserved_peers <= 0:
+            return ''
+
+        peer_label: str = 'active peer' if code is EventType.DB_CLEARED else 'peer'
+        if preserved_peers != 1:
+            peer_label += 's'
+        verb: str = 'was' if preserved_peers == 1 else 'were'
+        discovered_label: str = (
+            'anonymized discovered peer'
+            if preserved_peers == 1
+            else 'anonymized discovered peers'
+        )
+        article: str = 'an ' if preserved_peers == 1 else ''
+
+        return (
+            f', but {preserved_peers} {peer_label} {verb} preserved as '
+            f'{article}{discovered_label}'
+        )
 
     @staticmethod
     def _resolve_connection_origin(
@@ -542,6 +597,14 @@ class Translator:
                 f" for '{Theme.YELLOW}{key_text}{Theme.RESET}'" if key_text else ''
             )
             safe_params['reason'] = f': {reason_text}' if reason_text else ''
+
+        if code in {EventType.CONTACTS_CLEARED, EventType.DB_CLEARED}:
+            safe_params['preserved_peers_suffix'] = (
+                Translator._build_preserved_peers_suffix(
+                    code,
+                    safe_params.get('preserved_peers'),
+                )
+            )
 
         if code in {
             EventType.CONNECTED,

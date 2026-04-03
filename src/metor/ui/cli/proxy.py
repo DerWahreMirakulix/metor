@@ -62,6 +62,35 @@ from metor.ui import (
 from metor.utils import Constants, TypeCaster
 
 
+CLI_ASYNC_EVENT_TYPES: set[EventType] = {
+    EventType.ACK,
+    EventType.AUTO_RECONNECT_SCHEDULED,
+    EventType.CONNECTED,
+    EventType.CONNECTION_AUTO_ACCEPTED,
+    EventType.CONNECTION_CONNECTING,
+    EventType.CONNECTION_FAILED,
+    EventType.CONNECTION_PENDING,
+    EventType.CONNECTION_REJECTED,
+    EventType.CONNECTION_RETRY,
+    EventType.CONNECTIONS_STATE,
+    EventType.CONTACT_REMOVED,
+    EventType.DISCONNECTED,
+    EventType.DROP_FAILED,
+    EventType.FALLBACK_SUCCESS,
+    EventType.INBOX_NOTIFICATION,
+    EventType.INCOMING_CONNECTION,
+    EventType.INIT,
+    EventType.NO_PENDING_LIVE_MSGS,
+    EventType.PENDING_CONNECTION_EXPIRED,
+    EventType.REMOTE_MSG,
+    EventType.RENAME_SUCCESS,
+    EventType.RETUNNEL_FAILED,
+    EventType.RETUNNEL_INITIATED,
+    EventType.RETUNNEL_SUCCESS,
+    EventType.SWITCH_SUCCESS,
+}
+
+
 class CliProxy:
     """Facade for CLI operations that either route locally or over strict IPC DTOs."""
 
@@ -365,6 +394,9 @@ class CliProxy:
                     ):
                         pending_resume_event = None
                         self._send_socket_command(s, cmd)
+                        continue
+
+                    if event.event_type in CLI_ASYNC_EVENT_TYPES:
                         continue
 
                     return self._format_ipc_event(event)

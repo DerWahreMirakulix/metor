@@ -24,6 +24,7 @@ from metor.data import (
     HistoryActor,
     HistoryManager,
     HistoryEvent,
+    HistoryReasonCode,
     MessageManager,
     MessageDirection,
     MessageType,
@@ -121,7 +122,7 @@ class MessageRouter:
                 HistoryEvent.DROP_QUEUED,
                 onion,
                 actor=HistoryActor.LOCAL,
-                detail_text='Manual fallback to drop',
+                detail_code=HistoryReasonCode.MANUAL_FALLBACK_TO_DROP,
             )
 
         self._broadcast(
@@ -177,7 +178,7 @@ class MessageRouter:
                     HistoryEvent.DROP_QUEUED,
                     onion,
                     actor=HistoryActor.SYSTEM,
-                    detail_text='Auto fallback to drop',
+                    detail_code=HistoryReasonCode.AUTO_FALLBACK_TO_DROP,
                 )
                 self._broadcast(
                     FallbackSuccessEvent(

@@ -53,6 +53,18 @@ class PeerNotFoundEvent(IpcEvent):
     event_type: EventType = field(default=EventType.PEER_NOT_FOUND, init=False)
 
 
+@register_event(EventType.DISCOVERED_PEER_NOT_FOUND)
+@dataclass
+class DiscoveredPeerNotFoundEvent(IpcEvent):
+    """Signals that no discovered peer matched a requested promotion target."""
+
+    target: str
+    event_type: EventType = field(
+        default=EventType.DISCOVERED_PEER_NOT_FOUND,
+        init=False,
+    )
+
+
 @register_event(EventType.CONTACT_ALREADY_SAVED)
 @dataclass
 class ContactAlreadySavedEvent(IpcEvent):

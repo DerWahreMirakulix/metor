@@ -78,7 +78,10 @@ def handle_client(daemon: Any, conn: socket.socket) -> None:
                 daemon._send(conn, create_event(EventType.UNKNOWN_COMMAND))
                 break
 
-            daemon._process_command(cmd, conn)
+            try:
+                daemon._process_command(cmd, conn)
+            except Exception:
+                daemon._send(conn, create_event(EventType.INTERNAL_ERROR))
             break
     except OSError:
         pass

@@ -15,6 +15,7 @@ class ContactsClearedEvent(IpcEvent):
     """Signals that the address book was cleared."""
 
     profile: str
+    preserved_peers: int = 0
     event_type: EventType = field(default=EventType.CONTACTS_CLEARED, init=False)
 
 
@@ -114,6 +115,7 @@ class DatabaseClearedEvent(IpcEvent):
     """Signals that a profile database was cleared."""
 
     profile: str
+    preserved_peers: int = 0
     event_type: EventType = field(default=EventType.DB_CLEARED, init=False)
 
 

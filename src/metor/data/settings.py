@@ -54,8 +54,10 @@ class SettingKey(str, Enum):
     MAX_CONCURRENT_CONNECTIONS = 'daemon.max_concurrent_connections'
     DROP_TUNNEL_IDLE_TIMEOUT = 'daemon.drop_tunnel_idle_timeout'
     ALLOW_DROP_STANDBY_ON_LIVE = 'daemon.allow_drop_standby_on_live'
+    CONNECT_RETRY_BACKOFF_DELAY = 'daemon.connect_retry_backoff_delay'
     LIVE_RECONNECT_DELAY = 'daemon.live_reconnect_delay'
     LIVE_RECONNECT_GRACE_TIMEOUT = 'daemon.live_reconnect_grace_timeout'
+    LIVE_DISCONNECT_LINGER_TIMEOUT = 'daemon.live_disconnect_linger_timeout'
     RETUNNEL_RECONNECT_DELAY = 'daemon.retunnel_reconnect_delay'
     RETUNNEL_RECOVERY_RETRIES = 'daemon.retunnel_recovery_retries'
 
@@ -332,6 +334,14 @@ class Settings:
             description='Keeps a cached drop tunnel warm while live remains the primary transport.',
             constraints='Boolean.',
         ),
+        SettingKey.CONNECT_RETRY_BACKOFF_DELAY: SettingSpec(
+            key=SettingKey.CONNECT_RETRY_BACKOFF_DELAY,
+            default=3.0,
+            category='Advanced Network Resilience',
+            description='Delay between explicit live connect retries after the initial attempt. `0` retries immediately.',
+            constraints='Float >= 0 seconds.',
+            min_value=0.0,
+        ),
         SettingKey.LIVE_RECONNECT_DELAY: SettingSpec(
             key=SettingKey.LIVE_RECONNECT_DELAY,
             default=15,
@@ -347,6 +357,14 @@ class Settings:
             description='Reconnect grace window for silently accepting a recent peer reconnect. `0` disables reconnect grace.',
             constraints='Integer >= 0 seconds.',
             min_value=0,
+        ),
+        SettingKey.LIVE_DISCONNECT_LINGER_TIMEOUT: SettingSpec(
+            key=SettingKey.LIVE_DISCONNECT_LINGER_TIMEOUT,
+            default=1.0,
+            category='Advanced Network Resilience',
+            description='Keeps a locally initiated live socket open briefly after sending `DISCONNECT` so the control frame can flush through Tor before shutdown. Higher values improve retunnel reliability on slower routes.',
+            constraints='Float >= 0 seconds.',
+            min_value=0.0,
         ),
         SettingKey.RETUNNEL_RECONNECT_DELAY: SettingSpec(
             key=SettingKey.RETUNNEL_RECONNECT_DELAY,

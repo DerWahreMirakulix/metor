@@ -95,6 +95,14 @@ class UnknownCommandEvent(IpcEvent):
     event_type: EventType = field(default=EventType.UNKNOWN_COMMAND, init=False)
 
 
+@register_event(EventType.INTERNAL_ERROR)
+@dataclass
+class InternalErrorEvent(IpcEvent):
+    """Signals that the daemon hit an unexpected internal error."""
+
+    event_type: EventType = field(default=EventType.INTERNAL_ERROR, init=False)
+
+
 @register_event(EventType.INVALID_SETTING_KEY)
 @dataclass
 class InvalidSettingKeyEvent(IpcEvent):
