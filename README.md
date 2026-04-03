@@ -76,12 +76,12 @@ Python 3.11 or higher is required.
 
 ```bash
 # Recommended security-conscious runtime installation
-python -m pip install --upgrade 'pip==26.0.1'
+python -m pip install --upgrade pip==26.0.1
 pip install -r requirements/runtime.lock
 pip install --no-deps --no-build-isolation .
 
 # Recommended security-conscious developer installation
-python -m pip install --upgrade 'pip==26.0.1'
+python -m pip install --upgrade pip==26.0.1
 pip install -r requirements/dev.lock
 pip install --no-deps --no-build-isolation -e .
 ```
