@@ -24,6 +24,7 @@ from metor.core.api import (
 )
 from metor.core.daemon.models import PrimaryTransport
 from metor.data import (
+    HistoryActor,
     MessageManager,
     MessageStatus,
     HistoryManager,
@@ -259,11 +260,18 @@ class OutboxWorker:
                     self._tunnels[onion] = (conn, stream, time.time())
                 if self._state:
                     self._state.mark_drop_tunnel_open(onion)
-                self._hm.log_event(HistoryEvent.DROP_TUNNEL_CONNECTED, onion)
+                self._hm.log_event(
+                    HistoryEvent.DROP_TUNNEL_CONNECTED,
+                    onion,
+                    actor=HistoryActor.SYSTEM,
+                )
 
         if not conn or not stream:
             self._hm.log_event(
-                HistoryEvent.DROP_TUNNEL_FAILED, onion, 'Failed to build Tor circuit'
+                HistoryEvent.DROP_TUNNEL_FAILED,
+                onion,
+                actor=HistoryActor.SYSTEM,
+                detail_text='Failed to build Tor circuit',
             )
             return
 
@@ -305,10 +313,19 @@ class OutboxWorker:
                         raise ConnectionError('Tunnel dropped or invalid ACK received.')
 
                     self._mm.update_message_status(db_id, MessageStatus.DELIVERED)
-                    self._hm.log_event(HistoryEvent.DROP_SENT, onion)
+                    self._hm.log_event(
+                        HistoryEvent.DROP_SENT,
+                        onion,
+                        actor=HistoryActor.LOCAL,
+                    )
                     self._broadcast(AckEvent(msg_id=msg_id, text=payload))
                 except Exception as e:
-                    self._hm.log_event(HistoryEvent.DROP_FAILED, onion, str(e))
+                    self._hm.log_event(
+                        HistoryEvent.DROP_FAILED,
+                        onion,
+                        actor=HistoryActor.SYSTEM,
+                        detail_text=str(e),
+                    )
                     self._close_tunnel(onion)
                     break  # Stop processing batch, messages remain PENDING for next tick retry
 
@@ -323,7 +340,12 @@ class OutboxWorker:
             ):
                 self._close_tunnel(onion)
         except Exception as e:
-            self._hm.log_event(HistoryEvent.DROP_FAILED, onion, str(e))
+            self._hm.log_event(
+                HistoryEvent.DROP_FAILED,
+                onion,
+                actor=HistoryActor.SYSTEM,
+                detail_text=str(e),
+            )
             self._close_tunnel(onion)
 
     def _send_single_drop(
@@ -344,7 +366,10 @@ class OutboxWorker:
         )
         if not tunnel_data:
             self._hm.log_event(
-                HistoryEvent.DROP_TUNNEL_FAILED, onion, 'Failed to build Tor circuit'
+                HistoryEvent.DROP_TUNNEL_FAILED,
+                onion,
+                actor=HistoryActor.SYSTEM,
+                detail_text='Failed to build Tor circuit',
             )
             return
 
@@ -361,10 +386,19 @@ class OutboxWorker:
                 raise ConnectionError('Tunnel dropped or invalid ACK received.')
 
             self._mm.update_message_status(db_id, MessageStatus.DELIVERED)
-            self._hm.log_event(HistoryEvent.DROP_SENT, onion)
+            self._hm.log_event(
+                HistoryEvent.DROP_SENT,
+                onion,
+                actor=HistoryActor.LOCAL,
+            )
             self._broadcast(AckEvent(msg_id=msg_id, text=payload))
         except Exception as e:
-            self._hm.log_event(HistoryEvent.DROP_FAILED, onion, str(e))
+            self._hm.log_event(
+                HistoryEvent.DROP_FAILED,
+                onion,
+                actor=HistoryActor.SYSTEM,
+                detail_text=str(e),
+            )
         finally:
             try:
                 conn.close()
@@ -510,7 +544,11 @@ class OutboxWorker:
             self._state.clear_drop_tunnel(onion)
         try:
             conn.close()
-            self._hm.log_event(HistoryEvent.DROP_TUNNEL_CLOSED, onion)
+            self._hm.log_event(
+                HistoryEvent.DROP_TUNNEL_CLOSED,
+                onion,
+                actor=HistoryActor.SYSTEM,
+            )
         except Exception:
             pass
 

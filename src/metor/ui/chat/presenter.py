@@ -151,13 +151,13 @@ class ChatPresenter:
         if msg.msg_type == ChatMessageType.STATUS:
             prefix_raw: str
             if msg.tone == StatusTone.INFO:
-                prefix_raw = f'info{initial_prompt}'
+                prefix_raw = f'inf{initial_prompt}'
                 prefix = f'{timestamp_prefix}{Theme.YELLOW}{prefix_raw}{Theme.RESET}'
             elif msg.tone == StatusTone.ERROR:
-                prefix_raw = f'error{initial_prompt}'
+                prefix_raw = f'err{initial_prompt}'
                 prefix = f'{timestamp_prefix}{Theme.RED}{prefix_raw}{Theme.RESET}'
             else:
-                prefix_raw = f'system{initial_prompt}'
+                prefix_raw = f'sys{initial_prompt}'
                 prefix = f'{timestamp_prefix}{Theme.CYAN}{prefix_raw}{Theme.RESET}'
             visible_prefix = f'{timestamp_visible}{prefix_raw}'
         elif msg.msg_type != ChatMessageType.RAW:

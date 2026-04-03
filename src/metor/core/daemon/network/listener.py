@@ -13,21 +13,26 @@ from typing import Optional, Callable, List, TYPE_CHECKING
 
 from metor.core import TorManager
 from metor.core.api import (
+    ConnectionActor,
+    ConnectionOrigin,
+    ConnectionReasonCode,
     EventType,
     IpcEvent,
     ConnectedEvent,
     DisconnectedEvent,
     IncomingConnectionEvent,
     RetunnelSuccessEvent,
-    TiebreakerRejectedEvent,
+    ConnectionRejectedEvent,
     MaxConnectionsReachedEvent,
     create_event,
 )
-from metor.core.daemon.models import TorCommand
+from metor.core.daemon.models import LiveTransportState, TorCommand
 from metor.core.daemon.crypto import Crypto
 from metor.data import (
+    HistoryActor,
     HistoryManager,
     HistoryEvent,
+    HistoryReasonCode,
     ContactManager,
     SettingKey,
 )
@@ -144,9 +149,11 @@ class InboundListener:
 
                 if active_count + unauth_count >= max_conn:
                     self._hm.log_event(
-                        HistoryEvent.LIVE_REJECTED_MAX_CONNECTIONS,
+                        HistoryEvent.LIVE_REJECTED,
                         None,
-                        'Listener drop',
+                        actor=HistoryActor.SYSTEM,
+                        detail_text='Listener drop',
+                        detail_code=HistoryReasonCode.MAX_CONNECTIONS_REACHED,
                     )
                     self._broadcast(
                         MaxConnectionsReachedEvent(
@@ -164,7 +171,12 @@ class InboundListener:
                     target=self._handle_incoming, args=(conn,), daemon=True
                 ).start()
             except MemoryError as e:
-                self._hm.log_event(HistoryEvent.LIVE_STREAM_CORRUPTED, None, str(e))
+                self._hm.log_event(
+                    HistoryEvent.LIVE_STREAM_CORRUPTED,
+                    None,
+                    actor=HistoryActor.SYSTEM,
+                    detail_text=str(e),
+                )
             except Exception:
                 continue
 
@@ -202,7 +214,12 @@ class InboundListener:
                     if len(parts) >= 4 and parts[3] == 'ASYNC':
                         is_async = True
         except MemoryError as e:
-            self._hm.log_event(HistoryEvent.LIVE_STREAM_CORRUPTED, onion, str(e))
+            self._hm.log_event(
+                HistoryEvent.LIVE_STREAM_CORRUPTED,
+                onion,
+                actor=HistoryActor.SYSTEM,
+                detail_text=str(e),
+            )
         except Exception:
             pass
         finally:
@@ -276,10 +293,13 @@ class InboundListener:
         if not self._state.remove_pending_connection_if_socket(onion, conn):
             return
 
+        self._state.mark_recent_pending_expiry(onion)
         self._hm.log_event(
             HistoryEvent.LIVE_CONNECTION_LOST,
             onion,
-            'Pending acceptance expired',
+            actor=HistoryActor.SYSTEM,
+            trigger=ConnectionOrigin.INCOMING,
+            detail_code=HistoryReasonCode.PENDING_ACCEPTANCE_EXPIRED,
         )
 
         try:
@@ -289,7 +309,15 @@ class InboundListener:
 
         if self._state.is_retunneling(onion):
             self._state.clear_retunnel_flow(onion)
-            self._broadcast(DisconnectedEvent(alias=alias, onion=onion))
+            self._broadcast(
+                DisconnectedEvent(
+                    alias=alias,
+                    onion=onion,
+                    actor=ConnectionActor.SYSTEM,
+                    origin=ConnectionOrigin.INCOMING,
+                    reason_code=ConnectionReasonCode.PENDING_ACCEPTANCE_EXPIRED,
+                )
+            )
             self._broadcast(
                 create_event(
                     EventType.RETUNNEL_FAILED,
@@ -320,14 +348,23 @@ class InboundListener:
             conn.close()
             return
 
-        is_outbound_attempt: bool = self._state.has_outbound_attempt(onion)
+        is_outbound_attempt: bool = self._state.has_active_or_recent_outbound_attempt(
+            onion
+        )
         should_reject, is_mutual_winner = HandshakeProtocol.evaluate_tie_breaker(
             self._tm.onion, onion, is_outbound_attempt
         )
 
         grace_reconnect: bool = self._state.has_live_reconnect_grace(onion)
+        scheduled_auto_reconnect: bool = self._state.has_scheduled_auto_reconnect(onion)
+        duplicate_reason_code: Optional[HistoryReasonCode] = None
 
         if self._state.is_connected_or_pending(onion) and not grace_reconnect:
+            duplicate_reason_code = (
+                HistoryReasonCode.DUPLICATE_INCOMING_CONNECTED
+                if self._state.get_live_state(onion) is LiveTransportState.CONNECTED
+                else HistoryReasonCode.DUPLICATE_INCOMING_PENDING
+            )
             should_reject = True
 
         if should_reject:
@@ -339,21 +376,71 @@ class InboundListener:
                 pass
             conn.close()
 
+            if duplicate_reason_code is not None:
+                self._hm.log_event(
+                    HistoryEvent.LIVE_REJECTED,
+                    onion,
+                    actor=HistoryActor.SYSTEM,
+                    trigger=ConnectionOrigin.INCOMING,
+                    detail_code=duplicate_reason_code,
+                )
+                return
+
+            if (
+                not scheduled_auto_reconnect
+                and self._state.get_outbound_attempt_origin(onion)
+                is ConnectionOrigin.MANUAL
+            ):
+                self._state.override_outbound_connected_origin(
+                    onion,
+                    ConnectionOrigin.MUTUAL_CONNECT,
+                )
+
             self._hm.log_event(
-                HistoryEvent.TIEBREAKER_REJECTED,
+                HistoryEvent.LIVE_REJECTED,
                 onion,
-                'Mutual connection collision resolved',
+                actor=HistoryActor.SYSTEM,
+                trigger=(
+                    ConnectionOrigin.AUTO_RECONNECT
+                    if scheduled_auto_reconnect
+                    else ConnectionOrigin.MUTUAL_CONNECT
+                ),
+                detail_code=HistoryReasonCode.MUTUAL_TIEBREAKER_LOSER,
             )
-            self._broadcast(TiebreakerRejectedEvent(alias=alias, onion=onion))
+            self._broadcast(
+                ConnectionRejectedEvent(
+                    alias=alias,
+                    onion=onion,
+                    origin=(
+                        ConnectionOrigin.AUTO_RECONNECT
+                        if scheduled_auto_reconnect
+                        else ConnectionOrigin.MUTUAL_CONNECT
+                    ),
+                    actor=ConnectionActor.SYSTEM,
+                    reason_code=ConnectionReasonCode.MUTUAL_TIEBREAKER_LOSER,
+                )
+            )
             return
+
+        contact_auto_accept: bool = (
+            alias in self._cm.get_all_contacts()
+            and self._config.get_bool(SettingKey.AUTO_ACCEPT_CONTACTS)
+        )
+        incoming_origin: ConnectionOrigin = ConnectionOrigin.INCOMING
+        if grace_reconnect:
+            incoming_origin = ConnectionOrigin.GRACE_RECONNECT
+        elif scheduled_auto_reconnect:
+            incoming_origin = ConnectionOrigin.AUTO_RECONNECT
+        elif is_mutual_winner:
+            incoming_origin = ConnectionOrigin.MUTUAL_CONNECT
+        elif contact_auto_accept:
+            incoming_origin = ConnectionOrigin.AUTO_ACCEPT_CONTACT
 
         should_auto_accept_now: bool = (
             grace_reconnect
+            or scheduled_auto_reconnect
             or is_mutual_winner
-            or (
-                (alias in self._cm.get_all_contacts())
-                and self._config.get_bool(SettingKey.AUTO_ACCEPT_CONTACTS)
-            )
+            or contact_auto_accept
         )
 
         accepted_now: bool = False
@@ -377,6 +464,7 @@ class InboundListener:
                 conn,
                 stream.get_buffer(),
                 reason=pending_reason,
+                origin=incoming_origin,
             )
             threading.Thread(
                 target=self._watch_pending_connection,
@@ -390,17 +478,54 @@ class InboundListener:
             except Exception:
                 pass
 
-            self._hm.log_event(HistoryEvent.LIVE_CONNECTED, onion)
+            self._hm.log_event(
+                HistoryEvent.LIVE_CONNECTED,
+                onion,
+                actor=HistoryActor.SYSTEM,
+                trigger=incoming_origin,
+            )
             if self._state.consume_retunnel_reconnect(onion):
-                self._hm.log_event(HistoryEvent.LIVE_RETUNNEL_SUCCESS, onion)
+                self._hm.log_event(
+                    HistoryEvent.LIVE_RETUNNEL_SUCCESS,
+                    onion,
+                    actor=HistoryActor.SYSTEM,
+                )
                 self._state.clear_retunnel_flow(onion)
                 self._broadcast(RetunnelSuccessEvent(alias=alias, onion=onion))
             else:
-                self._broadcast(ConnectedEvent(alias=alias, onion=onion))
+                self._broadcast(
+                    ConnectedEvent(
+                        alias=alias,
+                        onion=onion,
+                        origin=incoming_origin,
+                        actor=ConnectionActor.SYSTEM,
+                    )
+                )
 
             if self._receiver:
-                self._receiver.start_receiving(onion, conn, stream.get_buffer())
+                self._receiver.start_receiving(
+                    onion,
+                    conn,
+                    stream.get_buffer(),
+                    connection_origin=incoming_origin,
+                )
         else:
-            self._hm.log_event(HistoryEvent.LIVE_REQUESTED_BY_REMOTE, onion)
+            self._hm.log_event(
+                HistoryEvent.LIVE_REQUESTED,
+                onion,
+                actor=HistoryActor.REMOTE,
+                trigger=(
+                    incoming_origin
+                    if pending_reason is PendingConnectionReason.CONSUMER_ABSENT
+                    else ConnectionOrigin.INCOMING
+                ),
+            )
             if pending_reason is PendingConnectionReason.USER_ACCEPT:
-                self._broadcast(IncomingConnectionEvent(alias=alias, onion=onion))
+                self._broadcast(
+                    IncomingConnectionEvent(
+                        alias=alias,
+                        onion=onion,
+                        origin=ConnectionOrigin.INCOMING,
+                        actor=ConnectionActor.REMOTE,
+                    )
+                )

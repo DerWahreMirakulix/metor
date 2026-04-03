@@ -24,6 +24,7 @@ class CommandType(str, Enum):
     MARK_READ = 'mark_read'
     FALLBACK = 'fallback'
     GET_HISTORY = 'get_history'
+    GET_RAW_HISTORY = 'get_raw_history'
     CLEAR_HISTORY = 'clear_history'
     GET_MESSAGES = 'get_messages'
     CLEAR_MESSAGES = 'clear_messages'
@@ -66,12 +67,12 @@ class EventType(str, Enum):
     CONNECTION_FAILED = 'connection_failed'
     INCOMING_CONNECTION = 'incoming_connection'
     CONNECTION_REJECTED = 'connection_rejected'
-    TIEBREAKER_REJECTED = 'tiebreaker_rejected'
-    AUTO_RECONNECT_ATTEMPT = 'auto_reconnect_attempt'
+    AUTO_RECONNECT_SCHEDULED = 'auto_reconnect_scheduled'
     INBOX_NOTIFICATION = 'inbox_notification'
     INBOX_DATA = 'inbox_data'
     CONTACTS_DATA = 'contacts_data'
     HISTORY_DATA = 'history_data'
+    HISTORY_RAW_DATA = 'history_raw_data'
     MESSAGES_DATA = 'messages_data'
     INBOX_COUNTS = 'inbox_counts'
     UNREAD_MESSAGES = 'unread_messages'
@@ -107,6 +108,7 @@ class EventType(str, Enum):
     NO_CONNECTION_TO_REJECT = 'no_connection_to_reject'
     NO_CONNECTION_TO_DISCONNECT = 'no_connection_to_disconnect'
     NO_PENDING_CONNECTION = 'no_pending_connection'
+    PENDING_CONNECTION_EXPIRED = 'pending_connection_expired'
     MAX_CONNECTIONS_REACHED = 'max_connections_reached'
     DROPS_DISABLED = 'drops_disabled'
     CANNOT_DROP_SELF = 'cannot_drop_self'
@@ -142,3 +144,40 @@ class EventType(str, Enum):
     RETUNNEL_INITIATED = 'retunnel_initiated'
     RETUNNEL_SUCCESS = 'retunnel_success'
     RETUNNEL_FAILED = 'retunnel_failed'
+
+
+class ConnectionOrigin(str, Enum):
+    """Enumeration describing why one live connection lifecycle step occurred."""
+
+    MANUAL = 'manual'
+    AUTO_RECONNECT = 'auto_reconnect'
+    RETUNNEL = 'retunnel'
+    INCOMING = 'incoming'
+    GRACE_RECONNECT = 'grace_reconnect'
+    MUTUAL_CONNECT = 'mutual_connect'
+    AUTO_ACCEPT_CONTACT = 'auto_accept_contact'
+
+
+class ConnectionActor(str, Enum):
+    """Enumeration describing who directly caused one live lifecycle event."""
+
+    LOCAL = 'local'
+    REMOTE = 'remote'
+    SYSTEM = 'system'
+
+
+class ConnectionReasonCode(str, Enum):
+    """Enumeration of machine-readable live lifecycle subreasons shared across the IPC boundary."""
+
+    RETRY_EXHAUSTED = 'retry_exhausted'
+    MAX_CONNECTIONS_REACHED = 'max_connections_reached'
+    RETUNNEL_PENDING_CONNECTION_MISSING = 'retunnel_pending_connection_missing'
+    LATE_ACCEPTANCE_TIMEOUT = 'late_acceptance_timeout'
+    OUTBOUND_ATTEMPT_REJECTED = 'outbound_attempt_rejected'
+    OUTBOUND_ATTEMPT_CLOSED_BEFORE_ACCEPTANCE = (
+        'outbound_attempt_closed_before_acceptance'
+    )
+    PENDING_ACCEPTANCE_EXPIRED = 'pending_acceptance_expired'
+    MUTUAL_TIEBREAKER_LOSER = 'mutual_tiebreaker_loser'
+    DUPLICATE_INCOMING_CONNECTED = 'duplicate_incoming_connected'
+    DUPLICATE_INCOMING_PENDING = 'duplicate_incoming_pending'

@@ -1,58 +1,25 @@
-"""
-Module for managing persisted inbound and outbound message state via SQLite.
-Enforces consume-time payload shredding policies, stable message identities,
-and transport-safe deduplication across live and drop delivery paths.
-Yields raw domain models without applying CLI format dependencies.
-"""
+"""Message persistence service backed by SQLite."""
 
-from dataclasses import dataclass
-import secrets
-from enum import Enum
-from pathlib import Path
 from datetime import datetime, timezone
-from typing import List, Tuple, Dict, Optional
+from pathlib import Path
+import secrets
+from typing import Dict, List, Optional, Tuple
 
-from metor.core.api import EventType
 from metor.utils import Constants, clean_onion
 
 # Local Package Imports
+from metor.data.message.models import (
+    MessageClearOperationType,
+    MessageClearResult,
+    MessageDirection,
+    MessageStatus,
+    MessageType,
+    QueuedMessageResult,
+    StoredMessageRecord,
+)
 from metor.data.profile import ProfileManager
-from metor.data.sql import SqlManager, SqlParam
 from metor.data.settings import SettingKey
-
-
-class MessageStatus(str, Enum):
-    """
-    Represents the delivery and consume status of a persisted message.
-    """
-
-    PENDING = 'pending'
-    DELIVERED = 'delivered'
-    UNREAD = 'unread'
-    READ = 'read'
-
-
-class MessageDirection(str, Enum):
-    """Represents the flow direction of a message."""
-
-    IN = 'in'
-    OUT = 'out'
-
-
-class MessageType(str, Enum):
-    """Represents the transport role of a persisted message payload."""
-
-    TEXT = 'text'
-    DROP_TEXT = 'drop_text'
-    LIVE_TEXT = 'live_text'
-
-
-@dataclass(frozen=True)
-class QueuedMessageResult:
-    """Represents the result of a message queue operation."""
-
-    row_id: int
-    was_duplicate: bool = False
+from metor.data.sql import SqlManager, SqlParam
 
 
 class MessageManager:
@@ -95,12 +62,12 @@ class MessageManager:
         query: str = """
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                msg_id TEXT,
-                contact_onion TEXT NOT NULL,
+                msg_id TEXT NOT NULL CHECK (msg_id <> ''),
+                contact_onion TEXT NOT NULL CHECK (contact_onion <> ''),
                 direction TEXT NOT NULL,
                 msg_type TEXT NOT NULL,
                 payload TEXT NOT NULL,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                timestamp TEXT NOT NULL CHECK (timestamp <> ''),
                 status TEXT NOT NULL
             )
         """
@@ -326,8 +293,8 @@ class MessageManager:
             List[Tuple[int, str, str, str]]: A list of message rows (id, msg_type, payload, timestamp).
         """
         query: str = """
-            SELECT id, msg_type, payload, timestamp 
-            FROM messages 
+            SELECT id, msg_type, payload, timestamp
+            FROM messages
             WHERE contact_onion = ? AND direction = ? AND status = ?
             ORDER BY timestamp ASC
         """
@@ -395,8 +362,10 @@ class MessageManager:
         return messages
 
     def get_chat_history(
-        self, contact_onion: str, limit: Optional[int] = None
-    ) -> List[Dict[str, str]]:
+        self,
+        contact_onion: str,
+        limit: Optional[int] = None,
+    ) -> List[StoredMessageRecord]:
         """
         Retrieves the past message history for a specific contact, ordered chronologically.
 
@@ -405,7 +374,7 @@ class MessageManager:
             limit (Optional[int]): The maximum number of past messages to fetch. Defaults to None.
 
         Returns:
-            List[Dict[str, str]]: A list of dictionaries containing formatted message data.
+            List[StoredMessageRecord]: A list of typed persisted message rows.
         """
         actual_limit: int = (
             limit
@@ -413,8 +382,8 @@ class MessageManager:
             else self._pm.config.get_int(SettingKey.MESSAGES_LIMIT)
         )
         query: str = f"""
-            SELECT direction, status, payload, timestamp 
-            FROM messages 
+            SELECT direction, status, payload, timestamp
+            FROM messages
             WHERE contact_onion = ?
               AND payload != ''
               AND msg_type IN ({self._DROP_VISIBLE_PLACEHOLDERS})
@@ -431,7 +400,7 @@ class MessageManager:
         )
         rows.reverse()
 
-        result: List[Dict[str, str]] = []
+        result: List[StoredMessageRecord] = []
         for row in rows:
             direction, status, payload, timestamp = (
                 str(row[0]),
@@ -440,18 +409,20 @@ class MessageManager:
                 str(row[3]),
             )
             result.append(
-                {
-                    'direction': direction,
-                    'status': status,
-                    'payload': payload,
-                    'timestamp': timestamp,
-                }
+                StoredMessageRecord(
+                    direction=direction,
+                    status=status,
+                    payload=payload,
+                    timestamp=timestamp,
+                )
             )
         return result
 
     def clear_messages(
-        self, onion: Optional[str] = None, non_contacts_only: bool = False
-    ) -> Tuple[bool, EventType, Dict[str, str]]:
+        self,
+        onion: Optional[str] = None,
+        non_contacts_only: bool = False,
+    ) -> MessageClearResult:
         """
         Wipes the message table completely or just for a specific contact.
         Maintains domain boundaries by leaving contact deletion to the Daemon orchestrator.
@@ -461,46 +432,53 @@ class MessageManager:
             non_contacts_only (bool): If True, only deletes messages from unsaved peers.
 
         Returns:
-            Tuple[bool, EventType, Dict[str, str]]: A success flag, strict event type, and payload.
+            MessageClearResult: The typed clear-messages result.
         """
         try:
             if non_contacts_only:
                 if onion:
                     query: str = """
-                        DELETE FROM messages 
-                        WHERE contact_onion = ? 
+                        DELETE FROM messages
+                        WHERE contact_onion = ?
                         AND contact_onion NOT IN (SELECT onion FROM contacts WHERE is_saved = 1)
                     """
                     self._sql.execute(query, (onion,))
-                    return (
+                    return MessageClearResult(
                         True,
-                        EventType.MESSAGES_CLEARED_NON_CONTACTS,
-                        {'target': onion},
-                    )
-                else:
-                    delete_all_query: str = """
-                        DELETE FROM messages 
-                        WHERE contact_onion NOT IN (SELECT onion FROM contacts WHERE is_saved = 1)
-                    """
-                    self._sql.execute(delete_all_query)
-                    return (
-                        True,
-                        EventType.MESSAGES_CLEARED_NON_CONTACTS_ALL,
-                        {'profile': self._pm.profile_name},
-                    )
-            else:
-                if onion:
-                    self._sql.execute(
-                        'DELETE FROM messages WHERE contact_onion = ?', (onion,)
-                    )
-                    return True, EventType.MESSAGES_CLEARED, {'target': onion}
-                else:
-                    self._sql.execute('DELETE FROM messages')
-                    return (
-                        True,
-                        EventType.MESSAGES_CLEARED_ALL,
-                        {'profile': self._pm.profile_name},
+                        MessageClearOperationType.NON_CONTACTS_TARGET_CLEARED,
+                        target_onion=onion,
                     )
 
+                delete_all_query: str = """
+                    DELETE FROM messages
+                    WHERE contact_onion NOT IN (SELECT onion FROM contacts WHERE is_saved = 1)
+                """
+                self._sql.execute(delete_all_query)
+                return MessageClearResult(
+                    True,
+                    MessageClearOperationType.NON_CONTACTS_ALL_CLEARED,
+                    profile=self._pm.profile_name,
+                )
+
+            if onion:
+                self._sql.execute(
+                    'DELETE FROM messages WHERE contact_onion = ?', (onion,)
+                )
+                return MessageClearResult(
+                    True,
+                    MessageClearOperationType.TARGET_CLEARED,
+                    target_onion=onion,
+                )
+
+            self._sql.execute('DELETE FROM messages')
+            return MessageClearResult(
+                True,
+                MessageClearOperationType.ALL_CLEARED,
+                profile=self._pm.profile_name,
+            )
+
         except Exception:
-            return False, EventType.MESSAGES_CLEAR_FAILED, {}
+            return MessageClearResult(
+                False,
+                MessageClearOperationType.CLEAR_FAILED,
+            )

@@ -177,3 +177,13 @@ class ProfileOperationResult:
     success: bool
     operation_type: ProfileOperationType
     params: ProfileResultParams
+
+
+@dataclass(frozen=True)
+class ProfileSummary:
+    """Represents one typed local profile summary independent from IPC DTOs."""
+
+    name: str
+    is_active: bool
+    is_remote: bool
+    port: Optional[int]

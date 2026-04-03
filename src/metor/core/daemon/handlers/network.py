@@ -33,6 +33,7 @@ from metor.core.api import (
 from metor.core.daemon.network import NetworkManager
 from metor.data import (
     HistoryManager,
+    HistoryActor,
     HistoryEvent,
     ContactManager,
     MessageManager,
@@ -205,8 +206,6 @@ class NetworkCommandHandler:
 
         if isinstance(cmd, InitCommand):
             self._send_to(conn, InitEvent(onion=self._tm.onion))
-            for active_onion in self._network.get_active_onions():
-                self._network.flush_ram_buffer(active_onion)
 
         elif isinstance(cmd, RegisterLiveConsumerCommand):
             self._register_live_consumer(conn)
@@ -221,8 +220,6 @@ class NetworkCommandHandler:
                     is_header=cmd.is_header,
                 ),
             )
-            for active_onion in self._network.get_active_onions():
-                self._network.flush_ram_buffer(active_onion)
 
         elif isinstance(cmd, ConnectCommand):
             if self._is_self_target(cmd.target):
@@ -300,8 +297,12 @@ class NetworkCommandHandler:
                     status=MessageStatus.PENDING,
                     msg_id=cmd.msg_id,
                 )
-                if self._config.get_bool(SettingKey.RECORD_DROP_EVENTS):
-                    self._hm.log_event(HistoryEvent.DROP_QUEUED, onion)
+                if self._config.get_bool(SettingKey.RECORD_DROP_HISTORY):
+                    self._hm.log_event(
+                        HistoryEvent.DROP_QUEUED,
+                        onion,
+                        actor=HistoryActor.LOCAL,
+                    )
 
                 self._send_to(
                     conn,

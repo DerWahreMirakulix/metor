@@ -1,4 +1,3 @@
-# metor/utils/__init__.py
 """
 Package initializer for the Utils layer.
 Provides a unified API for constants, file locking, process management, and security helpers.

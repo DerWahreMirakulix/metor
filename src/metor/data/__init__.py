@@ -15,7 +15,12 @@ from metor.data.sql import DatabaseCorruptedError, SqlManager, SqlParam
 
 # 2. Application Data Layer (Depends on Base Layer)
 from metor.data.contact import ContactManager
-from metor.data.history import HistoryManager, HistoryEvent
+from metor.data.history.codes import (
+    HistoryActor,
+    HistoryEvent,
+    HistoryReasonCode,
+)
+from metor.data.history.manager import HistoryManager
 from metor.data.message import (
     MessageManager,
     MessageStatus,
@@ -25,8 +30,10 @@ from metor.data.message import (
 
 __all__ = [
     'ContactManager',
+    'HistoryActor',
     'HistoryManager',
     'HistoryEvent',
+    'HistoryReasonCode',
     'MessageManager',
     'MessageStatus',
     'MessageDirection',

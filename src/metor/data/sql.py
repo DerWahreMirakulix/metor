@@ -333,19 +333,24 @@ class SqlManager:
         """
         contacts_query: str = """
         CREATE TABLE IF NOT EXISTS contacts (
-            onion TEXT PRIMARY KEY,
+            onion TEXT PRIMARY KEY NOT NULL CHECK (onion <> ''),
             alias TEXT UNIQUE NOT NULL,
-            is_saved BOOLEAN NOT NULL DEFAULT 0
+            is_saved BOOLEAN NOT NULL DEFAULT 0 CHECK (is_saved IN (0, 1))
         );
         """
 
         history_query: str = """
         CREATE TABLE IF NOT EXISTS history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            status TEXT NOT NULL,
-            onion TEXT,
-            reason TEXT
+            timestamp TEXT NOT NULL CHECK (timestamp <> ''),
+            family TEXT NOT NULL CHECK (family <> ''),
+            event_code TEXT NOT NULL CHECK (event_code <> ''),
+            peer_onion TEXT CHECK (peer_onion IS NULL OR peer_onion <> ''),
+            actor TEXT NOT NULL CHECK (actor <> ''),
+            trigger TEXT,
+            detail_code TEXT,
+            detail_text TEXT NOT NULL DEFAULT '',
+            flow_id TEXT NOT NULL CHECK (flow_id <> '')
         );
         """
 

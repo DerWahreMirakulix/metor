@@ -249,18 +249,6 @@ class NetworkManager:
         """
         self._state.remove_ui_focus(onion)
 
-    def flush_ram_buffer(self, onion: str) -> None:
-        """
-        Flushes the headless RAM buffer to the UI and fires pending ACKs.
-
-        Args:
-            onion (str): The target onion to flush.
-
-        Returns:
-            None
-        """
-        self._router.flush_ram_buffer(onion)
-
     def on_live_consumer_available(self) -> None:
         """
         Re-evaluates pending inbound live flows when an interactive consumer appears.

@@ -7,7 +7,14 @@ Utilizes generic status tones instead of chat-specific routing types.
 
 from typing import Dict, Tuple, Optional
 
-from metor.core.api import EventType, JsonValue
+from metor.core.api import (
+    ConnectionActor,
+    ConnectionOrigin,
+    ConnectionReasonCode,
+    EventType,
+    JsonValue,
+)
+from metor.utils import TypeCaster
 
 # Local Package Imports
 from metor.ui.theme import Theme
@@ -147,6 +154,11 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         StatusTone.INFO,
         AliasPolicy.DYNAMIC,
     ),
+    EventType.PENDING_CONNECTION_EXPIRED: TranslationDef(
+        "Acceptance window for '{alias}' expired. Try connecting to '{alias}' again.",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
+    ),
     EventType.MAX_CONNECTIONS_REACHED: TranslationDef(
         "Cannot connect to '{target}'. Maximum concurrent connections ({max_conn}) reached.",
         StatusTone.ERROR,
@@ -173,17 +185,17 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         AliasPolicy.DYNAMIC,
     ),
     EventType.CONNECTED: TranslationDef(
-        "Connected to '{alias}'.",
+        "{origin_text} '{alias}'.",
         StatusTone.INFO,
         AliasPolicy.DYNAMIC,
     ),
     EventType.DISCONNECTED: TranslationDef(
-        "Disconnected from '{alias}'.",
+        '{disconnect_text}',
         StatusTone.INFO,
         AliasPolicy.DYNAMIC,
     ),
     EventType.CONNECTION_CONNECTING: TranslationDef(
-        "Connecting to '{alias}'...",
+        "{origin_text} '{alias}'...",
         StatusTone.INFO,
         AliasPolicy.DYNAMIC,
     ),
@@ -193,7 +205,7 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         AliasPolicy.DYNAMIC,
     ),
     EventType.CONNECTION_PENDING: TranslationDef(
-        "Request sent to '{alias}'. Waiting for acceptance...",
+        "{origin_text} '{alias}'. Waiting for acceptance...",
         StatusTone.INFO,
         AliasPolicy.DYNAMIC,
     ),
@@ -203,17 +215,17 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         AliasPolicy.DYNAMIC,
     ),
     EventType.CONNECTION_RETRY: TranslationDef(
-        "Connecting to '{alias}' failed. Retrying ({attempt}/{max_retries})...",
+        "{origin_text} '{alias}' failed. Retrying ({attempt}/{max_retries})...",
         StatusTone.INFO,
         AliasPolicy.DYNAMIC,
     ),
     EventType.CONNECTION_FAILED: TranslationDef(
-        "Failed to connect to '{alias}'{error}.",
+        "{origin_text} '{alias}' failed{error}.",
         StatusTone.ERROR,
         AliasPolicy.DYNAMIC,
     ),
     EventType.CONNECTION_REJECTED: TranslationDef(
-        "Connection with '{alias}' rejected.",
+        '{reject_text}',
         StatusTone.INFO,
         AliasPolicy.DYNAMIC,
     ),
@@ -222,8 +234,8 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         StatusTone.INFO,
         AliasPolicy.DYNAMIC,
     ),
-    EventType.AUTO_RECONNECT_ATTEMPT: TranslationDef(
-        "Attempting automatic reconnect to '{alias}'...",
+    EventType.AUTO_RECONNECT_SCHEDULED: TranslationDef(
+        "Automatic reconnect to '{alias}' scheduled.",
         StatusTone.INFO,
         AliasPolicy.DYNAMIC,
     ),
@@ -350,6 +362,137 @@ class Translator:
     """Provides dynamic text translations based on strict daemon EventTypes."""
 
     @staticmethod
+    def _resolve_connection_origin(
+        origin: Optional[JsonValue],
+    ) -> ConnectionOrigin:
+        """
+        Coerces one raw origin payload to a strict connection origin.
+
+        Args:
+            origin (Optional[JsonValue]): The raw IPC parameter.
+
+        Returns:
+            ConnectionOrigin: The normalized connection origin.
+        """
+        return TypeCaster.to_enum(
+            ConnectionOrigin,
+            origin,
+            ConnectionOrigin.MANUAL,
+        )
+
+    @staticmethod
+    def _resolve_connection_actor(
+        actor: Optional[JsonValue],
+    ) -> ConnectionActor:
+        """
+        Coerces one raw actor payload to a strict connection actor.
+
+        Args:
+            actor (Optional[JsonValue]): The raw IPC parameter.
+
+        Returns:
+            ConnectionActor: The normalized connection actor.
+        """
+        return TypeCaster.to_enum(
+            ConnectionActor,
+            actor,
+            ConnectionActor.SYSTEM,
+        )
+
+    @staticmethod
+    def _resolve_connection_reason_code(
+        reason_code: Optional[JsonValue],
+    ) -> Optional[ConnectionReasonCode]:
+        """
+        Coerces one raw reason-code payload to a strict lifecycle reason.
+
+        Args:
+            reason_code (Optional[JsonValue]): The raw IPC parameter.
+
+        Returns:
+            Optional[ConnectionReasonCode]: The normalized reason code if valid.
+        """
+        return TypeCaster.to_optional_enum(ConnectionReasonCode, reason_code)
+
+    @staticmethod
+    def _apply_connection_origin_params(
+        code: EventType,
+        safe_params: Dict[str, JsonValue],
+    ) -> None:
+        """
+        Derives one human-readable origin phrase for connection lifecycle events.
+
+        Args:
+            code (EventType): The strict daemon event identifier.
+            safe_params (Dict[str, JsonValue]): Mutable translation parameters.
+
+        Returns:
+            None
+        """
+        origin: ConnectionOrigin = Translator._resolve_connection_origin(
+            safe_params.get('origin')
+        )
+        actor: ConnectionActor = Translator._resolve_connection_actor(
+            safe_params.get('actor')
+        )
+        reason_code: Optional[ConnectionReasonCode] = (
+            Translator._resolve_connection_reason_code(safe_params.get('reason_code'))
+        )
+
+        if code is EventType.CONNECTED:
+            safe_params['origin_text'] = 'Connected to'
+            return
+
+        if code is EventType.CONNECTION_CONNECTING:
+            if origin is ConnectionOrigin.AUTO_RECONNECT:
+                safe_params['origin_text'] = 'Automatically reconnecting to'
+            elif origin is ConnectionOrigin.RETUNNEL:
+                safe_params['origin_text'] = 'Retunnel reconnecting to'
+            else:
+                safe_params['origin_text'] = 'Connecting to'
+            return
+
+        if code is EventType.CONNECTION_PENDING:
+            if origin is ConnectionOrigin.AUTO_RECONNECT:
+                safe_params['origin_text'] = 'Automatic reconnect request sent to'
+            elif origin is ConnectionOrigin.RETUNNEL:
+                safe_params['origin_text'] = 'Retunnel reconnect request sent to'
+            else:
+                safe_params['origin_text'] = 'Request sent to'
+            return
+
+        if code in (EventType.CONNECTION_RETRY, EventType.CONNECTION_FAILED):
+            if origin is ConnectionOrigin.AUTO_RECONNECT:
+                safe_params['origin_text'] = 'Automatic reconnect to'
+            elif origin is ConnectionOrigin.RETUNNEL:
+                safe_params['origin_text'] = 'Retunnel reconnect to'
+            else:
+                safe_params['origin_text'] = 'Connection to'
+            return
+
+        if code is EventType.CONNECTION_REJECTED:
+            if actor is ConnectionActor.LOCAL:
+                safe_params['reject_text'] = "Rejected connection with '{alias}'."
+                return
+            if origin is ConnectionOrigin.AUTO_RECONNECT:
+                safe_params['reject_text'] = (
+                    "Automatic reconnect to '{alias}' rejected."
+                )
+            elif origin is ConnectionOrigin.RETUNNEL:
+                safe_params['reject_text'] = "Retunnel reconnect to '{alias}' rejected."
+            else:
+                safe_params['reject_text'] = "Connection with '{alias}' rejected."
+            return
+
+        if code is EventType.DISCONNECTED:
+            if actor is ConnectionActor.REMOTE:
+                safe_params['disconnect_text'] = "Peer '{alias}' disconnected."
+            elif actor is ConnectionActor.SYSTEM or reason_code is not None:
+                safe_params['disconnect_text'] = "Connection to '{alias}' lost."
+            else:
+                safe_params['disconnect_text'] = "Disconnected from '{alias}'."
+
+    @staticmethod
     def get_alias_policy(code: EventType) -> AliasPolicy:
         """
         Returns the alias binding policy for one translated event.
@@ -399,6 +542,17 @@ class Translator:
                 f" for '{Theme.YELLOW}{key_text}{Theme.RESET}'" if key_text else ''
             )
             safe_params['reason'] = f': {reason_text}' if reason_text else ''
+
+        if code in {
+            EventType.CONNECTED,
+            EventType.DISCONNECTED,
+            EventType.CONNECTION_CONNECTING,
+            EventType.CONNECTION_PENDING,
+            EventType.CONNECTION_RETRY,
+            EventType.CONNECTION_FAILED,
+            EventType.CONNECTION_REJECTED,
+        }:
+            Translator._apply_connection_origin_params(code, safe_params)
 
         # Preserve '{alias}' only for messages that explicitly opt into
         # dynamic peer-bound alias redraws.

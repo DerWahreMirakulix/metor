@@ -11,6 +11,7 @@ from metor.data.profile.models import (
     ProfileConfigValidationError,
     ProfileOperationResult,
     ProfileOperationType,
+    ProfileSummary,
     validate_profile_config_value,
 )
 
@@ -23,5 +24,6 @@ __all__ = [
     'ProfileConfigValidationError',
     'ProfileOperationResult',
     'ProfileOperationType',
+    'ProfileSummary',
     'validate_profile_config_value',
 ]

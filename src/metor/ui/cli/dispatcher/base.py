@@ -1,27 +1,29 @@
-"""
-Module defining the CLI command router.
-Implements the Command Pattern to direct parsed inputs to the correct proxy or handler.
-"""
+"""CLI dispatcher facade coordinating modular command routing helpers."""
 
 import argparse
 from typing import List, Optional, Tuple
 
-from metor.core.api import ProfilesDataEvent
+from metor.core.api import ProfileEntry, ProfilesDataEvent
 from metor.data.profile import (
     ProfileManager,
     ProfileOperationResult,
     ProfileOperationType,
     ProfileSecurityMode,
+    ProfileSummary,
 )
 from metor.ui import Help, UIPresenter
 
 # Local Package Imports
+from metor.ui.cli.dispatcher.history import HistoryDispatchMixin
+from metor.ui.cli.dispatcher.messages import MessagesDispatchMixin
 from metor.ui.cli.handlers import CommandHandlers
 from metor.ui.cli.proxy import CliProxy
 
 
-class CliDispatcher:
+class CliDispatcher(MessagesDispatchMixin, HistoryDispatchMixin):
     """Routes parsed CLI arguments to the corresponding application logic."""
+
+    _help = Help
 
     @staticmethod
     def _collect_command_args(
@@ -61,89 +63,6 @@ class CliDispatcher:
         if not limit_raw.isdigit():
             return None
         return int(limit_raw)
-
-    def _dispatch_messages(self, sub: Optional[str]) -> None:
-        """
-        Validates and routes the `messages` command.
-
-        Args:
-            sub (Optional[str]): Parsed subcommand token.
-
-        Returns:
-            None
-        """
-        non_contacts_only: bool = '--non-contacts' in self._extra
-        clean_args: List[str] = [x for x in self._extra if x != '--non-contacts']
-
-        if sub == 'clear':
-            if len(clean_args) > 1:
-                print(Help.show_command_help('messages'))
-                return
-
-            target: Optional[str] = clean_args[0] if clean_args else None
-            print(self._proxy.clear_messages(target, non_contacts_only))
-            return
-
-        if non_contacts_only:
-            print(Help.show_command_help('messages'))
-            return
-
-        message_args: List[str] = self._collect_command_args(
-            sub,
-            clean_args,
-            ('show', 'clear'),
-        )
-        if not message_args or len(message_args) > 2:
-            print(Help.show_command_help('messages'))
-            return
-
-        limit: Optional[int] = None
-        if len(message_args) == 2:
-            limit = self._parse_optional_limit(message_args[1])
-            if limit is None:
-                print(Help.show_command_help('messages'))
-                return
-
-        print(self._proxy.get_messages(message_args[0], limit))
-
-    def _dispatch_history(self, sub: Optional[str]) -> None:
-        """
-        Validates and routes the `history` command.
-
-        Args:
-            sub (Optional[str]): Parsed subcommand token.
-
-        Returns:
-            None
-        """
-        history_args: List[str] = self._collect_command_args(
-            sub,
-            self._extra,
-            ('show', 'clear'),
-        )
-
-        if sub == 'clear':
-            if len(history_args) > 1:
-                print(Help.show_command_help('history'))
-                return
-
-            clear_target: Optional[str] = history_args[0] if history_args else None
-            print(self._proxy.clear_history(clear_target))
-            return
-
-        if len(history_args) > 2:
-            print(Help.show_command_help('history'))
-            return
-
-        target: Optional[str] = history_args[0] if history_args else None
-        limit: Optional[int] = None
-        if len(history_args) == 2:
-            limit = self._parse_optional_limit(history_args[1])
-            if limit is None:
-                print(Help.show_command_help('history'))
-                return
-
-        print(self._proxy.get_history(target, limit))
 
     @staticmethod
     def _format_profile_result(result: ProfileOperationResult) -> str:
@@ -238,7 +157,10 @@ class CliDispatcher:
         return 'Unknown profile operation result.'
 
     def __init__(
-        self, args: argparse.Namespace, extra: List[str], pm: ProfileManager
+        self,
+        args: argparse.Namespace,
+        extra: List[str],
+        pm: ProfileManager,
     ) -> None:
         """
         Initializes the dispatcher with the parsed arguments and active profile.
@@ -269,7 +191,6 @@ class CliDispatcher:
         cmd: str = self._args.command
         sub: Optional[str] = self._args.subcommand
 
-        # --- Pre-Routing Help Interceptor ---
         is_help_request: bool = False
         if cmd in ('-h', '--help'):
             is_help_request = True
@@ -281,21 +202,20 @@ class CliDispatcher:
 
         if is_help_request:
             if cmd and cmd not in ('help', 'quickstart', '-h', '--help'):
-                print(Help.show_command_help(cmd, sub))
+                print(self._help.show_command_help(cmd, sub))
             else:
-                print(Help.show_main_help())
+                print(self._help.show_main_help())
             return
 
-        # --- Standard Command Routing ---
         if cmd == 'quickstart':
-            print(Help.show_quick_start())
+            print(self._help.show_quick_start())
 
         elif cmd == 'help':
-            print(Help.show_main_help())
+            print(self._help.show_main_help())
 
         elif cmd == 'daemon':
             if sub or self._extra:
-                print(Help.show_command_help(cmd))
+                print(self._help.show_command_help(cmd))
             else:
                 CommandHandlers.handle_daemon(
                     self._pm,
@@ -304,7 +224,7 @@ class CliDispatcher:
 
         elif cmd == 'unlock':
             if sub or self._extra:
-                print(Help.show_command_help(cmd))
+                print(self._help.show_command_help(cmd))
             else:
                 print(self._proxy.unlock_daemon())
 
@@ -314,7 +234,7 @@ class CliDispatcher:
             elif sub == 'get' and len(self._extra) >= 1:
                 print(self._proxy.handle_settings_get(self._extra[0]))
             else:
-                print(Help.show_command_help(cmd))
+                print(self._help.show_command_help(cmd))
 
         elif cmd == 'config':
             if sub == 'set' and len(self._extra) >= 2:
@@ -324,7 +244,7 @@ class CliDispatcher:
             elif sub == 'sync':
                 print(self._proxy.handle_config_sync())
             else:
-                print(Help.show_command_help(cmd))
+                print(self._help.show_command_help(cmd))
 
         elif cmd == 'chat':
             CommandHandlers.handle_chat(self._pm)
@@ -339,7 +259,7 @@ class CliDispatcher:
                 token for token in cleanup_tokens if token != '--force'
             ]
             if invalid_tokens:
-                print(Help.show_command_help(cmd))
+                print(self._help.show_command_help(cmd))
             else:
                 CommandHandlers.handle_cleanup(force='--force' in cleanup_tokens)
 
@@ -351,7 +271,7 @@ class CliDispatcher:
 
         elif cmd == 'send':
             if not sub or not self._extra:
-                print(Help.show_command_help(cmd))
+                print(self._help.show_command_help(cmd))
             else:
                 print(self._proxy.send_drop(sub, ' '.join(self._extra)))
 
@@ -368,12 +288,12 @@ class CliDispatcher:
             if sub in (None, 'show', 'generate'):
                 print(self._proxy.get_address(generate=(sub == 'generate')))
             else:
-                print(Help.show_command_help(cmd))
+                print(self._help.show_command_help(cmd))
 
         elif cmd == 'contacts':
             if sub == 'add':
                 if len(self._extra) < 1:
-                    print(Help.show_command_help(cmd))
+                    print(self._help.show_command_help(cmd))
                 else:
                     onion: Optional[str] = (
                         self._extra[1] if len(self._extra) > 1 else None
@@ -381,12 +301,12 @@ class CliDispatcher:
                     print(self._proxy.contacts_add(self._extra[0], onion))
             elif sub in ('rm', 'remove'):
                 if len(self._extra) < 1:
-                    print(Help.show_command_help(cmd))
+                    print(self._help.show_command_help(cmd))
                 else:
                     print(self._proxy.contacts_rm(self._extra[0]))
             elif sub == 'rename':
                 if len(self._extra) < 2:
-                    print(Help.show_command_help(cmd))
+                    print(self._help.show_command_help(cmd))
                 else:
                     print(self._proxy.contacts_rename(self._extra[0], self._extra[1]))
             elif sub == 'clear':
@@ -394,12 +314,12 @@ class CliDispatcher:
             elif sub in ('list', None):
                 print(self._proxy.contacts_list())
             else:
-                print(Help.show_command_help(cmd))
+                print(self._help.show_command_help(cmd))
 
         elif cmd == 'profiles':
             if sub == 'add':
                 if len(self._extra) < 1:
-                    print(Help.show_command_help(cmd))
+                    print(self._help.show_command_help(cmd))
                 else:
                     security_mode: ProfileSecurityMode = (
                         ProfileSecurityMode.PLAINTEXT
@@ -424,14 +344,14 @@ class CliDispatcher:
                         del profile_args[to_index : to_index + 2]
 
                 if len(profile_args) != 1 or target_mode_value is None:
-                    print(Help.show_command_help(cmd, sub))
+                    print(self._help.show_command_help(cmd, sub))
                 else:
                     try:
                         target_mode = ProfileSecurityMode(
                             target_mode_value.strip().lower()
                         )
                     except ValueError:
-                        print(Help.show_command_help(cmd, sub))
+                        print(self._help.show_command_help(cmd, sub))
                         return
 
                     result = CommandHandlers.handle_profile_security_migration(
@@ -441,7 +361,7 @@ class CliDispatcher:
                     print(self._format_profile_result(result))
             elif sub in ('rm', 'remove'):
                 if len(self._extra) < 1:
-                    print(Help.show_command_help(cmd))
+                    print(self._help.show_command_help(cmd))
                 else:
                     target_profile: str = self._extra[0]
                     is_nuke_remote = '--nuke-remote' in self._extra
@@ -459,37 +379,50 @@ class CliDispatcher:
                             return
 
                     result = ProfileManager.remove_profile_folder(
-                        target_profile, self._pm.profile_name
+                        target_profile,
+                        self._pm.profile_name,
                     )
                     print(self._format_profile_result(result))
             elif sub == 'rename':
                 if len(self._extra) < 2:
-                    print(Help.show_command_help(cmd))
+                    print(self._help.show_command_help(cmd))
                 else:
                     result = ProfileManager.rename_profile_folder(
-                        self._extra[0], self._extra[1]
+                        self._extra[0],
+                        self._extra[1],
                     )
                     print(self._format_profile_result(result))
             elif sub == 'set-default':
                 if len(self._extra) < 1:
-                    print(Help.show_command_help(cmd))
+                    print(self._help.show_command_help(cmd))
                 else:
                     result = ProfileManager.set_default_profile(self._extra[0])
                     print(self._format_profile_result(result))
             elif sub == 'clear':
                 if len(self._extra) < 1:
-                    print(Help.show_command_help(cmd))
+                    print(self._help.show_command_help(cmd))
                 else:
                     target_pm: ProfileManager = ProfileManager(self._extra[0])
                     target_proxy: CliProxy = CliProxy(target_pm)
                     print(target_proxy.clear_profile_db())
             elif sub in ('list', None):
-                profiles_event: ProfilesDataEvent = ProfileManager.get_profiles_data(
+                summaries: List[ProfileSummary] = ProfileManager.get_profile_summaries(
                     self._pm.profile_name
+                )
+                profiles_event: ProfilesDataEvent = ProfilesDataEvent(
+                    profiles=[
+                        ProfileEntry(
+                            name=summary.name,
+                            is_active=summary.is_active,
+                            is_remote=summary.is_remote,
+                            port=summary.port,
+                        )
+                        for summary in summaries
+                    ]
                 )
                 print(UIPresenter.format_profiles(profiles_event))
             else:
-                print(Help.show_command_help(cmd))
+                print(self._help.show_command_help(cmd))
 
         else:
             print("Unknown command. Use 'metor help' to see available commands.")

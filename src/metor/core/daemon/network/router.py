@@ -21,6 +21,7 @@ from metor.core.api import (
 from metor.core.daemon.models import TorCommand
 from metor.data import (
     ContactManager,
+    HistoryActor,
     HistoryManager,
     HistoryEvent,
     MessageManager,
@@ -79,18 +80,6 @@ class MessageRouter:
         )
         self._config: 'Config' = config
 
-    def flush_ram_buffer(self, onion: str) -> None:
-        """
-        Compatibility no-op kept for older call sites.
-
-        Args:
-            onion (str): The target onion to flush.
-
-        Returns:
-            None
-        """
-        return
-
     def force_fallback(
         self, target: str
     ) -> Tuple[bool, EventType, Dict[str, JsonValue]]:
@@ -129,7 +118,10 @@ class MessageRouter:
                 timestamp=timestamp,
             )
             self._hm.log_event(
-                HistoryEvent.DROP_QUEUED, onion, 'Manual fallback to drop'
+                HistoryEvent.DROP_QUEUED,
+                onion,
+                actor=HistoryActor.LOCAL,
+                detail_text='Manual fallback to drop',
             )
 
         self._broadcast(
@@ -182,7 +174,10 @@ class MessageRouter:
                     msg_id=msg_id,
                 )
                 self._hm.log_event(
-                    HistoryEvent.DROP_QUEUED, onion, 'Auto fallback to drop'
+                    HistoryEvent.DROP_QUEUED,
+                    onion,
+                    actor=HistoryActor.SYSTEM,
+                    detail_text='Auto fallback to drop',
                 )
                 self._broadcast(
                     FallbackSuccessEvent(
@@ -367,7 +362,11 @@ class MessageRouter:
                         if queue_result.was_duplicate:
                             continue
 
-                        self._hm.log_event(HistoryEvent.DROP_RECEIVED, onion)
+                        self._hm.log_event(
+                            HistoryEvent.DROP_RECEIVED,
+                            onion,
+                            actor=HistoryActor.REMOTE,
+                        )
 
                         if alias and self._has_clients_callback():
                             self._broadcast(

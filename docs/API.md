@@ -32,6 +32,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [GetHistoryCommand](#gethistorycommand)
 - [GetInboxCommand](#getinboxcommand)
 - [GetMessagesCommand](#getmessagescommand)
+- [GetRawHistoryCommand](#getrawhistorycommand)
 - [GetSettingCommand](#getsettingcommand)
 - [InitCommand](#initcommand)
 - [MarkReadCommand](#markreadcommand)
@@ -62,7 +63,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [AliasSameEvent](#aliassameevent)
 - [AlreadyUnlockedEvent](#alreadyunlockedevent)
 - [AuthRequiredEvent](#authrequiredevent)
-- [AutoReconnectAttemptEvent](#autoreconnectattemptevent)
+- [AutoReconnectScheduledEvent](#autoreconnectscheduledevent)
 - [CannotConnectSelfEvent](#cannotconnectselfevent)
 - [CannotDropSelfEvent](#cannotdropselfevent)
 - [CannotSwitchSelfEvent](#cannotswitchselfevent)
@@ -102,6 +103,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [HistoryClearedEvent](#historyclearedevent)
 - [HistoryClearedAllEvent](#historyclearedallevent)
 - [HistoryDataEvent](#historydataevent)
+- [HistoryRawDataEvent](#historyrawdataevent)
 - [InboxCountsEvent](#inboxcountsevent)
 - [InboxDataEvent](#inboxdataevent)
 - [InboxNotificationEvent](#inboxnotificationevent)
@@ -128,6 +130,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [PeerNotFoundEvent](#peernotfoundevent)
 - [PeerPromotedEvent](#peerpromotedevent)
 - [PeerRemovedEvent](#peerremovedevent)
+- [PendingConnectionExpiredEvent](#pendingconnectionexpiredevent)
 - [ProfilesDataEvent](#profilesdataevent)
 - [RemoteMsgEvent](#remotemsgevent)
 - [RenameSuccessEvent](#renamesuccessevent)
@@ -141,7 +144,6 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [SettingUpdateFailedEvent](#settingupdatefailedevent)
 - [SettingUpdatedEvent](#settingupdatedevent)
 - [SwitchSuccessEvent](#switchsuccessevent)
-- [TiebreakerRejectedEvent](#tiebreakerrejectedevent)
 - [TorKeyDecryptFailedEvent](#torkeydecryptfailedevent)
 - [TorKeyWriteFailedEvent](#torkeywritefailedevent)
 - [TorProcessTerminatedEvent](#torprocessterminatedevent)
@@ -235,7 +237,7 @@ _No additional payload parameters._
 
 ### `ClearHistoryCommand`
 
-Clears connection event history.
+Clears persisted history rows.
 
 | Field    | Type               | Default |
 | -------- | ------------------ | ------- |
@@ -454,7 +456,7 @@ Requests the structured address book.
 
 ### `GetHistoryCommand`
 
-Requests connection event history.
+Requests projected user-facing history summary.
 
 | Field    | Type               | Default |
 | -------- | ------------------ | ------- |
@@ -507,6 +509,27 @@ Requests stored message history.
 ```json
 {
   "command_type": "get_messages"
+}
+```
+
+---
+
+### `GetRawHistoryCommand`
+
+Requests the raw transport history ledger.
+
+| Field    | Type               | Default |
+| -------- | ------------------ | ------- |
+| `target` | `Union[str, None]` | `None`  |
+| `limit`  | `Union[int, None]` | `None`  |
+
+**Wire Value:** `get_raw_history`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "get_raw_history"
 }
 ```
 
@@ -1081,22 +1104,24 @@ _No additional payload parameters._
 
 ---
 
-### `AutoReconnectAttemptEvent`
+### `AutoReconnectScheduledEvent`
 
-Signals an automatic reconnect attempt.
+Signals that an automatic reconnect was scheduled.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field    | Type                        | Default                           |
+| -------- | --------------------------- | --------------------------------- |
+| `alias`  | `str`                       | Required                          |
+| `onion`  | `Union[str, None]`          | `None`                            |
+| `origin` | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.AUTO_RECONNECT` |
+| `actor`  | `<enum 'ConnectionActor'>`  | `ConnectionActor.SYSTEM`          |
 
-**Wire Value:** `auto_reconnect_attempt`
+**Wire Value:** `auto_reconnect_scheduled`
 
 **Example JSON**
 
 ```json
 {
-  "event_type": "auto_reconnect_attempt",
+  "event_type": "auto_reconnect_scheduled",
   "alias": "string"
 }
 ```
@@ -1241,10 +1266,12 @@ Signals that a profile-specific config override was updated.
 
 Announces a connected peer.
 
-| Field   | Type  | Default  |
-| ------- | ----- | -------- |
-| `alias` | `str` | Required |
-| `onion` | `str` | Required |
+| Field    | Type                        | Default                   |
+| -------- | --------------------------- | ------------------------- |
+| `alias`  | `str`                       | Required                  |
+| `onion`  | `str`                       | Required                  |
+| `origin` | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.MANUAL` |
+| `actor`  | `<enum 'ConnectionActor'>`  | `ConnectionActor.REMOTE`  |
 
 **Wire Value:** `connected`
 
@@ -1264,10 +1291,12 @@ Announces a connected peer.
 
 Signals that a pending connection was auto-accepted.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field    | Type                        | Default                     |
+| -------- | --------------------------- | --------------------------- |
+| `alias`  | `str`                       | Required                    |
+| `onion`  | `Union[str, None]`          | `None`                      |
+| `origin` | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.INCOMING` |
+| `actor`  | `<enum 'ConnectionActor'>`  | `ConnectionActor.SYSTEM`    |
 
 **Wire Value:** `connection_auto_accepted`
 
@@ -1286,10 +1315,12 @@ Signals that a pending connection was auto-accepted.
 
 Signals that an outbound connection attempt has started.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field    | Type                        | Default                   |
+| -------- | --------------------------- | ------------------------- |
+| `alias`  | `str`                       | Required                  |
+| `onion`  | `Union[str, None]`          | `None`                    |
+| `origin` | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.MANUAL` |
+| `actor`  | `<enum 'ConnectionActor'>`  | `ConnectionActor.LOCAL`   |
 
 **Wire Value:** `connection_connecting`
 
@@ -1308,11 +1339,14 @@ Signals that an outbound connection attempt has started.
 
 Signals that a connection attempt failed permanently.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
-| `error` | `Union[str, None]` | `None`   |
+| Field         | Type                                         | Default                   |
+| ------------- | -------------------------------------------- | ------------------------- |
+| `alias`       | `str`                                        | Required                  |
+| `onion`       | `Union[str, None]`                           | `None`                    |
+| `error`       | `Union[str, None]`                           | `None`                    |
+| `origin`      | `<enum 'ConnectionOrigin'>`                  | `ConnectionOrigin.MANUAL` |
+| `actor`       | `<enum 'ConnectionActor'>`                   | `ConnectionActor.SYSTEM`  |
+| `reason_code` | `Union[<enum 'ConnectionReasonCode'>, None]` | `None`                    |
 
 **Wire Value:** `connection_failed`
 
@@ -1331,10 +1365,12 @@ Signals that a connection attempt failed permanently.
 
 Signals a pending outbound live connection.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field    | Type                        | Default                   |
+| -------- | --------------------------- | ------------------------- |
+| `alias`  | `str`                       | Required                  |
+| `onion`  | `Union[str, None]`          | `None`                    |
+| `origin` | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.MANUAL` |
+| `actor`  | `<enum 'ConnectionActor'>`  | `ConnectionActor.REMOTE`  |
 
 **Wire Value:** `connection_pending`
 
@@ -1353,11 +1389,13 @@ Signals a pending outbound live connection.
 
 Signals that a live connection was rejected.
 
-| Field       | Type               | Default  |
-| ----------- | ------------------ | -------- |
-| `alias`     | `str`              | Required |
-| `onion`     | `Union[str, None]` | `None`   |
-| `by_remote` | `bool`             | `False`  |
+| Field         | Type                                         | Default                     |
+| ------------- | -------------------------------------------- | --------------------------- |
+| `alias`       | `str`                                        | Required                    |
+| `onion`       | `Union[str, None]`                           | `None`                      |
+| `origin`      | `<enum 'ConnectionOrigin'>`                  | `ConnectionOrigin.INCOMING` |
+| `actor`       | `<enum 'ConnectionActor'>`                   | `ConnectionActor.REMOTE`    |
+| `reason_code` | `Union[<enum 'ConnectionReasonCode'>, None]` | `None`                      |
 
 **Wire Value:** `connection_rejected`
 
@@ -1376,12 +1414,14 @@ Signals that a live connection was rejected.
 
 Signals a retrying connection attempt.
 
-| Field         | Type               | Default  |
-| ------------- | ------------------ | -------- |
-| `alias`       | `str`              | Required |
-| `attempt`     | `int`              | Required |
-| `max_retries` | `int`              | Required |
-| `onion`       | `Union[str, None]` | `None`   |
+| Field         | Type                        | Default                   |
+| ------------- | --------------------------- | ------------------------- |
+| `alias`       | `str`                       | Required                  |
+| `attempt`     | `int`                       | Required                  |
+| `max_retries` | `int`                       | Required                  |
+| `onion`       | `Union[str, None]`          | `None`                    |
+| `origin`      | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.MANUAL` |
+| `actor`       | `<enum 'ConnectionActor'>`  | `ConnectionActor.SYSTEM`  |
 
 **Wire Value:** `connection_retry`
 
@@ -1736,10 +1776,13 @@ _No additional payload parameters._
 
 Announces a disconnected peer.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field         | Type                                         | Default                   |
+| ------------- | -------------------------------------------- | ------------------------- |
+| `alias`       | `str`                                        | Required                  |
+| `onion`       | `Union[str, None]`                           | `None`                    |
+| `actor`       | `<enum 'ConnectionActor'>`                   | `ConnectionActor.LOCAL`   |
+| `origin`      | `<enum 'ConnectionOrigin'>`                  | `ConnectionOrigin.MANUAL` |
+| `reason_code` | `Union[<enum 'ConnectionReasonCode'>, None]` | `None`                    |
 
 **Wire Value:** `disconnected`
 
@@ -1904,14 +1947,14 @@ Signals that profile history was cleared.
 
 ### `HistoryDataEvent`
 
-Returns stored connection history.
+Returns projected user-facing history rows.
 
-| Field     | Type                 | Default  |
-| --------- | -------------------- | -------- |
-| `history` | `List[HistoryEntry]` | Required |
-| `profile` | `str`                | Required |
-| `alias`   | `Union[str, None]`   | `None`   |
-| `onion`   | `Union[str, None]`   | `None`   |
+| Field        | Type                 | Default  |
+| ------------ | -------------------- | -------- |
+| `entries`    | `List[HistoryEntry]` | Required |
+| `profile`    | `str`                | Required |
+| `alias`      | `Union[str, None]`   | `None`   |
+| `peer_onion` | `Union[str, None]`   | `None`   |
 
 **Wire Value:** `history_data`
 
@@ -1920,7 +1963,32 @@ Returns stored connection history.
 ```json
 {
   "event_type": "history_data",
-  "history": ["value"],
+  "entries": ["value"],
+  "profile": "string"
+}
+```
+
+---
+
+### `HistoryRawDataEvent`
+
+Returns raw transport history ledger rows.
+
+| Field        | Type                 | Default  |
+| ------------ | -------------------- | -------- |
+| `entries`    | `List[HistoryEntry]` | Required |
+| `profile`    | `str`                | Required |
+| `alias`      | `Union[str, None]`   | `None`   |
+| `peer_onion` | `Union[str, None]`   | `None`   |
+
+**Wire Value:** `history_raw_data`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "history_raw_data",
+  "entries": ["value"],
   "profile": "string"
 }
 ```
@@ -2002,10 +2070,12 @@ Signals new unread offline messages for a peer.
 
 Signals an inbound live connection request.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field    | Type                        | Default                     |
+| -------- | --------------------------- | --------------------------- |
+| `alias`  | `str`                       | Required                    |
+| `onion`  | `Union[str, None]`          | `None`                      |
+| `origin` | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.INCOMING` |
+| `actor`  | `<enum 'ConnectionActor'>`  | `ConnectionActor.REMOTE`    |
 
 **Wire Value:** `incoming_connection`
 
@@ -2487,6 +2557,31 @@ Signals that a discovered peer was removed.
 
 ---
 
+### `PendingConnectionExpiredEvent`
+
+Signals that a pending connection existed but its acceptance window expired.
+
+| Field         | Type                            | Default                                           |
+| ------------- | ------------------------------- | ------------------------------------------------- |
+| `alias`       | `str`                           | Required                                          |
+| `onion`       | `Union[str, None]`              | `None`                                            |
+| `origin`      | `<enum 'ConnectionOrigin'>`     | `ConnectionOrigin.INCOMING`                       |
+| `actor`       | `<enum 'ConnectionActor'>`      | `ConnectionActor.SYSTEM`                          |
+| `reason_code` | `<enum 'ConnectionReasonCode'>` | `ConnectionReasonCode.PENDING_ACCEPTANCE_EXPIRED` |
+
+**Wire Value:** `pending_connection_expired`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "pending_connection_expired",
+  "alias": "string"
+}
+```
+
+---
+
 ### `ProfilesDataEvent`
 
 Returns the list of available profiles.
@@ -2761,28 +2856,6 @@ Confirms a focus switch or focus clear operation.
 ```json
 {
   "event_type": "switch_success"
-}
-```
-
----
-
-### `TiebreakerRejectedEvent`
-
-Signals that a tie-breaker rejected a duplicate connection.
-
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
-
-**Wire Value:** `tiebreaker_rejected`
-
-**Example JSON**
-
-```json
-{
-  "event_type": "tiebreaker_rejected",
-  "alias": "string"
 }
 ```
 

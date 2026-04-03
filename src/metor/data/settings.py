@@ -45,8 +45,8 @@ class SettingKey(str, Enum):
     REQUIRE_LOCAL_AUTH = 'daemon.require_local_auth'
     ALLOW_DROPS = 'daemon.allow_drops'
     EPHEMERAL_MESSAGES = 'daemon.ephemeral_messages'
-    RECORD_LIVE_EVENTS = 'daemon.record_live_events'
-    RECORD_DROP_EVENTS = 'daemon.record_drop_events'
+    RECORD_LIVE_HISTORY = 'daemon.record_live_history'
+    RECORD_DROP_HISTORY = 'daemon.record_drop_history'
     FALLBACK_TO_DROP = 'daemon.fallback_to_drop'
     MAX_UNSEEN_LIVE_MSGS = 'daemon.max_unseen_live_msgs'
 
@@ -56,6 +56,8 @@ class SettingKey(str, Enum):
     ALLOW_DROP_STANDBY_ON_LIVE = 'daemon.allow_drop_standby_on_live'
     LIVE_RECONNECT_DELAY = 'daemon.live_reconnect_delay'
     LIVE_RECONNECT_GRACE_TIMEOUT = 'daemon.live_reconnect_grace_timeout'
+    RETUNNEL_RECONNECT_DELAY = 'daemon.retunnel_reconnect_delay'
+    RETUNNEL_RECOVERY_RETRIES = 'daemon.retunnel_recovery_retries'
 
     @property
     def is_ui(self) -> bool:
@@ -159,7 +161,7 @@ class Settings:
         ),
         SettingKey.INBOX_NOTIFICATION_DELAY: SettingSpec(
             key=SettingKey.INBOX_NOTIFICATION_DELAY,
-            default=0.0,
+            default=10.0,
             category='User Interface',
             description='Delays and aggregates unread-message notifications while the peer is unfocused. `0` disables buffering.',
             constraints='Float >= 0 seconds.',
@@ -276,19 +278,19 @@ class Settings:
             constraints='Boolean.',
             security_note='Improves local deniability by removing consumed drop content while preserving minimal delivery metadata for deduplication.',
         ),
-        SettingKey.RECORD_LIVE_EVENTS: SettingSpec(
-            key=SettingKey.RECORD_LIVE_EVENTS,
+        SettingKey.RECORD_LIVE_HISTORY: SettingSpec(
+            key=SettingKey.RECORD_LIVE_HISTORY,
             default=True,
             category='Core Daemon',
-            description='Persists live connection events in the history log.',
+            description='Persists raw live transport rows in the history ledger and projected summary history.',
             constraints='Boolean.',
             security_note='Disabling reduces local metadata retention for live sessions.',
         ),
-        SettingKey.RECORD_DROP_EVENTS: SettingSpec(
-            key=SettingKey.RECORD_DROP_EVENTS,
+        SettingKey.RECORD_DROP_HISTORY: SettingSpec(
+            key=SettingKey.RECORD_DROP_HISTORY,
             default=True,
             category='Core Daemon',
-            description='Persists offline drop transport events in the history log.',
+            description='Persists raw drop transport rows in the history ledger and projected summary history.',
             constraints='Boolean.',
             security_note='Disabling reduces local metadata retention for drop delivery attempts.',
         ),
@@ -332,7 +334,7 @@ class Settings:
         ),
         SettingKey.LIVE_RECONNECT_DELAY: SettingSpec(
             key=SettingKey.LIVE_RECONNECT_DELAY,
-            default=10,
+            default=15,
             category='Advanced Network Resilience',
             description='Base delay before automatic live reconnect attempts. `0` disables automatic reconnect.',
             constraints='Integer >= 0 seconds.',
@@ -340,10 +342,26 @@ class Settings:
         ),
         SettingKey.LIVE_RECONNECT_GRACE_TIMEOUT: SettingSpec(
             key=SettingKey.LIVE_RECONNECT_GRACE_TIMEOUT,
-            default=10,
+            default=15,
             category='Advanced Network Resilience',
             description='Reconnect grace window for silently accepting a recent peer reconnect. `0` disables reconnect grace.',
             constraints='Integer >= 0 seconds.',
+            min_value=0,
+        ),
+        SettingKey.RETUNNEL_RECONNECT_DELAY: SettingSpec(
+            key=SettingKey.RETUNNEL_RECONNECT_DELAY,
+            default=1.0,
+            category='Advanced Network Resilience',
+            description='Delay before reconnecting after a live retunnel disconnect. `0` reconnects immediately.',
+            constraints='Float >= 0 seconds.',
+            min_value=0.0,
+        ),
+        SettingKey.RETUNNEL_RECOVERY_RETRIES: SettingSpec(
+            key=SettingKey.RETUNNEL_RECOVERY_RETRIES,
+            default=2,
+            category='Advanced Network Resilience',
+            description='Additional delayed retunnel recovery retries after a transient reject or early close.',
+            constraints='Integer >= 0.',
             min_value=0,
         ),
     }

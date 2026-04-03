@@ -54,12 +54,15 @@ class Constants:
     WORKER_SLEEP_SEC: float = 1.0  # Standard background worker tick rate
     WORKER_SLEEP_SLOW_SEC: float = 2.0  # Slower background worker tick rate
     LOCK_SLEEP_SEC: float = 0.05  # Sleep interval for FileLock spinlocks
+    FILE_LOCK_TIMEOUT_SEC: float = 5.0  # Maximum wait for acquiring a file lock
+    FILE_LOCK_STALE_AGE_SEC: float = (
+        10.0  # Age threshold for considering a lock file stale
+    )
     INPUT_SLEEP_SEC: float = 0.02  # UI non-blocking input thread sleep
     TCP_CLOSE_LINGER_SEC: float = 0.2  # Socket linger before shutdown
     CONNECT_RETRY_BACKOFF_SEC: float = 3.0  # Delay between explicit connect retries
-    RETUNNEL_RECONNECT_DELAY_SEC: float = (
-        1.0  # Delay before reconnecting after a live retunnel disconnect
-    )
+    MUTUAL_CONNECT_RACE_WINDOW_SEC: float = 5.0  # Short grace window to recognize the winning inbound side of a simultaneous connect race
+    PENDING_EXPIRY_FEEDBACK_WINDOW_SEC: float = 30.0  # How long a recently expired pending live request should produce a dedicated accept-expired UI hint
 
     # Network Backoff Jitter (Algorithmic Constants)
     LIVE_RECONNECT_JITTER_MAX_MS: int = 2001

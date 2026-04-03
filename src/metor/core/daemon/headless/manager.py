@@ -1,63 +1,25 @@
-"""
-Module providing a headless, ephemeral Daemon instance.
-Processes offline CLI queries exclusively via IPC without initializing Tor or Network listeners,
-enforcing strict Domain-Driven Design by shielding the UI from direct database access.
-"""
+"""Ephemeral daemon manager for offline IPC-only CLI operations."""
 
 import socket
 import threading
-import json
 import types
 from functools import cached_property
-from typing import Dict, Optional, Type
+from typing import Optional, Type
 
 from metor.core import KeyManager, TorManager
-from metor.core.api import (
-    EventType,
-    JsonValue,
-    IpcEvent,
-    IpcCommand,
-    create_event,
-    GetContactsListCommand,
-    AddContactCommand,
-    RemoveContactCommand,
-    RenameContactCommand,
-    ClearContactsCommand,
-    ClearProfileDbCommand,
-    GetHistoryCommand,
-    ClearHistoryCommand,
-    GetMessagesCommand,
-    ClearMessagesCommand,
-    GetInboxCommand,
-    MarkReadCommand,
-    GetAddressCommand,
-    GenerateAddressCommand,
-    SetSettingCommand,
-    GetSettingCommand,
-    SetConfigCommand,
-    GetConfigCommand,
-    SyncConfigCommand,
-)
-from metor.data import (
-    ContactManager,
-    DatabaseCorruptedError,
-    HistoryManager,
-    MessageManager,
-    SettingKey,
-)
+from metor.core.api import IpcCommand, IpcEvent
+from metor.data import ContactManager, HistoryManager, MessageManager
 from metor.data.profile import ProfileManager
 from metor.utils import Constants
 
 # Local Package Imports
-from metor.core.daemon.bootstrap import (
-    verify_master_password,
-    InvalidMasterPasswordError,
-)
 from metor.core.daemon.handlers import (
+    ConfigCommandHandler,
     DatabaseCommandHandler,
     SystemCommandHandler,
-    ConfigCommandHandler,
 )
+from metor.core.daemon.headless.dispatch import process_command, validate_password
+from metor.core.daemon.headless.server import handle_client, run_acceptor
 
 
 class HeadlessDaemon:
@@ -173,7 +135,12 @@ class HeadlessDaemon:
             DatabaseCommandHandler: The active instance.
         """
         return DatabaseCommandHandler(
-            self._pm, self._cm, self._hm, self._mm, lambda: [], lambda e: None
+            self._pm,
+            self._cm,
+            self._hm,
+            self._mm,
+            lambda: [],
+            lambda e: None,
         )
 
     @cached_property
@@ -253,7 +220,7 @@ class HeadlessDaemon:
         if self._server:
             try:
                 self._server.close()
-            except Exception:
+            except OSError:
                 pass
 
     def _acceptor(self) -> None:
@@ -266,20 +233,7 @@ class HeadlessDaemon:
         Returns:
             None
         """
-        if not self._server:
-            return
-
-        try:
-            self._server.settimeout(Constants.THREAD_POLL_TIMEOUT)
-            while not self._stop_event.is_set():
-                try:
-                    conn, _ = self._server.accept()
-                    self._handle_client(conn)
-                    break
-                except socket.timeout:
-                    pass
-        except Exception:
-            pass
+        run_acceptor(self)
 
     def _handle_client(self, conn: socket.socket) -> None:
         """
@@ -291,42 +245,7 @@ class HeadlessDaemon:
         Returns:
             None
         """
-        try:
-            daemon_ipc_timeout = self._pm.config.get_float(
-                SettingKey.DAEMON_IPC_TIMEOUT
-            )
-            conn.settimeout(daemon_ipc_timeout)
-            buffer: bytearray = bytearray()
-            while not self._stop_event.is_set():
-                try:
-                    data: bytes = conn.recv(Constants.TCP_BUFFER_SIZE)
-                    if not data:
-                        break
-
-                    buffer.extend(data)
-                    if len(buffer) > Constants.MAX_IPC_BYTES:
-                        self._send(conn, create_event(EventType.UNKNOWN_COMMAND))
-                        break
-
-                    if b'\n' in buffer:
-                        line_bytes, _, _ = buffer.partition(b'\n')
-                        line: str = line_bytes.decode('utf-8', errors='ignore').strip()
-                        try:
-                            cmd_dict: Dict[str, JsonValue] = json.loads(line)
-                            cmd: IpcCommand = IpcCommand.from_dict(cmd_dict)
-                            self._process_command(cmd, conn)
-                        except Exception:
-                            self._send(conn, create_event(EventType.UNKNOWN_COMMAND))
-                        break
-                except socket.timeout:
-                    continue
-        except Exception:
-            pass
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
+        handle_client(self, conn)
 
     def _send(self, conn: socket.socket, event: IpcEvent) -> None:
         """
@@ -342,7 +261,7 @@ class HeadlessDaemon:
         try:
             msg: bytes = (event.to_json() + '\n').encode('utf-8')
             conn.sendall(msg)
-        except Exception:
+        except OSError:
             pass
 
     def _validate_password(self) -> Optional[IpcEvent]:
@@ -355,18 +274,7 @@ class HeadlessDaemon:
         Returns:
             Optional[IpcEvent]: An error event when validation fails, otherwise None.
         """
-        if not self._pm.supports_password_auth():
-            return None
-
-        if self._password is None:
-            return create_event(EventType.INVALID_PASSWORD)
-
-        try:
-            verify_master_password(self._km)
-        except InvalidMasterPasswordError:
-            return create_event(EventType.INVALID_PASSWORD)
-
-        return None
+        return validate_password(self)
 
     def _process_command(self, cmd: IpcCommand, conn: socket.socket) -> None:
         """
@@ -379,50 +287,4 @@ class HeadlessDaemon:
         Returns:
             None
         """
-        if isinstance(
-            cmd,
-            (
-                SetSettingCommand,
-                GetSettingCommand,
-                SetConfigCommand,
-                GetConfigCommand,
-                SyncConfigCommand,
-            ),
-        ):
-            self._send(conn, self._config_handler.handle(cmd))
-            return
-
-        if isinstance(
-            cmd,
-            (
-                GetContactsListCommand,
-                AddContactCommand,
-                RemoveContactCommand,
-                RenameContactCommand,
-                ClearContactsCommand,
-                ClearProfileDbCommand,
-                GetHistoryCommand,
-                ClearHistoryCommand,
-                GetMessagesCommand,
-                ClearMessagesCommand,
-                GetInboxCommand,
-                MarkReadCommand,
-            ),
-        ):
-            password_error: Optional[IpcEvent] = self._validate_password()
-            if password_error is not None:
-                self._send(conn, password_error)
-                return
-
-            try:
-                self._send(conn, self._db_handler.handle(cmd))
-            except DatabaseCorruptedError:
-                self._send(conn, create_event(EventType.DB_CORRUPTED))
-        elif isinstance(cmd, (GetAddressCommand, GenerateAddressCommand)):
-            password_error = self._validate_password()
-            if password_error is not None:
-                self._send(conn, password_error)
-                return
-            self._send(conn, self._sys_handler.handle(cmd))
-        else:
-            self._send(conn, create_event(EventType.DAEMON_OFFLINE))
+        process_command(self, cmd, conn)

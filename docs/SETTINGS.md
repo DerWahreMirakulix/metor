@@ -12,17 +12,18 @@ It is the canonical reference for supported user-facing settings and structural 
 
 ## Table of Contents
 
-- [1. Cascading Settings](#1-cascading-settings)
-- [2. Structural Profile Config](#2-structural-profile-config)
-- [User Interface](#user-interface)
-- [Core Daemon](#core-daemon)
-- [Advanced Network Resilience](#advanced-network-resilience)
+- [Configuration Model](#configuration-model)
+- [Cascading Settings](#cascading-settings)
+  - [User Interface](#user-interface)
+  - [Core Daemon](#core-daemon)
+  - [Advanced Network Resilience](#advanced-network-resilience)
+- [Structural Profile Config](#structural-profile-config)
 
-## 1. Cascading Settings
+## Cascading Settings
 
 ### User Interface
 
-### `ui.default_profile`
+#### `ui.default_profile`
 
 Selects the profile used when the CLI is started without `-p`.
 
@@ -42,7 +43,7 @@ Selects the profile used when the CLI is started without `-p`.
 
 ---
 
-### `ui.prompt_sign`
+#### `ui.prompt_sign`
 
 Sets the prompt prefix shown in the interactive chat UI.
 
@@ -64,7 +65,7 @@ Sets the prompt prefix shown in the interactive chat UI.
 
 ---
 
-### `ui.chat_limit`
+#### `ui.chat_limit`
 
 Limits the number of rendered chat lines kept in volatile UI memory.
 
@@ -86,7 +87,7 @@ Limits the number of rendered chat lines kept in volatile UI memory.
 
 ---
 
-### `ui.history_limit`
+#### `ui.history_limit`
 
 Default number of history events shown per request.
 
@@ -108,7 +109,7 @@ Default number of history events shown per request.
 
 ---
 
-### `ui.messages_limit`
+#### `ui.messages_limit`
 
 Default number of stored messages shown per request.
 
@@ -130,7 +131,7 @@ Default number of stored messages shown per request.
 
 ---
 
-### `ui.chat_buffer_padding`
+#### `ui.chat_buffer_padding`
 
 Keeps extra renderer lines around the viewport to reduce redraw churn.
 
@@ -152,14 +153,14 @@ Keeps extra renderer lines around the viewport to reduce redraw churn.
 
 ---
 
-### `ui.inbox_notification_delay`
+#### `ui.inbox_notification_delay`
 
 Delays and aggregates unread-message notifications while the peer is unfocused. `0` disables buffering.
 
 | Property         | Value               |
 | ---------------- | ------------------- |
 | Type             | `float`             |
-| Default          | `0.0`               |
+| Default          | `10.0`              |
 | Category         | `User Interface`    |
 | Scope            | `UI client-local`   |
 | Profile Override | `Yes`               |
@@ -168,13 +169,13 @@ Delays and aggregates unread-message notifications while the peer is unfocused. 
 **CLI Examples**
 
 - `metor settings get ui.inbox_notification_delay`
-- `metor settings set ui.inbox_notification_delay 0.0`
+- `metor settings set ui.inbox_notification_delay 10.0`
 - `metor -p <profile> config get ui.inbox_notification_delay`
-- `metor -p <profile> config set ui.inbox_notification_delay 0.0`
+- `metor -p <profile> config set ui.inbox_notification_delay 10.0`
 
 ---
 
-### `ui.ipc_timeout`
+#### `ui.ipc_timeout`
 
 Client-side timeout for CLI and chat IPC requests.
 
@@ -196,7 +197,7 @@ Client-side timeout for CLI and chat IPC requests.
 
 ### Core Daemon
 
-### `daemon.max_tor_retries`
+#### `daemon.max_tor_retries`
 
 Controls how many times Tor launch is attempted before startup fails.
 
@@ -218,7 +219,7 @@ Controls how many times Tor launch is attempted before startup fails.
 
 ---
 
-### `daemon.max_connect_retries`
+#### `daemon.max_connect_retries`
 
 Controls how many additional live connect retries run after the initial attempt.
 
@@ -240,7 +241,7 @@ Controls how many additional live connect retries run after the initial attempt.
 
 ---
 
-### `daemon.tor_timeout`
+#### `daemon.tor_timeout`
 
 Timeout for outbound Tor socket operations and readiness checks.
 
@@ -262,7 +263,7 @@ Timeout for outbound Tor socket operations and readiness checks.
 
 ---
 
-### `daemon.stream_idle_timeout`
+#### `daemon.stream_idle_timeout`
 
 Idle timeout for active live and drop sockets.
 
@@ -284,7 +285,7 @@ Idle timeout for active live and drop sockets.
 
 ---
 
-### `daemon.late_acceptance_timeout`
+#### `daemon.late_acceptance_timeout`
 
 Window during which pending live sessions may still be accepted.
 
@@ -306,7 +307,7 @@ Window during which pending live sessions may still be accepted.
 
 ---
 
-### `daemon.ipc_timeout`
+#### `daemon.ipc_timeout`
 
 Server-side timeout for daemon IPC sockets.
 
@@ -328,7 +329,7 @@ Server-side timeout for daemon IPC sockets.
 
 ---
 
-### `daemon.enable_tor_logging`
+#### `daemon.enable_tor_logging`
 
 Emits Tor process logs to the terminal.
 
@@ -351,7 +352,7 @@ Emits Tor process logs to the terminal.
 
 ---
 
-### `daemon.enable_sql_logging`
+#### `daemon.enable_sql_logging`
 
 Emits SQLCipher and SQLite diagnostics to the terminal.
 
@@ -374,7 +375,7 @@ Emits SQLCipher and SQLite diagnostics to the terminal.
 
 ---
 
-### `daemon.enable_runtime_db_mirror`
+#### `daemon.enable_runtime_db_mirror`
 
 Exports a plaintext runtime copy of the encrypted database for local inspection tools.
 
@@ -397,7 +398,7 @@ Exports a plaintext runtime copy of the encrypted database for local inspection 
 
 ---
 
-### `daemon.auto_accept_contacts`
+#### `daemon.auto_accept_contacts`
 
 Automatically accepts incoming live sessions from saved contacts.
 
@@ -420,7 +421,7 @@ Automatically accepts incoming live sessions from saved contacts.
 
 ---
 
-### `daemon.require_local_auth`
+#### `daemon.require_local_auth`
 
 Requires every UI session to authenticate even when the daemon is already running.
 
@@ -443,7 +444,7 @@ Requires every UI session to authenticate even when the daemon is already runnin
 
 ---
 
-### `daemon.allow_drops`
+#### `daemon.allow_drops`
 
 Enables reception and processing of offline drop messages.
 
@@ -465,7 +466,7 @@ Enables reception and processing of offline drop messages.
 
 ---
 
-### `daemon.ephemeral_messages`
+#### `daemon.ephemeral_messages`
 
 Shreds consumed drop-message payloads after they are read instead of retaining them in message history.
 
@@ -488,9 +489,9 @@ Shreds consumed drop-message payloads after they are read instead of retaining t
 
 ---
 
-### `daemon.record_live_events`
+#### `daemon.record_live_history`
 
-Persists live connection events in the history log.
+Persists raw live transport rows in the history ledger and projected summary history.
 
 | Property         | Value                                                         |
 | ---------------- | ------------------------------------------------------------- |
@@ -504,16 +505,16 @@ Persists live connection events in the history log.
 
 **CLI Examples**
 
-- `metor settings get daemon.record_live_events`
-- `metor settings set daemon.record_live_events true`
-- `metor -p <profile> config get daemon.record_live_events`
-- `metor -p <profile> config set daemon.record_live_events true`
+- `metor settings get daemon.record_live_history`
+- `metor settings set daemon.record_live_history true`
+- `metor -p <profile> config get daemon.record_live_history`
+- `metor -p <profile> config set daemon.record_live_history true`
 
 ---
 
-### `daemon.record_drop_events`
+#### `daemon.record_drop_history`
 
-Persists offline drop transport events in the history log.
+Persists raw drop transport rows in the history ledger and projected summary history.
 
 | Property         | Value                                                                  |
 | ---------------- | ---------------------------------------------------------------------- |
@@ -527,14 +528,14 @@ Persists offline drop transport events in the history log.
 
 **CLI Examples**
 
-- `metor settings get daemon.record_drop_events`
-- `metor settings set daemon.record_drop_events true`
-- `metor -p <profile> config get daemon.record_drop_events`
-- `metor -p <profile> config set daemon.record_drop_events true`
+- `metor settings get daemon.record_drop_history`
+- `metor settings set daemon.record_drop_history true`
+- `metor -p <profile> config get daemon.record_drop_history`
+- `metor -p <profile> config set daemon.record_drop_history true`
 
 ---
 
-### `daemon.fallback_to_drop`
+#### `daemon.fallback_to_drop`
 
 Falls back unacknowledged live messages into the offline drop queue when possible.
 
@@ -556,7 +557,7 @@ Falls back unacknowledged live messages into the offline drop queue when possibl
 
 ---
 
-### `daemon.max_unseen_live_msgs`
+#### `daemon.max_unseen_live_msgs`
 
 Caps unread crash-safe live backlog per peer. `0` disables headless live backlog, while `-1` removes the limit entirely.
 
@@ -578,7 +579,7 @@ Caps unread crash-safe live backlog per peer. `0` disables headless live backlog
 
 ### Advanced Network Resilience
 
-### `daemon.max_concurrent_connections`
+#### `daemon.max_concurrent_connections`
 
 Limits simultaneous authenticated and unauthenticated live sockets handled by the daemon.
 
@@ -600,7 +601,7 @@ Limits simultaneous authenticated and unauthenticated live sockets handled by th
 
 ---
 
-### `daemon.drop_tunnel_idle_timeout`
+#### `daemon.drop_tunnel_idle_timeout`
 
 Controls cached drop tunnel lifetime. `0` disables caching completely.
 
@@ -622,7 +623,7 @@ Controls cached drop tunnel lifetime. `0` disables caching completely.
 
 ---
 
-### `daemon.allow_drop_standby_on_live`
+#### `daemon.allow_drop_standby_on_live`
 
 Keeps a cached drop tunnel warm while live remains the primary transport.
 
@@ -644,14 +645,14 @@ Keeps a cached drop tunnel warm while live remains the primary transport.
 
 ---
 
-### `daemon.live_reconnect_delay`
+#### `daemon.live_reconnect_delay`
 
 Base delay before automatic live reconnect attempts. `0` disables automatic reconnect.
 
 | Property         | Value                         |
 | ---------------- | ----------------------------- |
 | Type             | `int`                         |
-| Default          | `10`                          |
+| Default          | `15`                          |
 | Category         | `Advanced Network Resilience` |
 | Scope            | `Daemon runtime`              |
 | Profile Override | `Yes`                         |
@@ -660,20 +661,20 @@ Base delay before automatic live reconnect attempts. `0` disables automatic reco
 **CLI Examples**
 
 - `metor settings get daemon.live_reconnect_delay`
-- `metor settings set daemon.live_reconnect_delay 10`
+- `metor settings set daemon.live_reconnect_delay 15`
 - `metor -p <profile> config get daemon.live_reconnect_delay`
-- `metor -p <profile> config set daemon.live_reconnect_delay 10`
+- `metor -p <profile> config set daemon.live_reconnect_delay 15`
 
 ---
 
-### `daemon.live_reconnect_grace_timeout`
+#### `daemon.live_reconnect_grace_timeout`
 
 Reconnect grace window for silently accepting a recent peer reconnect. `0` disables reconnect grace.
 
 | Property         | Value                         |
 | ---------------- | ----------------------------- |
 | Type             | `int`                         |
-| Default          | `10`                          |
+| Default          | `15`                          |
 | Category         | `Advanced Network Resilience` |
 | Scope            | `Daemon runtime`              |
 | Profile Override | `Yes`                         |
@@ -682,11 +683,55 @@ Reconnect grace window for silently accepting a recent peer reconnect. `0` disab
 **CLI Examples**
 
 - `metor settings get daemon.live_reconnect_grace_timeout`
-- `metor settings set daemon.live_reconnect_grace_timeout 10`
+- `metor settings set daemon.live_reconnect_grace_timeout 15`
 - `metor -p <profile> config get daemon.live_reconnect_grace_timeout`
-- `metor -p <profile> config set daemon.live_reconnect_grace_timeout 10`
+- `metor -p <profile> config set daemon.live_reconnect_grace_timeout 15`
 
-## 2. Structural Profile Config
+---
+
+#### `daemon.retunnel_reconnect_delay`
+
+Delay before reconnecting after a live retunnel disconnect. `0` reconnects immediately.
+
+| Property         | Value                         |
+| ---------------- | ----------------------------- |
+| Type             | `float`                       |
+| Default          | `1.0`                         |
+| Category         | `Advanced Network Resilience` |
+| Scope            | `Daemon runtime`              |
+| Profile Override | `Yes`                         |
+| Constraints      | Float >= 0 seconds.           |
+
+**CLI Examples**
+
+- `metor settings get daemon.retunnel_reconnect_delay`
+- `metor settings set daemon.retunnel_reconnect_delay 1.0`
+- `metor -p <profile> config get daemon.retunnel_reconnect_delay`
+- `metor -p <profile> config set daemon.retunnel_reconnect_delay 1.0`
+
+---
+
+#### `daemon.retunnel_recovery_retries`
+
+Additional delayed retunnel recovery retries after a transient reject or early close.
+
+| Property         | Value                         |
+| ---------------- | ----------------------------- |
+| Type             | `int`                         |
+| Default          | `2`                           |
+| Category         | `Advanced Network Resilience` |
+| Scope            | `Daemon runtime`              |
+| Profile Override | `Yes`                         |
+| Constraints      | Integer >= 0.                 |
+
+**CLI Examples**
+
+- `metor settings get daemon.retunnel_recovery_retries`
+- `metor settings set daemon.retunnel_recovery_retries 2`
+- `metor -p <profile> config get daemon.retunnel_recovery_retries`
+- `metor -p <profile> config set daemon.retunnel_recovery_retries 2`
+
+## Structural Profile Config
 
 ### `is_remote`
 

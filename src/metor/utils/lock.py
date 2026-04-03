@@ -24,8 +24,8 @@ class FileLock:
     def __init__(
         self,
         target_file_path: str | Path,
-        timeout: float = 5.0,
-        stale_age: float = 10.0,
+        timeout: float = Constants.FILE_LOCK_TIMEOUT_SEC,
+        stale_age: float = Constants.FILE_LOCK_STALE_AGE_SEC,
     ) -> None:
         """
         Initializes the FileLock instance.

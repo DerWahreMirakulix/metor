@@ -129,11 +129,12 @@ class Help:
         'history': CommandDef(
             name='history',
             usage='metor history',
-            description='View or wipe the connection event log.',
+            description='View projected history or inspect the raw transport ledger.',
             category='Messaging & History',
             subcommands=[
                 SubCommandDef(
-                    'show [onion|alias] [limit]', 'View connection event log.'
+                    'show [onion|alias] [limit] [--raw]',
+                    'View projected history or use `--raw` for the transport ledger.',
                 ),
                 SubCommandDef('clear [onion|alias]', 'Wipe the connection event log.'),
             ],
@@ -221,7 +222,7 @@ class Help:
         'cleanup': CommandDef(
             name='cleanup',
             usage='metor cleanup [--force]',
-            description='Kill managed daemon/Tor processes and clear daemon state; `--force` also rescues untracked daemons when local runtime-state files are missing or corrupted.',
+            description='Kill managed daemon/Tor processes and clear daemon state.',
             category='System & Settings',
         ),
         'purge': CommandDef(

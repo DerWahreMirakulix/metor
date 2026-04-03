@@ -138,14 +138,14 @@ Inside the Chat UI, you have access to the following slash commands:
 
 You don't need to enter the Chat UI to use Metor. It can act as an asynchronous CLI messenger (similar to email).
 
-| Command                               | Description                                                                  |
-| :------------------------------------ | :--------------------------------------------------------------------------- |
-| `metor send <onion\|alias> "Message"` | Queues a message in the outbox (sent automatically when the peer is online). |
-| `metor inbox [onion\|alias]`          | Checks for new unread messages or consumes them for a specific peer.         |
-| `metor address show`                  | Displays your current `.onion` hidden service address.                       |
-| `metor contacts list`                 | Lists your saved contacts.                                                   |
-| `metor history show [onion\|alias]`   | Shows the connection event log globally or for a specific peer.              |
-| `metor messages show <onion\|alias>`  | Prints the chat history with a contact directly to the console.              |
+| Command                                     | Description                                                                  |
+| :------------------------------------------ | :--------------------------------------------------------------------------- |
+| `metor send <onion\|alias> "Message"`       | Queues a message in the outbox (sent automatically when the peer is online). |
+| `metor inbox [onion\|alias]`                | Checks for new unread messages or consumes them for a specific peer.         |
+| `metor address show`                        | Displays your current `.onion` hidden service address.                       |
+| `metor contacts list`                       | Lists your saved contacts.                                                   |
+| `metor history show [onion\|alias] [--raw]` | Shows projected history or, with `--raw`, the raw transport ledger.          |
+| `metor messages show <onion\|alias>`        | Prints the chat history with a contact directly to the console.              |
 
 ### 4. Profile Management & Remote Setup
 
@@ -221,7 +221,7 @@ Generated documentation is part of the project maintenance pipeline.
 - `npm run docs`: Regenerates [API.md](docs/API.md) and [SETTINGS.md](docs/SETTINGS.md).
 - `npm run ready`: Formats code and markdown, runs linting and type checking, then regenerates the generated docs.
 
-Before changing architecture, security boundaries, or contributor-facing workflows, review [ARCHITECTURE.md](ARCHITECTURE.md), [AUDIT.md](AUDIT.md), and [CONTRIBUTE.md](CONTRIBUTE.md).
+Before changing architecture, security boundaries, or contributor-facing workflows, review [ARCHITECTURE.md](docs/ARCHITECTURE.md), [AUDIT.md](docs/AUDIT.md), and [CONTRIBUTE.md](docs/CONTRIBUTE.md).
 
 ## 🛡️ Security Disclaimer
 

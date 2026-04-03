@@ -30,6 +30,7 @@ from metor.core.api import (
     SendDropCommand,
     ClearHistoryCommand,
     GetHistoryCommand,
+    GetRawHistoryCommand,
     ClearMessagesCommand,
     GetMessagesCommand,
     MarkReadCommand,
@@ -42,6 +43,7 @@ from metor.core.api import (
     ClearProfileDbCommand,
     ContactsDataEvent,
     HistoryDataEvent,
+    HistoryRawDataEvent,
     MessagesDataEvent,
     InboxCountsEvent,
     UnreadMessagesEvent,
@@ -203,6 +205,7 @@ class CliProxy:
             (
                 ContactsDataEvent,
                 HistoryDataEvent,
+                HistoryRawDataEvent,
                 MessagesDataEvent,
                 InboxCountsEvent,
                 UnreadMessagesEvent,
@@ -619,7 +622,10 @@ class CliProxy:
         )
 
     def get_history(
-        self, target: Optional[str] = None, limit: Optional[int] = None
+        self,
+        target: Optional[str] = None,
+        limit: Optional[int] = None,
+        raw: bool = False,
     ) -> str:
         """
         Views the event history.
@@ -627,6 +633,7 @@ class CliProxy:
         Args:
             target (Optional[str]): The specific alias to filter by, if any.
             limit (Optional[int]): Maximum number of events to fetch.
+            raw (bool): Whether to request the raw transport ledger.
 
         Returns:
             str: The formatted history output or a status message.
@@ -635,7 +642,12 @@ class CliProxy:
         if err:
             return err
 
-        return self._request_ipc(GetHistoryCommand(target=target, limit=limit))
+        history_cmd = (
+            GetRawHistoryCommand(target=target, limit=limit)
+            if raw
+            else GetHistoryCommand(target=target, limit=limit)
+        )
+        return self._request_ipc(history_cmd)
 
     def clear_history(self, target: Optional[str] = None) -> str:
         """

@@ -11,9 +11,13 @@ from typing import List, Optional, Callable, Dict, TYPE_CHECKING, Tuple
 
 from metor.core import TorManager
 from metor.core.api import (
+    ConnectionActor,
+    ConnectionOrigin,
+    ConnectionReasonCode,
     EventType,
     IpcEvent,
     JsonValue,
+    AutoReconnectScheduledEvent,
     ConnectedEvent,
     DisconnectedEvent,
     FallbackSuccessEvent,
@@ -21,21 +25,22 @@ from metor.core.api import (
     ConnectionAutoAcceptedEvent,
     ConnectionRetryEvent,
     ConnectionFailedEvent,
-    IncomingConnectionEvent,
     ConnectionRejectedEvent,
     ContactRemovedEvent,
     MaxConnectionsReachedEvent,
+    PendingConnectionExpiredEvent,
     PeerNotFoundEvent,
     RetunnelInitiatedEvent,
     RetunnelSuccessEvent,
-    AutoReconnectAttemptEvent,
     create_event,
 )
 from metor.core.daemon.models import TorCommand
 from metor.core.daemon.crypto import Crypto
 from metor.data import (
+    HistoryActor,
     HistoryManager,
     HistoryEvent,
+    HistoryReasonCode,
     ContactManager,
     MessageManager,
     MessageDirection,
@@ -149,7 +154,14 @@ class ConnectionController:
             None
         """
         self._state.clear_retunnel_flow(onion)
-        self._broadcast(DisconnectedEvent(alias=alias, onion=onion))
+        self._broadcast(
+            DisconnectedEvent(
+                alias=alias,
+                onion=onion,
+                actor=ConnectionActor.SYSTEM,
+                origin=ConnectionOrigin.RETUNNEL,
+            )
+        )
         params: Dict[str, JsonValue] = {'alias': alias, 'onion': onion}
         if error:
             params['error'] = error
@@ -223,6 +235,46 @@ class ConnectionController:
         )
         self._state.mark_live_reconnect_grace(onion, float(grace_timeout_sec))
 
+    @staticmethod
+    def _get_local_history_actor(origin: ConnectionOrigin) -> HistoryActor:
+        """
+        Resolves whether one local flow should be attributed to the user or the daemon.
+
+        Args:
+            origin (ConnectionOrigin): The connection lifecycle origin.
+
+        Returns:
+            HistoryActor: The normalized local actor classification.
+        """
+        if origin in {
+            ConnectionOrigin.AUTO_RECONNECT,
+            ConnectionOrigin.GRACE_RECONNECT,
+            ConnectionOrigin.MUTUAL_CONNECT,
+            ConnectionOrigin.AUTO_ACCEPT_CONTACT,
+        }:
+            return HistoryActor.SYSTEM
+        return HistoryActor.LOCAL
+
+    @staticmethod
+    def _get_local_connection_actor(origin: ConnectionOrigin) -> ConnectionActor:
+        """
+        Resolves the IPC-facing actor for one locally initiated lifecycle step.
+
+        Args:
+            origin (ConnectionOrigin): The connection lifecycle origin.
+
+        Returns:
+            ConnectionActor: The normalized IPC actor classification.
+        """
+        if origin in {
+            ConnectionOrigin.AUTO_RECONNECT,
+            ConnectionOrigin.GRACE_RECONNECT,
+            ConnectionOrigin.MUTUAL_CONNECT,
+            ConnectionOrigin.AUTO_ACCEPT_CONTACT,
+        }:
+            return ConnectionActor.SYSTEM
+        return ConnectionActor.LOCAL
+
     def _sleep_connect_retry_backoff(self) -> None:
         """
         Sleeps between connect retries while remaining responsive to daemon shutdown.
@@ -242,6 +294,30 @@ class ConnectionController:
             time.sleep(sleep_sec)
             remaining_sec -= sleep_sec
 
+    def _get_retunnel_reconnect_delay(self) -> float:
+        """
+        Returns the configured reconnect delay between retunnel teardown and retry.
+
+        Args:
+            None
+
+        Returns:
+            float: The configured delay in seconds.
+        """
+        return self._config.get_float(SettingKey.RETUNNEL_RECONNECT_DELAY)
+
+    def _get_retunnel_recovery_retries(self) -> int:
+        """
+        Returns the configured delayed recovery retry budget for retunnel.
+
+        Args:
+            None
+
+        Returns:
+            int: The configured retry count.
+        """
+        return self._config.get_int(SettingKey.RETUNNEL_RECOVERY_RETRIES)
+
     def _sleep_retunnel_reconnect_delay(self) -> None:
         """
         Waits briefly before reconnecting a live retunnel to let the old session
@@ -253,7 +329,7 @@ class ConnectionController:
         Returns:
             None
         """
-        remaining_sec: float = Constants.RETUNNEL_RECONNECT_DELAY_SEC
+        remaining_sec: float = self._get_retunnel_reconnect_delay()
         while remaining_sec > 0:
             if self._stop_flag.is_set():
                 break
@@ -281,7 +357,102 @@ class ConnectionController:
             time.sleep(sleep_sec)
             remaining_sec -= sleep_sec
 
-    def connect_to(self, target: str) -> None:
+    def _retunnel_reconnect_retry_worker(self, onion: str) -> None:
+        """
+        Waits briefly and retries one retunnel reconnect attempt if the flow is still unresolved.
+
+        Args:
+            onion (str): The peer onion identity.
+
+        Returns:
+            None
+        """
+        try:
+            self._sleep_retunnel_reconnect_delay()
+            if self._stop_flag.is_set():
+                return
+
+            if not self._state.is_retunneling(onion):
+                return
+
+            if self._state.is_connected_or_pending(onion):
+                return
+
+            self.connect_to(onion, origin=ConnectionOrigin.RETUNNEL)
+        finally:
+            self._state.finish_retunnel_recovery_retry(onion)
+
+    def _schedule_retunnel_recovery_retry(
+        self,
+        alias: str,
+        onion: str,
+        error: str,
+    ) -> bool:
+        """
+        Schedules one bounded delayed retunnel recovery attempt before declaring the flow failed.
+
+        Args:
+            alias (str): The peer alias.
+            onion (str): The peer onion identity.
+            error (str): The failure detail for the eventual fatal failure path.
+
+        Returns:
+            bool: True if the flow remains recoverable or one retry was scheduled.
+        """
+        retry_limit: int = self._get_retunnel_recovery_retries()
+
+        self._state.clear_scheduled_auto_reconnect(onion)
+        self._mark_live_reconnect_grace(onion)
+
+        if self._state.has_retunnel_recovery_retry_pending(onion):
+            return True
+
+        attempt: Optional[int] = self._state.reserve_retunnel_recovery_retry(
+            onion,
+            retry_limit,
+        )
+        if attempt is None:
+            self._broadcast_retunnel_failure(alias, onion, error)
+            return False
+
+        self._broadcast(
+            ConnectionRetryEvent(
+                alias=alias,
+                onion=onion,
+                attempt=attempt,
+                max_retries=retry_limit,
+                origin=ConnectionOrigin.RETUNNEL,
+                actor=ConnectionActor.SYSTEM,
+            )
+        )
+        threading.Thread(
+            target=self._retunnel_reconnect_retry_worker,
+            args=(onion,),
+            daemon=True,
+        ).start()
+        return True
+
+    def _enqueue_live_reconnect(self, onion: str) -> bool:
+        """
+        Adds one peer to the reconnect queue once without duplicating queue entries.
+
+        Args:
+            onion (str): The target onion identity.
+
+        Returns:
+            bool: True if the peer was added to the queue.
+        """
+        with self._live_reconnect_lock:
+            if onion in self._live_reconnect_queue:
+                return False
+            self._live_reconnect_queue.append(onion)
+            return True
+
+    def connect_to(
+        self,
+        target: str,
+        origin: ConnectionOrigin = ConnectionOrigin.MANUAL,
+    ) -> None:
         """
         Initiates an outbound Tor connection securely utilizing the explicit Stream Reader.
         Receiver handles the Late Acceptance timeout. Protects against outbound FD/RAM exhaustion.
@@ -290,6 +461,7 @@ class ConnectionController:
 
         Args:
             target (str): The alias or onion address to connect to.
+            origin (ConnectionOrigin): The machine-readable source of the connection attempt.
 
         Returns:
             None
@@ -301,6 +473,9 @@ class ConnectionController:
             return
         alias, onion = resolved
 
+        if origin is not ConnectionOrigin.AUTO_RECONNECT:
+            self._state.clear_scheduled_auto_reconnect(onion)
+
         if self._state.get_connection(onion):
             return
 
@@ -308,16 +483,25 @@ class ConnectionController:
         if onion in self._state.get_pending_connections_keys():
             implicit_accept = True
         else:
-            self._state.add_outbound_attempt(onion)
+            self._state.add_outbound_attempt(onion, origin=origin)
 
         if implicit_accept:
-            self._broadcast(ConnectionAutoAcceptedEvent(alias=alias, onion=onion))
-            self.accept(target)
+            self._broadcast(
+                ConnectionAutoAcceptedEvent(
+                    alias=alias,
+                    onion=onion,
+                    origin=origin,
+                    actor=self._get_local_connection_actor(origin),
+                )
+            )
+            self.accept(target, origin=origin)
             return
 
         max_conn: int = self._config.get_int(SettingKey.MAX_CONCURRENT_CONNECTIONS)
         if len(self._state.get_active_onions()) >= max_conn:
             self._state.discard_outbound_attempt(onion)
+            if origin is ConnectionOrigin.AUTO_RECONNECT:
+                self._state.clear_scheduled_auto_reconnect(onion)
             self._broadcast(
                 MaxConnectionsReachedEvent(
                     target=target,
@@ -326,8 +510,14 @@ class ConnectionController:
             )
             return
 
-        if not self._state.is_retunneling(onion):
-            self._broadcast(ConnectionConnectingEvent(alias=alias, onion=onion))
+        self._broadcast(
+            ConnectionConnectingEvent(
+                alias=alias,
+                onion=onion,
+                origin=origin,
+                actor=self._get_local_connection_actor(origin),
+            )
+        )
 
         handshake_success: bool = False
         last_error: Optional[str] = None
@@ -366,28 +556,35 @@ class ConnectionController:
                         self._config.get_float(SettingKey.LATE_ACCEPTANCE_TIMEOUT)
                     )
 
-                    self._hm.log_event(HistoryEvent.LIVE_REQUESTED, onion)
+                    self._hm.log_event(
+                        HistoryEvent.LIVE_REQUESTED,
+                        onion,
+                        actor=self._get_local_history_actor(origin),
+                        trigger=origin,
+                    )
                     if self._receiver:
                         self._receiver.start_receiving(
                             onion,
                             conn,
                             stream.get_buffer(),
                             awaiting_acceptance=True,
+                            connection_origin=origin,
                         )
                     handshake_success = True
                     return
                 except Exception as exc:
                     last_error = str(exc).strip() or exc.__class__.__name__
                     if retry_index < max_retries:
-                        if not self._state.is_retunneling(onion):
-                            self._broadcast(
-                                ConnectionRetryEvent(
-                                    alias=alias,
-                                    onion=onion,
-                                    attempt=retry_index + 1,
-                                    max_retries=max_retries,
-                                )
+                        self._broadcast(
+                            ConnectionRetryEvent(
+                                alias=alias,
+                                onion=onion,
+                                attempt=retry_index + 1,
+                                max_retries=max_retries,
+                                origin=origin,
+                                actor=ConnectionActor.SYSTEM,
                             )
+                        )
                         self._sleep_connect_retry_backoff()
                     else:
                         failure_reason: str = (
@@ -396,11 +593,22 @@ class ConnectionController:
                         self._hm.log_event(
                             HistoryEvent.LIVE_CONNECTION_LOST,
                             onion,
-                            failure_reason,
+                            actor=HistoryActor.SYSTEM,
+                            detail_text=failure_reason,
+                            trigger=origin,
+                            detail_code=HistoryReasonCode.RETRY_EXHAUSTED,
                         )
                         if self._state.is_retunneling(onion):
                             self._state.clear_retunnel_flow(onion)
-                            self._broadcast(DisconnectedEvent(alias=alias, onion=onion))
+                            self._broadcast(
+                                DisconnectedEvent(
+                                    alias=alias,
+                                    onion=onion,
+                                    actor=ConnectionActor.SYSTEM,
+                                    origin=ConnectionOrigin.RETUNNEL,
+                                    reason_code=(ConnectionReasonCode.RETRY_EXHAUSTED),
+                                )
+                            )
                             self._broadcast(
                                 create_event(
                                     EventType.RETUNNEL_FAILED,
@@ -412,25 +620,35 @@ class ConnectionController:
                                 )
                             )
                         else:
+                            if origin is ConnectionOrigin.AUTO_RECONNECT:
+                                self._state.clear_scheduled_auto_reconnect(onion)
                             self._state.discard_retunnel_reconnect(onion)
                             self._broadcast(
                                 ConnectionFailedEvent(
                                     alias=alias,
                                     onion=onion,
                                     error=failure_reason,
+                                    origin=origin,
+                                    actor=ConnectionActor.SYSTEM,
+                                    reason_code=ConnectionReasonCode.RETRY_EXHAUSTED,
                                 )
                             )
         finally:
             if not handshake_success:
                 self._state.discard_outbound_attempt(onion)
 
-    def accept(self, target: str) -> None:
+    def accept(
+        self,
+        target: str,
+        origin: ConnectionOrigin = ConnectionOrigin.INCOMING,
+    ) -> None:
         """
         Approves a pending incoming connection. Safely handles if the socket has
         died in the meantime due to Late Acceptance Timeout.
 
         Args:
             target (str): The target alias or onion.
+            origin (ConnectionOrigin): The machine-readable source of the accepted live flow.
 
         Returns:
             None
@@ -441,18 +659,33 @@ class ConnectionController:
             return
         alias, onion = resolved
 
-        conn, initial_buffer, _ = self._state.pop_pending_connection(onion)
+        conn, initial_buffer, _, pending_origin = self._state.pop_pending_connection(
+            onion
+        )
         if not conn:
             if self._state.is_retunneling(onion):
                 self._hm.log_event(
                     HistoryEvent.LIVE_CONNECTION_LOST,
                     onion,
-                    'Retunnel pending connection missing',
+                    actor=HistoryActor.SYSTEM,
+                    trigger=origin,
+                    detail_code=HistoryReasonCode.RETUNNEL_PENDING_CONNECTION_MISSING,
                 )
                 self._broadcast_retunnel_failure(
                     alias,
                     onion,
                     'Retunnel pending connection missing',
+                )
+                return
+            if self._state.consume_recent_pending_expiry(onion):
+                self._broadcast(
+                    PendingConnectionExpiredEvent(
+                        alias=alias,
+                        onion=onion,
+                        origin=origin,
+                        actor=ConnectionActor.SYSTEM,
+                        reason_code=(ConnectionReasonCode.PENDING_ACCEPTANCE_EXPIRED),
+                    )
                 )
                 return
             self._broadcast(
@@ -467,7 +700,11 @@ class ConnectionController:
             conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8'))
         except Exception:
             self._hm.log_event(
-                HistoryEvent.LIVE_CONNECTION_LOST, onion, 'Late acceptance timeout'
+                HistoryEvent.LIVE_CONNECTION_LOST,
+                onion,
+                actor=HistoryActor.SYSTEM,
+                trigger=origin,
+                detail_code=HistoryReasonCode.LATE_ACCEPTANCE_TIMEOUT,
             )
             if self._state.is_retunneling(onion):
                 self._broadcast_retunnel_failure(
@@ -476,7 +713,15 @@ class ConnectionController:
                     'Late acceptance timeout',
                 )
             else:
-                self._broadcast(DisconnectedEvent(alias=alias, onion=onion))
+                self._broadcast(
+                    PendingConnectionExpiredEvent(
+                        alias=alias,
+                        onion=onion,
+                        origin=pending_origin or origin,
+                        actor=ConnectionActor.SYSTEM,
+                        reason_code=ConnectionReasonCode.LATE_ACCEPTANCE_TIMEOUT,
+                    )
+                )
             try:
                 conn.close()
             except Exception:
@@ -484,22 +729,44 @@ class ConnectionController:
             return
 
         self._state.add_active_connection(onion, conn)
-        self._hm.log_event(HistoryEvent.LIVE_CONNECTED, onion)
+        self._hm.log_event(
+            HistoryEvent.LIVE_CONNECTED,
+            onion,
+            actor=self._get_local_history_actor(origin),
+            trigger=origin,
+        )
         if self._state.consume_retunnel_reconnect(onion):
-            self._hm.log_event(HistoryEvent.LIVE_RETUNNEL_SUCCESS, onion)
+            self._hm.log_event(
+                HistoryEvent.LIVE_RETUNNEL_SUCCESS,
+                onion,
+                actor=HistoryActor.SYSTEM,
+            )
             self._state.clear_retunnel_flow(onion)
             self._broadcast(RetunnelSuccessEvent(alias=alias, onion=onion))
         else:
-            self._broadcast(ConnectedEvent(alias=alias, onion=onion))
+            self._broadcast(
+                ConnectedEvent(
+                    alias=alias,
+                    onion=onion,
+                    origin=origin,
+                    actor=self._get_local_connection_actor(origin),
+                )
+            )
 
         if self._receiver:
-            self._receiver.start_receiving(onion, conn, initial_buffer)
+            self._receiver.start_receiving(
+                onion,
+                conn,
+                initial_buffer,
+                connection_origin=origin,
+            )
 
     def reject(
         self,
         target: str,
         initiated_by_self: bool = True,
         socket_to_close: Optional[socket.socket] = None,
+        origin: ConnectionOrigin = ConnectionOrigin.INCOMING,
     ) -> None:
         """
         Rejects a connection request and drops the socket using state tracker safeguards.
@@ -508,16 +775,9 @@ class ConnectionController:
             target (str): The target alias or onion.
             initiated_by_self (bool): Whether the local user initiated the rejection.
             socket_to_close (Optional[socket.socket]): Specific duplicate socket to terminate safely.
+            origin (ConnectionOrigin): The machine-readable source of the rejected live flow.
 
         Returns:
-            if self._state.is_retunneling(onion):
-                self._broadcast_retunnel_failure(
-                    alias,
-                    onion,
-                    'Outbound attempt rejected',
-                )
-            else:
-                self._broadcast(DisconnectedEvent(alias=alias))
             None
         """
         resolved: Optional[Tuple[str, str]] = self._cm.resolve_target(target)
@@ -528,6 +788,7 @@ class ConnectionController:
         alias, onion = resolved
 
         if initiated_by_self:
+            self._state.clear_scheduled_auto_reconnect(onion)
             self._state.discard_outbound_attempt(onion)
 
         inflight_outbound: bool = False
@@ -546,7 +807,10 @@ class ConnectionController:
                     pass
                 return
 
-        conn: Optional[socket.socket] = self._state.pop_any_connection(onion)
+        status: HistoryEvent = HistoryEvent.LIVE_REJECTED
+        reject_actor: HistoryActor = (
+            HistoryActor.LOCAL if initiated_by_self else HistoryActor.REMOTE
+        )
 
         if inflight_outbound:
             self._state.discard_outbound_attempt(onion)
@@ -555,6 +819,45 @@ class ConnectionController:
                     socket_to_close.close()
                 except Exception:
                     pass
+
+            if self._state.is_connected_or_pending(onion):
+                return
+
+            self._hm.log_event(
+                status,
+                onion,
+                actor=reject_actor,
+                trigger=origin,
+                detail_code=HistoryReasonCode.OUTBOUND_ATTEMPT_REJECTED,
+            )
+
+            if self._state.is_retunneling(onion):
+                self._schedule_retunnel_recovery_retry(
+                    alias,
+                    onion,
+                    'Outbound attempt rejected',
+                )
+                return
+
+            if origin is ConnectionOrigin.AUTO_RECONNECT:
+                self._state.clear_scheduled_auto_reconnect(onion)
+
+            self._broadcast(
+                ConnectionRejectedEvent(
+                    alias=alias,
+                    onion=onion,
+                    origin=origin,
+                    actor=(
+                        ConnectionActor.LOCAL
+                        if initiated_by_self
+                        else ConnectionActor.REMOTE
+                    ),
+                    reason_code=ConnectionReasonCode.OUTBOUND_ATTEMPT_REJECTED,
+                )
+            )
+            return
+
+        conn: Optional[socket.socket] = self._state.pop_any_connection(onion)
 
         if not conn and not inflight_outbound:
             self._discard_outbound_attempt_if_idle(onion)
@@ -581,26 +884,21 @@ class ConnectionController:
             except Exception:
                 pass
 
-        status: HistoryEvent = (
-            HistoryEvent.LIVE_REJECTED
-            if initiated_by_self
-            else HistoryEvent.LIVE_REJECTED_BY_REMOTE
-        )
-        self._hm.log_event(status, onion)
+        self._hm.log_event(status, onion, actor=reject_actor, trigger=origin)
 
-        if inflight_outbound and self._state.is_retunneling(onion):
-            self._broadcast_retunnel_failure(
-                alias,
-                onion,
-                'Outbound attempt rejected',
-            )
-            return
+        if origin is ConnectionOrigin.AUTO_RECONNECT or not initiated_by_self:
+            self._state.clear_scheduled_auto_reconnect(onion)
 
         self._broadcast(
             ConnectionRejectedEvent(
                 alias=alias,
                 onion=onion,
-                by_remote=not initiated_by_self,
+                origin=origin,
+                actor=(
+                    ConnectionActor.LOCAL
+                    if initiated_by_self
+                    else ConnectionActor.REMOTE
+                ),
             )
         )
 
@@ -611,6 +909,7 @@ class ConnectionController:
         is_fallback: bool = False,
         socket_to_close: Optional[socket.socket] = None,
         suppress_events: bool = False,
+        origin: Optional[ConnectionOrigin] = None,
     ) -> None:
         """
         Terminates a connection safely and processes unacked fallbacks.
@@ -622,6 +921,7 @@ class ConnectionController:
             is_fallback (bool): Whether this is an unexpected network drop.
             socket_to_close (Optional[socket.socket]): Specific duplicate socket to safely terminate.
             suppress_events (bool): Whether transport lifecycle status events should be suppressed.
+            origin (Optional[ConnectionOrigin]): The machine-readable source of the disconnected live flow.
 
         Returns:
             None
@@ -634,6 +934,7 @@ class ConnectionController:
         alias, onion = resolved
 
         if initiated_by_self:
+            self._state.clear_scheduled_auto_reconnect(onion)
             self._state.discard_outbound_attempt(onion)
 
         inflight_outbound: bool = False
@@ -652,12 +953,6 @@ class ConnectionController:
                     pass
                 return
 
-        conn: Optional[socket.socket] = self._state.pop_any_connection(onion)
-        unacked: Dict[str, Tuple[str, str]] = {}
-
-        if self._config.get_bool(SettingKey.FALLBACK_TO_DROP):
-            unacked = self._state.pop_unacked_messages(onion)
-
         if inflight_outbound:
             self._state.discard_outbound_attempt(onion)
             if socket_to_close:
@@ -665,6 +960,47 @@ class ConnectionController:
                     socket_to_close.close()
                 except Exception:
                     pass
+
+            if self._state.is_connected_or_pending(onion):
+                return
+
+            self._hm.log_event(
+                HistoryEvent.LIVE_CONNECTION_LOST,
+                onion,
+                actor=HistoryActor.SYSTEM,
+                trigger=origin,
+                detail_code=(
+                    HistoryReasonCode.OUTBOUND_ATTEMPT_CLOSED_BEFORE_ACCEPTANCE
+                ),
+            )
+            if self._state.is_retunneling(onion):
+                self._schedule_retunnel_recovery_retry(
+                    alias,
+                    onion,
+                    'Outbound attempt closed before acceptance',
+                )
+            else:
+                if origin is ConnectionOrigin.AUTO_RECONNECT:
+                    self._state.clear_scheduled_auto_reconnect(onion)
+                self._broadcast(
+                    ConnectionFailedEvent(
+                        alias=alias,
+                        onion=onion,
+                        error='Outbound attempt closed before acceptance',
+                        origin=origin or ConnectionOrigin.MANUAL,
+                        actor=ConnectionActor.SYSTEM,
+                        reason_code=(
+                            ConnectionReasonCode.OUTBOUND_ATTEMPT_CLOSED_BEFORE_ACCEPTANCE
+                        ),
+                    )
+                )
+            return
+
+        conn: Optional[socket.socket] = self._state.pop_any_connection(onion)
+        unacked: Dict[str, Tuple[str, str]] = {}
+
+        if self._config.get_bool(SettingKey.FALLBACK_TO_DROP):
+            unacked = self._state.pop_unacked_messages(onion)
 
         if not conn and not unacked and not inflight_outbound:
             if not initiated_by_self:
@@ -675,28 +1011,6 @@ class ConnectionController:
                     create_event(
                         EventType.NO_CONNECTION_TO_DISCONNECT,
                         {'alias': alias, 'onion': onion},
-                    )
-                )
-            return
-
-        if inflight_outbound:
-            self._hm.log_event(
-                HistoryEvent.LIVE_CONNECTION_LOST,
-                onion,
-                'Outbound attempt closed before acceptance',
-            )
-            if self._state.is_retunneling(onion):
-                self._broadcast_retunnel_failure(
-                    alias,
-                    onion,
-                    'Outbound attempt closed before acceptance',
-                )
-            else:
-                self._broadcast(
-                    ConnectionFailedEvent(
-                        alias=alias,
-                        onion=onion,
-                        error='Outbound attempt closed before acceptance',
                     )
                 )
             return
@@ -714,7 +1028,10 @@ class ConnectionController:
                     timestamp=timestamp,
                 )
                 self._hm.log_event(
-                    HistoryEvent.DROP_QUEUED, onion, 'Unacked msgs converted to drop'
+                    HistoryEvent.DROP_QUEUED,
+                    onion,
+                    actor=HistoryActor.SYSTEM,
+                    detail_text='Unacked msgs converted to drop',
                 )
             if not suppress_events:
                 self._broadcast(
@@ -743,19 +1060,38 @@ class ConnectionController:
             except Exception:
                 pass
 
-        status: HistoryEvent = (
-            HistoryEvent.LIVE_CONNECTION_LOST
-            if is_fallback
-            else (
-                HistoryEvent.LIVE_DISCONNECTED
-                if initiated_by_self
-                else HistoryEvent.LIVE_DISCONNECTED_BY_REMOTE
+        if is_fallback:
+            status = HistoryEvent.LIVE_CONNECTION_LOST
+            disconnect_actor: HistoryActor = HistoryActor.SYSTEM
+        else:
+            status = HistoryEvent.LIVE_DISCONNECTED
+            disconnect_actor = (
+                HistoryActor.LOCAL if initiated_by_self else HistoryActor.REMOTE
             )
+        self._hm.log_event(
+            status,
+            onion,
+            actor=disconnect_actor,
+            trigger=origin,
         )
-        self._hm.log_event(status, onion)
 
         if not suppress_events:
-            self._broadcast(DisconnectedEvent(alias=alias, onion=onion))
+            self._broadcast(
+                DisconnectedEvent(
+                    alias=alias,
+                    onion=onion,
+                    actor=(
+                        ConnectionActor.SYSTEM
+                        if is_fallback
+                        else (
+                            ConnectionActor.LOCAL
+                            if initiated_by_self
+                            else ConnectionActor.REMOTE
+                        )
+                    ),
+                    origin=origin or ConnectionOrigin.MANUAL,
+                )
+            )
 
         if not initiated_by_self:
             self._mark_live_reconnect_grace(onion)
@@ -769,9 +1105,23 @@ class ConnectionController:
             )
 
         if is_fallback and self._get_live_reconnect_delay() > 0:
-            with self._live_reconnect_lock:
-                if onion not in self._live_reconnect_queue:
-                    self._live_reconnect_queue.append(onion)
+            self._state.mark_scheduled_auto_reconnect(onion)
+            was_scheduled: bool = self._enqueue_live_reconnect(onion)
+            if was_scheduled:
+                self._hm.log_event(
+                    HistoryEvent.LIVE_AUTO_RECONNECT_SCHEDULED,
+                    onion,
+                    actor=HistoryActor.SYSTEM,
+                    trigger=ConnectionOrigin.AUTO_RECONNECT,
+                )
+                self._broadcast(
+                    AutoReconnectScheduledEvent(
+                        alias=alias,
+                        onion=onion,
+                        origin=ConnectionOrigin.AUTO_RECONNECT,
+                        actor=ConnectionActor.SYSTEM,
+                    )
+                )
 
     def on_live_consumer_available(self) -> None:
         """
@@ -790,20 +1140,20 @@ class ConnectionController:
             if not alias:
                 continue
 
-            auto_accept_now: bool = self._state.consume_live_reconnect_grace(onion) or (
-                alias in self._cm.get_all_contacts()
-                and self._config.get_bool(SettingKey.AUTO_ACCEPT_CONTACTS)
+            auto_accept_origin: ConnectionOrigin = (
+                self._state.get_pending_connection_origin(onion)
+                or ConnectionOrigin.INCOMING
             )
 
-            if auto_accept_now:
-                self._broadcast(ConnectionAutoAcceptedEvent(alias=alias, onion=onion))
-                self.accept(onion)
-                continue
-
-            if self._state.set_pending_connection_reason(
-                onion, PendingConnectionReason.USER_ACCEPT
-            ):
-                self._broadcast(IncomingConnectionEvent(alias=alias, onion=onion))
+            self._broadcast(
+                ConnectionAutoAcceptedEvent(
+                    alias=alias,
+                    onion=onion,
+                    origin=auto_accept_origin,
+                    actor=ConnectionActor.SYSTEM,
+                )
+            )
+            self.accept(onion, origin=auto_accept_origin)
 
     def _live_reconnect_worker(self) -> None:
         """
@@ -826,33 +1176,64 @@ class ConnectionController:
                         onion = self._live_reconnect_queue.pop(0)
 
                 if onion:
+                    if not self._state.has_scheduled_auto_reconnect(onion):
+                        continue
+
+                    if self._state.get_connection(onion):
+                        self._state.clear_scheduled_auto_reconnect(onion)
+                        continue
+
+                    pending_reason: Optional[PendingConnectionReason] = (
+                        self._state.get_pending_connection_reason(onion)
+                    )
+
+                    if pending_reason is PendingConnectionReason.CONSUMER_ABSENT:
+                        self._enqueue_live_reconnect(onion)
+                        continue
+
+                    if pending_reason is PendingConnectionReason.USER_ACCEPT:
+                        self._state.clear_scheduled_auto_reconnect(onion)
+                        continue
+
                     reconnect_delay_sec: float = self._get_live_reconnect_delay()
                     if reconnect_delay_sec <= 0:
+                        self._state.clear_scheduled_auto_reconnect(onion)
                         continue
 
                     if not self._can_auto_accept_live():
-                        with self._live_reconnect_lock:
-                            if onion not in self._live_reconnect_queue:
-                                self._live_reconnect_queue.append(onion)
+                        self._enqueue_live_reconnect(onion)
                         continue
 
                     backoff: float = reconnect_delay_sec + (
                         secrets.randbelow(Constants.LIVE_RECONNECT_JITTER_MAX_MS)
                         / Constants.LIVE_RECONNECT_JITTER_DIVISOR
                     )
-                    alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
-
-                    self._hm.log_event(HistoryEvent.LIVE_AUTO_RECONNECT_ATTEMPT, onion)
-                    self._broadcast(
-                        AutoReconnectAttemptEvent(alias=str(alias), onion=onion)
-                    )
 
                     self._sleep_live_reconnect_delay(backoff)
+                    if not self._state.has_scheduled_auto_reconnect(onion):
+                        continue
+
+                    if self._state.get_connection(onion):
+                        self._state.clear_scheduled_auto_reconnect(onion)
+                        continue
+
+                    pending_reason = self._state.get_pending_connection_reason(onion)
+                    if pending_reason is PendingConnectionReason.CONSUMER_ABSENT:
+                        self._enqueue_live_reconnect(onion)
+                        continue
+
+                    if pending_reason is PendingConnectionReason.USER_ACCEPT:
+                        self._state.clear_scheduled_auto_reconnect(onion)
+                        continue
+
                     if (
                         not self._state.is_connected_or_pending(onion)
                         and not self._stop_flag.is_set()
                     ):
-                        self.connect_to(onion)
+                        self.connect_to(
+                            onion,
+                            origin=ConnectionOrigin.AUTO_RECONNECT,
+                        )
             except Exception:
                 pass
 
@@ -899,7 +1280,11 @@ class ConnectionController:
             return
 
         self._broadcast(RetunnelInitiatedEvent(alias=alias, onion=onion))
-        self._hm.log_event(HistoryEvent.LIVE_RETUNNEL_INITIATED, onion)
+        self._hm.log_event(
+            HistoryEvent.LIVE_RETUNNEL_INITIATED,
+            onion,
+            actor=HistoryActor.LOCAL,
+        )
 
         success, event_type, params = self._tm.rotate_circuits()
         if not success:
@@ -911,8 +1296,14 @@ class ConnectionController:
             return
 
         self._state.mark_retunnel_started(onion)
-        self.disconnect(onion, initiated_by_self=True, suppress_events=True)
+        self.disconnect(
+            onion,
+            initiated_by_self=True,
+            suppress_events=True,
+            origin=ConnectionOrigin.RETUNNEL,
+        )
+        self._mark_live_reconnect_grace(onion)
         self._sleep_retunnel_reconnect_delay()
 
         self._state.mark_retunnel_reconnect(onion)
-        self.connect_to(onion)
+        self.connect_to(onion, origin=ConnectionOrigin.RETUNNEL)

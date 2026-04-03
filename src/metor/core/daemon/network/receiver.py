@@ -8,6 +8,8 @@ import threading
 from typing import Optional, Callable, List, cast, TYPE_CHECKING
 
 from metor.core.api import (
+    ConnectionActor,
+    ConnectionOrigin,
     IpcEvent,
     ConnectedEvent,
     ConnectionPendingEvent,
@@ -15,6 +17,7 @@ from metor.core.api import (
 )
 from metor.core.daemon.models import TorCommand
 from metor.data import (
+    HistoryActor,
     HistoryManager,
     HistoryEvent,
     ContactManager,
@@ -41,8 +44,21 @@ class StreamReceiver:
         router: MessageRouter,
         broadcast_callback: Callable[[IpcEvent], None],
         has_clients_callback: Callable[[], bool],
-        disconnect_cb: Callable[[str, bool, bool, Optional[socket.socket]], None],
-        reject_cb: Callable[[str, bool, Optional[socket.socket]], None],
+        disconnect_cb: Callable[
+            [
+                str,
+                bool,
+                bool,
+                Optional[socket.socket],
+                bool,
+                Optional[ConnectionOrigin],
+            ],
+            None,
+        ],
+        reject_cb: Callable[
+            [str, bool, Optional[socket.socket], ConnectionOrigin],
+            None,
+        ],
         config: 'Config',
     ) -> None:
         """
@@ -71,11 +87,20 @@ class StreamReceiver:
         self._config: 'Config' = config
 
         self._disconnect_cb: Callable[
-            [str, bool, bool, Optional[socket.socket]], None
+            [
+                str,
+                bool,
+                bool,
+                Optional[socket.socket],
+                bool,
+                Optional[ConnectionOrigin],
+            ],
+            None,
         ] = disconnect_cb
-        self._reject_cb: Callable[[str, bool, Optional[socket.socket]], None] = (
-            reject_cb
-        )
+        self._reject_cb: Callable[
+            [str, bool, Optional[socket.socket], ConnectionOrigin],
+            None,
+        ] = reject_cb
 
     def start_receiving(
         self,
@@ -83,6 +108,7 @@ class StreamReceiver:
         conn: socket.socket,
         initial_buffer: str = '',
         awaiting_acceptance: bool = False,
+        connection_origin: ConnectionOrigin = ConnectionOrigin.INCOMING,
     ) -> None:
         """
         Starts a background thread to listen for data securely.
@@ -92,13 +118,14 @@ class StreamReceiver:
             conn (socket.socket): The active socket connection.
             initial_buffer (str): Leftover TCP stream buffer.
             awaiting_acceptance (bool): Whether the socket is still waiting for live acceptance.
+            connection_origin (ConnectionOrigin): The machine-readable origin of the flow.
 
         Returns:
             None
         """
         threading.Thread(
             target=self._receiver_target,
-            args=(onion, conn, initial_buffer, awaiting_acceptance),
+            args=(onion, conn, initial_buffer, awaiting_acceptance, connection_origin),
             daemon=True,
         ).start()
 
@@ -108,6 +135,7 @@ class StreamReceiver:
         conn: socket.socket,
         initial_buffer: str = '',
         awaiting_acceptance: bool = False,
+        connection_origin: ConnectionOrigin = ConnectionOrigin.INCOMING,
     ) -> None:
         """
         Target processing incoming live messages via the memory-safe reader.
@@ -117,6 +145,7 @@ class StreamReceiver:
             conn (socket.socket): The active socket connection.
             initial_buffer (str): Leftover TCP stream buffer.
             awaiting_acceptance (bool): Whether the socket is still waiting for live acceptance.
+            connection_origin (ConnectionOrigin): The machine-readable origin of the flow.
 
         Returns:
             None
@@ -139,34 +168,65 @@ class StreamReceiver:
                 try:
                     msg: Optional[str] = stream.read_line()
                 except socket.timeout:
-                    if awaiting_acceptance:
-                        break
-                    continue
+                    break
 
                 if not msg:
                     break
 
                 if msg == TorCommand.ACCEPTED.value:
+                    effective_origin: ConnectionOrigin = (
+                        self._state.consume_outbound_connected_origin(onion)
+                        or connection_origin
+                    )
                     awaiting_acceptance = False
                     conn.settimeout(idle_timeout)
                     self._state.add_active_connection(onion, conn)
                     alias: str = cast(str, self._cm.ensure_alias_for_onion(onion))
-                    self._hm.log_event(HistoryEvent.LIVE_CONNECTED, onion)
+                    self._hm.log_event(
+                        HistoryEvent.LIVE_CONNECTED,
+                        onion,
+                        actor=(
+                            HistoryActor.SYSTEM
+                            if effective_origin is ConnectionOrigin.MUTUAL_CONNECT
+                            else HistoryActor.REMOTE
+                        ),
+                        trigger=effective_origin,
+                    )
                     if self._state.consume_retunnel_reconnect(onion):
-                        self._hm.log_event(HistoryEvent.LIVE_RETUNNEL_SUCCESS, onion)
+                        self._hm.log_event(
+                            HistoryEvent.LIVE_RETUNNEL_SUCCESS,
+                            onion,
+                            actor=HistoryActor.SYSTEM,
+                        )
                         self._state.clear_retunnel_flow(onion)
                         self._broadcast(RetunnelSuccessEvent(alias=alias, onion=onion))
                     else:
-                        self._broadcast(ConnectedEvent(alias=alias, onion=onion))
+                        self._broadcast(
+                            ConnectedEvent(
+                                alias=alias,
+                                onion=onion,
+                                origin=effective_origin,
+                                actor=(
+                                    ConnectionActor.SYSTEM
+                                    if effective_origin
+                                    is ConnectionOrigin.MUTUAL_CONNECT
+                                    else ConnectionActor.REMOTE
+                                ),
+                            )
+                        )
 
                 elif msg == TorCommand.PENDING.value:
                     awaiting_acceptance = True
                     conn.settimeout(late_acceptance_timeout)
-                    if not self._state.is_retunneling(onion):
-                        alias = cast(str, self._cm.ensure_alias_for_onion(onion))
-                        self._broadcast(
-                            ConnectionPendingEvent(alias=alias, onion=onion)
+                    alias = cast(str, self._cm.ensure_alias_for_onion(onion))
+                    self._broadcast(
+                        ConnectionPendingEvent(
+                            alias=alias,
+                            onion=onion,
+                            origin=connection_origin,
+                            actor=ConnectionActor.REMOTE,
                         )
+                    )
 
                 elif msg.startswith(f'{TorCommand.DISCONNECT.value} '):
                     remote_disconnected = True
@@ -188,14 +248,35 @@ class StreamReceiver:
                             conn, onion, msg_id, content
                         )
                         if should_disconnect:
-                            self._disconnect_cb(onion, True, False, None)
+                            self._disconnect_cb(
+                                onion,
+                                True,
+                                False,
+                                None,
+                                False,
+                                connection_origin,
+                            )
                             break
         except Exception:
             pass
         finally:
             if remote_rejected:
-                self._reject_cb(onion, False, conn)
+                self._reject_cb(onion, False, conn, connection_origin)
             elif remote_disconnected:
-                self._disconnect_cb(onion, False, False, conn)
+                self._disconnect_cb(
+                    onion,
+                    False,
+                    False,
+                    conn,
+                    False,
+                    connection_origin,
+                )
             else:
-                self._disconnect_cb(onion, False, True, conn)
+                self._disconnect_cb(
+                    onion,
+                    False,
+                    True,
+                    conn,
+                    False,
+                    connection_origin,
+                )

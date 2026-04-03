@@ -71,6 +71,25 @@ The IPC boundary is typed on purpose. Future changes should extend that contract
 4. Alias-bearing peer-state logs should stay rename-safe when the event still refers to the current peer identity.
    In chat mode this means preserving the `{alias}` placeholder together with alias metadata for dynamic redraws, while inherently final events such as completed removals may remain static.
 
+## History Model
+
+History is intentionally split into two views owned by the daemon:
+
+1. Raw transport ledger.
+   The persisted `history` table stores `family`, `event_code`, `peer_onion`, `actor`, `trigger`, `detail_code`, `detail_text`, and `flow_id` for each retained transport row.
+
+2. Projected summary history.
+   The default history IPC path projects concise user-facing rows from that raw ledger before the UI renders them.
+
+History changes should follow these rules:
+
+- Summary history is derived in the daemon, not reconstructed in the UI from low-level transport noise.
+- `history --raw` is the explicit diagnostics path for the raw transport ledger; plain `history` remains the user-facing summary view.
+- `daemon.record_live_history` and `daemon.record_drop_history` gate retention at the raw-ledger layer. If retention is disabled, no downstream summary rows may be invented.
+- `flow_id` correlates related raw rows without forcing the UI to infer transport semantics from timing alone.
+- `family` is explicit in storage and IPC. The UI must not rediscover live vs drop by parsing string prefixes.
+- History-specific CLI parsing and presentation belong in the dedicated dispatcher and presenter packages behind their stable facades, so new history behavior does not regrow monolith files.
+
 ## Security and OPSEC Guardrails
 
 - Passwords must never be accepted through shell arguments or other surfaces that leak into history or process listings.

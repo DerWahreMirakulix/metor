@@ -3,7 +3,11 @@ Module providing centralized type coercion and parsing utilities.
 Ensures strict type compliance across configurations and CLI inputs.
 """
 
-from typing import Union, Any
+from enum import Enum
+from typing import Any, Optional, Type, TypeVar, Union
+
+
+EnumT = TypeVar('EnumT', bound=Enum)
 
 
 class TypeCaster:
@@ -84,6 +88,60 @@ class TypeCaster:
         try:
             return bool(int(float(str(val))))
         except (ValueError, TypeError):
+            return default
+
+    @staticmethod
+    def to_enum(enum_type: Type[EnumT], val: Any, default: EnumT) -> EnumT:
+        """
+        Safely casts a value to one enum member.
+
+        Args:
+            enum_type (Type[EnumT]): The target enum class.
+            val (Any): The raw value.
+            default (EnumT): Fallback enum member if casting fails.
+
+        Returns:
+            EnumT: The coerced enum member.
+        """
+        if isinstance(val, enum_type):
+            return val
+
+        raw_value: str = TypeCaster.to_str(val).strip()
+        if not raw_value:
+            return default
+
+        try:
+            return enum_type(raw_value)
+        except ValueError:
+            return default
+
+    @staticmethod
+    def to_optional_enum(
+        enum_type: Type[EnumT], val: Any, default: Optional[EnumT] = None
+    ) -> Optional[EnumT]:
+        """
+        Safely casts a value to one optional enum member.
+
+        Args:
+            enum_type (Type[EnumT]): The target enum class.
+            val (Any): The raw value.
+            default (Optional[EnumT]): Fallback member if casting fails.
+
+        Returns:
+            Optional[EnumT]: The coerced enum member or the fallback value.
+        """
+        if val is None:
+            return default
+        if isinstance(val, enum_type):
+            return val
+
+        raw_value: str = TypeCaster.to_str(val).strip()
+        if not raw_value:
+            return default
+
+        try:
+            return enum_type(raw_value)
+        except ValueError:
             return default
 
     @staticmethod

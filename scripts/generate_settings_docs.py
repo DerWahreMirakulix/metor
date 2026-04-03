@@ -160,6 +160,30 @@ class SettingsDocGenerator:
             f'`metor -p <profile> config set {spec.key.value} 50051`',
         ]
 
+    @staticmethod
+    def _heading_anchor(value: str) -> str:
+        """
+        Builds one predictable Markdown heading anchor.
+
+        Args:
+            value (str): The raw heading text.
+
+        Returns:
+            str: The normalized heading anchor without the leading '#'.
+        """
+        return (
+            value.strip()
+            .lower()
+            .replace('`', '')
+            .replace('&', '')
+            .replace('.', '')
+            .replace(',', '')
+            .replace('(', '')
+            .replace(')', '')
+            .replace('/', '')
+            .replace(' ', '-')
+        )
+
     def _format_setting(self, spec: SettingSpec) -> str:
         """
         Formats one setting entry as Markdown.
@@ -171,7 +195,7 @@ class SettingsDocGenerator:
             str: The rendered Markdown block.
         """
         lines: List[str] = [
-            f'### `{spec.key.value}`',
+            f'#### `{spec.key.value}`',
             '',
             f'{spec.description}',
             '',
@@ -254,15 +278,21 @@ class SettingsDocGenerator:
             '',
             '## Table of Contents',
             '',
-            '- [1. Cascading Settings](#1-cascading-settings)',
-            '- [2. Structural Profile Config](#2-structural-profile-config)',
+            '- [Configuration Model](#configuration-model)',
+            '- [Cascading Settings](#cascading-settings)',
         ]
 
         for category in settings_by_category.keys():
-            anchor: str = category.lower().replace(' ', '-').replace('&', '')
-            lines.append(f'- [{category}](#{anchor})')
+            lines.append(f'  - [{category}](#{self._heading_anchor(category)})')
 
-        lines.extend(['', '## 1. Cascading Settings', ''])
+        lines.extend(
+            [
+                '- [Structural Profile Config](#structural-profile-config)',
+                '',
+                '## Cascading Settings',
+                '',
+            ]
+        )
 
         for category, specs in settings_by_category.items():
             lines.append(f'### {category}')
@@ -274,7 +304,7 @@ class SettingsDocGenerator:
                     lines.append('')
             lines.append('')
 
-        lines.extend(['## 2. Structural Profile Config', ''])
+        lines.extend(['## Structural Profile Config', ''])
 
         profile_specs: List[ProfileConfigSpec] = list(PROFILE_CONFIG_SPECS.values())
         for index, profile_spec in enumerate(profile_specs):

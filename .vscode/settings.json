@@ -44,6 +44,8 @@
     "sqlcipher",
     "subcmd",
     "subkey",
+    "subreason",
+    "subreasons",
     "tcflush",
     "tcgetattr",
     "TCIFLUSH",
@@ -52,6 +54,7 @@
     "teardowns",
     "unacked",
     "unfocus",
+    "unparseable",
     "urandom",
     "venv",
     "WRONLY"

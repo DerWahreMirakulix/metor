@@ -1,15 +1,12 @@
 """
-Module for managing user profiles, their directories, and daemon lock states.
+Module for managing user-profile runtime state and filesystem metadata.
 Enforces validation checks to prevent runtime operation on tampered profiles.
 """
 
-import shutil
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import List, Optional
 
-from metor.core.api import ProfileEntry, ProfilesDataEvent
-from metor.data import DatabaseCorruptedError, SettingKey, Settings, SqlManager
-from metor.utils import Constants, ProcessManager, secure_shred_file
+from metor.utils import Constants, ProcessManager
 
 # Local Package Imports
 from metor.data.profile.config import Config
@@ -17,13 +14,13 @@ from metor.data.profile.paths import Paths
 from metor.data.profile.models import (
     ProfileConfigKey,
     ProfileOperationResult,
-    ProfileOperationType,
     ProfileSecurityMode,
+    ProfileSummary,
 )
 
 
 class ProfileManager:
-    """High-level orchestrator for profile states, daemons, and metadata."""
+    """Manages one profile's runtime state, configuration, and filesystem paths."""
 
     @staticmethod
     def _read_int_file(file_path: Path) -> Optional[int]:
@@ -339,7 +336,9 @@ class ProfileManager:
         Returns:
             str: Default profile name.
         """
-        return Settings.get_str(SettingKey.DEFAULT_PROFILE)
+        from metor.data.profile.catalog import load_default_profile
+
+        return load_default_profile()
 
     @classmethod
     def set_default_profile(cls, profile_name: str) -> ProfileOperationResult:
@@ -352,17 +351,9 @@ class ProfileManager:
         Returns:
             ProfileOperationResult: Structured local outcome for the CLI layer.
         """
-        safe_name: str = ''.join(
-            c for c in profile_name if c.isalnum() or c in ('-', '_')
-        )
-        if not safe_name:
-            return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
-        Settings.set(SettingKey.DEFAULT_PROFILE, safe_name)
-        return ProfileOperationResult(
-            True,
-            ProfileOperationType.DEFAULT_SET,
-            {'profile': safe_name},
-        )
+        from metor.data.profile.catalog import set_default_profile
+
+        return set_default_profile(profile_name)
 
     @staticmethod
     def get_all_profiles() -> List[str]:
@@ -375,24 +366,14 @@ class ProfileManager:
         Returns:
             List[str]: List of valid profile folder names.
         """
-        data_dir: Path = Constants.DATA
-        if not data_dir.exists():
-            return []
+        from metor.data.profile.catalog import get_all_profiles
 
-        ignored_folders: Set[str] = {
-            Constants.HIDDEN_SERVICE_DIR,
-            Constants.TOR_DATA_DIR,
-        }
-        return [
-            d.name
-            for d in data_dir.iterdir()
-            if d.is_dir() and d.name not in ignored_folders
-        ]
+        return get_all_profiles()
 
     @classmethod
-    def get_profiles_data(
+    def get_profile_summaries(
         cls, active_profile: Optional[str] = None
-    ) -> ProfilesDataEvent:
+    ) -> list[ProfileSummary]:
         """
         Retrieves typed metadata for all profiles.
 
@@ -400,24 +381,11 @@ class ProfileManager:
             active_profile (Optional[str]): Current active profile.
 
         Returns:
-            ProfilesDataEvent: Typed profile listing DTO.
+            list[ProfileSummary]: Typed local profile summaries.
         """
-        active: str = active_profile if active_profile else cls.load_default_profile()
-        profiles: List[str] = cls.get_all_profiles()
-        profile_list: List[ProfileEntry] = []
+        from metor.data.profile.catalog import get_profile_summaries
 
-        for p in profiles:
-            pm: 'ProfileManager' = cls(p)
-            profile_list.append(
-                ProfileEntry(
-                    name=p,
-                    is_active=p == active,
-                    is_remote=pm.is_remote(),
-                    port=pm.get_static_port(),
-                )
-            )
-
-        return ProfilesDataEvent(profiles=profile_list)
+        return get_profile_summaries(active_profile)
 
     @staticmethod
     def add_profile_folder(
@@ -437,69 +405,9 @@ class ProfileManager:
         Returns:
             ProfileOperationResult: Structured local outcome for the CLI layer.
         """
-        safe_name: str = ''.join(c for c in name if c.isalnum() or c in ('-', '_'))
-        if not safe_name:
-            return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
+        from metor.data.profile.lifecycle import add_profile_folder
 
-        if is_remote and not port:
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.REMOTE_PORT_REQUIRED,
-                {},
-            )
-
-        if is_remote and security_mode is ProfileSecurityMode.PLAINTEXT:
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.PASSWORDLESS_REMOTE_NOT_ALLOWED,
-                {},
-            )
-
-        target_dir: Path = Constants.DATA / safe_name
-        if target_dir.exists():
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.PROFILE_EXISTS,
-                {'profile': safe_name},
-            )
-
-        pm: 'ProfileManager' = ProfileManager(safe_name)
-        pm.initialize()
-
-        if security_mode is not ProfileSecurityMode.ENCRYPTED:
-            pm.config.set(
-                ProfileConfigKey.SECURITY_MODE,
-                security_mode.value,
-                allow_mutating_structural_keys=True,
-            )
-
-        if is_remote or port:
-            if is_remote:
-                pm.config.set(
-                    ProfileConfigKey.IS_REMOTE,
-                    True,
-                    allow_mutating_structural_keys=True,
-                )
-            if port:
-                pm.config.set(ProfileConfigKey.DAEMON_PORT, port)
-
-            remote_tag: str = 'Remote ' if is_remote else 'Static '
-            return ProfileOperationResult(
-                True,
-                ProfileOperationType.PROFILE_CREATED_WITH_PORT,
-                {
-                    'remote_tag': remote_tag,
-                    'profile': safe_name,
-                    'port': port,
-                    'security_mode': security_mode.value,
-                },
-            )
-
-        return ProfileOperationResult(
-            True,
-            ProfileOperationType.PROFILE_CREATED,
-            {'profile': safe_name, 'security_mode': security_mode.value},
-        )
+        return add_profile_folder(name, is_remote, port, security_mode)
 
     @classmethod
     def migrate_profile_security(
@@ -521,170 +429,13 @@ class ProfileManager:
         Returns:
             ProfileOperationResult: Structured local outcome for the CLI layer.
         """
-        from metor.core.daemon.bootstrap import (
-            InvalidMasterPasswordError,
-            verify_master_password,
-        )
-        from metor.core.key import KeyManager
+        from metor.data.profile.lifecycle import migrate_profile_security
 
-        safe_name: str = ''.join(c for c in name if c.isalnum() or c in ('-', '_'))
-        if not safe_name:
-            return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
-
-        pm: 'ProfileManager' = cls(safe_name)
-        if not pm.exists():
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.PROFILE_NOT_FOUND,
-                {'profile': safe_name},
-            )
-
-        if pm.is_remote():
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.SECURITY_MIGRATION_REMOTE_NOT_ALLOWED,
-                {'profile': safe_name},
-            )
-
-        if pm.is_daemon_running():
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.CANNOT_MIGRATE_RUNNING,
-                {'profile': safe_name},
-            )
-
-        current_mode: ProfileSecurityMode = pm.get_security_mode()
-        if current_mode is target_mode:
-            return ProfileOperationResult(
-                True,
-                ProfileOperationType.SECURITY_MODE_UNCHANGED,
-                {'profile': safe_name, 'security_mode': current_mode.value},
-            )
-
-        old_password: Optional[str] = (
-            current_password if current_mode is ProfileSecurityMode.ENCRYPTED else None
-        )
-        target_password: Optional[str] = (
-            new_password if target_mode is ProfileSecurityMode.ENCRYPTED else None
-        )
-
-        key_manager = KeyManager(pm, old_password)
-        db_path: Path = pm.paths.get_db_file()
-        config_dir: Path = pm.paths.get_config_dir()
-        runtime_db_path: Path = config_dir / Constants.DB_RUNTIME_FILE
-        temp_db_path: Path = config_dir / f'{Constants.DB_FILE}.security-migration'
-        backup_db_path: Path = config_dir / f'{Constants.DB_FILE}.security-backup'
-
-        if current_mode is ProfileSecurityMode.ENCRYPTED and (
-            key_manager.has_any_key_material() or db_path.exists()
-        ):
-            if not old_password:
-                return ProfileOperationResult(
-                    False,
-                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                    {
-                        'profile': safe_name,
-                        'reason': 'Current master password is required for encrypted profiles.',
-                    },
-                )
-
-            try:
-                verify_master_password(key_manager)
-            except InvalidMasterPasswordError:
-                return ProfileOperationResult(
-                    False,
-                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                    {
-                        'profile': safe_name,
-                        'reason': 'Current master password is invalid.',
-                    },
-                )
-
-        if target_mode is ProfileSecurityMode.ENCRYPTED and not target_password:
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                {
-                    'profile': safe_name,
-                    'reason': 'A new master password is required when migrating to encrypted storage.',
-                },
-            )
-
-        secure_shred_file(temp_db_path)
-        secure_shred_file(backup_db_path)
-
-        try:
-            if db_path.exists():
-                SqlManager.export_database_copy(
-                    db_path,
-                    temp_db_path,
-                    current_password=old_password,
-                    target_password=target_password,
-                )
-
-            key_manager.rewrite_password_protection(target_password)
-
-            SqlManager.close_connection(db_path)
-            SqlManager.close_connection(temp_db_path)
-
-            if db_path.exists():
-                db_path.replace(backup_db_path)
-
-            if temp_db_path.exists():
-                temp_db_path.replace(db_path)
-
-            secure_shred_file(runtime_db_path)
-            pm.config.set(
-                ProfileConfigKey.SECURITY_MODE,
-                target_mode.value,
-                allow_mutating_structural_keys=True,
-            )
-        except DatabaseCorruptedError as exc:
-            secure_shred_file(temp_db_path)
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                {'profile': safe_name, 'reason': str(exc)},
-            )
-        except Exception as exc:
-            secure_shred_file(temp_db_path)
-
-            if backup_db_path.exists():
-                try:
-                    SqlManager.close_connection(db_path)
-                    secure_shred_file(db_path)
-                    backup_db_path.replace(db_path)
-                except Exception:
-                    pass
-
-            try:
-                rollback_key_manager = KeyManager(pm, target_password)
-                rollback_key_manager.rewrite_password_protection(old_password)
-            except Exception:
-                pass
-
-            try:
-                pm.config.set(
-                    ProfileConfigKey.SECURITY_MODE,
-                    current_mode.value,
-                    allow_mutating_structural_keys=True,
-                )
-            except Exception:
-                pass
-
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                {'profile': safe_name, 'reason': str(exc) or 'Migration failed.'},
-            )
-
-        if backup_db_path.exists():
-            secure_shred_file(backup_db_path)
-
-        return ProfileOperationResult(
-            True,
-            ProfileOperationType.SECURITY_MODE_MIGRATED,
-            {'profile': safe_name, 'security_mode': target_mode.value},
+        return migrate_profile_security(
+            name,
+            target_mode,
+            current_password=current_password,
+            new_password=new_password,
         )
 
     @classmethod
@@ -701,48 +452,9 @@ class ProfileManager:
         Returns:
             ProfileOperationResult: Structured local outcome for the CLI layer.
         """
-        default: str = cls.load_default_profile()
-        active: str = active_profile if active_profile else default
-        safe_name: str = ''.join(c for c in name if c.isalnum() or c in ('-', '_'))
+        from metor.data.profile.lifecycle import remove_profile_folder
 
-        if not safe_name:
-            return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
-
-        target_dir: Path = Constants.DATA / safe_name
-
-        if active == safe_name:
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.CANNOT_REMOVE_ACTIVE,
-                {},
-            )
-        if default == safe_name:
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.CANNOT_REMOVE_DEFAULT,
-                {},
-            )
-        if not target_dir.exists():
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.PROFILE_NOT_FOUND,
-                {'profile': safe_name},
-            )
-
-        pm: 'ProfileManager' = cls(safe_name)
-        if pm.is_daemon_running() and not pm.is_remote():
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.CANNOT_REMOVE_RUNNING,
-                {'profile': safe_name},
-            )
-
-        shutil.rmtree(target_dir)
-        return ProfileOperationResult(
-            True,
-            ProfileOperationType.PROFILE_REMOVED,
-            {'profile': safe_name},
-        )
+        return remove_profile_folder(name, active_profile)
 
     @classmethod
     def rename_profile_folder(
@@ -758,39 +470,9 @@ class ProfileManager:
         Returns:
             ProfileOperationResult: Structured local outcome for the CLI layer.
         """
-        safe_old: str = ''.join(c for c in old_name if c.isalnum() or c in ('-', '_'))
-        safe_new: str = ''.join(c for c in new_name if c.isalnum() or c in ('-', '_'))
+        from metor.data.profile.lifecycle import rename_profile_folder
 
-        old_dir: Path = Constants.DATA / safe_old
-        new_dir: Path = Constants.DATA / safe_new
-
-        if not old_dir.exists():
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.PROFILE_NOT_FOUND,
-                {'profile': safe_old},
-            )
-        if new_dir.exists():
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.PROFILE_EXISTS,
-                {'profile': safe_new},
-            )
-
-        pm: 'ProfileManager' = cls(safe_old)
-        if pm.is_daemon_running() and not pm.is_remote():
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.CANNOT_RENAME_RUNNING,
-                {'old_profile': safe_old},
-            )
-
-        old_dir.rename(new_dir)
-        return ProfileOperationResult(
-            True,
-            ProfileOperationType.PROFILE_RENAMED,
-            {'old_profile': safe_old, 'new_profile': safe_new},
-        )
+        return rename_profile_folder(old_name, new_name)
 
     @classmethod
     def clear_profile_db(cls, name: str) -> ProfileOperationResult:
@@ -803,46 +485,6 @@ class ProfileManager:
         Returns:
             ProfileOperationResult: Structured local outcome for the CLI layer.
         """
-        safe_name: str = ''.join(c for c in name if c.isalnum() or c in ('-', '_'))
-        if not safe_name:
-            return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
+        from metor.data.profile.lifecycle import clear_profile_db
 
-        pm: 'ProfileManager' = cls(safe_name)
-        if not pm.exists():
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.PROFILE_NOT_FOUND,
-                {'profile': safe_name},
-            )
-
-        if pm.is_daemon_running() and not pm.is_remote():
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.CANNOT_CLEAR_RUNNING_DB,
-                {'profile': safe_name},
-            )
-
-        db_path: Path = pm.paths.get_db_file()
-        if not db_path.exists():
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.DATABASE_NOT_FOUND,
-                {'profile': safe_name},
-            )
-
-        try:
-            sql: SqlManager = SqlManager(db_path, pm.config)
-            sql.execute('DELETE FROM history')
-            sql.execute('DELETE FROM messages')
-            sql.execute('DELETE FROM contacts')
-            return ProfileOperationResult(
-                True,
-                ProfileOperationType.DATABASE_CLEARED,
-                {'profile': safe_name},
-            )
-        except Exception:
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.DATABASE_CLEAR_FAILED,
-                {},
-            )
+        return clear_profile_db(name)

@@ -92,7 +92,9 @@ class ApiDocGenerator:
         type_str = type_str.replace('NoneType', 'None')
 
         # Clean up absolute module paths for new DTO Sub-Models and Enums
+        type_str = type_str.replace('metor.core.api.events.entries.', '')
         type_str = type_str.replace('metor.core.api.events.', '')
+        type_str = type_str.replace('metor.core.api.events.history.', '')
         type_str = type_str.replace('metor.core.api.codes.', '')
         type_str = type_str.replace('metor.core.api.base.', '')
 
