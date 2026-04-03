@@ -1,8 +1,10 @@
 {
   "recommendations": [
     "charliermarsh.ruff",
+    "esbenp.prettier-vscode",
+    "tamasfe.even-better-toml",
+    "yy0931.vscode-sqlite3-editor",
     "ms-python.python",
     "ms-python.vscode-pylance",
-    "esbenp.prettier-vscode"
   ]
 }

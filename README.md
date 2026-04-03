@@ -1,143 +1,239 @@
-# Metor
+# A Tor Messenger Framework
 
-**Metor** is a simple, secure Tor-based messenger written in Python. It provides a persistent Tor hidden-service (onion address) along with an interactive, multiplexed chat mode. Built on a robust **Client-Daemon Architecture** and structured via **Domain-Driven Design**, you can manage multiple secure connections simultaneously, maintain an address book, and view connection history — all from the console.
+**Metor** is a highly secure, Tor-based terminal messenger written in Python. It provides a persistent Tor Hidden Service (.onion address) along with an interactive, multiplexed live chat and asynchronous offline messaging.
 
-## Features
+Built on a robust **Client-Daemon Architecture** and structured via **Domain-Driven Design (DDD)**, the user interface is completely stateless. You can manage multiple secure connections simultaneously, maintain an address book, queue offline messages, and view connection history — all seamlessly from the console, whether running locally or remotely.
 
-- **Client-Daemon Architecture:**
-  The heavy lifting (Tor process, cryptography, connections) runs seamlessly in a background daemon. This allows you to run the chat UI, send quick messages, or manage contacts from different terminal windows simultaneously without interrupting your Tor connection.
-- **Strongly-Typed IPC API:**
-  Communication between the background daemon and the chat UI is handled via a strict, Data Transfer Object (DTO) based IPC API, ensuring zero data loss and maximum stability.
-- **Smart Contact Management & RAM Aliases:**
-  Manage multiple concurrent chats flawlessly. Unknown incoming connections are assigned volatile **RAM aliases** (e.g., `abcdef1`) for the duration of the session. You can easily promote them to permanent contacts on your disk or rename them on the fly.
-- **"Downgrade Delete" (Safe Removal):**
-  Deleting a contact from your address book while actively chatting with them will _not_ drop the connection. Instead, the system gracefully downgrades the session back to a volatile RAM alias, keeping your chat alive and your UI fully responsive.
-- **Wait Room (Asynchronous Handshake):**
-  Incoming connections are placed in a background "wait room". The cryptographic handshake happens silently, and you are prompted to `/accept` or `/reject` the connection without interrupting your current chat.
-- **End-to-End Reliability & Cryptographic Authentication:**
-  Every sent message requires a cryptographic acknowledgment. Connections are secured using an Ed25519 challenge-response handshake. Peers must cryptographically prove ownership of their `.onion` address before a chat is established, making identity spoofing mathematically impossible.
-- **System-Wide Local SQLite Storage & Multi-Profile Support:**
-  Run multiple isolated identities from the same installation safely stored in your system's home directory. Using the `--profile` flag, you can maintain separate `.onion` addresses, Tor data directories, and SQLite-backed chat histories without conflicts.
-- **Reactive Terminal UI:**
-  A robust, non-blocking command-line interface. On Unix systems, the UI automatically recalculates and redraws itself when the terminal window is resized, maintaining perfect indentation for multi-line inputs.
+## 📚 Repository Guide
 
-## Installation
+Use this README as the landing page, then jump to the specialized documents below:
 
-For security reasons and to prevent supply-chain attacks, Metor **does not** bundle the Tor binary. You must download it directly from the official Tor Project.
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md): Canonical architecture decisions guide covering system boundaries, config routing, IPC contracts, OPSEC guardrails, and transport invariants.
+- [SETTINGS.md](docs/SETTINGS.md): Generated reference for all supported `settings` and profile `config` keys, including defaults, constraints, and security notes.
+- [API.md](docs/API.md): Generated IPC contract reference for all daemon commands and events.
+- [AUDIT.md](docs/AUDIT.md): Security and architecture audit checklist used for every critical change.
+- [CONTRIBUTE.md](docs/CONTRIBUTE.md): Coding standards, import rules, docstring requirements, and security-focused contribution constraints.
+
+## 🌟 Key Features
+
+- **Client-Daemon Architecture (Stateless UI):**
+  The heavy lifting (Tor process management, cryptography, network sockets, outbox routing) runs in the background as a headless daemon. The Chat UI merely acts as a client communicating via a strictly typed IPC interface. You can close the UI at any time without dropping active Tor connections.
+- **Asynchronous Offline Messaging ("Drops"):**
+  Send messages even when your contact is offline. The daemon safely queues outgoing messages in a local SQLite Outbox and automatically delivers them in the background as soon as the peer comes online (Drop & Go).
+- **Network Resilience & Retunneling:**
+  Built-in auto-reconnect logic handles intermittent network drops. If a route stalls completely, you can manually force a Tor circuit rotation (`NEWNYM`) and seamlessly retunnel the active connection to your peer on the fly.
+- **Zero-Trace & Ephemeral Messages:**
+  Configurable "Burn-After-Read" policies. Read messages can be permanently destroyed using cryptographic file shredding to meet strict OPSEC requirements.
+- **Cryptographic Peer Authentication:**
+  Connections are secured by a deterministic Ed25519 Challenge-Response handshake. Identity spoofing is mathematically impossible—every peer must cryptographically prove ownership of their `.onion` key before a session is established.
+- **Multi-Profile Support:**
+  Manage completely isolated identities (`metor -p work`, `metor -p private`). Each profile gets its own cryptographic keys, its own `.onion` address, and an isolated SQLCipher-encrypted database (Argon2i + SecretBox).
+- **Dynamic Contact Management:**
+  Unknown incoming connections are assigned volatile RAM aliases (e.g., `exw4kj1`) dynamically. These "Discovered Peers" can be promoted to permanent contacts on the fly. Deleting a contact during an active chat invokes a "Downgrade Delete"—the connection is not dropped, but gracefully downgraded back to a volatile alias.
+- **Remote Capability (VPS / SSH):**
+  Run the Metor daemon 24/7 on a secure remote server and securely connect your local laptop UI to it via an SSH tunnel forwarding the IPC port.
+
+## 🏗️ Architecture & API
+
+Metor strictly separates presentation (UI) from domain logic (Core/Data). Communication between the CLI and the background process occurs via rigidly defined **Data Transfer Objects (DTOs)**.
+
+Recommended reading order:
+
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) for the high-level design and long-lived decisions.
+- [SETTINGS.md](docs/SETTINGS.md) for all supported settings, defaults, constraints, and security notes.
+- [API.md](docs/API.md) for the exact IPC schema used between UI and daemon.
+- [AUDIT.md](docs/AUDIT.md) and [CONTRIBUTE.md](docs/CONTRIBUTE.md) if you are reviewing or changing code.
+
+### OPSEC & Security Concepts
+
+- **Data-at-Rest Encryption:** All local data (history, address book, queues) are stored in an SQLite database encrypted via `sqlcipher3`. Master keys are heavily derived using Argon2i and protected via NaCL SecretBoxes.
+- **Network Anti-DoS:** Incoming TCP streams (both Tor and local IPC) enforce strict stream framing and length limitations (`MAX_STREAM_BYTES`) to thwart Out-Of-Memory (OOM) and UTF-8 fragmentation attacks.
+- **Thread Safety:** Address book mutations and session state transitions are safeguarded by deterministic locks (`FileLock` across processes, `threading.Lock` in memory) preventing race conditions and database corruption.
+
+## 🚀 Installation
+
+For security reasons and to prevent supply-chain attacks, Metor **does not** bundle the Tor binary. You must install it from the official Tor Project sources.
 
 ### 1. Clone the Repository
 
-Clone the project to your local machine:
-
 ```bash
+# Clone the project to your local machine
 git clone https://github.com/DerWahreMirakulix/metor.git
-```
 
-Enter the repository:
-
-```bash
+# Enter the repository
 cd metor
 ```
 
-### 2. Download and Install Tor
+### 2. Install Tor
 
-Depending on your operating system, you need to provide the Tor binary:
+- **Windows (Manual Security Install):** Download the [Tor Expert Bundle](https://www.torproject.org/download/tor/). Extract it and copy the `tor.exe` directly into your user directory under `C:\Users\YourName\.metor\tor.exe`.
+- **Linux (Debian/Ubuntu):** `sudo apt update && sudo apt install tor`
+- **Linux (Fedora):** `sudo dnf install tor`
 
-**For Windows Users (Manual Security Install):**
+### 3. Install the Python Package
 
-1. Download the [Tor Expert Bundle](https://www.torproject.org/download/tor/) directly from the official Tor Project website.
-2. Extract the downloaded archive.
-3. Go to your system's user home directory (e.g., `C:\Users\YourUsername\`).
-4. Create a folder named `.metor`.
-5. Copy the extracted `tor.exe` file directly into this new folder.
-   _(The exact path MUST be: `C:\Users\YourUsername\.metor\tor.exe`)_
-
-**For Linux Users (Package Manager):**
-Ensure that Tor is installed on your system globally via your package manager:
-
-- **Debian/Ubuntu:** `sudo apt update && sudo apt install tor`
-- **Fedora:** `sudo dnf install tor`
-
-### 3. Install the Package
-
-Once the Tor binary is in place (or installed globally on Linux), install the Python package. Make sure you run these commands from the root directory of the repository (where the `setup.py` is located).
-
-For a standard installation, run:
+Python 3.11 or higher is required.
 
 ```bash
-pip install .
+# Recommended security-conscious runtime installation
+python -m pip install --upgrade pip==26.0.1
+pip install -r requirements/runtime.lock
+pip install --no-deps --no-build-isolation .
+
+# Recommended security-conscious developer installation
+python -m pip install --upgrade pip==26.0.1
+pip install -r requirements/dev.lock
+pip install --no-deps --no-build-isolation -e .
 ```
 
-If you’re developing, contributing, or wish to install it in editable mode (so code changes apply immediately without reinstalling), run:
+The lock files pin the full tested dependency set so normal resolver drift does not silently pull newer transitive packages.
 
-```bash
-pip install -e .
-```
+## 💻 Usage & Commands
 
-## Usage
+All data (databases, keys, configurations) are safely stored in your `~/.metor/` directory.
+_Tip: Append `-p <profile_name>` to any command to use an isolated identity._
 
-After installation, the global command `metor` will be available anywhere in your console. All configuration, keys, and databases will be safely stored in your `~/.metor/` directory.
+### 1. Start the Daemon
 
-### 1. Start the Background Daemon
-
-Before chatting, you need to start the Tor engine, generate your keys, and spin up the IPC handler. Leave this running in a terminal:
+Before chatting, the background daemon must be started:
 
 ```bash
 metor daemon
 ```
 
-### 2. Global Options
+_Leave this terminal window running in the background, or use `tmux`/`screen`._
 
-Keep different identities completely separated by using profiles.
+If you want the daemon to expose IPC first and defer all key/database access until later, start it in locked mode:
 
-- `-p, --profile <name>`: Set the active profile (default: 'default'). Keeps history, onion addresses, contacts, and locks isolated.
+```bash
+metor daemon --locked
+```
 
-### 3. Core & Identity Commands
+Use `metor unlock` only to unlock a daemon that was explicitly started in locked mode:
 
-Open a second terminal window to interact with your running daemon:
+```bash
+metor unlock
+```
 
-- `metor help` – Show the help overview.
-- `metor chat` – Enter the interactive multiplexed chat UI.
-- `metor cleanup` – Kill zombie Tor processes and clear broken locks.
-- `metor address [show|generate]` – View or cycle your hidden service address.
-- `metor profiles [list|add|rm|rename|set-default]` – Manage isolated profile environments.
-- `metor history [clear]` – View or wipe the SQLite connection event log.
+If `daemon.require_local_auth` is enabled for an encrypted profile, every CLI command and every chat window authenticates on its own persistent IPC session. Chat and one-shot CLI commands prompt automatically on the same socket that will execute the real command.
 
-### 4. External Contact Management
+### 2. The Live Chat (Multiplexed UI)
 
-You can manage your address book from outside the chat using these CLI commands:
+Open a second terminal window to start the interactive user interface:
 
-- `metor contacts list` – List all contacts in your address book.
-- `metor contacts add <alias> [onion]` – Add a manual contact or save a running RAM alias to disk.
-- `metor contacts rm <alias>` – Delete a contact (active sessions safely downgrade to RAM).
-- `metor contacts rename <old> <new>` – Rename a saved contact or active session.
+```bash
+metor chat
+```
 
-### 5. In-Chat Commands
+Inside the Chat UI, you have access to the following slash commands:
 
-Once inside the `metor chat` interface, you can manage your active sessions directly.
-_Note: The `[alias]` or `[old]` parameter can be safely omitted for the commands below if you are currently focused on a peer._
+| Command                         | Description                                                          |
+| :------------------------------ | :------------------------------------------------------------------- |
+| `/connect <onion\|alias>`       | Establishes a new secure Tor connection to a peer.                   |
+| `/accept [onion\|alias]`        | Accepts an incoming background connection request.                   |
+| `/reject [onion\|alias]`        | Rejects an incoming connection request.                              |
+| `/switch [..\|<onion\|alias>]`  | Switches focus between active chats (use `..` to unfocus).           |
+| `/end [onion\|alias]`           | Terminates the connection to the specified peer.                     |
+| `/fallback [onion\|alias]`      | Forces unacknowledged live messages into the offline drop queue.     |
+| `/retunnel [onion\|alias]`      | Forces a Tor circuit rotation (`NEWNYM`) and reconnects to the peer. |
+| `/contacts list`                | Displays the address book and temporary discovered peers.            |
+| `/contacts add <alias> [onion]` | Saves a temporary RAM peer permanently to disk.                      |
+| `/exit`                         | Closes the UI (the daemon remains active in the background).         |
 
-**Session Management:**
+### 3. Headless CLI Commands
 
-- `/connect <onion|alias>` – Establish a new secure connection.
-- `/accept [alias]` – Accept a background connection request.
-- `/reject [alias]` – Reject a background connection request.
-- `/switch [..|alias]` – Switch focus (use `..` to remove focus).
-- `/end [alias]` – Terminate an active or pending connection.
-- `/connections` – List all active and pending sessions.
-- `/clear` – Wipe the current chat display.
-- `/exit` – Close the UI (Daemon stays active).
+You don't need to enter the Chat UI to use Metor. It can act as an asynchronous CLI messenger (similar to email).
 
-**In-Chat Address Book Management:**
+| Command                                     | Description                                                                  |
+| :------------------------------------------ | :--------------------------------------------------------------------------- |
+| `metor send <onion\|alias> "Message"`       | Queues a message in the outbox (sent automatically when the peer is online). |
+| `metor inbox [onion\|alias]`                | Checks for new unread messages or consumes them for a specific peer.         |
+| `metor address show`                        | Displays your current `.onion` hidden service address.                       |
+| `metor contacts list`                       | Lists your saved contacts.                                                   |
+| `metor history show [onion\|alias] [--raw]` | Shows projected history or, with `--raw`, the raw transport ledger.          |
+| `metor messages show <onion\|alias>`        | Prints the chat history with a contact directly to the console.              |
 
-- `/contacts list` – Show saved contacts and temporary RAM aliases.
-- `/contacts add [alias] [onion]` – Save a RAM alias or add a new manual contact.
-- `/contacts rm [alias]` – Remove from disk (active chat reverts to RAM).
-- `/contacts rename [old] <new>` – Change the name of any RAM or Disk alias.
+### 4. Profile Management & Remote Setup
 
-## License
+Local profiles support two structural storage modes:
 
-This project is licensed under the GNU General Public License v3.0 (GPLv3).
-See the [LICENSE](LICENSE) file for details.
+- `encrypted` (default): keys and the SQLite database stay encrypted at rest and support daemon lock plus per-session local auth.
+- `plaintext`: create with `metor profiles add <name> --plaintext` when you intentionally do not want password protection at rest.
 
-Metor is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. This ensures that Metor and any derivative works remain open, transparent, and free from proprietary surveillance.
+Security mode is structural profile metadata, not a normal `config set` key. To change it later, use the dedicated migration flow:
+
+```bash
+metor profiles migrate <name> --to <encrypted|plaintext>
+```
+
+Want to run Metor on a server and connect securely from your laptop?
+
+1. **On the Server (VPS):** Run `metor profiles add my_server --port 50051` and start it with `metor -p my_server daemon`.
+2. **On your Laptop:** Run `metor profiles add remote_node --remote --port 50051`.
+3. **Establish SSH Tunnel:** `ssh -N -L 50051:127.0.0.1:50051 user@server_ip`.
+4. **Start Chatting:** Run `metor -p remote_node chat` (Your local UI now securely controls the remote daemon).
+
+### 5. Emergency & Cleanup
+
+- `metor cleanup`: Kills zombie Tor processes (`tor.pid`) and clears stale ghost locks.
+- `metor purge`: **WARNING!** Permanently wipes the entire `.metor` directory, completely destroying all databases, histories, and private keys (irreversible).
+
+## ⚙️ Settings & Configuration
+
+Metor's configuration system uses a cascading architecture. You can define **global settings** that apply to all profiles, or create **profile-specific overrides**.
+
+🔗 **Full Settings Reference:** See [SETTINGS.md](docs/SETTINGS.md) for the generated key-by-key reference, including defaults, constraints, scope, and security notes.
+
+### Global Settings (`settings`)
+
+Values are persistently stored in `settings.json` and affect all profiles unless overridden locally.
+
+- **Set a global value:** `metor settings set daemon.ephemeral_messages true`
+- **Get a global value:** `metor settings get daemon.ephemeral_messages`
+
+### Profile Overrides (`config`)
+
+Values are stored in the active profile's `config.json` and override the global defaults.
+
+- **Set a profile override:** `metor -p my_profile config set daemon.tor_timeout 20`
+- **Get the active value:** `metor -p my_profile config get daemon.tor_timeout` (Returns the local override, or falls back to global if none exists).
+- **Sync to global:** `metor -p my_profile config sync` (Wipes all local overrides, restoring global defaults for this profile).
+
+### Advanced Remote Routing
+
+When interacting with a remote daemon over SSH, Metor's CLI acts as a smart router to maintain strict domain boundaries:
+
+- **UI Settings (`ui.*`):** Commands like `metor config set ui.chat_limit 100` are stored **locally** on your laptop. The remote server never sees them, keeping its configuration clean.
+- **Daemon Settings (`daemon.*`):** Commands like `metor config set daemon.tor_timeout 30` are securely transmitted via IPC and stored directly on the **remote server's** disk.
+- **Config Sync:** Running `metor config sync` intelligently wipes UI overrides on your local machine _and_ instructs the remote daemon to wipe its overrides simultaneously.
+
+**Common Security-Relevant Keys:**
+
+- `daemon.ephemeral_messages` (bool): If true, consumed drop-message payloads are shredded from disk instead of being retained in visible message history.
+- `daemon.enable_runtime_db_mirror` (bool): If true, a plaintext runtime mirror of the encrypted database is written to disk for debugging and external inspection tools. Plaintext profiles force this off because the primary database is already plaintext.
+- `daemon.auto_accept_contacts` (bool): If true, saved contacts may be auto-accepted for inbound live sessions.
+- `daemon.require_local_auth` (bool): Requires each new local encrypted IPC session to authenticate before it can issue runtime commands. Plaintext profiles force this off because no password exists to validate.
+- `daemon.allow_drops` (bool): Globally allows or blocks the reception of asynchronous offline messages.
+- `daemon.max_unseen_live_msgs` (int): Caps unread crash-safe live backlog per peer. `0` disables headless live backlog, `-1` removes the limit.
+- `ui.inbox_notification_delay` (float): Delays and aggregates unread-message notifications for unfocused peers on this local UI.
+- `ui.chat_limit` (int): Maximum number of messages kept in the UI's volatile RAM display buffer.
+
+The full list, including all network and transport tuning knobs, is documented in [SETTINGS.md](docs/SETTINGS.md).
+
+## 🧰 Development Workflow
+
+Generated documentation is part of the project maintenance pipeline.
+
+- `npm run docs`: Regenerates [API.md](docs/API.md) and [SETTINGS.md](docs/SETTINGS.md).
+- `npm run ready`: Formats code and markdown, runs linting and type checking, then regenerates the generated docs.
+
+Before changing architecture, security boundaries, or contributor-facing workflows, review [ARCHITECTURE.md](docs/ARCHITECTURE.md), [AUDIT.md](docs/AUDIT.md), and [CONTRIBUTE.md](docs/CONTRIBUTE.md).
+
+## 🛡️ Security Disclaimer
+
+While Metor leverages the Tor network for anonymity and relies on strong modern cryptography (Ed25519, Argon2i, SQLCipher), this software is provided "as-is". **Do not use this software for communication where your life or liberty depends on absolute operational security.** The codebase has not undergone a formal third-party security audit.
+
+## 📄 License
+
+This project is licensed under the **GNU General Public License v3.0 (GPLv3)**.
+See the [LICENSE](LICENSE) file for details. Metor is free software: anyone can study, adapt, and redistribute it, ensuring the codebase remains transparent and free from proprietary surveillance.

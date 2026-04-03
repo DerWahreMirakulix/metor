@@ -1,41 +1,77 @@
 {
   "python-envs.defaultEnvManager": "ms-python.python:conda",
   "python-envs.defaultPackageManager": "ms-python.python:conda",
+
   "cSpell.words": [
     "acked",
+    "Alives",
     "CREAT",
+    "docstrings",
+    "dotenv",
     "getpid",
     "getwch",
+    "Headful",
     "kbhit",
     "keypair",
+    "lifecycles",
+    "memlimit",
     "metor",
+    "mypy",
     "nacl",
+    "NEWNYM",
+    "OPSEC",
+    "opslimit",
+    "pathlib",
+    "pids",
+    "PRNG",
+    "psutil",
+    "pwhash",
     "pycache",
+    "pynacl",
+    "pyproject",
     "RDWR",
+    "Retunnel",
+    "retunneled",
+    "retunneling",
+    "Retunnels",
+    "REUSEADDR",
+    "SALTBYTES",
+    "setuptools",
     "signum",
     "SIGWINCH",
     "socksocket",
+    "spinlocks",
+    "sqlcipher",
     "subcmd",
+    "subkey",
+    "subreason",
+    "subreasons",
     "tcflush",
     "tcgetattr",
     "TCIFLUSH",
     "TCSADRAIN",
     "tcsetattr",
+    "teardowns",
+    "unacked",
+    "unfocus",
+    "unparseable",
     "urandom",
     "venv",
     "WRONLY"
   ],
-  "editor.defaultFormatter": "charliermarsh.ruff",
+
   "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff"
+  },
+
+  "[toml]": {
+    "editor.defaultFormatter": "tamasfe.even-better-toml"
+  },
 
   "[markdown]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode",
-    "editor.formatOnSave": true,
     "editor.wordWrap": "on"
-  },
-  
-  "[json]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode",
-    "editor.formatOnSave": true
   }
 }

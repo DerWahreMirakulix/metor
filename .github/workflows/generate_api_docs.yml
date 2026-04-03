@@ -1,0 +1,73 @@
+name: Generate Documentation
+
+on:
+  push:
+    paths:
+      - "src/metor/core/api/**"
+      - "src/metor/data/settings.py"
+      - "src/metor/data/profile/models.py"
+      - "scripts/generate_api_docs.py"
+      - "scripts/generate_settings_docs.py"
+      - ".github/workflows/generate_api_docs.yml"
+      - "pyproject.toml"
+      - "requirements/**"
+      - "package.json"
+      - "package-lock.json"
+
+jobs:
+  build-and-commit-docs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          # Fetch the full history so the bot can push back to the branch cleanly
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Project and Dev Dependencies
+        run: |
+          python -m pip install --upgrade "pip==26.0.1"
+          pip install -r requirements/dev.lock
+          pip install --no-deps --no-build-isolation -e .
+
+      - name: Run Ruff (Linting)
+        run: ruff check src/metor/ scripts/
+
+      - name: Run Ruff (Formatting Check)
+        run: ruff format --check src/metor/ scripts/
+
+      - name: Run Mypy (Static Type Checking)
+        run: mypy src/metor/ scripts/
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.17.1"
+          cache: "npm"
+
+      - name: Install NPM Dependencies
+        run: npm ci
+
+      - name: Execute Documentation Generators
+        run: |
+          python scripts/generate_api_docs.py
+          python scripts/generate_settings_docs.py
+
+      - name: Commit and Push Changes
+        run: |
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          git add docs/API.md docs/SETTINGS.md
+
+          # Evaluate diff; commit and push only if the generation resulted in changes
+          git diff --quiet && git diff --staged --quiet || (git commit -m "docs: auto-update generated documentation" && git push origin HEAD)
