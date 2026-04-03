@@ -778,7 +778,7 @@ class CliProxy:
 
     def contacts_add(self, alias: str, onion: Optional[str] = None) -> str:
         """
-        Adds a contact or promotes a RAM alias.
+        Adds a contact or promotes a discovered peer.
 
         Args:
             alias (str): The alias to add or promote.
@@ -790,11 +790,6 @@ class CliProxy:
         err: Optional[str] = self._ensure_profile_exists()
         if err:
             return err
-
-        if not self.is_remote and not self._pm.is_daemon_running() and not onion:
-            return (
-                'Daemon not running. Cannot save a RAM alias without an active session.'
-            )
 
         return self._request_ipc(AddContactCommand(alias=alias, onion=onion))
 

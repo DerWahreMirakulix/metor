@@ -146,15 +146,17 @@ class Help:
             description='Manage your address book.',
             category='Contact Management',
             subcommands=[
-                SubCommandDef('list', 'List all contacts in your address book.'),
+                SubCommandDef('list', 'List saved contacts and discovered peers.'),
                 SubCommandDef(
-                    'add <alias> [onion]', 'Save a RAM alias or add a new contact.'
+                    'add <alias> [onion]',
+                    'Promote a discovered peer or add a new contact.',
                 ),
                 SubCommandDef(
-                    'rm <onion|alias>', 'Remove from disk (active chat reverts to RAM).'
+                    'rm <onion|alias>',
+                    'Remove from disk (active peers may be anonymized instead).',
                 ),
                 SubCommandDef(
-                    'rename <old> <new>', 'Rename a saved contact or active session.'
+                    'rename <old> <new>', 'Rename a saved or discovered peer.'
                 ),
                 SubCommandDef('clear', 'Wipe the address book completely.'),
             ],
@@ -301,16 +303,18 @@ class Help:
             description='Manage your address book in chat.',
             category='Contact Management',
             subcommands=[
-                SubCommandDef('list', 'Show saved contacts and temporary RAM aliases.'),
+                SubCommandDef('list', 'Show saved contacts and discovered peers.'),
                 SubCommandDef(
                     'add <alias> [onion]',
-                    'Save a RAM alias or add a new manual contact.',
+                    'Promote a discovered peer or add a new manual contact.',
                 ),
                 SubCommandDef(
-                    'rm <onion|alias>', 'Remove from disk (active chat reverts to RAM).'
+                    'rm <onion|alias>',
+                    'Remove from disk (active peers may be anonymized instead).',
                 ),
                 SubCommandDef(
-                    'rename <old> <new>', 'Change the name of any RAM or Disk alias.'
+                    'rename <old> <new>',
+                    'Change the name of any saved or discovered peer.',
                 ),
             ],
         ),
