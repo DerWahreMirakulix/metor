@@ -4,18 +4,27 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
+from metor.data.history.codes import (
+    HistoryActor,
+    HistoryEvent,
+    HistoryFamily,
+    HistoryReasonCode,
+    HistorySummaryCode,
+    HistoryTrigger,
+)
+
 
 @dataclass(frozen=True)
 class HistoryLedgerEntry:
     """Represents one raw persisted transport ledger row."""
 
     timestamp: str
-    family: str
-    event_code: str
+    family: HistoryFamily
+    event_code: HistoryEvent
     peer_onion: Optional[str]
-    actor: str
-    trigger: Optional[str]
-    detail_code: Optional[str]
+    actor: HistoryActor
+    trigger: Optional[HistoryTrigger]
+    detail_code: Optional[HistoryReasonCode]
     detail_text: str
     flow_id: str
 
@@ -25,12 +34,12 @@ class HistorySummaryEntry:
     """Represents one projected user-facing history row."""
 
     timestamp: str
-    family: str
-    event_code: str
+    family: HistoryFamily
+    event_code: HistorySummaryCode
     peer_onion: Optional[str]
-    actor: str
-    trigger: Optional[str]
-    detail_code: Optional[str]
+    actor: HistoryActor
+    trigger: Optional[HistoryTrigger]
+    detail_code: Optional[HistoryReasonCode]
     detail_text: str
     flow_id: str
 

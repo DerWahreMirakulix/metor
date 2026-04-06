@@ -7,21 +7,19 @@ import sys
 import shutil
 from typing import List, Dict, Optional, Union
 
-from metor.core import TorManager
 from metor.core.api import EventType, JsonValue
-from metor.core.daemon import Daemon, DaemonStatus
-from metor.data import SqlManager
+from metor.application import (
+    CorruptedDaemonStorageError,
+    DaemonStatus,
+    InvalidDaemonPasswordError,
+    configure_daemon_runtime_logging,
+    run_managed_daemon,
+)
 from metor.data.profile import ProfileManager
 from metor.ui import PromptAbortedError, Theme, Translator, prompt_hidden, prompt_text
 from metor.ui.chat import Chat
 from metor.utils import Constants, ProcessManager
 
-# Local Package Imports
-from metor.core.daemon.bootstrap import (
-    build_runtime,
-    CorruptedStorageError,
-    InvalidMasterPasswordError,
-)
 from metor.data.profile import (
     ProfileOperationResult,
     ProfileOperationType,
@@ -96,9 +94,6 @@ class CommandHandlers:
                 print('Master password cannot be empty.')
                 return
 
-        # Secure directory initialization before accessing any databases
-        pm.initialize()
-
         # Inversion of Control: Define UI printing logic here and inject it into Data and Core layers
         def sql_log_cb(line: str) -> None:
             sys.stdout.write(f'\r\033[K{Theme.CYAN}[SQL-LOG]{Theme.RESET} {line}\n')
@@ -121,41 +116,41 @@ class CommandHandlers:
             sys.stdout.write(f'{msg}\n')
             sys.stdout.flush()
 
-        SqlManager.set_log_callback(sql_log_cb)
-        TorManager.set_log_callback(tor_log_cb)
+        configure_daemon_runtime_logging(sql_log_cb, tor_log_cb)
 
-        daemon: Daemon
         if start_locked:
-            daemon = Daemon(
-                pm,
-                status_callback=status_cb,
-                start_locked=True,
-            )
-        else:
             try:
-                runtime = build_runtime(pm, password)
-            except InvalidMasterPasswordError:
+                run_managed_daemon(
+                    pm,
+                    password=password,
+                    start_locked=True,
+                    status_callback=status_cb,
+                )
+            except InvalidDaemonPasswordError:
                 msg, _ = Translator.get(EventType.INVALID_PASSWORD)
                 print(msg)
-                return
-            except CorruptedStorageError:
+            except CorruptedDaemonStorageError:
                 msg, _ = Translator.get(EventType.DB_CORRUPTED)
                 print(
                     f"{msg}\nYou need to run 'metor purge' or manually delete the storage.db."
                 )
-                return
+            return
 
-            daemon = Daemon(
+        try:
+            run_managed_daemon(
                 pm,
-                runtime.km,
-                runtime.tm,
-                runtime.cm,
-                runtime.hm,
-                runtime.mm,
+                password=password,
+                start_locked=False,
                 status_callback=status_cb,
             )
-
-        daemon.run()
+        except InvalidDaemonPasswordError:
+            msg, _ = Translator.get(EventType.INVALID_PASSWORD)
+            print(msg)
+        except CorruptedDaemonStorageError:
+            msg, _ = Translator.get(EventType.DB_CORRUPTED)
+            print(
+                f"{msg}\nYou need to run 'metor purge' or manually delete the storage.db."
+            )
 
     @staticmethod
     def handle_profile_security_migration(

@@ -97,9 +97,9 @@ class UnlockCommand(IpcCommand):
 @register_command(CommandType.AUTHENTICATE_SESSION)
 @dataclass
 class AuthenticateSessionCommand(IpcCommand):
-    """Authenticates the current IPC session when local auth is required."""
+    """Authenticates the current IPC session using one daemon-issued proof challenge."""
 
-    password: str
+    proof: str
     command_type: CommandType = field(
         default=CommandType.AUTHENTICATE_SESSION,
         init=False,

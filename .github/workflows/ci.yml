@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python-quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Run Shared Python Quality Checks
+        uses: ./.github/actions/python-quality
+        with:
+          python-version: "3.11"
+          ruff-check-paths: "src/metor/ scripts/ tests/"
+          ruff-format-paths: "src/metor/ scripts/ tests/"
+          mypy-paths: "src/metor/ scripts/"
+          run-tests: "true"

@@ -130,19 +130,16 @@ They exist so future work extends one coherent model instead of reintroducing ad
    For live, success is emitted after the new live session is established.
    For drop, success is emitted after the cached drop route was discarded and Tor circuit rotation completed.
 
-8. Terminal timeline ordering is receive-order only.
-   The terminal chat may show timestamps for live and drop messages, but it must not reorder buffered output by timestamp.
-
-9. The daemon owns message timestamps.
+8. The daemon owns message timestamps.
    Live and drop payloads may be rendered optimistically in the terminal, but daemon-authored timestamps remain the canonical values exposed over IPC.
 
-10. Delivery ACK is not a read receipt.
-    A sender-side ACK only means the peer daemon durably accepted the logical message. Read state is a separate local consume action.
+9. Delivery ACK is not a read receipt.
+   A sender-side ACK only means the peer daemon durably accepted the logical message. Read state is a separate local consume action.
 
-11. Every logical message keeps one stable identifier across transports.
+10. Every logical message keeps one stable identifier across transports.
     Live, drop, fallback, and retry paths must reuse the same `msg_id` so duplicate deliveries stay idempotent.
 
-12. Inbound live delivery is crash-safe but not normal chat history.
+11. Inbound live delivery is crash-safe but not normal chat history.
     Live payloads must be durably spooled before ACK, then shredded on explicit consume while retaining only minimal dedupe metadata. They do not become ordinary visible chat-history rows by default.
 
 ### Transport Settings

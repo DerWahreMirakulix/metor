@@ -13,23 +13,23 @@ class HistoryFamily(str, Enum):
 class HistoryEvent(str, Enum):
     """Raw persisted transport event codes."""
 
-    DROP_QUEUED = 'drop_queued'
-    DROP_SENT = 'drop_sent'
-    DROP_RECEIVED = 'drop_received'
-    DROP_FAILED = 'drop_failed'
-    DROP_TUNNEL_CONNECTED = 'drop_tunnel_connected'
-    DROP_TUNNEL_FAILED = 'drop_tunnel_failed'
-    DROP_TUNNEL_CLOSED = 'drop_tunnel_closed'
+    QUEUED = 'queued'
+    SENT = 'sent'
+    RECEIVED = 'received'
+    FAILED = 'failed'
+    TUNNEL_CONNECTED = 'tunnel_connected'
+    TUNNEL_FAILED = 'tunnel_failed'
+    TUNNEL_CLOSED = 'tunnel_closed'
 
-    LIVE_REQUESTED = 'live_requested'
-    LIVE_CONNECTED = 'live_connected'
-    LIVE_REJECTED = 'live_rejected'
-    LIVE_DISCONNECTED = 'live_disconnected'
-    LIVE_CONNECTION_LOST = 'live_connection_lost'
-    LIVE_AUTO_RECONNECT_SCHEDULED = 'live_auto_reconnect_scheduled'
-    LIVE_RETUNNEL_INITIATED = 'live_retunnel_initiated'
-    LIVE_RETUNNEL_SUCCESS = 'live_retunnel_success'
-    LIVE_STREAM_CORRUPTED = 'live_stream_corrupted'
+    REQUESTED = 'requested'
+    CONNECTED = 'connected'
+    REJECTED = 'rejected'
+    DISCONNECTED = 'disconnected'
+    CONNECTION_LOST = 'connection_lost'
+    AUTO_RECONNECT_SCHEDULED = 'auto_reconnect_scheduled'
+    RETUNNEL_INITIATED = 'retunnel_initiated'
+    RETUNNEL_SUCCEEDED = 'retunnel_succeeded'
+    STREAM_CORRUPTED = 'stream_corrupted'
 
     @property
     def family(self) -> HistoryFamily:
@@ -42,9 +42,7 @@ class HistoryEvent(str, Enum):
         Returns:
             HistoryFamily: The normalized transport family.
         """
-        if self.value.startswith('drop_'):
-            return HistoryFamily.DROP
-        return HistoryFamily.LIVE
+        return _HISTORY_EVENT_FAMILIES[self]
 
 
 class HistoryActor(str, Enum):
@@ -103,3 +101,23 @@ class HistorySummaryCode(str, Enum):
     DROP_SENT = 'drop_sent'
     DROP_RECEIVED = 'drop_received'
     DROP_FAILED = 'drop_failed'
+
+
+_HISTORY_EVENT_FAMILIES: dict[HistoryEvent, HistoryFamily] = {
+    HistoryEvent.QUEUED: HistoryFamily.DROP,
+    HistoryEvent.SENT: HistoryFamily.DROP,
+    HistoryEvent.RECEIVED: HistoryFamily.DROP,
+    HistoryEvent.FAILED: HistoryFamily.DROP,
+    HistoryEvent.TUNNEL_CONNECTED: HistoryFamily.DROP,
+    HistoryEvent.TUNNEL_FAILED: HistoryFamily.DROP,
+    HistoryEvent.TUNNEL_CLOSED: HistoryFamily.DROP,
+    HistoryEvent.REQUESTED: HistoryFamily.LIVE,
+    HistoryEvent.CONNECTED: HistoryFamily.LIVE,
+    HistoryEvent.REJECTED: HistoryFamily.LIVE,
+    HistoryEvent.DISCONNECTED: HistoryFamily.LIVE,
+    HistoryEvent.CONNECTION_LOST: HistoryFamily.LIVE,
+    HistoryEvent.AUTO_RECONNECT_SCHEDULED: HistoryFamily.LIVE,
+    HistoryEvent.RETUNNEL_INITIATED: HistoryFamily.LIVE,
+    HistoryEvent.RETUNNEL_SUCCEEDED: HistoryFamily.LIVE,
+    HistoryEvent.STREAM_CORRUPTED: HistoryFamily.LIVE,
+}

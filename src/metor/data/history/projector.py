@@ -2,8 +2,6 @@
 
 from typing import List, Optional, Sequence
 
-from metor.utils import TypeCaster
-
 # Local Package Imports
 from metor.data.history.codes import (
     HistoryEvent,
@@ -18,34 +16,6 @@ class HistoryProjector:
     """Converts raw transport ledger rows into compact summary history."""
 
     @staticmethod
-    def _resolve_event_code(event_code: str) -> Optional[HistoryEvent]:
-        """
-        Coerces one persisted raw event code back to its enum when supported.
-
-        Args:
-            event_code (str): The stored raw event code.
-
-        Returns:
-            Optional[HistoryEvent]: The enum member when recognized.
-        """
-        return TypeCaster.to_optional_enum(HistoryEvent, event_code)
-
-    @staticmethod
-    def _resolve_detail_code(
-        detail_code: Optional[str],
-    ) -> Optional[HistoryReasonCode]:
-        """
-        Coerces one persisted detail code back to its enum when supported.
-
-        Args:
-            detail_code (Optional[str]): The stored detail code.
-
-        Returns:
-            Optional[HistoryReasonCode]: The enum member when recognized.
-        """
-        return TypeCaster.to_optional_enum(HistoryReasonCode, detail_code)
-
-    @staticmethod
     def _map_summary_code(
         entry: HistoryLedgerEntry,
     ) -> Optional[HistorySummaryCode]:
@@ -58,28 +28,21 @@ class HistoryProjector:
         Returns:
             Optional[HistorySummaryCode]: The projected summary code, or None if the row is raw-only noise.
         """
-        event_code: Optional[HistoryEvent] = HistoryProjector._resolve_event_code(
-            entry.event_code
-        )
-        detail_code: Optional[HistoryReasonCode] = (
-            HistoryProjector._resolve_detail_code(entry.detail_code)
-        )
+        event_code: HistoryEvent = entry.event_code
+        detail_code: Optional[HistoryReasonCode] = entry.detail_code
 
-        if event_code is None:
-            return None
-
-        if event_code is HistoryEvent.LIVE_REQUESTED:
+        if event_code is HistoryEvent.REQUESTED:
             if entry.trigger in {
-                HistoryTrigger.AUTO_RECONNECT.value,
-                HistoryTrigger.RETUNNEL.value,
+                HistoryTrigger.AUTO_RECONNECT,
+                HistoryTrigger.RETUNNEL,
             }:
                 return None
             return HistorySummaryCode.CONNECTION_REQUESTED
 
-        if event_code is HistoryEvent.LIVE_CONNECTED:
+        if event_code is HistoryEvent.CONNECTED:
             return HistorySummaryCode.CONNECTED
 
-        if event_code is HistoryEvent.LIVE_REJECTED:
+        if event_code is HistoryEvent.REJECTED:
             if detail_code in {
                 HistoryReasonCode.MUTUAL_TIEBREAKER_LOSER,
                 HistoryReasonCode.DUPLICATE_INCOMING_CONNECTED,
@@ -88,10 +51,10 @@ class HistoryProjector:
                 return None
             return HistorySummaryCode.CONNECTION_REJECTED
 
-        if event_code is HistoryEvent.LIVE_DISCONNECTED:
+        if event_code is HistoryEvent.DISCONNECTED:
             return HistorySummaryCode.DISCONNECTED
 
-        if event_code is HistoryEvent.LIVE_CONNECTION_LOST:
+        if event_code is HistoryEvent.CONNECTION_LOST:
             if detail_code in {
                 HistoryReasonCode.LATE_ACCEPTANCE_TIMEOUT,
                 HistoryReasonCode.PENDING_ACCEPTANCE_EXPIRED,
@@ -106,22 +69,22 @@ class HistoryProjector:
                 return HistorySummaryCode.CONNECTION_FAILED
             return HistorySummaryCode.CONNECTION_LOST
 
-        if event_code is HistoryEvent.LIVE_RETUNNEL_INITIATED:
+        if event_code is HistoryEvent.RETUNNEL_INITIATED:
             return HistorySummaryCode.RETUNNEL_INITIATED
 
-        if event_code is HistoryEvent.LIVE_RETUNNEL_SUCCESS:
+        if event_code is HistoryEvent.RETUNNEL_SUCCEEDED:
             return HistorySummaryCode.RETUNNEL_SUCCEEDED
 
-        if event_code is HistoryEvent.DROP_QUEUED:
+        if event_code is HistoryEvent.QUEUED:
             return HistorySummaryCode.DROP_QUEUED
 
-        if event_code is HistoryEvent.DROP_SENT:
+        if event_code is HistoryEvent.SENT:
             return HistorySummaryCode.DROP_SENT
 
-        if event_code is HistoryEvent.DROP_RECEIVED:
+        if event_code is HistoryEvent.RECEIVED:
             return HistorySummaryCode.DROP_RECEIVED
 
-        if event_code is HistoryEvent.DROP_FAILED:
+        if event_code is HistoryEvent.FAILED:
             return HistorySummaryCode.DROP_FAILED
 
         return None
@@ -149,7 +112,7 @@ class HistoryProjector:
                 HistorySummaryEntry(
                     timestamp=entry.timestamp,
                     family=entry.family,
-                    event_code=summary_code.value,
+                    event_code=summary_code,
                     peer_onion=entry.peer_onion,
                     actor=entry.actor,
                     trigger=entry.trigger,

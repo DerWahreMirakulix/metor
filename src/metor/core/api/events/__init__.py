@@ -40,8 +40,9 @@ from metor.core.api.events.entries import (
 )
 from metor.core.api.events.history import (
     HistoryDataEvent,
-    HistoryEntry,
     HistoryRawDataEvent,
+    RawHistoryEntry,
+    SummaryHistoryEntry,
 )
 from metor.core.api.events.maintenance import (
     ContactsClearFailedEvent,
@@ -123,7 +124,8 @@ from metor.core.api.events.transport import (
 
 __all__ = [
     'ContactEntry',
-    'HistoryEntry',
+    'SummaryHistoryEntry',
+    'RawHistoryEntry',
     'MessageEntry',
     'UnreadMessageEntry',
     'ProfileEntry',

@@ -3,16 +3,18 @@ Module providing the interactive Chat User Interface Engine.
 Acts as a clean Facade, orchestrating the Session, Renderer, Commands, and Events.
 """
 
-import threading
 import secrets
+import threading
 from datetime import datetime, timezone
 from typing import Optional
 
 from metor.core.api import (
     AuthenticateSessionCommand,
+    AuthRequiredEvent,
     EventType,
     IpcEvent,
     InitCommand,
+    InvalidPasswordEvent,
     MsgCommand,
     RegisterLiveConsumerCommand,
     SendDropCommand,
@@ -22,7 +24,13 @@ from metor.core.api import (
 )
 from metor.data.profile import ProfileManager
 from metor.data.settings import SettingKey
-from metor.ui import Help, PromptAbortedError, Theme, prompt_hidden
+from metor.ui import (
+    Help,
+    PromptAbortedError,
+    Theme,
+    prompt_hidden,
+    prompt_session_auth_proof,
+)
 from metor.ui.models import AliasPolicy, StatusTone
 from metor.utils import clean_onion, Constants
 
@@ -59,7 +67,7 @@ class Chat:
         self._conn_event: threading.Event = threading.Event()
         self._disconnect_event: threading.Event = threading.Event()
         self._startup_gate_event: threading.Event = threading.Event()
-        self._startup_gate_type: Optional[EventType] = None
+        self._startup_gate_payload: Optional[IpcEvent] = None
 
         self._handler: Optional[EventHandler] = None
         self._dispatcher: Optional[CommandDispatcher] = None
@@ -161,6 +169,7 @@ class Chat:
         Safely shuts down the IPC client and exits the UI process.
         Propagates focus removal to ensure Daemon TTL Keep-Alives update correctly.
         Avoids sys.exit(0) core dumps by cleanly terminating thread loops.
+        Ensures the terminal cursor is restored to a visible state natively.
 
         Args:
             None
@@ -168,6 +177,9 @@ class Chat:
         Returns:
             None
         """
+        # Ensure cursor is visible before exiting to avoid OS zombie states.
+        self._renderer.restore_cursor()
+
         if self._ipc:
             if self._session.focused_alias:
                 self._ipc.send_command(SwitchCommand(target=None))
@@ -272,13 +284,30 @@ class Chat:
             if event.event_type is EventType.INIT and self._handler:
                 self._handler.handle(event)
 
-            self._startup_gate_type = event.event_type
+            self._startup_gate_payload = event
             self._startup_gate_event.set()
 
             return
 
         if self._handler:
             self._handler.handle(event)
+
+    @staticmethod
+    def _extract_session_auth_prompt(event: IpcEvent) -> Optional[tuple[str, str]]:
+        """
+        Extracts the daemon-issued session-auth challenge payload from one IPC event.
+
+        Args:
+            event (IpcEvent): The incoming IPC event.
+
+        Returns:
+            Optional[tuple[str, str]]: The challenge and salt, or None when unavailable.
+        """
+        if isinstance(event, (AuthRequiredEvent, InvalidPasswordEvent)):
+            if event.challenge is not None and event.salt is not None:
+                return event.challenge, event.salt
+
+        return None
 
     def _bootstrap_ipc_session(self) -> bool:
         """
@@ -295,11 +324,13 @@ class Chat:
 
         self._init_event.clear()
         self._startup_gate_event.clear()
-        self._startup_gate_type = None
+        self._startup_gate_payload = None
         self._ipc.send_command(InitCommand())
 
         ipc_timeout: float = self._pm.config.get_float(SettingKey.IPC_TIMEOUT)
         pending_gate: Optional[EventType] = None
+        auth_failures: int = 0
+        unlock_failures: int = 0
 
         while not self._init_event.is_set():
             if self._disconnect_event.is_set():
@@ -318,8 +349,16 @@ class Chat:
                 return False
 
             self._startup_gate_event.clear()
-            gate: Optional[EventType] = self._startup_gate_type
-            self._startup_gate_type = None
+            gate_event: Optional[IpcEvent] = self._startup_gate_payload
+            self._startup_gate_payload = None
+
+            if gate_event is None:
+                continue
+
+            gate: EventType = gate_event.event_type
+            session_auth_prompt: Optional[tuple[str, str]] = (
+                self._extract_session_auth_prompt(gate_event)
+            )
 
             if self._init_event.is_set():
                 return True
@@ -330,31 +369,78 @@ class Chat:
                     msg_type=ChatMessageType.STATUS,
                     tone=StatusTone.ERROR,
                 )
-                gate = pending_gate
+
+                if session_auth_prompt is not None or (
+                    pending_gate is EventType.SESSION_AUTHENTICATED
+                ):
+                    auth_failures += 1
+                    if auth_failures >= Constants.IPC_AUTH_FAILURE_LIMIT:
+                        return False
+                elif pending_gate is EventType.DAEMON_UNLOCKED:
+                    unlock_failures += 1
+                    if unlock_failures >= Constants.IPC_AUTH_FAILURE_LIMIT:
+                        return False
+
+                if (
+                    session_auth_prompt is None
+                    and pending_gate is EventType.DAEMON_UNLOCKED
+                ):
+                    gate = EventType.DAEMON_LOCKED
+                elif session_auth_prompt is None:
+                    continue
 
             if gate is EventType.DAEMON_UNLOCKED:
                 pending_gate = None
+                unlock_failures = 0
                 self._ipc.send_command(InitCommand())
                 continue
 
             if gate is EventType.SESSION_AUTHENTICATED:
                 pending_gate = None
+                auth_failures = 0
                 self._ipc.send_command(InitCommand())
                 continue
 
-            if gate not in (EventType.AUTH_REQUIRED, EventType.DAEMON_LOCKED):
+            if session_auth_prompt is not None:
+                pending_gate = EventType.SESSION_AUTHENTICATED
+                try:
+                    proof: Optional[str] = prompt_session_auth_proof(
+                        'Enter Master Password: ',
+                        session_auth_prompt[0],
+                        session_auth_prompt[1],
+                    )
+                except PromptAbortedError:
+                    return False
+
+                if proof is None:
+                    self._renderer.print_message(
+                        'Master password cannot be empty.',
+                        msg_type=ChatMessageType.STATUS,
+                        tone=StatusTone.ERROR,
+                    )
+                    return False
+
+                self._ipc.send_command(AuthenticateSessionCommand(proof=proof))
                 continue
 
-            pending_gate = gate
-            prompt: str = (
-                'Enter Master Password to unlock daemon: '
-                if gate is EventType.DAEMON_LOCKED
-                else 'Enter Master Password: '
-            )
+            if gate is not EventType.DAEMON_LOCKED:
+                if gate is EventType.AUTH_REQUIRED:
+                    self._renderer.print_message(
+                        'Daemon session authentication challenge missing.',
+                        msg_type=ChatMessageType.STATUS,
+                        tone=StatusTone.ERROR,
+                    )
+                    return False
+                continue
+
+            pending_gate = EventType.DAEMON_UNLOCKED
             try:
-                password: str = prompt_hidden(f'{Theme.GREEN}{prompt}{Theme.RESET}')
+                password: str = prompt_hidden(
+                    f'{Theme.GREEN}Enter Master Password to unlock daemon: {Theme.RESET}'
+                )
             except PromptAbortedError:
                 return False
+
             if not password:
                 self._renderer.print_message(
                     'Master password cannot be empty.',
@@ -363,10 +449,7 @@ class Chat:
                 )
                 return False
 
-            if gate is EventType.DAEMON_LOCKED:
-                self._ipc.send_command(UnlockCommand(password=password))
-            else:
-                self._ipc.send_command(AuthenticateSessionCommand(password=password))
+            self._ipc.send_command(UnlockCommand(password=password))
 
         return True
 

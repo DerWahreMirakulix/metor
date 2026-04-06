@@ -27,26 +27,13 @@ jobs:
           # Fetch the full history so the bot can push back to the branch cleanly
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Run Shared Python Quality Checks
+        uses: ./.github/actions/python-quality
         with:
           python-version: "3.11"
-          cache: "pip"
-
-      - name: Install Project and Dev Dependencies
-        run: |
-          python -m pip install --upgrade "pip==26.0.1"
-          pip install -r requirements/dev.lock
-          pip install --no-deps --no-build-isolation -e .
-
-      - name: Run Ruff (Linting)
-        run: ruff check src/metor/ scripts/
-
-      - name: Run Ruff (Formatting Check)
-        run: ruff format --check src/metor/ scripts/
-
-      - name: Run Mypy (Static Type Checking)
-        run: mypy src/metor/ scripts/
+          ruff-check-paths: "src/metor/ scripts/"
+          ruff-format-paths: "src/metor/ scripts/"
+          mypy-paths: "src/metor/ scripts/"
 
       - name: Setup Node.js
         uses: actions/setup-node@v6

@@ -10,7 +10,9 @@ from metor.core.api import (
     InboxCountsEvent,
     IpcEvent,
     MarkReadCommand,
+    MessageDirectionCode,
     MessageEntry,
+    MessageStatusCode,
     MessagesDataEvent,
     UnreadMessageEntry,
     UnreadMessagesEvent,
@@ -60,8 +62,8 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
         messages_raw = self._mm.get_chat_history(onion, cmd.limit)
         messages = [
             MessageEntry(
-                direction=message.direction,
-                status=message.status,
+                direction=MessageDirectionCode(message.direction),
+                status=MessageStatusCode(message.status),
                 payload=message.payload,
                 timestamp=message.timestamp,
             )

@@ -2,7 +2,15 @@
 
 from typing import Optional
 
-from metor.core.api import HistoryDataEvent, HistoryEntry, HistoryRawDataEvent
+from metor.core.api import (
+    HistoryDataEvent,
+    HistoryEntryActor,
+    HistoryEntryReasonCode,
+    HistoryRawDataEvent,
+    HistorySummaryEventCode,
+    RawHistoryEntry,
+    SummaryHistoryEntry,
+)
 
 # Local Package Imports
 from metor.ui.presenter.shared import (
@@ -13,22 +21,30 @@ from metor.ui.presenter.shared import (
 from metor.ui.theme import Theme
 
 
-SUMMARY_REASON_TEXTS: dict[str, str] = {
-    'auto_fallback_to_drop': 'automatic fallback to drop',
-    'duplicate_incoming_connected': 'peer was already connected',
-    'duplicate_incoming_pending': 'peer already had a pending incoming request',
-    'late_acceptance_timeout': 'late acceptance timed out',
-    'manual_fallback_to_drop': 'manual fallback to drop',
-    'max_connections_reached': 'maximum concurrent connections reached',
-    'mutual_tiebreaker_loser': 'lost the mutual connect tie-break',
-    'outbound_attempt_closed_before_acceptance': (
+SUMMARY_REASON_TEXTS: dict[HistoryEntryReasonCode, str] = {
+    HistoryEntryReasonCode.AUTO_FALLBACK_TO_DROP: 'automatic fallback to drop',
+    HistoryEntryReasonCode.DUPLICATE_INCOMING_CONNECTED: ('peer was already connected'),
+    HistoryEntryReasonCode.DUPLICATE_INCOMING_PENDING: (
+        'peer already had a pending incoming request'
+    ),
+    HistoryEntryReasonCode.LATE_ACCEPTANCE_TIMEOUT: 'late acceptance timed out',
+    HistoryEntryReasonCode.MANUAL_FALLBACK_TO_DROP: 'manual fallback to drop',
+    HistoryEntryReasonCode.MAX_CONNECTIONS_REACHED: (
+        'maximum concurrent connections reached'
+    ),
+    HistoryEntryReasonCode.MUTUAL_TIEBREAKER_LOSER: (
+        'lost the mutual connect tie-break'
+    ),
+    HistoryEntryReasonCode.OUTBOUND_ATTEMPT_CLOSED_BEFORE_ACCEPTANCE: (
         'outbound attempt closed before acceptance'
     ),
-    'outbound_attempt_rejected': 'outbound attempt rejected',
-    'pending_acceptance_expired': 'pending acceptance expired',
-    'retunnel_pending_connection_missing': 'retunnel pending connection missing',
-    'retry_exhausted': 'retry limit exhausted',
-    'unacked_live_converted_to_drop': (
+    HistoryEntryReasonCode.OUTBOUND_ATTEMPT_REJECTED: ('outbound attempt rejected'),
+    HistoryEntryReasonCode.PENDING_ACCEPTANCE_EXPIRED: ('pending acceptance expired'),
+    HistoryEntryReasonCode.RETUNNEL_PENDING_CONNECTION_MISSING: (
+        'retunnel pending connection missing'
+    ),
+    HistoryEntryReasonCode.RETRY_EXHAUSTED: 'retry limit exhausted',
+    HistoryEntryReasonCode.UNACKED_LIVE_CONVERTED_TO_DROP: (
         'unacknowledged live messages were converted to drops'
     ),
 }
@@ -53,12 +69,12 @@ def _format_scope_label(
     return f'profile {Theme.CYAN}{profile}{Theme.RESET}'
 
 
-def _format_summary_peer_label(entry: HistoryEntry) -> str:
+def _format_summary_peer_label(entry: SummaryHistoryEntry) -> str:
     """
     Formats one peer identity label for projected summary output.
 
     Args:
-        entry (HistoryEntry): The history entry.
+        entry (SummaryHistoryEntry): The history entry.
 
     Returns:
         str: The formatted peer label.
@@ -67,12 +83,12 @@ def _format_summary_peer_label(entry: HistoryEntry) -> str:
     return f'{Theme.PURPLE}{alias_label}{Theme.RESET}'
 
 
-def _format_raw_peer_label(entry: HistoryEntry) -> str:
+def _format_raw_peer_label(entry: RawHistoryEntry) -> str:
     """
     Formats one peer identity label for raw ledger output.
 
     Args:
-        entry (HistoryEntry): The history entry.
+        entry (RawHistoryEntry): The history entry.
 
     Returns:
         str: The formatted raw peer label.
@@ -86,46 +102,48 @@ def _format_raw_peer_label(entry: HistoryEntry) -> str:
     return f'{Theme.PURPLE}{alias_label}{Theme.RESET}'
 
 
-def _append_reason(base: str, entry: HistoryEntry) -> str:
+def _append_reason(base: str, entry: SummaryHistoryEntry) -> str:
     """
     Appends one humanized machine-readable reason suffix when available.
 
     Args:
         base (str): The base summary sentence.
-        entry (HistoryEntry): The history entry.
+        entry (SummaryHistoryEntry): The history entry.
 
     Returns:
         str: The augmented summary sentence.
     """
-    reason_text: Optional[str] = SUMMARY_REASON_TEXTS.get(entry.detail_code or '')
+    reason_text: Optional[str] = None
+    if entry.detail_code is not None:
+        reason_text = SUMMARY_REASON_TEXTS.get(entry.detail_code)
     if not reason_text:
         return base
     return f'{base} {Theme.DARK_GREY}Reason:{Theme.RESET} {reason_text}.'
 
 
-def _describe_summary_entry(entry: HistoryEntry) -> str:
+def _describe_summary_entry(entry: SummaryHistoryEntry) -> str:
     """
     Converts one projected history entry into one concise sentence.
 
     Args:
-        entry (HistoryEntry): The projected history entry.
+        entry (SummaryHistoryEntry): The projected history entry.
 
     Returns:
         str: The formatted summary sentence.
     """
     peer_label: str = _format_summary_peer_label(entry)
-    family_prefix: str = f'{Theme.DARK_GREY}{entry.family.upper()}{Theme.RESET} '
+    family_prefix: str = f'{Theme.DARK_GREY}{entry.family.value.upper()}{Theme.RESET} '
 
-    if entry.event_code == 'connection_requested':
-        if entry.actor == 'remote':
+    if entry.event_code is HistorySummaryEventCode.CONNECTION_REQUESTED:
+        if entry.actor is HistoryEntryActor.REMOTE:
             return f'{family_prefix}Incoming connection request from {peer_label}.'
         return f'{family_prefix}Connection request sent to {peer_label}.'
 
-    if entry.event_code == 'connected':
+    if entry.event_code is HistorySummaryEventCode.CONNECTED:
         return f'{family_prefix}Connected to {peer_label}.'
 
-    if entry.event_code == 'connection_rejected':
-        if entry.actor == 'local':
+    if entry.event_code is HistorySummaryEventCode.CONNECTION_REJECTED:
+        if entry.actor is HistoryEntryActor.LOCAL:
             return _append_reason(
                 f'{family_prefix}Rejected connection with {peer_label}.',
                 entry,
@@ -135,51 +153,51 @@ def _describe_summary_entry(entry: HistoryEntry) -> str:
             entry,
         )
 
-    if entry.event_code == 'connection_failed':
+    if entry.event_code is HistorySummaryEventCode.CONNECTION_FAILED:
         return _append_reason(
             f'{family_prefix}Connection to {peer_label} failed.',
             entry,
         )
 
-    if entry.event_code == 'connection_lost':
+    if entry.event_code is HistorySummaryEventCode.CONNECTION_LOST:
         return _append_reason(
             f'{family_prefix}Connection to {peer_label} lost.',
             entry,
         )
 
-    if entry.event_code == 'disconnected':
-        if entry.actor == 'remote':
+    if entry.event_code is HistorySummaryEventCode.DISCONNECTED:
+        if entry.actor is HistoryEntryActor.REMOTE:
             return f'{family_prefix}{peer_label} disconnected.'
         return f'{family_prefix}Disconnected from {peer_label}.'
 
-    if entry.event_code == 'pending_expired':
+    if entry.event_code is HistorySummaryEventCode.PENDING_EXPIRED:
         return f'{family_prefix}Acceptance window for {peer_label} expired.'
 
-    if entry.event_code == 'retunnel_initiated':
+    if entry.event_code is HistorySummaryEventCode.RETUNNEL_INITIATED:
         return f'{family_prefix}Retunnel started for {peer_label}.'
 
-    if entry.event_code == 'retunnel_succeeded':
+    if entry.event_code is HistorySummaryEventCode.RETUNNEL_SUCCEEDED:
         return f'{family_prefix}Retunnel completed for {peer_label}.'
 
-    if entry.event_code == 'drop_queued':
+    if entry.event_code is HistorySummaryEventCode.DROP_QUEUED:
         return _append_reason(
             f'{family_prefix}Queued drop for {peer_label}.',
             entry,
         )
 
-    if entry.event_code == 'drop_sent':
+    if entry.event_code is HistorySummaryEventCode.DROP_SENT:
         return f'{family_prefix}Delivered drop to {peer_label}.'
 
-    if entry.event_code == 'drop_received':
+    if entry.event_code is HistorySummaryEventCode.DROP_RECEIVED:
         return f'{family_prefix}Received drop from {peer_label}.'
 
-    if entry.event_code == 'drop_failed':
+    if entry.event_code is HistorySummaryEventCode.DROP_FAILED:
         return _append_reason(
             f'{family_prefix}Drop delivery for {peer_label} failed.',
             entry,
         )
 
-    return f'{family_prefix}{entry.event_code} -> {peer_label}'
+    return f'{family_prefix}{entry.event_code.value} -> {peer_label}'
 
 
 def format_history(event: HistoryDataEvent) -> str:
@@ -224,18 +242,18 @@ def format_raw_history(event: HistoryRawDataEvent) -> str:
         prefix, prefix_visible = build_timestamp_prefix(entry.timestamp)
         peer_label: str = _format_raw_peer_label(entry)
         line: str = (
-            f'{Theme.DARK_GREY}family:{Theme.RESET} {Theme.CYAN}{entry.family}{Theme.RESET}\n'
-            f'{Theme.DARK_GREY}event:{Theme.RESET} {Theme.YELLOW}{entry.event_code}{Theme.RESET}\n'
-            f'{Theme.DARK_GREY}actor:{Theme.RESET} {Theme.GREEN}{entry.actor}{Theme.RESET}\n'
+            f'{Theme.DARK_GREY}family:{Theme.RESET} {Theme.CYAN}{entry.family.value}{Theme.RESET}\n'
+            f'{Theme.DARK_GREY}event:{Theme.RESET} {Theme.YELLOW}{entry.event_code.value}{Theme.RESET}\n'
+            f'{Theme.DARK_GREY}actor:{Theme.RESET} {Theme.GREEN}{entry.actor.value}{Theme.RESET}\n'
             f'{Theme.DARK_GREY}peer:{Theme.RESET} {peer_label}\n'
             f'{Theme.DARK_GREY}flow:{Theme.RESET} {Theme.CYAN}{entry.flow_id}{Theme.RESET}\n'
         )
         if entry.trigger:
-            line += f'{Theme.DARK_GREY}trigger:{Theme.RESET} {Theme.CYAN}{entry.trigger}{Theme.RESET}\n'
+            line += f'{Theme.DARK_GREY}trigger:{Theme.RESET} {Theme.CYAN}{entry.trigger.value}{Theme.RESET}\n'
         if entry.detail_code:
             line += (
                 f'{Theme.DARK_GREY}detail code:{Theme.RESET} '
-                f'{Theme.CYAN}{entry.detail_code}{Theme.RESET}\n'
+                f'{Theme.CYAN}{entry.detail_code.value}{Theme.RESET}\n'
             )
         if entry.detail_text:
             line += (

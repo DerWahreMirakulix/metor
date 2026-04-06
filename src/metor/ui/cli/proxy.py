@@ -1,6 +1,6 @@
 """
 Module providing a transparent proxy for all CLI commands.
-Routes requests to the Daemon via IPC automatically, launching a HeadlessDaemon if offline.
+Routes requests to the Daemon via IPC automatically, launching an ephemeral local runtime if offline.
 Formats responses securely via the centralized Translator and Presenter using strict DTOs.
 Enforces Domain-Driven Design by routing UI settings locally and Daemon settings via IPC.
 Prevents structural ProfileConfigKey mutability vulnerabilities via strict property validations.
@@ -12,12 +12,15 @@ import dataclasses
 import secrets
 from typing import Optional, Dict, Union
 
+from metor.application import run_with_headless_daemon
 from metor.core.api import (
     AuthenticateSessionCommand,
+    AuthRequiredEvent,
     EventType,
     JsonValue,
     IpcCommand,
     IpcEvent,
+    InvalidPasswordEvent,
     UnlockCommand,
     SelfDestructCommand,
     SetSettingCommand,
@@ -49,15 +52,15 @@ from metor.core.api import (
     UnreadMessagesEvent,
     ProfilesDataEvent,
 )
-from metor.core.daemon import HeadlessDaemon
-from metor.data import Settings, SettingKey
 from metor.data.profile import ProfileManager, ProfileConfigKey
+from metor.data.settings import Settings, SettingKey
 from metor.ui import (
     PromptAbortedError,
     Theme,
     Translator,
     UIPresenter,
     prompt_hidden,
+    prompt_session_auth_proof,
 )
 from metor.utils import Constants, TypeCaster
 
@@ -192,18 +195,39 @@ class CliProxy:
         """
         sock.sendall((cmd.to_json() + '\n').encode('utf-8'))
 
-    def _read_socket_event(self, sock: socket.socket) -> Optional[IpcEvent]:
+    @staticmethod
+    def _extract_session_auth_prompt(event: IpcEvent) -> Optional[tuple[str, str]]:
+        """
+        Extracts the daemon-issued session-auth challenge payload from one IPC event.
+
+        Args:
+            event (IpcEvent): The incoming IPC event.
+
+        Returns:
+            Optional[tuple[str, str]]: The challenge and salt, or None when unavailable.
+        """
+        if isinstance(event, (AuthRequiredEvent, InvalidPasswordEvent)):
+            if event.challenge is not None and event.salt is not None:
+                return event.challenge, event.salt
+
+        return None
+
+    def _read_socket_event(
+        self,
+        sock: socket.socket,
+        buffer: bytearray,
+    ) -> Optional[IpcEvent]:
         """
         Reads one strictly typed newline-delimited IPC event from the socket.
 
         Args:
             sock (socket.socket): The connected IPC socket.
+            buffer (bytearray): The persistent receive buffer for the active socket.
 
         Returns:
             Optional[IpcEvent]: The decoded event, or None when the stream ends.
         """
-        buffer: bytearray = bytearray()
-        while True:
+        while b'\n' not in buffer:
             chunk: bytes = sock.recv(Constants.TCP_BUFFER_SIZE)
             if not chunk:
                 return None
@@ -212,10 +236,9 @@ class CliProxy:
             if len(buffer) > Constants.MAX_IPC_BYTES:
                 raise ValueError('Daemon response exceeded the IPC size limit.')
 
-            if b'\n' in buffer:
-                break
-
-        line: str = bytes(buffer).split(b'\n', 1)[0].decode('utf-8')
+        line_bytes, _, rest = buffer.partition(b'\n')
+        buffer[:] = rest
+        line: str = line_bytes.decode('utf-8')
         resp_dict: Dict[str, JsonValue] = json.loads(line)
         return IpcEvent.from_dict(resp_dict)
 
@@ -291,8 +314,11 @@ class CliProxy:
                     if password is None:
                         return 'Master password cannot be empty.'
 
-                with HeadlessDaemon(self._pm, password) as hd:
-                    return self._send_to_port(hd.port, cmd, wait_for_response)
+                return run_with_headless_daemon(
+                    self._pm,
+                    password,
+                    lambda port: self._send_to_port(port, cmd, wait_for_response),
+                )
 
             return self._send_to_port(port, cmd, wait_for_response)
         except PromptAbortedError:
@@ -320,24 +346,38 @@ class CliProxy:
                 if not wait_for_response:
                     return self._prefix_remote('Command executed successfully.')
 
+                buffer: bytearray = bytearray()
                 pending_resume_event: Optional[EventType] = None
                 auth_failures: int = 0
                 unlock_failures: int = 0
 
                 while True:
-                    event: Optional[IpcEvent] = self._read_socket_event(s)
+                    event: Optional[IpcEvent] = self._read_socket_event(s, buffer)
                     if event is None:
                         break
 
+                    session_auth_prompt: Optional[tuple[str, str]] = (
+                        self._extract_session_auth_prompt(event)
+                    )
+
                     if event.event_type is EventType.AUTH_REQUIRED:
-                        password = self._prompt_password('Enter Master Password: ')
-                        if password is None:
+                        if session_auth_prompt is None:
+                            return self._prefix_remote(
+                                'Daemon session authentication challenge missing.'
+                            )
+
+                        proof: Optional[str] = prompt_session_auth_proof(
+                            'Enter Master Password: ',
+                            session_auth_prompt[0],
+                            session_auth_prompt[1],
+                        )
+                        if proof is None:
                             return 'Master password cannot be empty.'
 
                         pending_resume_event = EventType.SESSION_AUTHENTICATED
                         self._send_socket_command(
                             s,
-                            AuthenticateSessionCommand(password=password),
+                            AuthenticateSessionCommand(proof=proof),
                         )
                         continue
 
@@ -358,22 +398,29 @@ class CliProxy:
                     if event.event_type is EventType.INVALID_PASSWORD:
                         if pending_resume_event is EventType.SESSION_AUTHENTICATED:
                             auth_failures += 1
-                            if auth_failures >= 3:
+                            if auth_failures >= Constants.IPC_AUTH_FAILURE_LIMIT:
                                 return self._format_ipc_event(event)
 
-                            password = self._prompt_password('Enter Master Password: ')
-                            if password is None:
+                            if session_auth_prompt is None:
+                                return self._format_ipc_event(event)
+
+                            proof = prompt_session_auth_proof(
+                                'Enter Master Password: ',
+                                session_auth_prompt[0],
+                                session_auth_prompt[1],
+                            )
+                            if proof is None:
                                 return 'Master password cannot be empty.'
 
                             self._send_socket_command(
                                 s,
-                                AuthenticateSessionCommand(password=password),
+                                AuthenticateSessionCommand(proof=proof),
                             )
                             continue
 
                         if pending_resume_event is EventType.DAEMON_UNLOCKED:
                             unlock_failures += 1
-                            if unlock_failures >= 3:
+                            if unlock_failures >= Constants.IPC_AUTH_FAILURE_LIMIT:
                                 return self._format_ipc_event(event)
 
                             password = self._prompt_password(

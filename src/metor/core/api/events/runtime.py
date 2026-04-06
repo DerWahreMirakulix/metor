@@ -14,14 +14,18 @@ from metor.core.api.registry import register_event
 class AuthRequiredEvent(IpcEvent):
     """Signals that the session must authenticate first."""
 
+    challenge: Optional[str] = None
+    salt: Optional[str] = None
     event_type: EventType = field(default=EventType.AUTH_REQUIRED, init=False)
 
 
 @register_event(EventType.INVALID_PASSWORD)
 @dataclass
 class InvalidPasswordEvent(IpcEvent):
-    """Signals that the supplied password was invalid."""
+    """Signals that the supplied unlock password or session proof was invalid."""
 
+    challenge: Optional[str] = None
+    salt: Optional[str] = None
     event_type: EventType = field(default=EventType.INVALID_PASSWORD, init=False)
 
 

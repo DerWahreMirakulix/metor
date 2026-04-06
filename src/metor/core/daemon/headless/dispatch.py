@@ -1,7 +1,7 @@
 """Command-dispatch helpers for the ephemeral headless daemon."""
 
 import socket
-from typing import Any, Optional
+from typing import Optional
 
 from metor.core.api import (
     AddContactCommand,
@@ -29,21 +29,19 @@ from metor.core.api import (
     SyncConfigCommand,
     create_event,
 )
+from metor.core.daemon import InvalidMasterPasswordError, verify_master_password
 from metor.data import DatabaseCorruptedError
 
 # Local Package Imports
-from metor.core.daemon.bootstrap import (
-    InvalidMasterPasswordError,
-    verify_master_password,
-)
+from metor.core.daemon.headless.protocols import HeadlessDaemonProtocol
 
 
-def validate_password(daemon: Any) -> Optional[IpcEvent]:
+def validate_password(daemon: HeadlessDaemonProtocol) -> Optional[IpcEvent]:
     """
     Validates the configured master password before opening encrypted storage.
 
     Args:
-        daemon (Any): The owning headless daemon instance.
+        daemon (HeadlessDaemonProtocol): The owning headless daemon instance.
 
     Returns:
         Optional[IpcEvent]: An error event when validation fails, otherwise None.
@@ -62,12 +60,16 @@ def validate_password(daemon: Any) -> Optional[IpcEvent]:
     return None
 
 
-def process_command(daemon: Any, cmd: IpcCommand, conn: socket.socket) -> None:
+def process_command(
+    daemon: HeadlessDaemonProtocol,
+    cmd: IpcCommand,
+    conn: socket.socket,
+) -> None:
     """
     Routes a parsed headless IPC command to the matching offline handler.
 
     Args:
-        daemon (Any): The owning headless daemon instance.
+        daemon (HeadlessDaemonProtocol): The owning headless daemon instance.
         cmd (IpcCommand): The parsed IPC command DTO.
         conn (socket.socket): The connected local IPC socket.
 

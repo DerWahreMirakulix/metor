@@ -5,11 +5,12 @@ from typing import List
 from metor.core.api import (
     ContactsDataEvent,
     InboxCountsEvent,
+    MessageDirectionCode,
+    MessageStatusCode,
     MessagesDataEvent,
     ProfilesDataEvent,
     UnreadMessagesEvent,
 )
-from metor.data import MessageDirection, MessageStatus
 
 # Local Package Imports
 from metor.ui.presenter.shared import (
@@ -70,11 +71,11 @@ def format_messages(event: MessagesDataEvent) -> str:
     )
     out: str = f'{get_header_string(header_text)}\n'
     for msg in event.messages:
-        if msg.direction == MessageDirection.OUT.value:
+        if msg.direction is MessageDirectionCode.OUT:
             prefix_text: str = f'To {event.alias}: '
             rendered_prefix_text: str = (
                 f'{Theme.GREEN}{prefix_text}{Theme.RESET}'
-                if msg.status == MessageStatus.DELIVERED.value
+                if msg.status is MessageStatusCode.DELIVERED
                 else prefix_text
             )
         else:

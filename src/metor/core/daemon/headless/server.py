@@ -2,19 +2,21 @@
 
 import json
 import socket
-from typing import Any, Dict
+from typing import Dict
 
 from metor.core.api import EventType, IpcCommand, JsonValue, create_event
 from metor.data import SettingKey
 from metor.utils import Constants
 
+from metor.core.daemon.headless.protocols import HeadlessDaemonProtocol
 
-def run_acceptor(daemon: Any) -> None:
+
+def run_acceptor(daemon: HeadlessDaemonProtocol) -> None:
     """
     Waits for a single local client and delegates socket processing.
 
     Args:
-        daemon (Any): The owning headless daemon instance.
+        daemon (HeadlessDaemonProtocol): The owning headless daemon instance.
 
     Returns:
         None
@@ -35,12 +37,12 @@ def run_acceptor(daemon: Any) -> None:
         break
 
 
-def handle_client(daemon: Any, conn: socket.socket) -> None:
+def handle_client(daemon: HeadlessDaemonProtocol, conn: socket.socket) -> None:
     """
     Reads one newline-delimited IPC frame and routes the parsed command.
 
     Args:
-        daemon (Any): The owning headless daemon instance.
+        daemon (HeadlessDaemonProtocol): The owning headless daemon instance.
         conn (socket.socket): The connected local IPC socket.
 
     Returns:
@@ -70,7 +72,12 @@ def handle_client(daemon: Any, conn: socket.socket) -> None:
                 continue
 
             line_bytes, _, _ = buffer.partition(b'\n')
-            line: str = line_bytes.decode('utf-8', errors='ignore').strip()
+            try:
+                line: str = line_bytes.decode('utf-8').strip()
+            except UnicodeDecodeError:
+                daemon._send(conn, create_event(EventType.UNKNOWN_COMMAND))
+                break
+
             try:
                 cmd_dict: Dict[str, JsonValue] = json.loads(line)
                 cmd: IpcCommand = IpcCommand.from_dict(cmd_dict)

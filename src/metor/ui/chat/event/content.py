@@ -1,7 +1,7 @@
 """Helpers for chat content, data, and inbox event handling."""
 
 import dataclasses
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from metor.core.api import (
     AckEvent,
@@ -26,14 +26,15 @@ from metor.ui import AliasPolicy, StatusTone, UIPresenter
 
 # Local Package Imports
 from metor.ui.chat.models import ChatMessageType
+from metor.ui.chat.event.protocols import EventHandlerProtocol
 
 
-def handle_content_event(handler: Any, event: IpcEvent) -> bool:
+def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool:
     """
     Handles data-returning, message, and inbox-related chat events.
 
     Args:
-        handler (Any): The owning EventHandler instance.
+        handler (EventHandlerProtocol): The owning EventHandler instance.
         event (IpcEvent): The incoming IPC event.
 
     Returns:

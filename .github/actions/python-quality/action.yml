@@ -1,0 +1,77 @@
+name: "Python Quality"
+description: "Set up Python, install dependencies, and run shared quality checks."
+
+inputs:
+  python-version:
+    description: Python version to install.
+    required: false
+    default: "3.11"
+  pip-version:
+    description: Pip version to install before dependency setup.
+    required: false
+    default: "26.0.1"
+  dev-lockfile:
+    description: Path to the locked development requirements file.
+    required: false
+    default: "requirements/dev.lock"
+  install-target:
+    description: Package installation target passed to pip.
+    required: false
+    default: "--no-deps --no-build-isolation -e ."
+  ruff-check-paths:
+    description: Space-delimited paths for ruff check.
+    required: false
+    default: "src/metor/ scripts/"
+  ruff-format-paths:
+    description: Space-delimited paths for ruff format --check.
+    required: false
+    default: "src/metor/ scripts/"
+  mypy-paths:
+    description: Space-delimited paths for mypy.
+    required: false
+    default: "src/metor/ scripts/"
+  run-tests:
+    description: Whether to execute the configured test command.
+    required: false
+    default: "false"
+  test-command:
+    description: Shell command used to execute the test suite.
+    required: false
+    default: "python -m unittest discover -s tests -p 'test_*.py'"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: pip
+
+    - name: Install Project and Dev Dependencies
+      shell: bash
+      run: |
+        python -m pip install --upgrade "pip==${{ inputs.pip-version }}"
+        pip install -r "${{ inputs.dev-lockfile }}"
+        pip install ${{ inputs.install-target }}
+
+    - name: Run Ruff (Linting)
+      shell: bash
+      run: |
+        ruff check ${{ inputs.ruff-check-paths }}
+
+    - name: Run Ruff (Formatting Check)
+      shell: bash
+      run: |
+        ruff format --check ${{ inputs.ruff-format-paths }}
+
+    - name: Run Mypy (Static Type Checking)
+      shell: bash
+      run: |
+        mypy ${{ inputs.mypy-paths }}
+
+    - name: Run Tests
+      if: ${{ inputs.run-tests == 'true' }}
+      shell: bash
+      run: |
+        ${{ inputs.test-command }}
