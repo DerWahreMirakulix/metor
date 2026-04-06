@@ -200,11 +200,11 @@ Adds a new contact or promotes a discovered peer.
 
 ### `AuthenticateSessionCommand`
 
-Authenticates the current IPC session when local auth is required.
+Authenticates the current IPC session using one daemon-issued proof challenge.
 
-| Field      | Type  | Default  |
-| ---------- | ----- | -------- |
-| `password` | `str` | Required |
+| Field   | Type  | Default  |
+| ------- | ----- | -------- |
+| `proof` | `str` | Required |
 
 **Wire Value:** `authenticate_session`
 
@@ -213,7 +213,7 @@ Authenticates the current IPC session when local auth is required.
 ```json
 {
   "command_type": "authenticate_session",
-  "password": "string"
+  "proof": "string"
 }
 ```
 
@@ -1092,7 +1092,10 @@ _No additional payload parameters._
 
 Signals that the session must authenticate first.
 
-_No additional payload parameters._
+| Field       | Type               | Default |
+| ----------- | ------------------ | ------- |
+| `challenge` | `Union[str, None]` | `None`  |
+| `salt`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `auth_required`
 
@@ -1974,12 +1977,12 @@ Signals that profile history was cleared.
 
 Returns projected user-facing history rows.
 
-| Field        | Type                 | Default  |
-| ------------ | -------------------- | -------- |
-| `entries`    | `List[HistoryEntry]` | Required |
-| `profile`    | `str`                | Required |
-| `alias`      | `Union[str, None]`   | `None`   |
-| `peer_onion` | `Union[str, None]`   | `None`   |
+| Field        | Type                            | Default  |
+| ------------ | ------------------------------- | -------- |
+| `entries`    | `Sequence[SummaryHistoryEntry]` | Required |
+| `profile`    | `str`                           | Required |
+| `alias`      | `Union[str, None]`              | `None`   |
+| `peer_onion` | `Union[str, None]`              | `None`   |
 
 **Wire Value:** `history_data`
 
@@ -1988,7 +1991,7 @@ Returns projected user-facing history rows.
 ```json
 {
   "event_type": "history_data",
-  "entries": ["value"],
+  "entries": "value",
   "profile": "string"
 }
 ```
@@ -1999,12 +2002,12 @@ Returns projected user-facing history rows.
 
 Returns raw transport history ledger rows.
 
-| Field        | Type                 | Default  |
-| ------------ | -------------------- | -------- |
-| `entries`    | `List[HistoryEntry]` | Required |
-| `profile`    | `str`                | Required |
-| `alias`      | `Union[str, None]`   | `None`   |
-| `peer_onion` | `Union[str, None]`   | `None`   |
+| Field        | Type                        | Default  |
+| ------------ | --------------------------- | -------- |
+| `entries`    | `Sequence[RawHistoryEntry]` | Required |
+| `profile`    | `str`                       | Required |
+| `alias`      | `Union[str, None]`          | `None`   |
+| `peer_onion` | `Union[str, None]`          | `None`   |
 
 **Wire Value:** `history_raw_data`
 
@@ -2013,7 +2016,7 @@ Returns raw transport history ledger rows.
 ```json
 {
   "event_type": "history_raw_data",
-  "entries": ["value"],
+  "entries": "value",
   "profile": "string"
 }
 ```
@@ -2173,9 +2176,12 @@ _No additional payload parameters._
 
 ### `InvalidPasswordEvent`
 
-Signals that the supplied password was invalid.
+Signals that the supplied unlock password or session proof was invalid.
 
-_No additional payload parameters._
+| Field       | Type               | Default |
+| ----------- | ------------------ | ------- |
+| `challenge` | `Union[str, None]` | `None`  |
+| `salt`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `invalid_password`
 
