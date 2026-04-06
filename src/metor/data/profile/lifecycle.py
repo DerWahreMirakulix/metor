@@ -120,7 +120,7 @@ def migrate_profile_security(
     Returns:
         ProfileOperationResult: Structured local outcome for the CLI layer.
     """
-    from metor.core.daemon.bootstrap import (
+    from metor.core.daemon import (
         InvalidMasterPasswordError,
         verify_master_password,
     )

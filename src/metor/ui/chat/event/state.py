@@ -1,6 +1,6 @@
 """Helpers for chat UI state mutation events."""
 
-from typing import Any, Optional
+from typing import Optional
 
 from metor.core.api import (
     ConnectionsStateEvent,
@@ -12,16 +12,17 @@ from metor.core.api import (
 from metor.ui import StatusTone
 
 # Local Package Imports
+from metor.ui.chat.event.protocols import EventHandlerProtocol
 from metor.ui.chat.models import ChatMessageType
 from metor.ui.chat.presenter import ChatPresenter
 
 
-def handle_state_event(handler: Any, event: IpcEvent) -> bool:
+def handle_state_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool:
     """
     Handles alias, contact, and focus state mutation events.
 
     Args:
-        handler (Any): The owning EventHandler instance.
+        handler (EventHandlerProtocol): The owning EventHandler instance.
         event (IpcEvent): The incoming IPC event.
 
     Returns:

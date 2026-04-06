@@ -14,6 +14,11 @@ from metor.ui.chat.presenter import ChatPresenter
 class Display:
     """Manages the terminal output buffer and coordinates thread-safe rendering."""
 
+    _CURSOR_HIDE: str = '\033[?25l'
+    _CURSOR_SHOW: str = '\033[?25h'
+    _CLEAR_INPUT_AREA: str = '\r\033[J'
+    _CLEAR_SCREEN: str = '\033[2J\033[H'
+
     def __init__(
         self,
         initial_prompt: str,
@@ -89,6 +94,55 @@ class Display:
             count += max(1, (offset + len(line) + cols - 1) // cols)
         return count
 
+    def _append_input_area_clear(
+        self,
+        buffer: List[str],
+        last_visual_lines: int,
+        hide_cursor: bool = False,
+    ) -> None:
+        """
+        Appends the VT100 sequence required to clear the current input block.
+
+        Args:
+            buffer (List[str]): Aggregated terminal frame buffer.
+            last_visual_lines (int): The number of lines the input previously occupied.
+            hide_cursor (bool): Whether to hide the cursor before clearing.
+
+        Returns:
+            None
+        """
+        if hide_cursor:
+            buffer.append(self._CURSOR_HIDE)
+        if last_visual_lines > 1:
+            buffer.append(f'\033[{last_visual_lines - 1}A')
+        buffer.append(self._CLEAR_INPUT_AREA)
+
+    def restore_cursor(self) -> None:
+        """
+        Restores terminal cursor visibility immediately.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        sys.stdout.write(self._CURSOR_SHOW)
+        sys.stdout.flush()
+
+    def render_prompt(self, prompt: str) -> None:
+        """
+        Writes the prompt and guarantees that the cursor is visible.
+
+        Args:
+            prompt (str): The prompt string to render.
+
+        Returns:
+            None
+        """
+        sys.stdout.write(prompt + self._CURSOR_SHOW)
+        sys.stdout.flush()
+
     def clear_input_area(self, last_visual_lines: int) -> None:
         """
         Wipes the bottom input area dynamically to prepare for a redraw.
@@ -99,9 +153,9 @@ class Display:
         Returns:
             None
         """
-        if last_visual_lines > 1:
-            sys.stdout.write(f'\033[{last_visual_lines - 1}A')
-        sys.stdout.write('\r\033[J')
+        buffer: List[str] = []
+        self._append_input_area_clear(buffer, last_visual_lines)
+        sys.stdout.write(''.join(buffer))
 
     def redraw_input_area(
         self,
@@ -111,9 +165,13 @@ class Display:
         cursor_index: int,
         input_lines: int,
         cols: int,
+        last_visual_lines: int = 1,
+        clear_first: bool = False,
     ) -> None:
         """
         Prints the prompt and restores the cursor to the exact typed position.
+        Uses string buffering for atomic rendering to prevent visual strobe effects.
+        Always guarantees cursor visibility restoration.
 
         Args:
             prompt (str): The dynamic prompt string.
@@ -122,14 +180,25 @@ class Display:
             cursor_index (int): The current cursor position in the array.
             input_lines (int): Total visual lines the input occupies.
             cols (int): Terminal width.
+            last_visual_lines (int): The number of lines the input previously occupied.
+            clear_first (bool): Perform an atomic clear operation before redrawing.
 
         Returns:
             None
         """
-        sys.stdout.write(prompt)
+        buffer: List[str] = []
+
+        if clear_first:
+            self._append_input_area_clear(
+                buffer,
+                last_visual_lines,
+                hide_cursor=True,
+            )
+
+        buffer.append(prompt)
         padding: str = ' ' * len(prompt)
         display_input: str = current_input.replace('\n', '\n' + padding)
-        sys.stdout.write(display_input)
+        buffer.append(display_input)
 
         text_to_cursor: str = ''.join(line_chars[:cursor_index])
         cursor_lines: int = 0
@@ -143,13 +212,17 @@ class Display:
         col_pos: int = (len(prompt) + len(lines[-1])) % cols
 
         if lines_up > 0:
-            sys.stdout.write(f'\033[{lines_up}A')
-        sys.stdout.write(f'\r\033[{col_pos}C' if col_pos > 0 else '\r')
+            buffer.append(f'\033[{lines_up}A')
+        buffer.append(f'\r\033[{col_pos}C' if col_pos > 0 else '\r')
+
+        buffer.append(self._CURSOR_SHOW)
+
+        sys.stdout.write(''.join(buffer))
         sys.stdout.flush()
 
     def clear_screen(self) -> None:
         """
-        Wipes the terminal display completely.
+        Wipes the terminal display completely and ensures cursor visibility.
 
         Args:
             None
@@ -157,6 +230,6 @@ class Display:
         Returns:
             None
         """
-        sys.stdout.write('\033[2J\033[H')
+        sys.stdout.write(f'{self._CURSOR_SHOW}{self._CLEAR_SCREEN}')
         sys.stdout.flush()
         self.all_msgs.clear()

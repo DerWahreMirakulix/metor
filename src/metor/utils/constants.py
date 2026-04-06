@@ -47,6 +47,19 @@ class Constants:
     LIVE_MSG_DEDUPE_CACHE_SIZE: int = (
         256  # Per-peer cache size for recent live message IDs
     )
+    SESSION_AUTH_KEY_BYTES: int = (
+        32  # Argon2-derived key length for IPC session-auth proofs
+    )
+    SESSION_AUTH_CHALLENGE_BYTES: int = (
+        32  # Random challenge length for one IPC session-auth proof round
+    )
+    TOR_HANDSHAKE_CHALLENGE_BYTES: int = (
+        32  # Random challenge length for one Tor peer-auth proof round
+    )
+    TOR_V3_ONION_ADDRESS_LENGTH: int = 56  # Base32 chars in one v3 onion address
+    TOR_V3_PUBLIC_KEY_BYTES: int = 32  # Ed25519 public key bytes embedded in v3 onions
+    TOR_V3_CHECKSUM_BYTES: int = 2  # Checksum bytes embedded in v3 onions
+    TOR_V3_VERSION_BYTE: int = 3  # Tor v3 onion address version marker
     INPUT_SELECT_TIMEOUT_SEC: float = 0.0  # Non-blocking POSIX stdin poll
 
     # Thread Constraints & Timing
@@ -60,6 +73,9 @@ class Constants:
     )
     INPUT_SLEEP_SEC: float = 0.02  # UI non-blocking input thread sleep
     TCP_CLOSE_LINGER_SEC: float = 0.2  # Socket linger before shutdown
+    IPC_AUTH_FAILURE_LIMIT: int = (
+        3  # Maximum invalid local auth attempts per IPC session before disconnect
+    )
     MUTUAL_CONNECT_RACE_WINDOW_SEC: float = 5.0  # Short grace window to recognize the winning inbound side of a simultaneous connect race
     PENDING_EXPIRY_FEEDBACK_WINDOW_SEC: float = 30.0  # How long a recently expired pending live request should produce a dedicated accept-expired UI hint
 
@@ -91,3 +107,4 @@ class Constants:
     # Application Metadata
     # Uses METOR_DATA_DIR_PARENT from environment if set, otherwise falls back to the user's home directory natively via pathlib
     DATA: Path = Path(os.getenv('METOR_DATA_DIR_PARENT', Path.home())) / DATA_DIR
+    TOR_PATH: str = os.getenv('METOR_TOR_PATH', '').strip()

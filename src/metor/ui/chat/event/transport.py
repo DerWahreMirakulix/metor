@@ -1,6 +1,6 @@
 """Helpers for chat transport and connection lifecycle event handling."""
 
-from typing import Any, Dict
+from typing import Dict
 
 from metor.core.api import (
     AutoReconnectScheduledEvent,
@@ -22,13 +22,15 @@ from metor.core.api import (
     PeerNotFoundEvent,
 )
 
+from metor.ui.chat.event.protocols import EventHandlerProtocol
 
-def handle_transport_event(handler: Any, event: IpcEvent) -> bool:
+
+def handle_transport_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool:
     """
     Handles connection lifecycle and transport status events.
 
     Args:
-        handler (Any): The owning EventHandler instance.
+        handler (EventHandlerProtocol): The owning EventHandler instance.
         event (IpcEvent): The incoming IPC event.
 
     Returns:

@@ -66,7 +66,7 @@ cd metor
 
 ### 2. Install Tor
 
-- **Windows (Manual Security Install):** Download the [Tor Expert Bundle](https://www.torproject.org/download/tor/). Extract it and copy the `tor.exe` directly into your user directory under `C:\Users\YourName\.metor\tor.exe`.
+- **Windows (Manual Security Install):** Download the [Tor Expert Bundle](https://www.torproject.org/download/tor/). Extract it and either set `METOR_TOR_PATH=C:\path\to\tor.exe` in your environment or a local `.env` file, or copy `tor.exe` into `C:\Users\YourName\.metor\tor.exe`. If `METOR_TOR_PATH` is unset, Metor first tries `tor.exe` from `PATH` and then falls back to `.metor\tor.exe`.
 - **Linux (Debian/Ubuntu):** `sudo apt update && sudo apt install tor`
 - **Linux (Fedora):** `sudo dnf install tor`
 

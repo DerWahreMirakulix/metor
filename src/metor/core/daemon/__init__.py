@@ -1,10 +1,12 @@
-"""
-Package initializer for the Metor background daemon.
-Exports the main Daemon orchestrator and the ephemeral HeadlessDaemon for CLI data processing.
-"""
+"""Facade exports for daemon-shared bootstrap helpers."""
 
-from metor.core.daemon.engine import Daemon
-from metor.core.daemon.headless import HeadlessDaemon
-from metor.core.daemon.models import DaemonStatus
+from metor.core.daemon.bootstrap import (
+    InvalidMasterPasswordError,
+    verify_master_password,
+)
 
-__all__ = ['Daemon', 'HeadlessDaemon', 'DaemonStatus']
+
+__all__ = [
+    'InvalidMasterPasswordError',
+    'verify_master_password',
+]

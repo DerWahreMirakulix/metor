@@ -4,6 +4,7 @@ Enforces strict socket timeouts, configurable network resilience, and Tor circui
 """
 
 import os
+import shutil
 import socket
 import subprocess
 import threading
@@ -251,6 +252,32 @@ class TorManager:
             return None
         return Constants.UNIX_TOR_TIMEOUT
 
+    @staticmethod
+    def _resolve_tor_command() -> str:
+        """
+        Resolves the Tor executable command for the current host environment.
+
+        Args:
+            None
+
+        Returns:
+            str: The Tor executable path or command name.
+        """
+        tor_cmd_override: str = Constants.TOR_PATH
+        if tor_cmd_override:
+            return tor_cmd_override
+
+        if os.name == 'nt':
+            path_tor_cmd: Optional[str] = shutil.which(Constants.TOR_WIN)
+            if path_tor_cmd:
+                return path_tor_cmd
+            return str(Constants.DATA / Constants.TOR_WIN)
+
+        path_tor_cmd = shutil.which(Constants.TOR_UNIX)
+        if path_tor_cmd:
+            return path_tor_cmd
+        return Constants.TOR_UNIX
+
     def _launch_process(self) -> Tuple[bool, Optional[EventType], Dict[str, JsonValue]]:
         """
         Launches the Tor process using the current runtime ports and hidden service state.
@@ -275,11 +302,7 @@ class TorManager:
             'HiddenServicePort': f'80 {Constants.LOCALHOST}:{self.incoming_port}',
         }
 
-        tor_cmd: str = (
-            str(Constants.DATA / Constants.TOR_WIN)
-            if os.name == 'nt'
-            else Constants.TOR_UNIX
-        )
+        tor_cmd: str = self._resolve_tor_command()
         tor_timeout: Optional[int] = self._get_launch_timeout()
 
         def print_tor_output(line: str) -> None:

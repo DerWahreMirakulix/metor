@@ -379,7 +379,7 @@ class Renderer:
 
     def print_prompt(self) -> None:
         """
-        Forces the terminal to display the prompt.
+        Forces the terminal to display the prompt and restores cursor visibility.
 
         Args:
             None
@@ -387,8 +387,21 @@ class Renderer:
         Returns:
             None
         """
-        sys.stdout.write(self._prompt)
-        sys.stdout.flush()
+        with self._display.print_lock:
+            self._display.render_prompt(self._prompt)
+
+    def restore_cursor(self) -> None:
+        """
+        Restores cursor visibility without mutating the active screen state.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with self._display.print_lock:
+            self._display.restore_cursor()
 
     def print_empty_line(self) -> None:
         """
@@ -433,9 +446,6 @@ class Renderer:
             None
         """
         with self._display.print_lock:
-            cols: int = shutil.get_terminal_size().columns
-            if cols < 1:
-                cols = Constants.DEFAULT_COLS
             self._display.clear_input_area(self._last_visual_lines)
             sys.stdout.flush()
 
@@ -598,7 +608,8 @@ class Renderer:
 
     def read_line(self, stop_event: Optional[threading.Event] = None) -> Optional[str]:
         """
-        Reads a full line of text securely, handling blocking I/O and redraws.
+        Reads a full line of text securely, handling blocking I/O and atomic redraws.
+        Reduces strobe effects during input by clearing and restoring the cursor in a single write.
 
         Args:
             stop_event (Optional[threading.Event]): Optional signal to abort the read loop.
@@ -627,14 +638,14 @@ class Renderer:
                     cols = Constants.DEFAULT_COLS
 
                 result: Optional[str] = self._input.process_key(ch)
-                self._display.clear_input_area(self._last_visual_lines)
 
                 if result is not None:
+                    self._display.clear_input_area(self._last_visual_lines)
                     self._last_visual_lines = 1
                     sys.stdout.flush()
                     return result
 
-                self._last_visual_lines = self._display.get_input_visual_lines(
+                new_visual_lines: int = self._display.get_input_visual_lines(
                     self._input.current_input, self._prompt, cols
                 )
                 self._display.redraw_input_area(
@@ -642,6 +653,9 @@ class Renderer:
                     self._input.current_input,
                     self._input.line_chars,
                     self._input.cursor_index,
-                    self._last_visual_lines,
+                    new_visual_lines,
                     cols,
+                    last_visual_lines=self._last_visual_lines,
+                    clear_first=True,
                 )
+                self._last_visual_lines = new_visual_lines

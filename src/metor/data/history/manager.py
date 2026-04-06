@@ -13,6 +13,7 @@ from metor.data.history.codes import (
     HistoryEvent,
     HistoryFamily,
     HistoryReasonCode,
+    HistoryTrigger,
 )
 from metor.data.history.models import (
     HistoryClearOperationType,
@@ -81,8 +82,8 @@ class HistoryManager:
 
         key: str = peer_onion or '__global__'
         if event_code in {
-            HistoryEvent.LIVE_REQUESTED,
-            HistoryEvent.LIVE_RETUNNEL_INITIATED,
+            HistoryEvent.REQUESTED,
+            HistoryEvent.RETUNNEL_INITIATED,
         }:
             new_flow_id: str = self._create_flow_id()
             self._active_live_flow_ids[key] = new_flow_id
@@ -94,10 +95,10 @@ class HistoryManager:
             self._active_live_flow_ids[key] = flow_id
 
         if event_code in {
-            HistoryEvent.LIVE_REJECTED,
-            HistoryEvent.LIVE_DISCONNECTED,
-            HistoryEvent.LIVE_CONNECTION_LOST,
-            HistoryEvent.LIVE_RETUNNEL_SUCCESS,
+            HistoryEvent.REJECTED,
+            HistoryEvent.DISCONNECTED,
+            HistoryEvent.CONNECTION_LOST,
+            HistoryEvent.RETUNNEL_SUCCEEDED,
         }:
             self._active_live_flow_ids.pop(key, None)
 
@@ -132,7 +133,7 @@ class HistoryManager:
         *,
         actor: HistoryActor,
         detail_text: str = '',
-        trigger: Optional[str] = None,
+        trigger: Optional[str | HistoryTrigger] = None,
         detail_code: Optional[HistoryReasonCode] = None,
         flow_id: Optional[str] = None,
     ) -> None:
@@ -161,6 +162,9 @@ class HistoryManager:
         normalized_onion: Optional[str] = (
             clean_onion(peer_onion) if peer_onion else None
         )
+        trigger_value: Optional[str] = (
+            trigger.value if isinstance(trigger, HistoryTrigger) else trigger
+        )
         timestamp: str = datetime.now(timezone.utc).isoformat()
         resolved_flow_id: str = self._resolve_flow_id(
             event_code,
@@ -181,7 +185,7 @@ class HistoryManager:
                 event_code.value,
                 normalized_onion,
                 actor.value,
-                trigger,
+                trigger_value,
                 detail_code.value if detail_code is not None else None,
                 detail_text,
                 resolved_flow_id,
@@ -201,12 +205,14 @@ class HistoryManager:
         """
         return HistoryLedgerEntry(
             timestamp=str(row[0]),
-            family=str(row[1]),
-            event_code=str(row[2]),
+            family=HistoryFamily(str(row[1])),
+            event_code=HistoryEvent(str(row[2])),
             peer_onion=str(row[3]) if row[3] is not None else None,
-            actor=str(row[4]),
-            trigger=str(row[5]) if row[5] is not None else None,
-            detail_code=str(row[6]) if row[6] is not None else None,
+            actor=HistoryActor(str(row[4])),
+            trigger=HistoryTrigger(str(row[5])) if row[5] is not None else None,
+            detail_code=(
+                HistoryReasonCode(str(row[6])) if row[6] is not None else None
+            ),
             detail_text=str(row[7] or ''),
             flow_id=str(row[8]),
         )

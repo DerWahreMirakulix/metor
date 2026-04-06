@@ -265,7 +265,7 @@ Timeout for outbound Tor socket operations and readiness checks.
 
 #### `daemon.stream_idle_timeout`
 
-Idle timeout for active live and drop sockets.
+Socket read timeout for active live sessions and idle timeout for drop sockets. Active live chats stay connected across pure read timeouts.
 
 | Property         | Value                 |
 | ---------------- | --------------------- |

@@ -1,7 +1,21 @@
 """Shared IPC entry DTOs for nested event payloads."""
 
 from dataclasses import dataclass
-from typing import Optional
+from enum import Enum
+from typing import Optional, TypeVar
+
+from metor.core.api.codes import MessageDirectionCode, MessageStatusCode
+
+
+EnumT = TypeVar('EnumT', bound=Enum)
+
+
+def _coerce_enum(enum_type: type[EnumT], value: object) -> EnumT:
+    """Coerces one string-backed DTO field to its target enum type."""
+
+    if isinstance(value, enum_type):
+        return value
+    return enum_type(value)
 
 
 @dataclass
@@ -16,10 +30,14 @@ class ContactEntry:
 class MessageEntry:
     """Represents a stored chat message."""
 
-    direction: str
-    status: str
+    direction: MessageDirectionCode
+    status: MessageStatusCode
     payload: str
     timestamp: str
+
+    def __post_init__(self) -> None:
+        self.direction = _coerce_enum(MessageDirectionCode, self.direction)
+        self.status = _coerce_enum(MessageStatusCode, self.status)
 
 
 @dataclass

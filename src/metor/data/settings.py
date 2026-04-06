@@ -205,7 +205,11 @@ class Settings:
             key=SettingKey.STREAM_IDLE_TIMEOUT,
             default=60.0,
             category='Core Daemon',
-            description='Idle timeout for active live and drop sockets.',
+            description=(
+                'Socket read timeout for active live sessions and idle timeout '
+                'for drop sockets. Active live chats stay connected across pure '
+                'read timeouts.'
+            ),
             constraints='Float >= 0.1 seconds.',
             min_value=0.1,
         ),

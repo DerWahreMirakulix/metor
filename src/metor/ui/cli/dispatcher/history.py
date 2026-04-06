@@ -1,14 +1,17 @@
 """History-specific CLI dispatch mixin."""
 
-from typing import Any, List, Optional, Protocol
+from typing import List, Optional, Protocol
+
+from metor.ui import Help
+from metor.ui.cli.proxy import CliProxy
 
 
 class _HistoryDispatcherProtocol(Protocol):
     """Structural type for the dispatcher attributes used by the history mixin."""
 
     _extra: List[str]
-    _help: Any
-    _proxy: Any
+    _help: type[Help]
+    _proxy: CliProxy
 
     def _parse_optional_limit(self, limit_raw: Optional[str]) -> Optional[int]: ...
 

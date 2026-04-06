@@ -229,9 +229,11 @@ class ProfileManager:
         if pid is not None:
             with self.paths.get_daemon_pid_file().open('w') as f:
                 f.write(str(pid))
+            self.paths.get_daemon_pid_file().chmod(0o600)
 
         with self.paths.get_daemon_port_file().open('w') as f:
             f.write(str(port))
+        self.paths.get_daemon_port_file().chmod(0o600)
 
     def get_daemon_pid(self) -> Optional[int]:
         """

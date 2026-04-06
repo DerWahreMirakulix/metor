@@ -47,7 +47,8 @@ class Paths:
         Returns:
             None
         """
-        self.base_dir.mkdir(parents=True, exist_ok=True)
+        self.base_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.base_dir.chmod(0o700)
 
         hs_dir: Path = self.base_dir / Constants.HIDDEN_SERVICE_DIR
         hs_dir.mkdir(mode=0o700, exist_ok=True)

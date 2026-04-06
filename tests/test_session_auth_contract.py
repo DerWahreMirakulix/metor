@@ -1,0 +1,127 @@
+"""Regression tests for local daemon session-auth challenge and proof flows."""
+
+# ruff: noqa: E402
+
+import socket
+import sys
+import unittest
+from pathlib import Path
+
+import nacl.pwhash
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
+
+from metor.core.api import (
+    AuthenticateSessionCommand,
+    AuthRequiredEvent,
+    InvalidPasswordEvent,
+    IpcCommand,
+    IpcEvent,
+)
+from metor.core.daemon.managed.local_auth import (
+    LocalAuthTracker,
+    create_session_auth_context,
+)
+from metor.utils import Constants, build_session_auth_proof
+
+
+class SessionAuthContractTests(unittest.TestCase):
+    def test_authenticate_session_command_uses_proof_field(self) -> None:
+        cmd = IpcCommand.from_dict(
+            {
+                'command_type': 'authenticate_session',
+                'proof': 'abc123',
+            }
+        )
+
+        self.assertIsInstance(cmd, AuthenticateSessionCommand)
+        self.assertEqual(cmd.proof, 'abc123')
+
+    def test_runtime_auth_events_preserve_optional_challenge_payload(self) -> None:
+        challenge = 'ab' * Constants.SESSION_AUTH_CHALLENGE_BYTES
+        salt = 'cd' * nacl.pwhash.argon2i.SALTBYTES
+
+        auth_event = IpcEvent.from_dict(
+            {
+                'event_type': 'auth_required',
+                'challenge': challenge,
+                'salt': salt,
+            }
+        )
+        invalid_event = IpcEvent.from_dict(
+            {
+                'event_type': 'invalid_password',
+                'challenge': challenge,
+                'salt': salt,
+            }
+        )
+
+        self.assertIsInstance(auth_event, AuthRequiredEvent)
+        self.assertEqual(auth_event.challenge, challenge)
+        self.assertEqual(auth_event.salt, salt)
+        self.assertIsInstance(invalid_event, InvalidPasswordEvent)
+        self.assertEqual(invalid_event.challenge, challenge)
+        self.assertEqual(invalid_event.salt, salt)
+
+    def test_local_auth_tracker_accepts_valid_session_proof(self) -> None:
+        tracker = LocalAuthTracker()
+        context = create_session_auth_context(
+            'correct horse battery staple',
+            b'\x11' * nacl.pwhash.argon2i.SALTBYTES,
+        )
+        tracker.install_context(context)
+
+        left, right = socket.socketpair()
+        try:
+            prompt = tracker.issue_session_challenge(right)
+
+            self.assertIsNotNone(prompt)
+
+            assert prompt is not None
+            proof = build_session_auth_proof(
+                'correct horse battery staple',
+                prompt.challenge,
+                prompt.salt,
+            )
+            result = tracker.verify_session_proof(right, proof)
+
+            self.assertTrue(result.authenticated)
+            self.assertFalse(result.should_disconnect)
+            self.assertIsNone(result.retry_prompt)
+        finally:
+            left.close()
+            right.close()
+
+    def test_local_auth_tracker_rotates_challenge_and_disconnects_after_limit(
+        self,
+    ) -> None:
+        tracker = LocalAuthTracker()
+        context = create_session_auth_context(
+            'correct horse battery staple',
+            b'\x22' * nacl.pwhash.argon2i.SALTBYTES,
+        )
+        tracker.install_context(context)
+
+        left, right = socket.socketpair()
+        try:
+            prompt = tracker.issue_session_challenge(right)
+
+            self.assertIsNotNone(prompt)
+
+            for attempt in range(Constants.IPC_AUTH_FAILURE_LIMIT):
+                result = tracker.verify_session_proof(right, 'deadbeef')
+
+                self.assertFalse(result.authenticated)
+                if attempt + 1 < Constants.IPC_AUTH_FAILURE_LIMIT:
+                    self.assertFalse(result.should_disconnect)
+                    self.assertIsNotNone(result.retry_prompt)
+                else:
+                    self.assertTrue(result.should_disconnect)
+                    self.assertIsNone(result.retry_prompt)
+        finally:
+            left.close()
+            right.close()
+
+
+if __name__ == '__main__':
+    unittest.main()

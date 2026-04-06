@@ -50,19 +50,20 @@ class DatabaseCommandHistoryMixin(DatabaseCommandHandlerSupportMixin):
                 return create_event(EventType.INVALID_TARGET, {'target': cmd.target})
             alias, onion = resolved
 
-        entries = (
-            self._hm.get_raw_history(onion, cmd.limit)
-            if isinstance(cmd, GetRawHistoryCommand)
-            else self._hm.get_history(onion, cmd.limit)
-        )
-        history_entries = [self._build_history_entry(entry) for entry in entries]
-        history_event_cls = (
-            HistoryRawDataEvent
-            if isinstance(cmd, GetRawHistoryCommand)
-            else HistoryDataEvent
-        )
-        return history_event_cls(
-            entries=history_entries,
+        if isinstance(cmd, GetRawHistoryCommand):
+            raw_entries = self._hm.get_raw_history(onion, cmd.limit)
+            return HistoryRawDataEvent(
+                entries=[self._build_raw_history_entry(entry) for entry in raw_entries],
+                profile=self._pm.profile_name,
+                alias=alias,
+                peer_onion=onion,
+            )
+
+        summary_entries = self._hm.get_history(onion, cmd.limit)
+        return HistoryDataEvent(
+            entries=[
+                self._build_summary_history_entry(entry) for entry in summary_entries
+            ],
             profile=self._pm.profile_name,
             alias=alias,
             peer_onion=onion,

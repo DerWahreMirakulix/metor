@@ -92,39 +92,24 @@ class CliDispatcher(MessagesDispatchMixin, HistoryDispatchMixin):
             return f"Profile '{params['profile']}' already exists."
         if result.operation_type is ProfileOperationType.PROFILE_CREATED:
             if params.get('security_mode') == ProfileSecurityMode.PLAINTEXT.value:
-                return (
-                    f"Profile '{params['profile']}' successfully created without "
-                    'password protection.'
-                )
+                return f"Profile '{params['profile']}' successfully created without password protection."
             return f"Profile '{params['profile']}' successfully created."
         if result.operation_type is ProfileOperationType.PROFILE_CREATED_WITH_PORT:
             storage_suffix: str = ''
             if params.get('security_mode') == ProfileSecurityMode.PLAINTEXT.value:
                 storage_suffix = ' without password protection'
-            return (
-                f"{params['remote_tag']}profile '{params['profile']}' successfully "
-                f'created{storage_suffix} (Port {params["port"]}).'
-            )
+            return f"{params['remote_tag']}profile '{params['profile']}' successfully created{storage_suffix} (Port {params['port']})."
         if (
             result.operation_type
             is ProfileOperationType.SECURITY_MIGRATION_REMOTE_NOT_ALLOWED
         ):
             return 'Remote profiles cannot migrate local storage security mode.'
         if result.operation_type is ProfileOperationType.CANNOT_MIGRATE_RUNNING:
-            return (
-                f"Cannot migrate security mode for '{params['profile']}' while its "
-                'daemon is running.'
-            )
+            return f"Cannot migrate security mode for '{params['profile']}' while its daemon is running."
         if result.operation_type is ProfileOperationType.SECURITY_MODE_UNCHANGED:
-            return (
-                f"Profile '{params['profile']}' is already using "
-                f'{params["security_mode"]} storage.'
-            )
+            return f"Profile '{params['profile']}' is already using {params['security_mode']} storage."
         if result.operation_type is ProfileOperationType.SECURITY_MODE_MIGRATED:
-            return (
-                f"Profile '{params['profile']}' successfully migrated to "
-                f'{params["security_mode"]} storage.'
-            )
+            return f"Profile '{params['profile']}' successfully migrated to {params['security_mode']} storage."
         if result.operation_type is ProfileOperationType.SECURITY_MIGRATION_FAILED:
             reason: str = str(params.get('reason') or 'Security migration failed.')
             return reason
@@ -141,10 +126,7 @@ class CliDispatcher(MessagesDispatchMixin, HistoryDispatchMixin):
         if result.operation_type is ProfileOperationType.CANNOT_RENAME_RUNNING:
             return f"Cannot rename profile '{params['old_profile']}' while its daemon is running!"
         if result.operation_type is ProfileOperationType.PROFILE_RENAMED:
-            return (
-                f"Profile '{params['old_profile']}' successfully renamed to "
-                f"'{params['new_profile']}'."
-            )
+            return f"Profile '{params['old_profile']}' successfully renamed to '{params['new_profile']}'."
         if result.operation_type is ProfileOperationType.CANNOT_CLEAR_RUNNING_DB:
             return f"Cannot clear database for '{params['profile']}' while daemon is running."
         if result.operation_type is ProfileOperationType.DATABASE_NOT_FOUND:

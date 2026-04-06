@@ -35,6 +35,26 @@ class KeyManager:
         self._password: Optional[str] = password
         self._salt_file: Path = self._hs_dir / 'crypto.salt'
 
+    def get_or_create_password_salt(self) -> bytes:
+        """
+        Loads the persisted password salt or creates it on first encrypted use.
+
+        Args:
+            None
+
+        Returns:
+            bytes: The persisted salt bytes.
+        """
+        if not self._salt_file.exists():
+            salt: bytes = nacl.utils.random(nacl.pwhash.argon2i.SALTBYTES)
+            with self._salt_file.open('wb') as f:
+                f.write(salt)
+            self._salt_file.chmod(0o600)
+            return salt
+
+        with self._salt_file.open('rb') as f:
+            return f.read()
+
     def _get_encryption_box(self) -> Optional[nacl.secret.SecretBox]:
         """
         Derives an encryption key from the master password and returns a SecretBox.
@@ -48,14 +68,7 @@ class KeyManager:
         if not self._password:
             return None
 
-        if not self._salt_file.exists():
-            salt: bytes = nacl.utils.random(nacl.pwhash.argon2i.SALTBYTES)
-            with self._salt_file.open('wb') as f:
-                f.write(salt)
-            self._salt_file.chmod(0o600)
-        else:
-            with self._salt_file.open('rb') as f:
-                salt = f.read()
+        salt: bytes = self.get_or_create_password_salt()
 
         key: bytes = nacl.pwhash.argon2i.kdf(
             nacl.secret.SecretBox.KEY_SIZE,
