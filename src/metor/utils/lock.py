@@ -5,7 +5,7 @@ Ensures that files are not concurrently modified by different processes.
 
 import os
 import time
-import psutil  # type: ignore
+import psutil
 from typing import Optional, Type
 from types import TracebackType
 from pathlib import Path

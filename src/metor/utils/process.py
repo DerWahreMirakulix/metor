@@ -6,7 +6,7 @@ Isolates external dependencies like psutil from the core domain logic.
 import os
 from typing import Callable, Optional, Set
 
-import psutil  # type: ignore
+import psutil
 from pathlib import Path
 
 # Local Package Imports

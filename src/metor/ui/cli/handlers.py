@@ -96,10 +96,12 @@ class CommandHandlers:
 
         # Inversion of Control: Define UI printing logic here and inject it into Data and Core layers
         def sql_log_cb(line: str) -> None:
+            """Writes one SQLCipher diagnostic line to stdout with its log tag."""
             sys.stdout.write(f'\r\033[K{Theme.CYAN}[SQL-LOG]{Theme.RESET} {line}\n')
             sys.stdout.flush()
 
         def tor_log_cb(line: str) -> None:
+            """Writes one Tor process diagnostic line to stdout with its log tag."""
             sys.stdout.write(f'\r\033[K{Theme.CYAN}[TOR-LOG]{Theme.RESET} {line}\n')
             sys.stdout.flush()
 
@@ -107,6 +109,7 @@ class CommandHandlers:
             code: Union[EventType, DaemonStatus],
             params: Optional[Dict[str, JsonValue]] = None,
         ) -> None:
+            """Translates and prints one daemon startup status event to stdout."""
             if params is None:
                 params = {}
             if isinstance(code, EventType):

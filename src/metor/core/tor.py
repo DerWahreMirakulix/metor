@@ -9,9 +9,9 @@ import socket
 import subprocess
 import threading
 import time
-import socks  # type: ignore
-import stem.process  # type: ignore
-import stem.control  # type: ignore
+import socks
+import stem.process
+import stem.control
 import nacl.exceptions
 from pathlib import Path
 from typing import Tuple, Optional, Dict, Callable

@@ -29,6 +29,7 @@ def register_command(command_type: CommandType) -> Callable[[Type[C]], Type[C]]:
     """
 
     def wrapper(cls: Type[C]) -> Type[C]:
+        """Stores the decorated class in the command registry and returns it unchanged."""
         CMD_MAP[command_type] = cls
         return cls
 
@@ -47,6 +48,7 @@ def register_event(event_type: EventType) -> Callable[[Type[E]], Type[E]]:
     """
 
     def wrapper(cls: Type[E]) -> Type[E]:
+        """Stores the decorated class in the event registry and returns it unchanged."""
         EVENT_MAP[event_type] = cls
         return cls
 

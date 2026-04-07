@@ -18,9 +18,13 @@ class _MessagesDispatcherProtocol(Protocol):
         sub: Optional[str],
         extra: List[str],
         reserved_subcommands: tuple[str, ...],
-    ) -> List[str]: ...
+    ) -> List[str]:
+        """Collects positional command arguments, excluding reserved subcommand tokens."""
+        ...
 
-    def _parse_optional_limit(self, limit_raw: Optional[str]) -> Optional[int]: ...
+    def _parse_optional_limit(self, limit_raw: Optional[str]) -> Optional[int]:
+        """Parses an optional integer limit token and returns None for invalid input."""
+        ...
 
 
 class MessagesDispatchMixin:

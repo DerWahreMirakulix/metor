@@ -23,20 +23,26 @@ class EventHandlerProtocol(Protocol):
         self,
         alias: Optional[str],
         onion: Optional[str],
-    ) -> None: ...
+    ) -> None:
+        """Caches peer alias/onion in the session so later events can resolve them."""
+        ...
 
     def _cancel_buffered_notification(
         self,
         alias: Optional[str] = None,
         onion: Optional[str] = None,
-    ) -> None: ...
+    ) -> None:
+        """Cancels any pending buffered unread notification for the given peer."""
+        ...
 
     def _queue_buffered_notification(
         self,
         alias: str,
         onion: Optional[str],
         count: int,
-    ) -> None: ...
+    ) -> None:
+        """Enqueues a delayed unread notification for a backgrounded peer."""
+        ...
 
     def _print_translated(
         self,
@@ -44,18 +50,24 @@ class EventHandlerProtocol(Protocol):
         params: Optional[Dict[str, JsonValue]] = None,
         alias: Optional[str] = None,
         onion: Optional[str] = None,
-    ) -> None: ...
+    ) -> None:
+        """Translates one event code to a localized string and writes it to the renderer."""
+        ...
 
     def _matches_focus_target(
         self,
         target: Optional[str],
         alias: Optional[str] = None,
         onion: Optional[str] = None,
-    ) -> bool: ...
+    ) -> bool:
+        """Returns True when the peer identified by alias/onion matches the current focus target."""
+        ...
 
     def _switch_focus(
         self,
         alias: Optional[str],
         hide_message: bool = False,
         sync_daemon: bool = False,
-    ) -> None: ...
+    ) -> None:
+        """Switches the active chat focus to the given peer alias."""
+        ...

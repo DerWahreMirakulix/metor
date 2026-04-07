@@ -9,7 +9,7 @@ import sys
 import threading
 import tempfile
 from contextlib import contextmanager
-from sqlcipher3 import dbapi2 as sqlite3  # type: ignore
+from sqlcipher3 import dbapi2 as sqlite3
 from typing import (
     List,
     Tuple,
@@ -287,7 +287,7 @@ class SqlManager:
         self._detach_runtime_mirror(cursor)
 
         if runtime_db_path.exists():
-            runtime_db_path.unlink()
+            secure_shred_file(runtime_db_path)
 
         cursor.execute(f"ATTACH DATABASE '{safe_runtime_path}' AS runtime KEY ''")
         try:

@@ -36,6 +36,7 @@ class MessageEntry:
     timestamp: str
 
     def __post_init__(self) -> None:
+        """Coerces string-backed direction and status fields to their typed enum equivalents."""
         self.direction = _coerce_enum(MessageDirectionCode, self.direction)
         self.status = _coerce_enum(MessageStatusCode, self.status)
 
