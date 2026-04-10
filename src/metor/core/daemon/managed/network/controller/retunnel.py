@@ -145,7 +145,7 @@ class ConnectionControllerRetunnelMixin(ConnectionControllerSupportMixin):
 
     def retunnel(self, target: str) -> None:
         """
-        Forces a Tor circuit rotation and reconnects to the target.
+        Forces a Tor circuit rotation and replaces the live route without preemptive teardown.
 
         Args:
             target (str): The target alias or onion address.
@@ -189,14 +189,6 @@ class ConnectionControllerRetunnelMixin(ConnectionControllerSupportMixin):
             return
 
         self._state.mark_retunnel_started(onion)
-        self.disconnect(
-            onion,
-            initiated_by_self=True,
-            suppress_events=True,
-            origin=ConnectionOrigin.RETUNNEL,
-        )
         self._mark_live_reconnect_grace(onion)
-        self._sleep_retunnel_reconnect_delay()
-
         self._state.mark_retunnel_reconnect(onion)
         self.connect_to(onion, origin=ConnectionOrigin.RETUNNEL)

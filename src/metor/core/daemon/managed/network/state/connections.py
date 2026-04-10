@@ -347,7 +347,12 @@ class StateTrackerConnectionsMixin:
         should_track: bool = True
         with self._lock:
             active_conn = self._connections.get(onion)
-            if active_conn is not None and active_conn is not conn:
+            allow_retunnel_replacement: bool = onion in self._retunnel_in_progress
+            if (
+                active_conn is not None
+                and active_conn is not conn
+                and not allow_retunnel_replacement
+            ):
                 should_track = False
             else:
                 replaced_pending = self._pending_connections.get(onion)

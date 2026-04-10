@@ -48,6 +48,12 @@ class CommandHandlers:
         if status is DaemonStatus.LOCKED_MODE:
             return 'Daemon running in LOCKED mode... Waiting for IPC unlock.'
 
+        if status is DaemonStatus.RUNTIME_ERROR:
+            message: str = str(
+                params.get('message') or 'Unexpected daemon runtime error.'
+            )
+            return f'{Theme.CYAN}[DAEMON-LOG]{Theme.RESET} {message}'
+
         onion: str = str(params.get('onion', ''))
         port: str = str(params.get('port', 'unknown'))
         return (

@@ -81,6 +81,7 @@ class ConnectionControllerSupportMixin:
         Returns:
             None
         """
+        self._state.mark_live_reconnect_grace(onion, 0.0)
         self._state.clear_retunnel_flow(onion)
         self._broadcast(
             create_event(
@@ -93,6 +94,30 @@ class ConnectionControllerSupportMixin:
                 },
             )
         )
+        params: Dict[str, JsonValue] = {'alias': alias, 'onion': onion}
+        if error:
+            params['error'] = error
+        self._broadcast(create_event(EventType.RETUNNEL_FAILED, params))
+
+    def _broadcast_retunnel_preserved_failure(
+        self,
+        alias: str,
+        onion: str,
+        error: Optional[str] = None,
+    ) -> None:
+        """
+        Clears retunnel state and emits failure while keeping the old live session.
+
+        Args:
+            alias (str): The peer alias.
+            onion (str): The peer onion identity.
+            error (Optional[str]): Optional failure detail.
+
+        Returns:
+            None
+        """
+        self._state.mark_live_reconnect_grace(onion, 0.0)
+        self._state.clear_retunnel_flow(onion)
         params: Dict[str, JsonValue] = {'alias': alias, 'onion': onion}
         if error:
             params['error'] = error
@@ -229,7 +254,7 @@ class ConnectionControllerSupportMixin:
 
     def _get_retunnel_reconnect_delay(self) -> float:
         """
-        Returns the configured reconnect delay between retunnel teardown and retry.
+        Returns the configured delay between delayed retunnel recovery attempts.
 
         Args:
             None
@@ -253,8 +278,7 @@ class ConnectionControllerSupportMixin:
 
     def _sleep_retunnel_reconnect_delay(self) -> None:
         """
-        Waits briefly before reconnecting a live retunnel to let the old session
-        teardown propagate to the remote peer.
+        Waits briefly before a delayed retunnel recovery retry.
 
         Args:
             None

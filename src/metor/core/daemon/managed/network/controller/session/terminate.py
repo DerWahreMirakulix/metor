@@ -108,6 +108,14 @@ def reject(
             _close_socket(socket_to_close)
 
         if controller._state.is_connected_or_pending(onion):
+            if controller._state.is_retunneling(
+                onion
+            ) and controller._state.is_live_active(onion):
+                controller._broadcast_retunnel_preserved_failure(
+                    alias,
+                    onion,
+                    'Outbound attempt rejected',
+                )
             return
 
         controller._hm.log_event(
@@ -242,6 +250,14 @@ def disconnect(
             _close_socket(socket_to_close)
 
         if controller._state.is_connected_or_pending(onion):
+            if controller._state.is_retunneling(
+                onion
+            ) and controller._state.is_live_active(onion):
+                controller._broadcast_retunnel_preserved_failure(
+                    alias,
+                    onion,
+                    'Outbound attempt closed before acceptance',
+                )
             return
 
         controller._hm.log_event(

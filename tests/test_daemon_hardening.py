@@ -7,18 +7,32 @@ import hashlib
 import json
 import socket
 import sys
+import threading
 import unittest
 from pathlib import Path
 from typing import Any, Optional
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 import nacl.bindings
 
-from metor.core.api import ConnectionOrigin
+from metor.core.api import (
+    ConnectionOrigin,
+    EventType,
+    SelfDestructCommand,
+    create_event,
+)
+from metor.core.daemon.managed.engine import Daemon
+from metor.core.daemon.managed.status import DaemonStatus
 from metor.core.daemon.managed.crypto import Crypto
 from metor.core.daemon.managed.ipc import IpcServer
+from metor.core.daemon.managed.network.controller.retunnel import (
+    ConnectionControllerRetunnelMixin,
+)
+from metor.core.daemon.managed.network.controller.session.connect import (
+    connect_to as connect_to_helper,
+)
 from metor.core.daemon.managed.network.handshake import HandshakeProtocol
 from metor.core.daemon.managed.network.receiver import StreamReceiver
 from metor.core.daemon.managed.network.router import MessageRouter
@@ -26,13 +40,20 @@ from metor.core.daemon.managed.network.state import (
     PendingConnectionReason,
     StateTracker,
 )
+from metor.core.daemon.managed.outbox import OutboxWorker
 from metor.core.daemon.managed.network.stream import TcpStreamReader
+from metor.data import SettingKey
+from metor.ui.cli.handlers import CommandHandlers
+from metor.ui.theme import Theme
 from metor.utils import Constants
 
 
 class _DummyConfig:
     def get_bool(self, _key: Any) -> bool:
         return True
+
+    def get_int(self, _key: Any) -> int:
+        return 1
 
     def get_float(self, _key: Any) -> float:
         return 0.2
@@ -108,6 +129,67 @@ class _DummyConn:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _AcceptedClientSocket:
+    def __init__(self) -> None:
+        self.closed: bool = False
+        self.timeouts: list[float] = []
+
+    def settimeout(self, timeout: float) -> None:
+        self.timeouts.append(timeout)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _AcceptorSocket:
+    def __init__(self, accepted_connections: list[_AcceptedClientSocket]) -> None:
+        self._accepted_connections: list[_AcceptedClientSocket] = accepted_connections
+        self.timeouts: list[float] = []
+
+    def settimeout(self, timeout: float) -> None:
+        self.timeouts.append(timeout)
+
+    def accept(self) -> tuple[_AcceptedClientSocket, tuple[str, int]]:
+        conn = self._accepted_connections.pop(0)
+        return conn, ('127.0.0.1', 0)
+
+
+class _ThreadStartHandle:
+    def __init__(self, index: int, server: IpcServer) -> None:
+        self._index: int = index
+        self._server: IpcServer = server
+
+    def start(self) -> None:
+        if self._index == 1:
+            raise RuntimeError('thread start failed')
+        self._server._stop_flag.set()
+
+
+class _ThreadStartFactory:
+    def __init__(self, server: IpcServer) -> None:
+        self._server: IpcServer = server
+        self.calls: int = 0
+
+    def __call__(self, *args: Any, **kwargs: Any) -> _ThreadStartHandle:
+        del args, kwargs
+        self.calls += 1
+        return _ThreadStartHandle(self.calls, self._server)
+
+
+class _FaultingOutboxMessageManager:
+    def __init__(self, stop_flag: threading.Event) -> None:
+        self._stop_flag: threading.Event = stop_flag
+        self.calls: int = 0
+
+    def get_pending_outbox(self) -> list[tuple[int, str, str, str, str, str]]:
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError('boom')
+
+        self._stop_flag.set()
+        return []
 
 
 class _DummyKeyManager:
@@ -186,7 +268,101 @@ class _DummyReceiverSocket:
         return None
 
 
+class _ConnectTestConfig:
+    def __init__(self, max_connections: int, max_retries: int = 0) -> None:
+        self._max_connections: int = max_connections
+        self._max_retries: int = max_retries
+
+    def get_int(self, key: Any) -> int:
+        if key is SettingKey.MAX_CONCURRENT_CONNECTIONS:
+            return self._max_connections
+        if key is SettingKey.MAX_CONNECT_RETRIES:
+            return self._max_retries
+        if key is SettingKey.LIVE_RECONNECT_GRACE_TIMEOUT:
+            return 1
+        return 0
+
+    def get_float(self, _key: Any) -> float:
+        return 0.0
+
+
+class _ConnectControllerHarness:
+    def __init__(
+        self,
+        state: StateTracker,
+        config: _ConnectTestConfig,
+        connect_side_effect: Optional[BaseException] = None,
+    ) -> None:
+        self._cm = Mock()
+        self._cm.resolve_target_for_interaction = Mock(
+            return_value=('peer', 'peer-onion')
+        )
+        self._tm = Mock()
+        self._tm.onion = 'self-onion'
+        self._tm.connect = Mock(side_effect=connect_side_effect)
+        self._state: StateTracker = state
+        self._config: _ConnectTestConfig = config
+        self._broadcast = Mock()
+        self._stop_flag = threading.Event()
+        self._crypto = Mock()
+        self._hm = Mock()
+        self._receiver = None
+
+    def accept(
+        self,
+        _target: str,
+        origin: ConnectionOrigin = ConnectionOrigin.INCOMING,
+    ) -> None:
+        del origin
+
+    def _get_local_connection_actor(self, _origin: ConnectionOrigin) -> Any:
+        return None
+
+    def _get_local_history_actor(self, _origin: ConnectionOrigin) -> Any:
+        return None
+
+    def _sleep_connect_retry_backoff(self) -> None:
+        return None
+
+    def _broadcast_retunnel_preserved_failure(
+        self,
+        alias: str,
+        onion: str,
+        error: Optional[str] = None,
+    ) -> None:
+        self._state.mark_live_reconnect_grace(onion, 0.0)
+        self._state.clear_retunnel_flow(onion)
+        params: dict[str, Any] = {'alias': alias, 'onion': onion}
+        if error is not None:
+            params['error'] = error
+        self._broadcast(create_event(EventType.RETUNNEL_FAILED, params))
+
+
+class _RetunnelControllerHarness(ConnectionControllerRetunnelMixin):
+    def __init__(self) -> None:
+        self._cm = Mock()
+        self._cm.resolve_target = Mock(return_value=('peer', 'peer-onion'))
+        self._state = Mock()
+        self._state.is_connected_or_pending.return_value = True
+        self._broadcast = Mock()
+        self._hm = Mock()
+        self._tm = Mock()
+        self._tm.rotate_circuits.return_value = (True, None, {})
+        self._config = _ConnectTestConfig(max_connections=10)
+        self._stop_flag = threading.Event()
+        self.connect_to = Mock()
+        self.disconnect = Mock()
+
+
 class DaemonHardeningTests(unittest.TestCase):
+    @staticmethod
+    def _build_daemon(start_locked: bool = False) -> Daemon:
+        with (
+            patch('metor.core.daemon.managed.engine.atexit.register'),
+            patch('metor.core.daemon.managed.engine.signal.signal'),
+        ):
+            return Daemon(_DummyProfileManager(), start_locked=start_locked)
+
     @staticmethod
     def _build_v3_onion(public_key: bytes, checksum: bytes, version: bytes) -> str:
         return (
@@ -211,6 +387,223 @@ class DaemonHardeningTests(unittest.TestCase):
 
         self.assertEqual(client.payloads, [b'{"event_type": "test"}\n'])
         self.assertFalse(client.lock_was_held)
+
+    def test_daemon_broadcast_targets_only_authenticated_clients(self) -> None:
+        daemon = self._build_daemon()
+        daemon._ipc = Mock()
+        authenticated_conn = object()
+
+        with daemon._client_state_lock:
+            daemon._authenticated_clients.add(authenticated_conn)
+
+        event = create_event(EventType.INTERNAL_ERROR)
+        with patch.object(Daemon, '_requires_session_auth', return_value=True):
+            daemon._broadcast_ipc_event(event)
+
+        daemon._ipc.broadcast_to.assert_called_once_with(event, {authenticated_conn})
+        daemon._ipc.broadcast.assert_not_called()
+
+    def test_runtime_internal_error_uses_daemon_status_callback(self) -> None:
+        daemon = self._build_daemon()
+        daemon._ipc = Mock()
+        status_cb = Mock()
+        daemon._status_cb = status_cb
+
+        daemon._on_runtime_internal_error('Outbox worker recovered from an error.')
+
+        status_cb.assert_called_once_with(
+            DaemonStatus.RUNTIME_ERROR,
+            {'message': 'Outbox worker recovered from an error.'},
+        )
+        daemon._ipc.broadcast.assert_not_called()
+        daemon._ipc.broadcast_to.assert_not_called()
+
+    def test_runtime_error_status_formats_daemon_log_prefix(self) -> None:
+        formatted = CommandHandlers._format_daemon_status(
+            DaemonStatus.RUNTIME_ERROR,
+            {'message': 'IPC acceptor recovered cleanly.'},
+        )
+
+        self.assertEqual(
+            formatted,
+            f'{Theme.CYAN}[DAEMON-LOG]{Theme.RESET} IPC acceptor recovered cleanly.',
+        )
+
+    def test_locked_daemon_rejects_self_destruct_command(self) -> None:
+        daemon = self._build_daemon(start_locked=True)
+        daemon._ipc = Mock()
+        conn = object()
+
+        with patch('metor.core.daemon.managed.engine.threading.Thread') as thread_cls:
+            daemon._process_ui_command(SelfDestructCommand(), conn)
+
+        thread_cls.assert_not_called()
+        daemon._ipc.send_to.assert_called_once()
+        sent_event = daemon._ipc.send_to.call_args.args[1]
+        self.assertIs(sent_event.event_type, EventType.DAEMON_LOCKED)
+
+    def test_unauthenticated_self_destruct_requires_session_auth(self) -> None:
+        daemon = self._build_daemon()
+        daemon._ipc = Mock()
+        daemon._local_auth.issue_session_challenge = Mock(return_value=object())
+        conn = object()
+
+        with (
+            patch.object(Daemon, '_requires_session_auth', return_value=True),
+            patch.object(
+                daemon,
+                '_build_session_auth_event',
+                return_value=create_event(EventType.AUTH_REQUIRED),
+            ) as build_auth_event,
+            patch('metor.core.daemon.managed.engine.threading.Thread') as thread_cls,
+        ):
+            daemon._process_ui_command(SelfDestructCommand(), conn)
+
+        thread_cls.assert_not_called()
+        build_auth_event.assert_called_once()
+        daemon._ipc.send_to.assert_called_once()
+        sent_event = daemon._ipc.send_to.call_args.args[1]
+        self.assertIs(sent_event.event_type, EventType.AUTH_REQUIRED)
+
+    def test_ipc_acceptor_recovers_after_handler_thread_start_failure(self) -> None:
+        errors: list[str] = []
+        server = IpcServer(
+            _DummyProfileManager(),
+            lambda _cmd, _conn: None,
+            error_callback=lambda message: errors.append(message),
+        )
+        first_conn = _AcceptedClientSocket()
+        second_conn = _AcceptedClientSocket()
+        server._server = _AcceptorSocket([first_conn, second_conn])
+        thread_factory = _ThreadStartFactory(server)
+
+        with patch(
+            'metor.core.daemon.managed.ipc.threading.Thread',
+            side_effect=thread_factory,
+        ):
+            server._acceptor()
+
+        self.assertEqual(
+            errors,
+            ['IPC acceptor failed to start a client handler thread. Continuing.'],
+        )
+        self.assertEqual(thread_factory.calls, 2)
+        self.assertTrue(first_conn.closed)
+        self.assertNotIn(first_conn, server._clients)
+        self.assertIn(second_conn, server._clients)
+
+    def test_outbox_worker_reports_unexpected_loop_error_without_history_noise(
+        self,
+    ) -> None:
+        stop_flag = threading.Event()
+        history_manager = _DummyHistoryManager()
+        message_manager = _FaultingOutboxMessageManager(stop_flag)
+        errors: list[str] = []
+        worker = OutboxWorker(
+            tm=object(),
+            mm=message_manager,
+            hm=history_manager,
+            crypto=object(),
+            broadcast_callback=lambda _event: None,
+            stop_flag=stop_flag,
+            config=_DummyConfig(),
+            error_callback=lambda message: errors.append(message),
+        )
+
+        with patch('metor.core.daemon.managed.outbox.time.sleep', return_value=None):
+            worker._loop()
+
+        self.assertEqual(
+            errors,
+            ['Outbox worker loop recovered from an unexpected runtime error.'],
+        )
+        self.assertEqual(message_manager.calls, 2)
+        self.assertEqual(history_manager.events, [])
+
+    def test_retunnel_keeps_existing_live_connection_until_replacement_starts(
+        self,
+    ) -> None:
+        controller = _RetunnelControllerHarness()
+
+        controller.retunnel('peer')
+
+        controller.disconnect.assert_not_called()
+        controller._state.mark_retunnel_started.assert_called_once_with('peer-onion')
+        controller._state.mark_retunnel_reconnect.assert_called_once_with('peer-onion')
+        controller.connect_to.assert_called_once_with(
+            'peer-onion',
+            origin=ConnectionOrigin.RETUNNEL,
+        )
+
+    def test_state_allows_pending_replacement_during_retunnel(self) -> None:
+        state = StateTracker()
+        active_conn, active_peer = socket.socketpair()
+        pending_conn, pending_peer = socket.socketpair()
+        try:
+            state.add_active_connection('peer', active_conn)
+            state.mark_retunnel_started('peer')
+
+            added = state.add_pending_connection(
+                'peer',
+                pending_conn,
+                b'',
+                reason=PendingConnectionReason.USER_ACCEPT,
+                origin=ConnectionOrigin.RETUNNEL,
+            )
+
+            self.assertTrue(added)
+            self.assertIn('peer', state.get_pending_connections_keys())
+        finally:
+            active_peer.close()
+            pending_peer.close()
+            conn = state.pop_any_connection('peer')
+            if conn is not None and conn.fileno() != -1:
+                conn.close()
+
+    def test_connect_limit_counts_unauthenticated_sockets(self) -> None:
+        state = StateTracker()
+        unauth_conn, unauth_peer = socket.socketpair()
+        state.add_unauthenticated_connection(unauth_conn)
+        controller = _ConnectControllerHarness(
+            state,
+            _ConnectTestConfig(max_connections=1),
+        )
+        try:
+            connect_to_helper(controller, 'peer', origin=ConnectionOrigin.MANUAL)
+
+            self.assertEqual(controller._broadcast.call_count, 1)
+            event = controller._broadcast.call_args.args[0]
+            self.assertIs(event.event_type, EventType.MAX_CONNECTIONS_REACHED)
+            controller._tm.connect.assert_not_called()
+        finally:
+            state.remove_unauthenticated_connection(unauth_conn)
+            unauth_conn.close()
+            unauth_peer.close()
+
+    def test_retunnel_connect_failure_preserves_current_live_connection(self) -> None:
+        state = StateTracker()
+        active_conn, active_peer = socket.socketpair()
+        state.add_active_connection('peer-onion', active_conn)
+        state.mark_retunnel_started('peer-onion')
+        controller = _ConnectControllerHarness(
+            state,
+            _ConnectTestConfig(max_connections=1, max_retries=0),
+            connect_side_effect=ConnectionError('no route'),
+        )
+        try:
+            connect_to_helper(controller, 'peer', origin=ConnectionOrigin.RETUNNEL)
+
+            self.assertIs(state.get_connection('peer-onion'), active_conn)
+            events = [
+                call.args[0].event_type for call in controller._broadcast.call_args_list
+            ]
+            self.assertEqual(events[-1], EventType.RETUNNEL_FAILED)
+            self.assertNotIn(EventType.DISCONNECTED, events)
+        finally:
+            conn = state.pop_any_connection('peer-onion')
+            if conn is not None and conn.fileno() != -1:
+                conn.close()
+            active_peer.close()
 
     def test_async_drop_skips_invalid_payload_and_processes_next_message(self) -> None:
         history_manager = _DummyHistoryManager()
@@ -367,7 +760,6 @@ class DaemonHardeningTests(unittest.TestCase):
             state=_DummyState(),
             router=_DummyRouterReceiver(),
             broadcast_callback=lambda _event: None,
-            has_clients_callback=lambda: False,
             disconnect_cb=lambda *args: disconnect_calls.append(args),
             reject_cb=lambda *args: reject_calls.append(args),
             config=_DummyReceiverConfig(),
@@ -404,7 +796,6 @@ class DaemonHardeningTests(unittest.TestCase):
             state=_DummyState(),
             router=_DummyRouterReceiver(),
             broadcast_callback=lambda _event: None,
-            has_clients_callback=lambda: False,
             disconnect_cb=lambda *args: disconnect_calls.append(args),
             reject_cb=lambda *args: reject_calls.append(args),
             config=_DummyReceiverConfig(),
@@ -447,7 +838,6 @@ class DaemonHardeningTests(unittest.TestCase):
             state=_DummyState(),
             router=_DummyRouterReceiver(),
             broadcast_callback=lambda _event: None,
-            has_clients_callback=lambda: False,
             disconnect_cb=lambda *args: disconnect_calls.append(args),
             reject_cb=lambda *args: reject_calls.append(args),
             config=_DummyReceiverConfig(),

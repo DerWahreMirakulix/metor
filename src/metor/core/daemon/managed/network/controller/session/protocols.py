@@ -63,6 +63,25 @@ class _SessionControllerBaseProtocol(Protocol):
 class ConnectControllerProtocol(_SessionControllerBaseProtocol, Protocol):
     """Surface required by the outbound connect helper."""
 
+    def _broadcast_retunnel_preserved_failure(
+        self,
+        alias: str,
+        onion: str,
+        error: Optional[str] = None,
+    ) -> None:
+        """
+        Broadcasts one retunnel failure while preserving the current live session.
+
+        Args:
+            alias (str): The peer alias.
+            onion (str): The peer onion identity.
+            error (Optional[str]): Optional failure detail.
+
+        Returns:
+            None
+        """
+        ...
+
     def accept(
         self,
         target: str,
@@ -96,6 +115,25 @@ class ConnectControllerProtocol(_SessionControllerBaseProtocol, Protocol):
 class AcceptControllerProtocol(_SessionControllerBaseProtocol, Protocol):
     """Surface required by the pending-accept helper."""
 
+    def _broadcast_retunnel_preserved_failure(
+        self,
+        alias: str,
+        onion: str,
+        error: Optional[str] = None,
+    ) -> None:
+        """
+        Broadcasts one retunnel failure while preserving the current live session.
+
+        Args:
+            alias (str): The peer alias.
+            onion (str): The peer onion identity.
+            error (Optional[str]): Optional failure detail.
+
+        Returns:
+            None
+        """
+        ...
+
     def _broadcast_retunnel_failure(
         self,
         alias: str,
@@ -118,6 +156,25 @@ class AcceptControllerProtocol(_SessionControllerBaseProtocol, Protocol):
 
 class TerminateControllerProtocol(_SessionControllerBaseProtocol, Protocol):
     """Surface required by the reject and disconnect helpers."""
+
+    def _broadcast_retunnel_preserved_failure(
+        self,
+        alias: str,
+        onion: str,
+        error: Optional[str] = None,
+    ) -> None:
+        """
+        Broadcasts one retunnel failure while preserving the current live session.
+
+        Args:
+            alias (str): The peer alias.
+            onion (str): The peer onion identity.
+            error (Optional[str]): Optional failure detail.
+
+        Returns:
+            None
+        """
+        ...
 
     def _discard_outbound_attempt_if_idle(self, onion: str) -> None:
         """

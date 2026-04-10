@@ -141,6 +141,7 @@ class Daemon:
 
         self._stop_flag: threading.Event = threading.Event()
         self._stop_lock: threading.Lock = threading.Lock()
+        self._client_state_lock: threading.Lock = threading.Lock()
         self._is_locked: bool = start_locked
         self._is_stopping: bool = False
         self._authenticated_clients: Set[socket.socket] = set()
@@ -150,7 +151,10 @@ class Daemon:
 
         self._crypto: Optional[Crypto] = None
         self._ipc: IpcServer = IpcServer(
-            pm, self._process_ui_command, self._on_ipc_disconnect
+            pm,
+            self._process_ui_command,
+            self._on_ipc_disconnect,
+            self._on_runtime_internal_error,
         )
         self._outbox: Optional[OutboxWorker] = None
         self._network: Optional[NetworkManager] = None
@@ -209,7 +213,7 @@ class Daemon:
             runtime.hm,
             runtime.mm,
             self._crypto,
-            self._ipc.broadcast,
+            self._broadcast_ipc_event,
             self._ipc.has_active_clients,
             self._has_live_consumers,
             self._stop_flag,
@@ -221,10 +225,11 @@ class Daemon:
             runtime.mm,
             runtime.hm,
             self._crypto,
-            self._ipc.broadcast,
+            self._broadcast_ipc_event,
             self._stop_flag,
             config=self._pm.config,
             state=self._transport_state,
+            error_callback=self._on_runtime_internal_error,
         )
         self._db_handler = DatabaseCommandHandler(
             self._pm,
@@ -232,7 +237,7 @@ class Daemon:
             runtime.hm,
             runtime.mm,
             self._network.get_active_onions,
-            self._ipc.broadcast,
+            self._broadcast_ipc_event,
         )
         self._sys_handler = SystemCommandHandler(self._pm, runtime.tm)
         self._network_handler = NetworkCommandHandler(
@@ -242,11 +247,52 @@ class Daemon:
             runtime.mm,
             self._network,
             self._outbox,
-            self._ipc.broadcast,
+            self._broadcast_ipc_event,
             self._send_to_client,
             self._register_live_consumer,
             config=self._pm.config,
         )
+
+    def _on_runtime_internal_error(self, message: str) -> None:
+        """
+        Surfaces one unexpected daemon runtime error to the daemon console callback.
+
+        Args:
+            message (str): The console-safe runtime error message.
+
+        Returns:
+            None
+        """
+        if self._is_stopping:
+            return
+
+        try:
+            if self._status_cb is not None:
+                self._status_cb(DaemonStatus.RUNTIME_ERROR, {'message': message})
+        except Exception:
+            pass
+
+    def _broadcast_ipc_event(self, event: IpcEvent) -> None:
+        """
+        Broadcasts one IPC event while preserving local-auth session boundaries.
+
+        Args:
+            event (IpcEvent): The event payload to emit.
+
+        Returns:
+            None
+        """
+        if self._requires_session_auth():
+            with self._client_state_lock:
+                recipients: set[socket.socket] = set(self._authenticated_clients)
+
+            if not recipients:
+                return
+
+            self._ipc.broadcast_to(event, recipients)
+            return
+
+        self._ipc.broadcast(event)
 
     def _has_live_consumers(self) -> bool:
         """
@@ -258,7 +304,8 @@ class Daemon:
         Returns:
             bool: True if at least one live consumer is connected.
         """
-        return bool(self._live_consumer_clients)
+        with self._client_state_lock:
+            return bool(self._live_consumer_clients)
 
     def _register_live_consumer(self, conn: socket.socket) -> None:
         """
@@ -270,8 +317,10 @@ class Daemon:
         Returns:
             None
         """
-        had_consumers: bool = self._has_live_consumers()
-        self._live_consumer_clients.add(conn)
+        with self._client_state_lock:
+            had_consumers: bool = bool(self._live_consumer_clients)
+            self._live_consumer_clients.add(conn)
+
         if not had_consumers and self._network is not None:
             self._network.on_live_consumer_available()
 
@@ -379,8 +428,9 @@ class Daemon:
                 return
             self._is_stopping = True
             self._stop_flag.set()
-            self._authenticated_clients.clear()
-            self._live_consumer_clients.clear()
+            with self._client_state_lock:
+                self._authenticated_clients.clear()
+                self._live_consumer_clients.clear()
             self._local_auth.clear_all()
 
         try:
@@ -464,10 +514,9 @@ class Daemon:
         Returns:
             None
         """
-        if conn in self._authenticated_clients:
-            self._authenticated_clients.remove(conn)
-
-        self._live_consumer_clients.discard(conn)
+        with self._client_state_lock:
+            self._authenticated_clients.discard(conn)
+            self._live_consumer_clients.discard(conn)
         self._local_auth.clear_connection(conn)
 
         if self._network_handler is not None:
@@ -539,7 +588,10 @@ class Daemon:
             if not isinstance(
                 cmd, (InitCommand, AuthenticateSessionCommand, UnlockCommand)
             ):
-                if conn not in self._authenticated_clients:
+                with self._client_state_lock:
+                    is_authenticated: bool = conn in self._authenticated_clients
+
+                if not is_authenticated:
                     prompt: Optional[SessionAuthPrompt] = (
                         self._local_auth.issue_session_challenge(conn)
                     )
@@ -553,28 +605,24 @@ class Daemon:
                         )
                     return
 
-        if isinstance(cmd, SelfDestructCommand):
-            self._ipc.send_to(
-                conn,
-                create_event(EventType.SELF_DESTRUCT_INITIATED),
-            )
-            threading.Thread(target=self._nuke_data, daemon=True).start()
-            return
-
         if isinstance(cmd, AuthenticateSessionCommand):
             if self._is_locked:
                 self._ipc.send_to(conn, create_event(EventType.DAEMON_LOCKED))
                 return
 
             if not self._requires_session_auth():
-                self._authenticated_clients.add(conn)
+                with self._client_state_lock:
+                    self._authenticated_clients.add(conn)
                 self._ipc.send_to(
                     conn,
                     create_event(EventType.SESSION_AUTHENTICATED),
                 )
                 return
 
-            if conn in self._authenticated_clients:
+            with self._client_state_lock:
+                already_authenticated: bool = conn in self._authenticated_clients
+
+            if already_authenticated:
                 self._ipc.send_to(
                     conn,
                     create_event(EventType.SESSION_AUTHENTICATED),
@@ -587,7 +635,8 @@ class Daemon:
             )
 
             if result.authenticated:
-                self._authenticated_clients.add(conn)
+                with self._client_state_lock:
+                    self._authenticated_clients.add(conn)
                 self._ipc.send_to(
                     conn,
                     create_event(EventType.SESSION_AUTHENTICATED),
@@ -636,7 +685,8 @@ class Daemon:
 
             self._is_locked = False
             self._local_auth.clear_connection(conn)
-            self._authenticated_clients.add(conn)
+            with self._client_state_lock:
+                self._authenticated_clients.add(conn)
             if not self._start_subsystems():
                 return
             self._ipc.send_to(conn, create_event(EventType.DAEMON_UNLOCKED))
@@ -644,6 +694,14 @@ class Daemon:
 
         if self._is_locked:
             self._ipc.send_to(conn, create_event(EventType.DAEMON_LOCKED))
+            return
+
+        if isinstance(cmd, SelfDestructCommand):
+            self._ipc.send_to(
+                conn,
+                create_event(EventType.SELF_DESTRUCT_INITIATED),
+            )
+            threading.Thread(target=self._nuke_data, daemon=True).start()
             return
 
         # --- DELEGATION TO DEDICATED HANDLERS ---

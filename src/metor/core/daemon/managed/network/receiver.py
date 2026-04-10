@@ -43,7 +43,6 @@ class StreamReceiver:
         state: StateTracker,
         router: MessageRouter,
         broadcast_callback: Callable[[IpcEvent], None],
-        has_clients_callback: Callable[[], bool],
         disconnect_cb: Callable[
             [
                 str,
@@ -70,7 +69,6 @@ class StreamReceiver:
             state (StateTracker): The thread-safe state container.
             router (MessageRouter): The application-layer message router.
             broadcast_callback (Callable): IPC broadcaster.
-            has_clients_callback (Callable): Checks for active UI clients.
             disconnect_cb (Callable): Controller callback to handle safe disconnections.
             reject_cb (Callable): Controller callback to handle safe rejections.
             config (Config): The profile configuration instance.
@@ -83,7 +81,6 @@ class StreamReceiver:
         self._state: StateTracker = state
         self._router: MessageRouter = router
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
-        self._has_clients_callback: Callable[[], bool] = has_clients_callback
         self._config: 'Config' = config
 
         self._disconnect_cb: Callable[

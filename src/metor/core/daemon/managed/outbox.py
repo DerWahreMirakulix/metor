@@ -56,6 +56,7 @@ class OutboxWorker:
         stop_flag: threading.Event,
         config: 'Config',
         state: Optional[StateTracker] = None,
+        error_callback: Optional[Callable[[str], None]] = None,
     ) -> None:
         """
         Initializes the OutboxWorker.
@@ -69,6 +70,8 @@ class OutboxWorker:
             stop_flag (threading.Event): Event to gracefully shutdown the worker loop.
             config (Config): The profile configuration instance.
             state (Optional[StateTracker]): State tracker to read UI focus reference counts.
+            error_callback (Optional[Callable[[str], None]]): Optional callback used to
+                surface unexpected worker-loop errors outside projected history.
 
         Returns:
             None
@@ -81,11 +84,30 @@ class OutboxWorker:
         self._stop_flag: threading.Event = stop_flag
         self._config: 'Config' = config
         self._state: Optional[StateTracker] = state
+        self._error_callback: Optional[Callable[[str], None]] = error_callback
 
         # Cache for persistent tunnels: onion -> (socket, stream_reader, last_used_timestamp)
         self._tunnels: Dict[str, Tuple[socket.socket, TcpStreamReader, float]] = {}
         self._tunnels_lock: threading.Lock = threading.Lock()
         self._worker_thread: Optional[threading.Thread] = None
+
+    def _report_internal_error(self, message: str) -> None:
+        """
+        Emits one best-effort runtime error callback.
+
+        Args:
+            message (str): The console-safe runtime error message.
+
+        Returns:
+            None
+        """
+        if self._error_callback is None:
+            return
+
+        try:
+            self._error_callback(message)
+        except Exception:
+            pass
 
     def _is_drop_standby_allowed(self) -> bool:
         """
@@ -210,7 +232,9 @@ class OutboxWorker:
                 # 3. Clean up stale or unfocused tunnels
                 self._cleanup_tunnels()
             except Exception:
-                pass
+                self._report_internal_error(
+                    'Outbox worker loop recovered from an unexpected runtime error.'
+                )
 
         self._close_all_tunnels()
 
@@ -319,7 +343,7 @@ class OutboxWorker:
                         onion,
                         actor=HistoryActor.LOCAL,
                     )
-                    self._broadcast(AckEvent(msg_id=msg_id, text=payload))
+                    self._broadcast(AckEvent(msg_id=msg_id, timestamp=timestamp))
                 except Exception as e:
                     self._hm.log_event(
                         HistoryEvent.FAILED,
@@ -392,7 +416,7 @@ class OutboxWorker:
                 onion,
                 actor=HistoryActor.LOCAL,
             )
-            self._broadcast(AckEvent(msg_id=msg_id, text=payload))
+            self._broadcast(AckEvent(msg_id=msg_id, timestamp=timestamp))
         except Exception as e:
             self._hm.log_event(
                 HistoryEvent.FAILED,

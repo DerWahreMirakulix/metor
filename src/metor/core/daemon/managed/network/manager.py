@@ -93,7 +93,6 @@ class NetworkManager:
             state=self._state,
             router=self._router,
             broadcast_callback=broadcast_callback,
-            has_clients_callback=has_clients_callback,
             disconnect_cb=self._controller.disconnect,
             reject_cb=self._controller.reject,
             config=config,

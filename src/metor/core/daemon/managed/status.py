@@ -8,3 +8,4 @@ class DaemonStatus(str, Enum):
 
     LOCKED_MODE = 'locked_mode'
     ACTIVE = 'active'
+    RUNTIME_ERROR = 'runtime_error'

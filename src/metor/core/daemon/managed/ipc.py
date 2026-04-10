@@ -8,7 +8,7 @@ import os
 import socket
 import threading
 import json
-from typing import List, Callable, Dict, Optional
+from typing import List, Callable, Dict, Optional, Iterable
 
 from metor.core.api import IpcCommand, IpcEvent, JsonValue, EventType, create_event
 from metor.data import SettingKey
@@ -24,6 +24,7 @@ class IpcServer:
         pm: ProfileManager,
         command_callback: Callable[[IpcCommand, socket.socket], None],
         disconnect_callback: Optional[Callable[[socket.socket], None]] = None,
+        error_callback: Optional[Callable[[str], None]] = None,
     ) -> None:
         """
         Initializes the IPC Server.
@@ -32,6 +33,8 @@ class IpcServer:
             pm (ProfileManager): To store and retrieve the active daemon port.
             command_callback (Callable): The function to call when a valid command arrives.
             disconnect_callback (Optional[Callable]): Hook to clean up socket states externally.
+            error_callback (Optional[Callable[[str], None]]): Hook to surface
+                unexpected runtime errors without terminating the acceptor.
 
         Returns:
             None
@@ -43,12 +46,31 @@ class IpcServer:
         self._disconnect_callback: Optional[Callable[[socket.socket], None]] = (
             disconnect_callback
         )
+        self._error_callback: Optional[Callable[[str], None]] = error_callback
 
         self._clients: List[socket.socket] = []
         self._lock: threading.Lock = threading.Lock()
         self._stop_flag: threading.Event = threading.Event()
         self.port: Optional[int] = None
         self._server: Optional[socket.socket] = None
+
+    def _report_internal_error(self, message: str) -> None:
+        """
+        Emits one best-effort runtime error callback.
+
+        Args:
+            message (str): The console-safe runtime error message.
+
+        Returns:
+            None
+        """
+        if self._error_callback is None:
+            return
+
+        try:
+            self._error_callback(message)
+        except Exception:
+            pass
 
     def has_active_clients(self) -> bool:
         """
@@ -125,11 +147,32 @@ class IpcServer:
         Returns:
             None
         """
+        self.broadcast_to(event)
+
+    def broadcast_to(
+        self,
+        event: IpcEvent,
+        recipients: Optional[Iterable[socket.socket]] = None,
+    ) -> None:
+        """
+        Sends one event payload to a subset of currently connected UI clients.
+
+        Args:
+            event (IpcEvent): The DTO event to broadcast.
+            recipients (Optional[Iterable[socket.socket]]): Optional recipient subset.
+
+        Returns:
+            None
+        """
         msg: bytes = (event.to_json() + '\n').encode('utf-8')
         dead_clients: List[socket.socket] = []
 
         with self._lock:
             clients: List[socket.socket] = list(self._clients)
+
+        if recipients is not None:
+            allowed_clients: set[socket.socket] = set(recipients)
+            clients = [client for client in clients if client in allowed_clients]
 
         for client in clients:
             try:
@@ -189,19 +232,42 @@ class IpcServer:
                 server.settimeout(Constants.THREAD_POLL_TIMEOUT)
                 conn, _ = server.accept()
                 conn.settimeout(daemon_ipc_timeout)
-                with self._lock:
-                    self._clients.append(conn)
-                threading.Thread(
-                    target=self._handler, args=(conn,), daemon=True
-                ).start()
+
+                try:
+                    handler_thread: threading.Thread = threading.Thread(
+                        target=self._handler,
+                        args=(conn,),
+                        daemon=True,
+                    )
+                    with self._lock:
+                        self._clients.append(conn)
+                    handler_thread.start()
+                except Exception:
+                    with self._lock:
+                        if conn in self._clients:
+                            self._clients.remove(conn)
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    self._report_internal_error(
+                        'IPC acceptor failed to start a client handler thread. Continuing.'
+                    )
+                    continue
             except socket.timeout:
                 continue
             except OSError:
-                if self._stop_flag.is_set():
+                if self._stop_flag.is_set() or self._server is None:
                     break
-                break
+                self._report_internal_error(
+                    'IPC acceptor hit an OS-level runtime error. Continuing.'
+                )
+                continue
             except Exception:
-                break
+                self._report_internal_error(
+                    'IPC acceptor hit an unexpected runtime error. Continuing.'
+                )
+                continue
 
     def _handler(self, conn: socket.socket) -> None:
         """

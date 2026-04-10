@@ -147,10 +147,9 @@ class InboundListener:
                 max_conn: int = self._config.get_int(
                     SettingKey.MAX_CONCURRENT_CONNECTIONS
                 )
-                active_count: int = len(self._state.get_active_onions())
-                unauth_count: int = self._state.get_unauthenticated_count()
+                tracked_socket_count: int = self._state.get_tracked_live_socket_count()
 
-                if active_count + unauth_count >= max_conn:
+                if tracked_socket_count >= max_conn:
                     self._hm.log_event(
                         HistoryEvent.REJECTED,
                         None,
@@ -311,16 +310,19 @@ class InboundListener:
             pass
 
         if self._state.is_retunneling(onion):
+            preserved_live_connection: bool = self._state.is_live_active(onion)
+            self._state.mark_live_reconnect_grace(onion, 0.0)
             self._state.clear_retunnel_flow(onion)
-            self._broadcast(
-                DisconnectedEvent(
-                    alias=alias,
-                    onion=onion,
-                    actor=ConnectionActor.SYSTEM,
-                    origin=ConnectionOrigin.INCOMING,
-                    reason_code=ConnectionReasonCode.PENDING_ACCEPTANCE_EXPIRED,
+            if not preserved_live_connection:
+                self._broadcast(
+                    DisconnectedEvent(
+                        alias=alias,
+                        onion=onion,
+                        actor=ConnectionActor.SYSTEM,
+                        origin=ConnectionOrigin.INCOMING,
+                        reason_code=ConnectionReasonCode.PENDING_ACCEPTANCE_EXPIRED,
+                    )
                 )
-            )
             self._broadcast(
                 create_event(
                     EventType.RETUNNEL_FAILED,
@@ -359,10 +361,15 @@ class InboundListener:
         )
 
         grace_reconnect: bool = self._state.has_live_reconnect_grace(onion)
+        retunnel_reconnect: bool = self._state.is_retunneling(onion)
         scheduled_auto_reconnect: bool = self._state.has_scheduled_auto_reconnect(onion)
         duplicate_reason_code: Optional[HistoryReasonCode] = None
 
-        if self._state.is_connected_or_pending(onion) and not grace_reconnect:
+        if (
+            self._state.is_connected_or_pending(onion)
+            and not grace_reconnect
+            and not retunnel_reconnect
+        ):
             duplicate_reason_code = (
                 HistoryReasonCode.DUPLICATE_INCOMING_CONNECTED
                 if self._state.get_live_state(onion) is LiveTransportState.CONNECTED
@@ -432,6 +439,8 @@ class InboundListener:
         incoming_origin: ConnectionOrigin = ConnectionOrigin.INCOMING
         if grace_reconnect:
             incoming_origin = ConnectionOrigin.GRACE_RECONNECT
+        elif retunnel_reconnect:
+            incoming_origin = ConnectionOrigin.RETUNNEL
         elif scheduled_auto_reconnect:
             incoming_origin = ConnectionOrigin.AUTO_RECONNECT
         elif is_mutual_winner:
@@ -441,6 +450,7 @@ class InboundListener:
 
         should_auto_accept_now: bool = (
             grace_reconnect
+            or retunnel_reconnect
             or scheduled_auto_reconnect
             or is_mutual_winner
             or contact_auto_accept

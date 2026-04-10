@@ -13,6 +13,7 @@ class StateTrackerMessagesMixin:
     _lock: threading.Lock
     _connections: Dict[str, socket.socket]
     _pending_connections: Dict[str, socket.socket]
+    _outbound_sockets: Dict[str, socket.socket]
     _unacked_messages: Dict[str, Dict[str, Tuple[str, str]]]
     _recent_live_msg_ids: Dict[str, List[str]]
     _unauthenticated_connections: Set[socket.socket]
@@ -143,3 +144,21 @@ class StateTrackerMessagesMixin:
         """
         with self._lock:
             return len(self._unauthenticated_connections)
+
+    def get_tracked_live_socket_count(self) -> int:
+        """
+        Returns the total number of live sockets currently tracked by the daemon.
+
+        Args:
+            None
+
+        Returns:
+            int: Active, pending, outbound, and unauthenticated live sockets.
+        """
+        with self._lock:
+            return (
+                len(self._connections)
+                + len(self._pending_connections)
+                + len(self._outbound_sockets)
+                + len(self._unauthenticated_connections)
+            )
