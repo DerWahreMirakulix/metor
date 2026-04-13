@@ -603,6 +603,29 @@ Falls back unacknowledged live messages into the offline drop queue when possibl
 
 ---
 
+#### `daemon.max_unseen_drop_msgs`
+
+Caps unread crash-safe drop backlog per peer. `0` rejects new unread drops, while `-1` removes the limit entirely.
+
+| Property         | Value                                                                             |
+| ---------------- | --------------------------------------------------------------------------------- |
+| Type             | `int`                                                                             |
+| Default          | `20`                                                                              |
+| Category         | `Core Daemon`                                                                     |
+| Scope            | `Daemon runtime`                                                                  |
+| Profile Override | `Yes`                                                                             |
+| Constraints      | Integer >= -1.                                                                    |
+| Security Note    | Limits authenticated peers from growing local on-disk drop backlog without bound. |
+
+**CLI Examples**
+
+- `metor settings get daemon.max_unseen_drop_msgs`
+- `metor settings set daemon.max_unseen_drop_msgs 20`
+- `metor -p <profile> config get daemon.max_unseen_drop_msgs`
+- `metor -p <profile> config set daemon.max_unseen_drop_msgs 20`
+
+---
+
 #### `daemon.max_unseen_live_msgs`
 
 Caps unread crash-safe live backlog per peer. `0` disables headless live backlog, while `-1` removes the limit entirely.

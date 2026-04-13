@@ -16,6 +16,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 
 - [AcceptCommand](#acceptcommand)
 - [AddContactCommand](#addcontactcommand)
+- [AddProfileCommand](#addprofilecommand)
 - [AuthenticateSessionCommand](#authenticatesessioncommand)
 - [ClearContactsCommand](#clearcontactscommand)
 - [ClearHistoryCommand](#clearhistorycommand)
@@ -36,15 +37,19 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [GetSettingCommand](#getsettingcommand)
 - [InitCommand](#initcommand)
 - [MarkReadCommand](#markreadcommand)
+- [MigrateProfileSecurityCommand](#migrateprofilesecuritycommand)
 - [MsgCommand](#msgcommand)
 - [RegisterLiveConsumerCommand](#registerliveconsumercommand)
 - [RejectCommand](#rejectcommand)
 - [RemoveContactCommand](#removecontactcommand)
+- [RemoveProfileCommand](#removeprofilecommand)
 - [RenameContactCommand](#renamecontactcommand)
+- [RenameProfileCommand](#renameprofilecommand)
 - [RetunnelCommand](#retunnelcommand)
 - [SelfDestructCommand](#selfdestructcommand)
 - [SendDropCommand](#senddropcommand)
 - [SetConfigCommand](#setconfigcommand)
+- [SetDefaultProfileCommand](#setdefaultprofilecommand)
 - [SetSettingCommand](#setsettingcommand)
 - [SwitchCommand](#switchcommand)
 - [SyncConfigCommand](#syncconfigcommand)
@@ -135,6 +140,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [PeerPromotedEvent](#peerpromotedevent)
 - [PeerRemovedEvent](#peerremovedevent)
 - [PendingConnectionExpiredEvent](#pendingconnectionexpiredevent)
+- [ProfileOperationResultEvent](#profileoperationresultevent)
 - [ProfilesDataEvent](#profilesdataevent)
 - [RemoteMsgEvent](#remotemsgevent)
 - [RenameSuccessEvent](#renamesuccessevent)
@@ -195,6 +201,30 @@ Adds a new contact or promotes a discovered peer.
 {
   "command_type": "add_contact",
   "alias": "string"
+}
+```
+
+---
+
+### `AddProfileCommand`
+
+Requests creation of one local or remote profile entry.
+
+| Field           | Type               | Default     |
+| --------------- | ------------------ | ----------- |
+| `name`          | `str`              | Required    |
+| `is_remote`     | `bool`             | `False`     |
+| `port`          | `Union[int, None]` | `None`      |
+| `security_mode` | `str`              | `encrypted` |
+
+**Wire Value:** `add_profile`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "add_profile",
+  "name": "string"
 }
 ```
 
@@ -599,6 +629,31 @@ Reads and clears unread messages for a peer.
 
 ---
 
+### `MigrateProfileSecurityCommand`
+
+Requests migration of one local profile between encrypted and plaintext storage.
+
+| Field              | Type               | Default  |
+| ------------------ | ------------------ | -------- |
+| `name`             | `str`              | Required |
+| `target_mode`      | `str`              | Required |
+| `current_password` | `Union[str, None]` | `None`   |
+| `new_password`     | `Union[str, None]` | `None`   |
+
+**Wire Value:** `migrate_profile_security`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "migrate_profile_security",
+  "name": "string",
+  "target_mode": "string"
+}
+```
+
+---
+
 ### `MsgCommand`
 
 Sends a live chat message to a peer.
@@ -684,6 +739,28 @@ Removes a saved contact or discovered peer.
 
 ---
 
+### `RemoveProfileCommand`
+
+Requests complete local removal of one profile.
+
+| Field            | Type               | Default  |
+| ---------------- | ------------------ | -------- |
+| `name`           | `str`              | Required |
+| `active_profile` | `Union[str, None]` | `None`   |
+
+**Wire Value:** `remove_profile`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "remove_profile",
+  "name": "string"
+}
+```
+
+---
+
 ### `RenameContactCommand`
 
 Renames an existing contact or discovered peer.
@@ -702,6 +779,29 @@ Renames an existing contact or discovered peer.
   "command_type": "rename_contact",
   "old_alias": "string",
   "new_alias": "string"
+}
+```
+
+---
+
+### `RenameProfileCommand`
+
+Requests renaming of one local profile directory.
+
+| Field      | Type  | Default  |
+| ---------- | ----- | -------- |
+| `old_name` | `str` | Required |
+| `new_name` | `str` | Required |
+
+**Wire Value:** `rename_profile`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "rename_profile",
+  "old_name": "string",
+  "new_name": "string"
 }
 ```
 
@@ -789,6 +889,27 @@ Updates a profile-specific configuration override.
   "command_type": "set_config",
   "setting_key": "string",
   "setting_value": "string"
+}
+```
+
+---
+
+### `SetDefaultProfileCommand`
+
+Requests one new default-profile selection.
+
+| Field          | Type  | Default  |
+| -------------- | ----- | -------- |
+| `profile_name` | `str` | Required |
+
+**Wire Value:** `set_default_profile`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "set_default_profile",
+  "profile_name": "string"
 }
 ```
 
@@ -2670,6 +2791,33 @@ Signals that a pending connection existed but its acceptance window expired.
 {
   "event_type": "pending_connection_expired",
   "alias": "string"
+}
+```
+
+---
+
+### `ProfileOperationResultEvent`
+
+Carries one structured local profile-operation result over IPC.
+
+| Field            | Type                                                                                                         | Default  |
+| ---------------- | ------------------------------------------------------------------------------------------------------------ | -------- |
+| `success`        | `bool`                                                                                                       | Required |
+| `operation_type` | `<enum 'ProfileOperationCode'>`                                                                              | Required |
+| `params`         | `Dict[str, Union[str, int, float, bool, None, Dict[str, Dict[str, JsonValue]], List[Dict[str, JsonValue]]]]` | Required |
+
+**Wire Value:** `profile_operation_result`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "profile_operation_result",
+  "success": false,
+  "operation_type": "invalid_name",
+  "params": {
+    "key": "string"
+  }
 }
 ```
 
