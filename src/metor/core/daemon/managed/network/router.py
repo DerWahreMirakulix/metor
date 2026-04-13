@@ -404,6 +404,7 @@ class MessageRouter:
             return
 
         alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
+        unread_drop_limit: int = self._config.get_int(SettingKey.MAX_UNSEEN_DROP_MSGS)
         try:
             while True:
                 msg: Optional[str] = stream.read_line()
@@ -422,6 +423,25 @@ class MessageRouter:
                             continue
 
                         msg_id, content, timestamp = decoded_payload
+
+                        if self._mm.has_inbound_message(onion, msg_id):
+                            conn.sendall(
+                                f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8')
+                            )
+                            continue
+
+                        if (
+                            unread_drop_limit != -1
+                            and self._mm.get_unread_drop_count(onion)
+                            >= unread_drop_limit
+                        ):
+                            self._hm.log_event(
+                                HistoryEvent.FAILED,
+                                onion,
+                                actor=HistoryActor.SYSTEM,
+                                detail_text='Drop backlog limit reached.',
+                            )
+                            break
 
                         queue_result = self._mm.queue_message(
                             contact_onion=onion,

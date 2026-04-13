@@ -58,6 +58,7 @@ from metor.core.api.events.maintenance import (
     MessagesClearedNonContactsAllEvent,
     MessagesClearedNonContactsEvent,
 )
+from metor.core.api.events.profile import ProfileOperationResultEvent
 from metor.core.api.events.runtime import (
     AlreadyUnlockedEvent,
     AuthRequiredEvent,
@@ -166,6 +167,7 @@ __all__ = [
     'AddressCantGenerateRunningEvent',
     'AddressNotGeneratedEvent',
     'ProfilesDataEvent',
+    'ProfileOperationResultEvent',
     'AuthRequiredEvent',
     'InvalidPasswordEvent',
     'LocalAuthRateLimitedEvent',

@@ -11,10 +11,14 @@ from typing import Callable, cast
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.core.api import (
+    EventType,
+    IpcEvent,
     MessageDirectionCode,
     MessageEntry,
     MessageStatusCode,
     MessagesDataEvent,
+    ProfileOperationCode,
+    ProfileOperationResultEvent,
 )
 from metor.ui import UIPresenter
 
@@ -89,6 +93,22 @@ def _is_ui_application_violation(line: str) -> bool:
     return line.startswith('from metor.ui') or line.startswith('import metor.ui')
 
 
+def _is_ui_profile_mutation_violation(line: str) -> bool:
+    """Determines whether one UI line bypasses the local profile orchestration boundary."""
+
+    forbidden_fragments: tuple[str, ...] = (
+        'ProfileManager.add_profile_folder(',
+        'ProfileManager.migrate_profile_security(',
+        'ProfileManager.remove_profile_folder(',
+        'ProfileManager.rename_profile_folder(',
+        'ProfileManager.set_default_profile(',
+        '.clear_daemon_port(',
+        '.paths.get_daemon_port_file(',
+        '.paths.get_daemon_pid_file(',
+    )
+    return any(fragment in line for fragment in forbidden_fragments)
+
+
 def _is_lower_layer_application_violation(line: str) -> bool:
     """Determines whether one core/data/utils file imports the application layer."""
 
@@ -134,6 +154,14 @@ class UiBoundaryTests(unittest.TestCase):
         violations: list[str] = _collect_import_violations(
             APPLICATION_ROOT,
             _is_ui_application_violation,
+        )
+
+        self.assertEqual(violations, [])
+
+    def test_ui_avoids_direct_profile_mutation_and_runtime_state_paths(self) -> None:
+        violations: list[str] = _collect_import_violations(
+            UI_ROOT,
+            _is_ui_profile_mutation_violation,
         )
 
         self.assertEqual(violations, [])
@@ -220,6 +248,19 @@ class UiBoundaryTests(unittest.TestCase):
         rendered: str = UIPresenter.format_messages(event)
 
         self.assertIn('To peer:', rendered)
+
+    def test_profile_operation_result_event_casts_operation_code(self) -> None:
+        event = IpcEvent.from_dict(
+            {
+                'event_type': EventType.PROFILE_OPERATION_RESULT.value,
+                'success': True,
+                'operation_type': ProfileOperationCode.PROFILE_REMOVED.value,
+                'params': {'profile': 'alice'},
+            }
+        )
+
+        typed_event = cast(ProfileOperationResultEvent, event)
+        self.assertIs(typed_event.operation_type, ProfileOperationCode.PROFILE_REMOVED)
 
 
 if __name__ == '__main__':

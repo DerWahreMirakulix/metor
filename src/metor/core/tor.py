@@ -427,7 +427,14 @@ class TorManager:
             None
         """
         hs_dir: Path = self._pm.paths.get_hidden_service_dir()
-        secure_shred_file(hs_dir / Constants.TOR_SECRET_KEY)
+        try:
+            secure_shred_file(hs_dir / Constants.TOR_SECRET_KEY)
+        except OSError:
+            if TorManager._log_callback is not None:
+                try:
+                    TorManager._log_callback('Failed to shred Tor runtime key.')
+                except Exception:
+                    pass
 
     def start(self) -> Tuple[bool, Optional[EventType], Dict[str, JsonValue]]:
         """

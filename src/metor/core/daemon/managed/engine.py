@@ -461,7 +461,12 @@ class Daemon:
         runtime_db_path: Path = (
             self._pm.paths.get_config_dir() / Constants.DB_RUNTIME_FILE
         )
-        secure_shred_file(runtime_db_path)
+        try:
+            secure_shred_file(runtime_db_path)
+        except OSError:
+            self._on_runtime_internal_error(
+                'Failed to shred the runtime database mirror during shutdown.'
+            )
 
         try:
             self._pm.clear_daemon_port(
@@ -491,8 +496,16 @@ class Daemon:
         runtime_db_path: Path = (
             self._pm.paths.get_config_dir() / Constants.DB_RUNTIME_FILE
         )
-        secure_shred_file(db_path)
-        secure_shred_file(runtime_db_path)
+        for path, description in (
+            (db_path, 'profile database'),
+            (runtime_db_path, 'runtime database mirror'),
+        ):
+            try:
+                secure_shred_file(path)
+            except OSError:
+                self._on_runtime_internal_error(
+                    f'Failed to shred the {description} during self-destruct.'
+                )
 
         hs_dir: Path = self._pm.paths.get_hidden_service_dir()
         key_files: List[str] = [
@@ -502,7 +515,12 @@ class Daemon:
             Constants.TOR_PUBLIC_KEY,
         ]
         for key_file in key_files:
-            secure_shred_file(hs_dir / key_file)
+            try:
+                secure_shred_file(hs_dir / key_file)
+            except OSError:
+                self._on_runtime_internal_error(
+                    f'Failed to shred key material during self-destruct: {key_file}.'
+                )
 
         self.stop()
 

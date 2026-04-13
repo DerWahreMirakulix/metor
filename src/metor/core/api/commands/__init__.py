@@ -22,6 +22,13 @@ from metor.core.api.commands.messages import (
     MsgCommand,
     SendDropCommand,
 )
+from metor.core.api.commands.profile import (
+    AddProfileCommand,
+    MigrateProfileSecurityCommand,
+    RemoveProfileCommand,
+    RenameProfileCommand,
+    SetDefaultProfileCommand,
+)
 from metor.core.api.commands.session import (
     AcceptCommand,
     AuthenticateSessionCommand,
@@ -62,6 +69,11 @@ __all__ = [
     'RemoveContactCommand',
     'RenameContactCommand',
     'ClearContactsCommand',
+    'AddProfileCommand',
+    'MigrateProfileSecurityCommand',
+    'RemoveProfileCommand',
+    'RenameProfileCommand',
+    'SetDefaultProfileCommand',
     'MsgCommand',
     'SendDropCommand',
     'GetInboxCommand',

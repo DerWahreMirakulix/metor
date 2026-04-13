@@ -72,6 +72,25 @@ class Chat:
         self._handler: Optional[EventHandler] = None
         self._dispatcher: Optional[CommandDispatcher] = None
 
+    def _handle_daemon_disconnect_exit(self, *, show_divider: bool = False) -> None:
+        """
+        Renders the daemon-disconnect shutdown message without redrawing the prompt.
+
+        Args:
+            show_divider (bool): Whether to render a divider before the exit message.
+
+        Returns:
+            None
+        """
+        self._renderer.clear_input_area()
+        if show_divider:
+            self._renderer.print_divider(skip_prompt=True)
+        self._renderer.print_message(
+            f'{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}',
+            msg_type=ChatMessageType.RAW,
+            skip_prompt=True,
+        )
+
     def run(self) -> None:
         """
         Starts the main chat UI loop, establishes the IPC Client, and handles inputs.
@@ -134,11 +153,7 @@ class Chat:
 
                 if user_input is None:
                     if self._disconnect_event.is_set():
-                        self._renderer.print_divider()
-                        self._renderer.print_message(
-                            f'{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}',
-                            msg_type=ChatMessageType.RAW,
-                        )
+                        self._handle_daemon_disconnect_exit(show_divider=True)
                         break
                     continue
 
@@ -337,10 +352,7 @@ class Chat:
 
         while not self._init_event.is_set():
             if self._disconnect_event.is_set():
-                self._renderer.print_message(
-                    f'{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}',
-                    msg_type=ChatMessageType.RAW,
-                )
+                self._handle_daemon_disconnect_exit()
                 return False
 
             if not self._startup_gate_event.wait(timeout=ipc_timeout):

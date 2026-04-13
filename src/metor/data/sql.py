@@ -212,6 +212,25 @@ class SqlManager:
     _log_callback: Optional[Callable[[str], None]] = None
 
     @classmethod
+    def _report_runtime_mirror_error(cls, message: str) -> None:
+        """
+        Emits one best-effort runtime-mirror error log line.
+
+        Args:
+            message (str): The log-safe error message.
+
+        Returns:
+            None
+        """
+        if cls._log_callback is None:
+            return
+
+        try:
+            cls._log_callback(message)
+        except Exception:
+            pass
+
+    @classmethod
     def set_log_callback(cls, callback: Callable[[str], None]) -> None:
         """
         Sets a global callback for SQL logging to keep the Data layer UI-agnostic.
@@ -485,7 +504,9 @@ class SqlManager:
                         try:
                             self._refresh_runtime_mirror(conn)
                         except Exception:
-                            pass
+                            SqlManager._report_runtime_mirror_error(
+                                'Failed to refresh the runtime database mirror.'
+                            )
         except (sqlite3.DatabaseError, sqlite3.OperationalError, MemoryError) as e:
             path_str: str = str(self.db_path.absolute())
             with SqlManager._pool_lock:
@@ -516,7 +537,9 @@ class SqlManager:
                 try:
                     self._refresh_runtime_mirror(conn)
                 except Exception:
-                    pass
+                    SqlManager._report_runtime_mirror_error(
+                        'Failed to refresh the runtime database mirror.'
+                    )
 
     def cleanup_runtime_mirror(self) -> None:
         """
@@ -530,7 +553,12 @@ class SqlManager:
         """
         runtime_db_path: Path = self._get_runtime_db_path()
         if runtime_db_path.exists():
-            secure_shred_file(runtime_db_path)
+            try:
+                secure_shred_file(runtime_db_path)
+            except OSError:
+                SqlManager._report_runtime_mirror_error(
+                    'Failed to shred the runtime database mirror.'
+                )
 
     def fetchall(
         self, query: str, params: Tuple[SqlParam, ...] = ()

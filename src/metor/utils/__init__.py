@@ -23,7 +23,7 @@ if TYPE_CHECKING:
         ensure_onion_format,
     )
     from metor.utils.process import ProcessManager  # noqa: F401
-    from metor.utils.security import secure_shred_file  # noqa: F401
+    from metor.utils.security import secure_remove_path, secure_shred_file  # noqa: F401
     from metor.utils.validators import validate_json_file  # noqa: F401
 
 
@@ -55,6 +55,7 @@ _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
         'decode_tor_v3_onion_public_key',
     ),
     'ensure_onion_format': ('metor.utils.network', 'ensure_onion_format'),
+    'secure_remove_path': ('metor.utils.security', 'secure_remove_path'),
     'secure_shred_file': ('metor.utils.security', 'secure_shred_file'),
     'verify_session_auth_proof': (
         'metor.utils.auth',
@@ -112,6 +113,7 @@ __all__ = [
     'clean_onion',
     'decode_tor_v3_onion_public_key',
     'ensure_onion_format',
+    'secure_remove_path',
     'secure_shred_file',
     'verify_session_auth_proof',
 ]

@@ -4,11 +4,11 @@ Isolates interactive prompts and subsystem orchestration from the generic router
 """
 
 import sys
-import shutil
 from typing import List, Dict, Optional, Union
 
 from metor.core.api import EventType, JsonValue
 from metor.application import (
+    cleanup_local_runtime,
     CorruptedDaemonStorageError,
     DaemonStatus,
     InvalidDaemonPasswordError,
@@ -18,13 +18,9 @@ from metor.application import (
 from metor.data.profile import ProfileManager
 from metor.ui import PromptAbortedError, Theme, Translator, prompt_hidden, prompt_text
 from metor.ui.chat import Chat
-from metor.utils import Constants, ProcessManager
+from metor.utils import Constants, ProcessManager, secure_remove_path
 
-from metor.data.profile import (
-    ProfileOperationResult,
-    ProfileOperationType,
-    ProfileSecurityMode,
-)
+from metor.data.profile import ProfileSecurityMode
 from metor.ui.cli.proxy import CliProxy
 
 
@@ -163,26 +159,28 @@ class CommandHandlers:
 
     @staticmethod
     def handle_profile_security_migration(
+        proxy: CliProxy,
         name: str,
         target_mode: ProfileSecurityMode,
-    ) -> ProfileOperationResult:
+    ) -> str:
         """
         Interactively migrates one local profile between encrypted and plaintext storage.
 
         Args:
+            proxy (CliProxy): The active CLI proxy used for local headless routing.
             name (str): Target profile name.
             target_mode (ProfileSecurityMode): The requested storage mode.
 
         Returns:
-            ProfileOperationResult: Structured local outcome for the CLI layer.
+            str: The formatted CLI outcome.
         """
         pm: ProfileManager = ProfileManager(name)
         if not pm.exists():
-            return ProfileManager.migrate_profile_security(name, target_mode)
+            return proxy.migrate_profile_security(name, target_mode)
 
         current_mode: ProfileSecurityMode = pm.get_security_mode()
         if current_mode is target_mode:
-            return ProfileManager.migrate_profile_security(name, target_mode)
+            return proxy.migrate_profile_security(name, target_mode)
 
         if target_mode is ProfileSecurityMode.PLAINTEXT:
             print(
@@ -192,17 +190,9 @@ class CommandHandlers:
             try:
                 confirm: str = prompt_text("Type 'yes' to continue: ")
             except PromptAbortedError:
-                return ProfileOperationResult(
-                    False,
-                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                    {'profile': name, 'reason': 'Security migration aborted.'},
-                )
+                return 'Security migration aborted.'
             if confirm.strip().lower() != 'yes':
-                return ProfileOperationResult(
-                    False,
-                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                    {'profile': name, 'reason': 'Security migration aborted.'},
-                )
+                return 'Security migration aborted.'
 
         current_password: Optional[str] = None
         if current_mode is ProfileSecurityMode.ENCRYPTED:
@@ -211,20 +201,9 @@ class CommandHandlers:
                     f'{Theme.GREEN}Enter Current Master Password: {Theme.RESET}'
                 )
             except PromptAbortedError:
-                return ProfileOperationResult(
-                    False,
-                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                    {'profile': name, 'reason': 'Security migration aborted.'},
-                )
+                return 'Security migration aborted.'
             if not current_password:
-                return ProfileOperationResult(
-                    False,
-                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                    {
-                        'profile': name,
-                        'reason': 'Current master password cannot be empty.',
-                    },
-                )
+                return 'Current master password cannot be empty.'
 
         new_password: Optional[str] = None
         if target_mode is ProfileSecurityMode.ENCRYPTED:
@@ -233,39 +212,20 @@ class CommandHandlers:
                     f'{Theme.GREEN}Enter New Master Password: {Theme.RESET}'
                 )
             except PromptAbortedError:
-                return ProfileOperationResult(
-                    False,
-                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                    {'profile': name, 'reason': 'Security migration aborted.'},
-                )
+                return 'Security migration aborted.'
             if not new_password:
-                return ProfileOperationResult(
-                    False,
-                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                    {
-                        'profile': name,
-                        'reason': 'New master password cannot be empty.',
-                    },
-                )
+                return 'New master password cannot be empty.'
 
             try:
                 confirm_password: str = prompt_hidden(
                     f'{Theme.GREEN}Confirm New Master Password: {Theme.RESET}'
                 )
             except PromptAbortedError:
-                return ProfileOperationResult(
-                    False,
-                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                    {'profile': name, 'reason': 'Security migration aborted.'},
-                )
+                return 'Security migration aborted.'
             if new_password != confirm_password:
-                return ProfileOperationResult(
-                    False,
-                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                    {'profile': name, 'reason': 'New master passwords do not match.'},
-                )
+                return 'New master passwords do not match.'
 
-        return ProfileManager.migrate_profile_security(
+        return proxy.migrate_profile_security(
             name,
             target_mode,
             current_password=current_password,
@@ -312,27 +272,15 @@ class CommandHandlers:
         else:
             print('Cleaning up Metor processes and daemon state...')
 
-        killed: int = ProcessManager.cleanup_processes(force=force)
-        cleared_runtime_state: int = 0
+        result = cleanup_local_runtime(force=force)
 
-        for profile_name in ProfileManager.get_all_profiles():
-            temp_pm: ProfileManager = ProfileManager(profile_name)
-            if not temp_pm.is_remote():
-                had_runtime_state: bool = (
-                    temp_pm.paths.get_daemon_port_file().exists()
-                    or temp_pm.paths.get_daemon_pid_file().exists()
-                )
-                temp_pm.clear_daemon_port()
-                if had_runtime_state:
-                    cleared_runtime_state += 1
-
-        if killed > 0:
+        if result.killed_processes > 0:
             print(
                 'Cleanup completed. Managed processes were terminated and daemon state was cleared.'
             )
             return
 
-        if cleared_runtime_state > 0:
+        if result.cleared_runtime_state > 0:
             print('Cleanup completed. Daemon state was cleared.')
             return
 
@@ -386,7 +334,7 @@ class CommandHandlers:
 
             ProcessManager.cleanup_processes()
             if Constants.DATA.exists():
-                shutil.rmtree(str(Constants.DATA))
+                secure_remove_path(Constants.DATA)
                 print(f'{Theme.GREEN}Purge complete. All data destroyed.{Theme.RESET}')
         else:
             print(f'{Theme.YELLOW}Purge aborted.{Theme.RESET}')

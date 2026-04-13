@@ -24,16 +24,32 @@ from metor.utils.release_bundle import (
 )
 from metor.data.profile import (
     ProfileManager,
-    ProfileOperationResult,
-    ProfileOperationType,
 )
 from metor.data.profile.models import ProfileSecurityMode
 from metor.data.sql import SqlCipherDbApi, _load_sqlcipher_dbapi
 from metor.data.settings import Settings, SettingKey
 from metor.ui.cli.dispatcher import CliDispatcher
+from metor.ui.cli.proxy import CliProxy
 
 
 class _DummyProfileManager:
+    def is_remote(self) -> bool:
+        return False
+
+
+class _DummyUiConfig:
+    def __init__(self, value: str) -> None:
+        self._value: str = value
+
+    def get_str(self, _key: object) -> str:
+        return self._value
+
+
+class _DummyUiProfileManager:
+    def __init__(self, value: str) -> None:
+        self.config: _DummyUiConfig = _DummyUiConfig(value)
+        self.profile_name: str = 'default'
+
     def is_remote(self) -> bool:
         return False
 
@@ -77,16 +93,11 @@ class ReleaseContractTests(unittest.TestCase):
             ['alice'],
             cast(ProfileManager, _DummyProfileManager()),
         )
-        result = ProfileOperationResult(
-            True,
-            ProfileOperationType.PROFILE_CREATED,
-            {'profile': 'alice', 'security_mode': ProfileSecurityMode.PLAINTEXT.value},
-        )
 
         with (
             patch(
-                'metor.ui.cli.dispatcher.base.ProfileManager.add_profile_folder',
-                return_value=result,
+                'metor.ui.cli.dispatcher.profiles.CliProxy.add_profile',
+                return_value='ok',
             ) as add_profile,
             patch('builtins.print'),
         ):
@@ -103,16 +114,11 @@ class ReleaseContractTests(unittest.TestCase):
             ['alice'],
             cast(ProfileManager, _DummyProfileManager()),
         )
-        result = ProfileOperationResult(
-            True,
-            ProfileOperationType.PROFILE_CREATED,
-            {'profile': 'alice', 'security_mode': ProfileSecurityMode.ENCRYPTED.value},
-        )
 
         with (
             patch(
-                'metor.ui.cli.dispatcher.base.ProfileManager.add_profile_folder',
-                return_value=result,
+                'metor.ui.cli.dispatcher.profiles.CliProxy.add_profile',
+                return_value='ok',
             ) as add_profile,
             patch('builtins.print'),
         ):
@@ -133,10 +139,27 @@ class ReleaseContractTests(unittest.TestCase):
 
         self.assertEqual(spec.default, 30.0)
 
+    def test_max_unseen_drop_msgs_has_bounded_default(self) -> None:
+        spec = Settings.SETTING_SPECS[SettingKey.MAX_UNSEEN_DROP_MSGS]
+
+        self.assertEqual(spec.default, 20)
+
     def test_max_ipc_clients_has_bounded_default(self) -> None:
         spec = Settings.SETTING_SPECS[SettingKey.MAX_IPC_CLIENTS]
 
         self.assertEqual(spec.default, 8)
+
+    def test_ui_settings_get_uses_effective_profile_config_value(self) -> None:
+        proxy = CliProxy(cast(ProfileManager, _DummyUiProfileManager('9.5')))
+
+        with patch(
+            'metor.ui.cli.proxy.settings.Settings.get_str',
+            side_effect=AssertionError('unexpected global settings lookup'),
+        ):
+            result = proxy.handle_settings_get(SettingKey.IPC_TIMEOUT.value)
+
+        self.assertIn('Effective UI Setting', result)
+        self.assertIn('9.5', result)
 
     def test_release_bundle_name_normalizes_windows_host_labels(self) -> None:
         bundle_name = build_bundle_name('Windows', 'AMD64', 3, 11)

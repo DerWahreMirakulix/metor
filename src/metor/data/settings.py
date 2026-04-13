@@ -50,6 +50,7 @@ class SettingKey(str, Enum):
     RECORD_LIVE_HISTORY = 'daemon.record_live_history'
     RECORD_DROP_HISTORY = 'daemon.record_drop_history'
     FALLBACK_TO_DROP = 'daemon.fallback_to_drop'
+    MAX_UNSEEN_DROP_MSGS = 'daemon.max_unseen_drop_msgs'
     MAX_UNSEEN_LIVE_MSGS = 'daemon.max_unseen_live_msgs'
 
     # 3. Advanced Network Resilience & Constraints
@@ -326,6 +327,15 @@ class Settings:
             category='Core Daemon',
             description='Falls back unacknowledged live messages into the offline drop queue when possible.',
             constraints='Boolean.',
+        ),
+        SettingKey.MAX_UNSEEN_DROP_MSGS: SettingSpec(
+            key=SettingKey.MAX_UNSEEN_DROP_MSGS,
+            default=20,
+            category='Core Daemon',
+            description='Caps unread crash-safe drop backlog per peer. `0` rejects new unread drops, while `-1` removes the limit entirely.',
+            constraints='Integer >= -1.',
+            security_note='Limits authenticated peers from growing local on-disk drop backlog without bound.',
+            min_value=-1,
         ),
         SettingKey.MAX_UNSEEN_LIVE_MSGS: SettingSpec(
             key=SettingKey.MAX_UNSEEN_LIVE_MSGS,

@@ -75,6 +75,16 @@ class _DummyConfig:
         return 0.2
 
 
+class _DropQuotaConfig(_DummyConfig):
+    def __init__(self, unread_drop_limit: int) -> None:
+        self._unread_drop_limit: int = unread_drop_limit
+
+    def get_int(self, key: Any) -> int:
+        if key is SettingKey.MAX_UNSEEN_DROP_MSGS:
+            return self._unread_drop_limit
+        return super().get_int(key)
+
+
 class _DummyProfileManager:
     def __init__(self) -> None:
         self.config: _DummyConfig = _DummyConfig()
@@ -129,6 +139,7 @@ class _DummyHistoryManager:
 class _DummyMessageManager:
     def __init__(self) -> None:
         self.queued: list[dict[str, Any]] = []
+        self.unread_drop_count: int = 0
 
     def queue_message(self, **kwargs: Any) -> _QueueResult:
         self.queued.append(kwargs)
@@ -139,6 +150,9 @@ class _DummyMessageManager:
 
     def get_unread_live_count(self, _onion: str) -> int:
         return 0
+
+    def get_unread_drop_count(self, _onion: str) -> int:
+        return self.unread_drop_count
 
 
 class _DummyConn:
@@ -911,6 +925,40 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(message_manager.queued[0]['payload'], 'hello')
         self.assertEqual(conn.sent, [b'/ack msg-1\n'])
         self.assertTrue(conn.closed)
+
+    def test_async_drop_stops_without_ack_when_drop_backlog_limit_is_reached(
+        self,
+    ) -> None:
+        history_manager = _DummyHistoryManager()
+        message_manager = _DummyMessageManager()
+        message_manager.unread_drop_count = 1
+        router = MessageRouter(
+            cm=cast(ContactManager, _DummyContactManager()),
+            hm=cast(HistoryManager, history_manager),
+            mm=cast(MessageManager, message_manager),
+            state=cast(StateTracker, object()),
+            broadcast_callback=lambda _event: None,
+            has_clients_callback=lambda: False,
+            has_live_consumers_callback=lambda: False,
+            config=cast(Config, _DropQuotaConfig(unread_drop_limit=1)),
+        )
+        payload_text = json.dumps(
+            {'id': 'msg-2', 'text': 'blocked', 'timestamp': '2026-04-04T12:05:00+00:00'}
+        )
+        payload_b64 = base64.b64encode(payload_text.encode('utf-8')).decode('utf-8')
+        stream = _FakeStream([f'/drop transport-id {payload_b64}', None])
+        conn = _DummyConn()
+
+        router.process_async_drop(
+            cast(socket.socket, conn),
+            cast(TcpStreamReader, stream),
+            'peer-onion',
+        )
+
+        self.assertEqual(message_manager.queued, [])
+        self.assertEqual(conn.sent, [])
+        self.assertTrue(conn.closed)
+        self.assertEqual(history_manager.events[0][0][0], HistoryEvent.FAILED)
 
     def test_live_router_disconnects_on_invalid_payload_without_ack(self) -> None:
         history_manager = _DummyHistoryManager()

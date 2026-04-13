@@ -416,7 +416,10 @@ class Renderer:
         self.print_message(' ', msg_type=ChatMessageType.RAW, skip_prompt=True)
 
     def print_divider(
-        self, msg_type: ChatMessageType = ChatMessageType.RAW, compact: bool = False
+        self,
+        msg_type: ChatMessageType = ChatMessageType.RAW,
+        compact: bool = False,
+        skip_prompt: bool = False,
     ) -> None:
         """
         Prints a visual divider line.
@@ -424,6 +427,7 @@ class Renderer:
         Args:
             msg_type (ChatMessageType): The message type for the divider.
             compact (bool): Whether to use a compact divider.
+            skip_prompt (bool): Whether to avoid redrawing the prompt afterward.
 
         Returns:
             None
@@ -433,6 +437,7 @@ class Renderer:
             if not compact
             else UIPresenter.get_divider_string(3, add_spaces=True),
             msg_type=msg_type,
+            skip_prompt=skip_prompt,
         )
 
     def clear_input_area(self) -> None:

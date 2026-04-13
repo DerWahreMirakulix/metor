@@ -144,6 +144,7 @@ class ProcessManager:
             return 0
 
         killed: int = 0
+        should_remove_pid_file: bool = False
         try:
             with pid_file.open('r') as f:
                 pid_str: str = f.read().strip()
@@ -153,6 +154,7 @@ class ProcessManager:
 
             pid: int = int(pid_str)
             if not ProcessManager.is_pid_running(pid):
+                should_remove_pid_file = True
                 return 0
 
             proc = psutil.Process(pid)
@@ -161,10 +163,14 @@ class ProcessManager:
 
             if ProcessManager._terminate_process(proc):
                 killed = 1
-        except (OSError, ValueError, psutil.NoSuchProcess, psutil.AccessDenied):
+                should_remove_pid_file = True
+        except (psutil.NoSuchProcess, psutil.ZombieProcess):
+            should_remove_pid_file = True
+        except (OSError, ValueError, psutil.AccessDenied):
             pass
         finally:
-            pid_file.unlink(missing_ok=True)
+            if should_remove_pid_file:
+                pid_file.unlink(missing_ok=True)
 
         return killed
 

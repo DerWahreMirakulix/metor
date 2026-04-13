@@ -4,6 +4,7 @@ import socket
 from typing import Optional
 
 from metor.core.api import (
+    AddProfileCommand,
     AddContactCommand,
     ClearContactsCommand,
     ClearHistoryCommand,
@@ -22,8 +23,12 @@ from metor.core.api import (
     IpcCommand,
     IpcEvent,
     MarkReadCommand,
+    MigrateProfileSecurityCommand,
+    RemoveProfileCommand,
     RemoveContactCommand,
+    RenameProfileCommand,
     RenameContactCommand,
+    SetDefaultProfileCommand,
     SetConfigCommand,
     SetSettingCommand,
     SyncConfigCommand,
@@ -87,6 +92,19 @@ def process_command(
         ),
     ):
         daemon._send(conn, daemon._config_handler.handle(cmd))
+        return
+
+    if isinstance(
+        cmd,
+        (
+            AddProfileCommand,
+            MigrateProfileSecurityCommand,
+            RemoveProfileCommand,
+            RenameProfileCommand,
+            SetDefaultProfileCommand,
+        ),
+    ):
+        daemon._send(conn, daemon._profile_handler.handle(cmd))
         return
 
     if isinstance(

@@ -1,11 +1,10 @@
 """Lifecycle operations for local profile creation, mutation, and cleanup."""
 
-import shutil
 from pathlib import Path
 from typing import Optional
 
 from metor.data import DatabaseCorruptedError, SqlManager
-from metor.utils import Constants, secure_shred_file
+from metor.utils import Constants, secure_remove_path, secure_shred_file
 
 # Local Package Imports
 from metor.data.profile.models import (
@@ -340,7 +339,7 @@ def remove_profile_folder(
             {'profile': safe_name},
         )
 
-    shutil.rmtree(target_dir)
+    secure_remove_path(target_dir)
     return ProfileOperationResult(
         True,
         ProfileOperationType.PROFILE_REMOVED,

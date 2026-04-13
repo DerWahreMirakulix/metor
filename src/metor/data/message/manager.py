@@ -201,6 +201,31 @@ class MessageManager:
         )
         return int(str(rows[0][0])) if rows and rows[0][0] is not None else 0
 
+    def get_unread_drop_count(self, contact_onion: str) -> int:
+        """
+        Counts unread inbound drop messages currently retained for one peer.
+
+        Args:
+            contact_onion (str): The remote onion identity.
+
+        Returns:
+            int: The unread inbound drop-message backlog for the peer.
+        """
+        query: str = (
+            'SELECT COUNT(*) FROM messages '
+            'WHERE contact_onion = ? AND direction = ? AND msg_type = ? AND status = ?'
+        )
+        rows: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
+            query,
+            (
+                clean_onion(contact_onion),
+                MessageDirection.IN.value,
+                MessageType.DROP_TEXT.value,
+                MessageStatus.UNREAD.value,
+            ),
+        )
+        return int(str(rows[0][0])) if rows and rows[0][0] is not None else 0
+
     def get_pending_outbox(self) -> List[Tuple[int, str, str, str, str, str]]:
         """
         Retrieves all outbound messages that are waiting to be delivered.
