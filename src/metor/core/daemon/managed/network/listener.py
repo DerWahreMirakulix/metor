@@ -9,7 +9,7 @@ import socket
 import threading
 import secrets
 import time
-from typing import Optional, Callable, List, TYPE_CHECKING
+from typing import Optional, Callable, TYPE_CHECKING
 
 from metor.core import TorManager
 from metor.core.api import (
@@ -206,15 +206,13 @@ class InboundListener:
             stream = TcpStreamReader(conn)
             line: Optional[str] = stream.read_line()
 
-            if line and line.startswith(f'{TorCommand.AUTH.value} '):
-                parts: List[str] = line.split(' ')
-                if len(parts) >= 3 and self._crypto.verify_signature(
-                    parts[1], challenge, parts[2]
-                ):
-                    onion = parts[1]
+            if line:
+                remote_onion, signature, is_async = HandshakeProtocol.parse_auth_line(
+                    line
+                )
+                if self._crypto.verify_signature(remote_onion, challenge, signature):
+                    onion = remote_onion
                     auth_successful = True
-                    if len(parts) >= 4 and parts[3] == 'ASYNC':
-                        is_async = True
         except MemoryError as e:
             self._hm.log_event(
                 HistoryEvent.STREAM_CORRUPTED,

@@ -3,10 +3,12 @@
 # ruff: noqa: E402
 
 import argparse
+import importlib
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import ModuleType
 from typing import Sequence, cast
 from unittest.mock import patch
 
@@ -211,6 +213,59 @@ class ReleaseContractTests(unittest.TestCase):
                 for command in commands
             )
         )
+
+    def test_release_bundle_import_avoids_optional_runtime_utils_dependencies(
+        self,
+    ) -> None:
+        module_names: tuple[str, ...] = (
+            'metor.utils.release_bundle',
+            'metor.utils',
+            'metor.utils.auth',
+            'metor.utils.lock',
+            'metor.utils.process',
+        )
+        saved_modules: dict[str, ModuleType] = {
+            name: module
+            for name in module_names
+            if isinstance(sys.modules.get(name), ModuleType)
+            for module in [sys.modules[name]]
+        }
+        imported_module: ModuleType | None = None
+
+        for name in module_names:
+            sys.modules.pop(name, None)
+
+        original_import = __import__
+
+        def guarded_import(
+            name: str,
+            globals_: dict[str, object] | None = None,
+            locals_: dict[str, object] | None = None,
+            fromlist: tuple[str, ...] = (),
+            level: int = 0,
+        ) -> object:
+            if name in {
+                'metor.utils.auth',
+                'metor.utils.lock',
+                'metor.utils.process',
+                'psutil',
+            } or name.startswith('nacl'):
+                raise ImportError(f'blocked optional dependency import: {name}')
+
+            return original_import(name, globals_, locals_, fromlist, level)
+
+        try:
+            with patch('builtins.__import__', side_effect=guarded_import):
+                imported_module = importlib.import_module('metor.utils.release_bundle')
+        finally:
+            for name in module_names:
+                sys.modules.pop(name, None)
+            for name, module in saved_modules.items():
+                sys.modules[name] = module
+
+        self.assertIsNotNone(imported_module)
+        assert imported_module is not None
+        self.assertTrue(hasattr(imported_module, 'build_release_wheelhouse'))
 
     def test_sqlcipher_loader_prefers_sqlcipher3(self) -> None:
         def importer(module_name: str) -> SqlCipherDbApi:

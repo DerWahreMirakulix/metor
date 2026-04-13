@@ -49,7 +49,13 @@ from metor.core.daemon.managed.network.state import (
 )
 from metor.core.daemon.managed.outbox import OutboxWorker
 from metor.core.daemon.managed.network.stream import TcpStreamReader
-from metor.data import ContactManager, HistoryManager, MessageManager, SettingKey
+from metor.data import (
+    ContactManager,
+    HistoryEvent,
+    HistoryManager,
+    MessageManager,
+    SettingKey,
+)
 from metor.data.profile import ProfileManager
 from metor.data.profile.config import Config
 from metor.ui.chat.ipc import IpcClient
@@ -128,11 +134,33 @@ class _DummyMessageManager:
         self.queued.append(kwargs)
         return _QueueResult()
 
+    def has_inbound_message(self, _onion: str, _msg_id: str) -> bool:
+        return False
+
+    def get_unread_live_count(self, _onion: str) -> int:
+        return 0
+
 
 class _DummyConn:
     def __init__(self) -> None:
         self.sent: list[bytes] = []
         self.closed: bool = False
+
+    def sendall(self, payload: bytes) -> None:
+        self.sent.append(payload)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _NetworkSocket:
+    def __init__(self) -> None:
+        self.closed: bool = False
+        self.sent: list[bytes] = []
+        self.timeouts: list[float] = []
+
+    def settimeout(self, timeout: float) -> None:
+        self.timeouts.append(timeout)
 
     def sendall(self, payload: bytes) -> None:
         self.sent.append(payload)
@@ -817,6 +845,35 @@ class DaemonHardeningTests(unittest.TestCase):
                 conn.close()
             active_peer.close()
 
+    def test_connect_helper_closes_socket_after_handshake_failure(self) -> None:
+        state = StateTracker()
+        controller = _ConnectControllerHarness(
+            state,
+            _ConnectTestConfig(max_connections=10, max_retries=0),
+        )
+        conn = _NetworkSocket()
+        controller.tor_manager_mock.connect = Mock(return_value=conn)
+
+        class _InvalidChallengeStream:
+            def __init__(self, _conn: Any) -> None:
+                return None
+
+            def read_line(self) -> str:
+                return '/msg invalid'
+
+        with patch(
+            'metor.core.daemon.managed.network.controller.session.connect.TcpStreamReader',
+            _InvalidChallengeStream,
+        ):
+            connect_to_helper(
+                cast(ConnectControllerProtocol, controller),
+                'peer',
+                origin=ConnectionOrigin.MANUAL,
+            )
+
+        self.assertTrue(conn.closed)
+        self.assertEqual(state.get_tracked_live_socket_count(), 0)
+
     def test_async_drop_skips_invalid_payload_and_processes_next_message(self) -> None:
         history_manager = _DummyHistoryManager()
         message_manager = _DummyMessageManager()
@@ -854,6 +911,33 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(message_manager.queued[0]['payload'], 'hello')
         self.assertEqual(conn.sent, [b'/ack msg-1\n'])
         self.assertTrue(conn.closed)
+
+    def test_live_router_disconnects_on_invalid_payload_without_ack(self) -> None:
+        history_manager = _DummyHistoryManager()
+        message_manager = _DummyMessageManager()
+        router = MessageRouter(
+            cm=cast(ContactManager, _DummyContactManager()),
+            hm=cast(HistoryManager, history_manager),
+            mm=cast(MessageManager, message_manager),
+            state=cast(StateTracker, object()),
+            broadcast_callback=lambda _event: None,
+            has_clients_callback=lambda: False,
+            has_live_consumers_callback=lambda: False,
+            config=cast(Config, _DummyConfig()),
+        )
+        conn = _DummyConn()
+
+        should_disconnect = router.process_incoming_msg(
+            cast(socket.socket, conn),
+            'peer-onion',
+            'transport-id',
+            'not-base64!!!',
+        )
+
+        self.assertTrue(should_disconnect)
+        self.assertEqual(conn.sent, [])
+        self.assertEqual(message_manager.queued, [])
+        self.assertEqual(history_manager.events[0][0][0], HistoryEvent.STREAM_CORRUPTED)
 
     def test_tcp_stream_reader_preserves_partial_buffer_bytes(self) -> None:
         writer, reader = socket.socketpair()
@@ -927,6 +1011,10 @@ class DaemonHardeningTests(unittest.TestCase):
                 f'/challenge {"ab" * (Constants.TOR_HANDSHAKE_CHALLENGE_BYTES - 1)}'
             )
 
+    def test_handshake_protocol_rejects_auth_frame_with_extra_tokens(self) -> None:
+        with self.assertRaises(ValueError):
+            HandshakeProtocol.parse_auth_line('/auth peer sig ASYNC extra')
+
     def test_crypto_verify_signature_rejects_invalid_onion_checksum(self) -> None:
         seed = b'\x42' * 32
         public_key, secret_key = nacl.bindings.crypto_sign_seed_keypair(seed)
@@ -997,6 +1085,55 @@ class DaemonHardeningTests(unittest.TestCase):
             self.assertEqual(disconnect_calls[0][0], 'peer-onion')
             self.assertFalse(disconnect_calls[0][1])
             self.assertFalse(disconnect_calls[0][2])
+            self.assertEqual(reject_calls, [])
+        finally:
+            writer.close()
+            if reader.fileno() != -1:
+                reader.close()
+
+    def test_receiver_ignores_malformed_ack_frame(self) -> None:
+        disconnect_calls: list[tuple[Any, ...]] = []
+        reject_calls: list[tuple[Any, ...]] = []
+        acked_msg_ids: list[str] = []
+
+        class _AckTrackingRouter:
+            def process_incoming_ack(self, _onion: str, msg_id: str) -> None:
+                acked_msg_ids.append(msg_id)
+
+            def process_incoming_msg(
+                self,
+                _conn: socket.socket,
+                _onion: str,
+                _payload_id: str,
+                _b64_payload: str,
+            ) -> bool:
+                return False
+
+        receiver = StreamReceiver(
+            cm=cast(ContactManager, _DummyContactManagerReceiver()),
+            hm=cast(HistoryManager, _DummyHistoryManagerReceiver()),
+            state=cast(StateTracker, _DummyState()),
+            router=cast(MessageRouter, _AckTrackingRouter()),
+            broadcast_callback=lambda _event: None,
+            disconnect_cb=lambda *args: disconnect_calls.append(args),
+            reject_cb=lambda *args: reject_calls.append(args),
+            config=cast(Config, _DummyReceiverConfig()),
+        )
+        writer, reader = socket.socketpair()
+        try:
+            writer.sendall(b'/ack msg-1 extra\n/disconnect\n')
+            writer.shutdown(socket.SHUT_WR)
+
+            receiver._receiver_target(
+                'peer-onion',
+                reader,
+                b'',
+                False,
+                ConnectionOrigin.INCOMING,
+            )
+
+            self.assertEqual(acked_msg_ids, [])
+            self.assertEqual(len(disconnect_calls), 1)
             self.assertEqual(reject_calls, [])
         finally:
             writer.close()
@@ -1086,6 +1223,39 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(len(disconnect_calls), 1)
         self.assertTrue(disconnect_calls[0][2])
         self.assertEqual(reject_calls, [])
+
+    def test_outbox_establish_tunnel_closes_socket_after_handshake_failure(
+        self,
+    ) -> None:
+        conn = _NetworkSocket()
+        tor_manager = Mock()
+        tor_manager.connect.return_value = conn
+        tor_manager.onion = 'self-onion'
+        worker = OutboxWorker(
+            tm=cast(TorManager, tor_manager),
+            mm=cast(MessageManager, object()),
+            hm=cast(HistoryManager, object()),
+            crypto=cast(Crypto, Mock()),
+            broadcast_callback=lambda _event: None,
+            stop_flag=threading.Event(),
+            config=cast(Config, _DummyConfig()),
+        )
+
+        class _InvalidChallengeStream:
+            def __init__(self, _conn: Any) -> None:
+                return None
+
+            def read_line(self) -> str:
+                return '/msg invalid'
+
+        with patch(
+            'metor.core.daemon.managed.outbox.TcpStreamReader',
+            _InvalidChallengeStream,
+        ):
+            result = worker._establish_tunnel('peer-onion')
+
+        self.assertIsNone(result)
+        self.assertTrue(conn.closed)
 
 
 if __name__ == '__main__':

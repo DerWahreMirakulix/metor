@@ -41,6 +41,32 @@ class HandshakeProtocol:
         return challenge_hex
 
     @staticmethod
+    def parse_auth_line(line: str) -> Tuple[str, str, bool]:
+        """
+        Validates one peer-auth frame and returns its onion, signature, and async flag.
+
+        Args:
+            line (str): The raw auth line received from the peer.
+
+        Raises:
+            ValueError: If the frame shape is malformed.
+
+        Returns:
+            Tuple[str, str, bool]: The remote onion, signature, and async-mode flag.
+        """
+        parts: list[str] = line.strip().split()
+        if len(parts) not in (3, 4) or parts[0] != TorCommand.AUTH.value:
+            raise ValueError('Invalid handshake auth frame.')
+
+        is_async: bool = False
+        if len(parts) == 4:
+            if parts[3] != 'ASYNC':
+                raise ValueError('Invalid handshake auth frame.')
+            is_async = True
+
+        return parts[1], parts[2], is_async
+
+    @staticmethod
     def evaluate_tie_breaker(
         local_onion: Optional[str], remote_onion: str, is_outbound_attempt: bool
     ) -> Tuple[bool, bool]:

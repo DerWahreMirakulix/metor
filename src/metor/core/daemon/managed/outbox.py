@@ -482,8 +482,9 @@ class OutboxWorker:
         Returns:
             Optional[Tuple[socket.socket, TcpStreamReader]]: The authenticated socket and its stream reader, or None if failed.
         """
+        conn: Optional[socket.socket] = None
         try:
-            conn: socket.socket = self._tm.connect(onion)
+            conn = self._tm.connect(onion)
             tor_timeout: float = self._config.get_float(SettingKey.TOR_TIMEOUT)
             conn.settimeout(tor_timeout)
 
@@ -507,6 +508,11 @@ class OutboxWorker:
             conn.sendall(auth_msg.encode('utf-8'))
             return conn, stream
         except Exception:
+            if conn is not None:
+                try:
+                    conn.close()
+                except OSError:
+                    pass
             return None
 
     def _cleanup_tunnels(self) -> None:

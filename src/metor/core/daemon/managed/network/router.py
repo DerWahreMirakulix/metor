@@ -223,20 +223,21 @@ class MessageRouter:
         Returns:
             bool: True if the connection should be terminated due to live backlog pressure.
         """
-        alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
-
-        msg_id: str = payload_id
-        content: str = b64_payload
-        timestamp: str = ''
-
         try:
-            raw_text = base64.b64decode(b64_payload).decode('utf-8')
-            envelope = json.loads(raw_text)
-            msg_id = str(envelope.get('id', payload_id))
-            content = str(envelope.get('text', raw_text))
-            timestamp = str(envelope.get('timestamp') or '')
-        except Exception:
-            pass
+            msg_id, content, timestamp = self._decode_live_payload(
+                payload_id,
+                b64_payload,
+            )
+        except ValueError as exc:
+            self._hm.log_event(
+                HistoryEvent.STREAM_CORRUPTED,
+                onion,
+                actor=HistoryActor.SYSTEM,
+                detail_text=str(exc),
+            )
+            return True
+
+        alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
 
         if self._mm.has_inbound_message(onion, msg_id):
             try:
@@ -282,6 +283,50 @@ class MessageRouter:
             )
 
         return False
+
+    def _decode_live_payload(
+        self,
+        payload_id: str,
+        b64_payload: str,
+    ) -> Tuple[str, str, Optional[str]]:
+        """
+        Decodes one strict live JSON envelope and rejects malformed payloads.
+
+        Args:
+            payload_id (str): The transport-level fallback identifier.
+            b64_payload (str): The received Base64 payload.
+
+        Raises:
+            ValueError: If the payload is not a valid live JSON envelope.
+
+        Returns:
+            Tuple[str, str, Optional[str]]: The decoded message ID, text payload,
+                and optional timestamp.
+        """
+        try:
+            raw_bytes: bytes = base64.b64decode(b64_payload, validate=True)
+            raw_text: str = raw_bytes.decode('utf-8')
+        except (binascii.Error, UnicodeDecodeError) as exc:
+            raise ValueError('Invalid live payload encoding.') from exc
+
+        try:
+            envelope_raw: JsonValue = json.loads(raw_text)
+        except json.JSONDecodeError as exc:
+            raise ValueError('Invalid live payload JSON.') from exc
+
+        if not isinstance(envelope_raw, dict):
+            raise ValueError('Invalid live payload envelope.')
+
+        envelope: Dict[str, JsonValue] = envelope_raw
+        text_value: JsonValue = envelope.get('text')
+        if not isinstance(text_value, str):
+            raise ValueError('Invalid live payload text field.')
+
+        timestamp_value: JsonValue = envelope.get('timestamp')
+        timestamp: Optional[str] = (
+            str(timestamp_value) if timestamp_value is not None else None
+        )
+        return str(envelope.get('id', payload_id)), text_value, timestamp
 
     def process_incoming_ack(self, onion: str, msg_id: str) -> None:
         """

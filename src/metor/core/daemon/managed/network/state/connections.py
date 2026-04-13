@@ -272,6 +272,29 @@ class StateTrackerConnectionsMixin:
                 time.time() + Constants.MUTUAL_CONNECT_RACE_WINDOW_SEC
             )
 
+    def clear_bound_outbound_socket(
+        self,
+        onion: str,
+        conn: Optional[socket.socket] = None,
+    ) -> None:
+        """
+        Removes one bound outbound socket while keeping the attempt bookkeeping intact.
+
+        Args:
+            onion (str): The peer onion identity.
+            conn (Optional[socket.socket]): Optional guard socket that must still match
+                the tracked outbound socket.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            current_conn: Optional[socket.socket] = self._outbound_sockets.get(onion)
+            if conn is not None and current_conn is not conn:
+                return
+
+            self._outbound_sockets.pop(onion, None)
+
     def is_current_outbound_socket(self, onion: str, sock: socket.socket) -> bool:
         """
         Checks whether one socket is the current tracked outbound attempt.

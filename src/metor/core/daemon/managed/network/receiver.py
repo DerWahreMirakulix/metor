@@ -99,6 +99,23 @@ class StreamReceiver:
             None,
         ] = reject_cb
 
+    @staticmethod
+    def _parse_ack_msg_id(msg: str) -> Optional[str]:
+        """
+        Validates one live ACK frame and returns its message identifier.
+
+        Args:
+            msg (str): The raw newline-delimited frame.
+
+        Returns:
+            Optional[str]: The acknowledged message ID, or None if the frame is malformed.
+        """
+        parts: list[str] = msg.split()
+        if len(parts) != 2 or parts[0] != TorCommand.ACK.value:
+            return None
+
+        return parts[1]
+
     def start_receiving(
         self,
         onion: str,
@@ -237,29 +254,30 @@ class StreamReceiver:
                 ):
                     remote_rejected = True
                     break
-                elif msg.startswith(f'{TorCommand.ACK.value} '):
-                    msg_id: str = msg.split(' ')[1]
-                    self._router.process_incoming_ack(onion, msg_id)
+                else:
+                    ack_msg_id: Optional[str] = self._parse_ack_msg_id(msg)
+                    if ack_msg_id is not None:
+                        self._router.process_incoming_ack(onion, ack_msg_id)
 
-                elif msg.startswith(f'{TorCommand.MSG.value} '):
-                    parts: List[str] = msg.split(' ', 2)
-                    if len(parts) == 3:
-                        msg_id = parts[1]
-                        content: str = parts[2]
+                    elif msg.startswith(f'{TorCommand.MSG.value} '):
+                        parts: List[str] = msg.split(' ', 2)
+                        if len(parts) == 3:
+                            msg_id = parts[1]
+                            content: str = parts[2]
 
-                        should_disconnect: bool = self._router.process_incoming_msg(
-                            conn, onion, msg_id, content
-                        )
-                        if should_disconnect:
-                            self._disconnect_cb(
-                                onion,
-                                True,
-                                False,
-                                None,
-                                False,
-                                connection_origin,
+                            should_disconnect: bool = self._router.process_incoming_msg(
+                                conn, onion, msg_id, content
                             )
-                            break
+                            if should_disconnect:
+                                self._disconnect_cb(
+                                    onion,
+                                    True,
+                                    False,
+                                    None,
+                                    False,
+                                    connection_origin,
+                                )
+                                break
         except Exception:
             pass
         finally:

@@ -32,6 +32,25 @@ from metor.core.daemon.managed.network.controller.session.protocols import (
 from metor.core.daemon.managed.network.stream import TcpStreamReader
 
 
+def _close_socket(conn: Optional[socket.socket]) -> None:
+    """
+    Closes one failed outbound socket quietly.
+
+    Args:
+        conn (Optional[socket.socket]): The socket to close.
+
+    Returns:
+        None
+    """
+    if conn is None:
+        return
+
+    try:
+        conn.close()
+    except OSError:
+        pass
+
+
 def connect_to(
     controller: ConnectControllerProtocol,
     target: str,
@@ -112,8 +131,9 @@ def connect_to(
         for retry_index in range(max_retries + 1):
             if controller._stop_flag.is_set():
                 break
+            conn: Optional[socket.socket] = None
             try:
-                conn: socket.socket = controller._tm.connect(onion)
+                conn = controller._tm.connect(onion)
                 controller._state.bind_outbound_socket(onion, conn)
                 conn.settimeout(controller._config.get_float(SettingKey.TOR_TIMEOUT))
 
@@ -155,8 +175,12 @@ def connect_to(
                         connection_origin=origin,
                     )
                 handshake_success = True
+                conn = None
                 return
             except Exception as exc:
+                _close_socket(conn)
+                if conn is not None:
+                    controller._state.clear_bound_outbound_socket(onion, conn)
                 last_error = str(exc).strip() or exc.__class__.__name__
                 if retry_index < max_retries:
                     controller._broadcast(
