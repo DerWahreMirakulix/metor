@@ -19,6 +19,22 @@ from metor.utils import Constants
 class IpcServer:
     """Manages the local IPC server socket for UI-Daemon communication."""
 
+    @staticmethod
+    def _build_client_limit_event(max_clients: int) -> IpcEvent:
+        """
+        Creates one IPC saturation event for a newly rejected client socket.
+
+        Args:
+            max_clients (int): The configured daemon IPC client ceiling.
+
+        Returns:
+            IpcEvent: The typed rejection event.
+        """
+        return create_event(
+            EventType.IPC_CLIENT_LIMIT_REACHED,
+            {'max_clients': max_clients},
+        )
+
     def __init__(
         self,
         pm: ProfileManager,
@@ -209,6 +225,23 @@ class IpcServer:
         except Exception:
             pass
 
+    def _reject_client_limit(self, conn: socket.socket, max_clients: int) -> None:
+        """
+        Rejects one freshly accepted IPC socket when the daemon is already saturated.
+
+        Args:
+            conn (socket.socket): The newly accepted socket.
+            max_clients (int): The configured daemon IPC client ceiling.
+
+        Returns:
+            None
+        """
+        self.send_to(conn, self._build_client_limit_event(max_clients))
+        try:
+            conn.close()
+        except Exception:
+            pass
+
     def _acceptor(self) -> None:
         """
         Target loop for accepting new incoming UI connections.
@@ -232,6 +265,17 @@ class IpcServer:
                 server.settimeout(Constants.THREAD_POLL_TIMEOUT)
                 conn, _ = server.accept()
                 conn.settimeout(daemon_ipc_timeout)
+                max_clients: int = self._pm.config.get_int(SettingKey.MAX_IPC_CLIENTS)
+
+                with self._lock:
+                    if len(self._clients) >= max_clients:
+                        reject_conn: Optional[socket.socket] = conn
+                    else:
+                        reject_conn = None
+
+                if reject_conn is not None:
+                    self._reject_client_limit(reject_conn, max_clients)
+                    continue
 
                 try:
                     handler_thread: threading.Thread = threading.Thread(

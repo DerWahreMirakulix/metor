@@ -341,9 +341,17 @@ class CliProxy:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.settimeout(self._pm.config.get_float(SettingKey.IPC_TIMEOUT))
                 s.connect((Constants.LOCALHOST, port))
-                self._send_socket_command(s, cmd)
+                send_failed: bool = False
+                try:
+                    self._send_socket_command(s, cmd)
+                except OSError:
+                    send_failed = True
 
                 if not wait_for_response:
+                    if send_failed:
+                        return self._prefix_remote(
+                            'Failed to communicate with the daemon.'
+                        )
                     return self._prefix_remote('Command executed successfully.')
 
                 buffer: bytearray = bytearray()
@@ -447,6 +455,9 @@ class CliProxy:
                         continue
 
                     return self._format_ipc_event(event)
+
+                if send_failed:
+                    return self._prefix_remote('Failed to communicate with the daemon.')
 
             return self._prefix_remote('Command executed successfully.')
         except PromptAbortedError:

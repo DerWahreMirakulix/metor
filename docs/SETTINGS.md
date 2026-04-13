@@ -329,6 +329,29 @@ Server-side timeout for daemon IPC sockets.
 
 ---
 
+#### `daemon.max_ipc_clients`
+
+Limits concurrent local IPC client sessions attached to the daemon. Additional clients are rejected immediately.
+
+| Property         | Value                                                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------------------------------- |
+| Type             | `int`                                                                                                         |
+| Default          | `8`                                                                                                           |
+| Category         | `Core Daemon`                                                                                                 |
+| Scope            | `Daemon runtime`                                                                                              |
+| Profile Override | `Yes`                                                                                                         |
+| Constraints      | Integer >= 1.                                                                                                 |
+| Security Note    | Caps localhost IPC fan-out so a local process cannot exhaust daemon threads or file descriptors indefinitely. |
+
+**CLI Examples**
+
+- `metor settings get daemon.max_ipc_clients`
+- `metor settings set daemon.max_ipc_clients 8`
+- `metor -p <profile> config get daemon.max_ipc_clients`
+- `metor -p <profile> config set daemon.max_ipc_clients 8`
+
+---
+
 #### `daemon.enable_tor_logging`
 
 Emits Tor process logs to the terminal.
@@ -441,6 +464,29 @@ Requires every UI session to authenticate even when the daemon is already runnin
 - `metor settings set daemon.require_local_auth true`
 - `metor -p <profile> config get daemon.require_local_auth`
 - `metor -p <profile> config set daemon.require_local_auth true`
+
+---
+
+#### `daemon.local_auth_lockout_timeout`
+
+Temporarily blocks new local unlock or session-auth attempts after too many invalid passwords. `0` disables the cross-connection lockout window.
+
+| Property         | Value                                                                        |
+| ---------------- | ---------------------------------------------------------------------------- |
+| Type             | `float`                                                                      |
+| Default          | `30.0`                                                                       |
+| Category         | `Core Daemon`                                                                |
+| Scope            | `Daemon runtime`                                                             |
+| Profile Override | `Yes`                                                                        |
+| Constraints      | Float >= 0 seconds.                                                          |
+| Security Note    | Slows reconnect-based local password guessing against the daemon IPC socket. |
+
+**CLI Examples**
+
+- `metor settings get daemon.local_auth_lockout_timeout`
+- `metor settings set daemon.local_auth_lockout_timeout 30.0`
+- `metor -p <profile> config get daemon.local_auth_lockout_timeout`
+- `metor -p <profile> config set daemon.local_auth_lockout_timeout 30.0`
 
 ---
 

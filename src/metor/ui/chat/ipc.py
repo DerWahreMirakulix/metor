@@ -18,6 +18,7 @@ class IpcClient:
     def __init__(
         self,
         port: int,
+        timeout: float,
         on_event: Callable[[IpcEvent], None],
         on_disconnect: Callable[[], None],
     ) -> None:
@@ -26,6 +27,7 @@ class IpcClient:
 
         Args:
             port (int): The local localhost port the Daemon is listening on.
+            timeout (float): Socket timeout used for connect and recv operations.
             on_event (Callable[[IpcEvent], None]): Callback fired when a valid event arrives.
             on_disconnect (Callable[[], None]): Callback fired if the connection drops.
 
@@ -33,6 +35,7 @@ class IpcClient:
             None
         """
         self._port: int = port
+        self._timeout: float = timeout
         self._on_event: Callable[[IpcEvent], None] = on_event
         self._on_disconnect: Callable[[], None] = on_disconnect
 
@@ -58,6 +61,7 @@ class IpcClient:
                 self._disconnect_notified = False
 
             self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._socket.settimeout(self._timeout)
             self._socket.connect((Constants.LOCALHOST, self._port))
             self._listener_thread = threading.Thread(
                 target=self._listener_thread_main, daemon=True
@@ -155,7 +159,11 @@ class IpcClient:
                 if not self._socket:
                     break
 
-                data: bytes = self._socket.recv(Constants.TCP_BUFFER_SIZE)
+                try:
+                    data: bytes = self._socket.recv(Constants.TCP_BUFFER_SIZE)
+                except socket.timeout:
+                    continue
+
                 if not data:
                     self._notify_disconnect()
                     break
@@ -170,7 +178,12 @@ class IpcClient:
                     line_bytes, _, rest = buffer.partition(b'\n')
                     buffer = bytearray(rest)
 
-                    line: str = line_bytes.decode('utf-8', errors='ignore').strip()
+                    try:
+                        line: str = line_bytes.decode('utf-8').strip()
+                    except UnicodeDecodeError:
+                        self._notify_disconnect()
+                        return
+
                     if not line:
                         continue
 

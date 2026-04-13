@@ -7,6 +7,7 @@ import sys
 import unittest
 from pathlib import Path
 from typing import cast
+from unittest.mock import patch
 
 import nacl.pwhash
 
@@ -126,6 +127,53 @@ class SessionAuthContractTests(unittest.TestCase):
         finally:
             left.close()
             right.close()
+
+    def test_local_auth_lockout_survives_reconnects_until_cooldown_expires(
+        self,
+    ) -> None:
+        tracker = LocalAuthTracker()
+        first_left, first_right = socket.socketpair()
+        second_left, second_right = socket.socketpair()
+
+        try:
+            with patch(
+                'metor.core.daemon.managed.local_auth.time.monotonic',
+                return_value=100.0,
+            ):
+                for _ in range(Constants.IPC_AUTH_FAILURE_LIMIT):
+                    tracker.register_invalid_unlock(first_right, lockout_seconds=30.0)
+
+            with patch(
+                'metor.core.daemon.managed.local_auth.time.monotonic',
+                return_value=110.0,
+            ):
+                retry_after = tracker.get_retry_after_seconds()
+
+                self.assertIsNotNone(retry_after)
+                self.assertGreaterEqual(cast(int, retry_after), 20)
+                self.assertTrue(
+                    tracker.register_invalid_unlock(
+                        second_right,
+                        lockout_seconds=30.0,
+                    )
+                )
+
+            with patch(
+                'metor.core.daemon.managed.local_auth.time.monotonic',
+                return_value=131.0,
+            ):
+                self.assertIsNone(tracker.get_retry_after_seconds())
+                self.assertFalse(
+                    tracker.register_invalid_unlock(
+                        second_right,
+                        lockout_seconds=30.0,
+                    )
+                )
+        finally:
+            first_left.close()
+            first_right.close()
+            second_left.close()
+            second_right.close()
 
 
 if __name__ == '__main__':

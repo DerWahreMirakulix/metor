@@ -45,6 +45,10 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
     EventType.INVALID_PASSWORD: TranslationDef(
         'Invalid master password.', StatusTone.ERROR
     ),
+    EventType.LOCAL_AUTH_RATE_LIMITED: TranslationDef(
+        'Too many invalid local authentication attempts. Retry in {retry_after}s.',
+        StatusTone.ERROR,
+    ),
     EventType.DB_CORRUPTED: TranslationDef(
         'Profile database is corrupted.', StatusTone.ERROR
     ),
@@ -132,6 +136,10 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
     ),
     EventType.DAEMON_OFFLINE: TranslationDef(
         'Local daemon is not running.', StatusTone.SYSTEM
+    ),
+    EventType.IPC_CLIENT_LIMIT_REACHED: TranslationDef(
+        'Daemon IPC client limit reached ({max_clients} sessions). Close another local session and retry.',
+        StatusTone.ERROR,
     ),
     EventType.CANNOT_CONNECT_SELF: TranslationDef(
         'You cannot connect to yourself.', StatusTone.SYSTEM

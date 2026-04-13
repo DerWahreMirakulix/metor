@@ -126,6 +126,16 @@ class ReleaseContractTests(unittest.TestCase):
 
         self.assertTrue(spec.default)
 
+    def test_local_auth_lockout_timeout_has_secure_default(self) -> None:
+        spec = Settings.SETTING_SPECS[SettingKey.LOCAL_AUTH_LOCKOUT_TIMEOUT]
+
+        self.assertEqual(spec.default, 30.0)
+
+    def test_max_ipc_clients_has_bounded_default(self) -> None:
+        spec = Settings.SETTING_SPECS[SettingKey.MAX_IPC_CLIENTS]
+
+        self.assertEqual(spec.default, 8)
+
     def test_release_bundle_name_normalizes_windows_host_labels(self) -> None:
         bundle_name = build_bundle_name('Windows', 'AMD64', 3, 11)
 

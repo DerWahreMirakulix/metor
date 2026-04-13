@@ -38,11 +38,13 @@ class SettingKey(str, Enum):
     STREAM_IDLE_TIMEOUT = 'daemon.stream_idle_timeout'
     LATE_ACCEPTANCE_TIMEOUT = 'daemon.late_acceptance_timeout'
     DAEMON_IPC_TIMEOUT = 'daemon.ipc_timeout'
+    MAX_IPC_CLIENTS = 'daemon.max_ipc_clients'
     ENABLE_TOR_LOGGING = 'daemon.enable_tor_logging'
     ENABLE_SQL_LOGGING = 'daemon.enable_sql_logging'
     ENABLE_RUNTIME_DB_MIRROR = 'daemon.enable_runtime_db_mirror'
     AUTO_ACCEPT_CONTACTS = 'daemon.auto_accept_contacts'
     REQUIRE_LOCAL_AUTH = 'daemon.require_local_auth'
+    LOCAL_AUTH_LOCKOUT_TIMEOUT = 'daemon.local_auth_lockout_timeout'
     ALLOW_DROPS = 'daemon.allow_drops'
     EPHEMERAL_MESSAGES = 'daemon.ephemeral_messages'
     RECORD_LIVE_HISTORY = 'daemon.record_live_history'
@@ -229,6 +231,15 @@ class Settings:
             constraints='Float >= 0.1 seconds.',
             min_value=0.1,
         ),
+        SettingKey.MAX_IPC_CLIENTS: SettingSpec(
+            key=SettingKey.MAX_IPC_CLIENTS,
+            default=8,
+            category='Core Daemon',
+            description='Limits concurrent local IPC client sessions attached to the daemon. Additional clients are rejected immediately.',
+            constraints='Integer >= 1.',
+            security_note='Caps localhost IPC fan-out so a local process cannot exhaust daemon threads or file descriptors indefinitely.',
+            min_value=1,
+        ),
         SettingKey.ENABLE_TOR_LOGGING: SettingSpec(
             key=SettingKey.ENABLE_TOR_LOGGING,
             default=False,
@@ -268,6 +279,15 @@ class Settings:
             description='Requires every UI session to authenticate even when the daemon is already running.',
             constraints='Boolean.',
             security_note='Enabled by default for encrypted profiles. Disable it only on trusted single-user hosts.',
+        ),
+        SettingKey.LOCAL_AUTH_LOCKOUT_TIMEOUT: SettingSpec(
+            key=SettingKey.LOCAL_AUTH_LOCKOUT_TIMEOUT,
+            default=30.0,
+            category='Core Daemon',
+            description='Temporarily blocks new local unlock or session-auth attempts after too many invalid passwords. `0` disables the cross-connection lockout window.',
+            constraints='Float >= 0 seconds.',
+            security_note='Slows reconnect-based local password guessing against the daemon IPC socket.',
+            min_value=0.0,
         ),
         SettingKey.ALLOW_DROPS: SettingSpec(
             key=SettingKey.ALLOW_DROPS,

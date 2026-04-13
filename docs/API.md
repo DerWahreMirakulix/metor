@@ -115,6 +115,8 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [InvalidPasswordEvent](#invalidpasswordevent)
 - [InvalidSettingKeyEvent](#invalidsettingkeyevent)
 - [InvalidTargetEvent](#invalidtargetevent)
+- [IpcClientLimitReachedEvent](#ipcclientlimitreachedevent)
+- [LocalAuthRateLimitedEvent](#localauthratelimitedevent)
 - [MaxConnectionsReachedEvent](#maxconnectionsreachedevent)
 - [MessagesClearFailedEvent](#messagesclearfailedevent)
 - [MessagesClearedEvent](#messagesclearedevent)
@@ -2229,6 +2231,48 @@ Signals that a user-supplied target could not be resolved.
 {
   "event_type": "invalid_target",
   "target": "string"
+}
+```
+
+---
+
+### `IpcClientLimitReachedEvent`
+
+Signals that the daemon rejected a new IPC session due to client saturation.
+
+| Field         | Type  | Default  |
+| ------------- | ----- | -------- |
+| `max_clients` | `int` | Required |
+
+**Wire Value:** `ipc_client_limit_reached`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "ipc_client_limit_reached",
+  "max_clients": 0
+}
+```
+
+---
+
+### `LocalAuthRateLimitedEvent`
+
+Signals that local daemon auth is temporarily rate-limited.
+
+| Field         | Type  | Default  |
+| ------------- | ----- | -------- |
+| `retry_after` | `int` | Required |
+
+**Wire Value:** `local_auth_rate_limited`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "local_auth_rate_limited",
+  "retry_after": 0
 }
 ```
 

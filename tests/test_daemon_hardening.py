@@ -20,6 +20,7 @@ import nacl.bindings
 from metor.core.api import (
     ConnectionOrigin,
     EventType,
+    InitCommand,
     IpcEvent,
     SelfDestructCommand,
     create_event,
@@ -51,6 +52,7 @@ from metor.core.daemon.managed.network.stream import TcpStreamReader
 from metor.data import ContactManager, HistoryManager, MessageManager, SettingKey
 from metor.data.profile import ProfileManager
 from metor.data.profile.config import Config
+from metor.ui.chat.ipc import IpcClient
 from metor.ui.cli.handlers import CommandHandlers
 from metor.ui.theme import Theme
 from metor.utils import Constants
@@ -142,10 +144,14 @@ class _DummyConn:
 class _AcceptedClientSocket:
     def __init__(self) -> None:
         self.closed: bool = False
+        self.sent: list[bytes] = []
         self.timeouts: list[float] = []
 
     def settimeout(self, timeout: float) -> None:
         self.timeouts.append(timeout)
+
+    def sendall(self, payload: bytes) -> None:
+        self.sent.append(payload)
 
     def close(self) -> None:
         self.closed = True
@@ -162,6 +168,25 @@ class _AcceptorSocket:
     def accept(self) -> tuple[_AcceptedClientSocket, tuple[str, int]]:
         conn = self._accepted_connections.pop(0)
         return conn, ('127.0.0.1', 0)
+
+
+class _StopAfterRejectSocket:
+    def __init__(self, server: IpcServer, conn: _AcceptedClientSocket) -> None:
+        self._server: IpcServer = server
+        self._conn: _AcceptedClientSocket = conn
+        self._accepted: bool = False
+        self.timeouts: list[float] = []
+
+    def settimeout(self, timeout: float) -> None:
+        self.timeouts.append(timeout)
+
+    def accept(self) -> tuple[_AcceptedClientSocket, tuple[str, int]]:
+        if not self._accepted:
+            self._accepted = True
+            return self._conn, ('127.0.0.1', 0)
+
+        self._server._stop_flag.set()
+        raise OSError('stop accept loop')
 
 
 class _ThreadStartHandle:
@@ -184,6 +209,45 @@ class _ThreadStartFactory:
         del args, kwargs
         self.calls += 1
         return _ThreadStartHandle(self.calls, self._server)
+
+
+class _PassiveThread:
+    def start(self) -> None:
+        return None
+
+    def is_alive(self) -> bool:
+        return False
+
+
+class _FakeChatIpcSocket:
+    def __init__(self, recv_items: list[object]) -> None:
+        self._recv_items: list[object] = recv_items
+        self.connected_to: Optional[tuple[str, int]] = None
+        self.sent: list[bytes] = []
+        self.timeouts: list[float] = []
+        self.closed: bool = False
+        self.shutdown_called: bool = False
+
+    def settimeout(self, timeout: float) -> None:
+        self.timeouts.append(timeout)
+
+    def connect(self, address: tuple[str, int]) -> None:
+        self.connected_to = address
+
+    def recv(self, _size: int) -> bytes:
+        item = self._recv_items.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return cast(bytes, item)
+
+    def sendall(self, payload: bytes) -> None:
+        self.sent.append(payload)
+
+    def shutdown(self, _how: int) -> None:
+        self.shutdown_called = True
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class _FaultingOutboxMessageManager:
@@ -553,6 +617,50 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertNotIn(first_conn, server._clients)
         self.assertIn(second_conn, server._clients)
 
+    def test_ipc_acceptor_rejects_clients_over_limit(self) -> None:
+        server = IpcServer(
+            cast(ProfileManager, _DummyProfileManager()),
+            lambda _cmd, _conn: None,
+        )
+        existing_client = cast(socket.socket, _DummyConn())
+        limited_conn = _AcceptedClientSocket()
+        server._clients = [existing_client]
+        server._server = cast(
+            socket.socket,
+            _StopAfterRejectSocket(server, limited_conn),
+        )
+
+        with patch('metor.core.daemon.managed.ipc.threading.Thread') as thread_cls:
+            server._acceptor()
+
+        thread_cls.assert_not_called()
+        self.assertTrue(limited_conn.closed)
+        self.assertEqual(len(limited_conn.sent), 1)
+        event = IpcEvent.from_dict(json.loads(limited_conn.sent[0].decode('utf-8')))
+        self.assertIs(event.event_type, EventType.IPC_CLIENT_LIMIT_REACHED)
+        self.assertEqual(getattr(event, 'max_clients'), 1)
+
+    def test_daemon_reports_local_auth_rate_limit_during_locked_startup(self) -> None:
+        daemon = self._build_daemon(start_locked=True)
+        daemon._ipc = Mock()
+        conn, peer = socket.socketpair()
+
+        try:
+            with patch.object(
+                daemon._local_auth,
+                'get_retry_after_seconds',
+                return_value=12,
+            ):
+                daemon._process_ui_command(InitCommand(), conn)
+
+            daemon._ipc.send_to.assert_called_once()
+            sent_event = daemon._ipc.send_to.call_args.args[1]
+            self.assertIs(sent_event.event_type, EventType.LOCAL_AUTH_RATE_LIMITED)
+            self.assertEqual(sent_event.retry_after, 12)
+        finally:
+            conn.close()
+            peer.close()
+
     def test_outbox_worker_reports_unexpected_loop_error_without_history_noise(
         self,
     ) -> None:
@@ -580,6 +688,36 @@ class DaemonHardeningTests(unittest.TestCase):
         )
         self.assertEqual(message_manager.calls, 2)
         self.assertEqual(history_manager.events, [])
+
+    def test_outbox_worker_requires_exact_ack_frames(self) -> None:
+        self.assertTrue(OutboxWorker._is_expected_ack_line('msg-1', '/ack msg-1'))
+        self.assertFalse(
+            OutboxWorker._is_expected_ack_line('msg-1', '/ack msg-1 extra')
+        )
+        self.assertFalse(OutboxWorker._is_expected_ack_line('msg-1', '/ack other'))
+        self.assertFalse(
+            OutboxWorker._is_expected_ack_line('msg-1', 'prefix /ack msg-1')
+        )
+
+    def test_chat_ipc_client_applies_timeout_and_ignores_read_timeouts(self) -> None:
+        disconnect_mock = Mock()
+        fake_socket = _FakeChatIpcSocket([socket.timeout(), b''])
+        client = IpcClient(
+            port=4312,
+            timeout=2.5,
+            on_event=lambda _event: None,
+            on_disconnect=disconnect_mock,
+        )
+
+        with (
+            patch('metor.ui.chat.ipc.socket.socket', return_value=fake_socket),
+            patch('metor.ui.chat.ipc.threading.Thread', return_value=_PassiveThread()),
+        ):
+            self.assertTrue(client.connect())
+
+        self.assertEqual(fake_socket.timeouts, [2.5])
+        client._listener_thread_main()
+        disconnect_mock.assert_called_once()
 
     def test_retunnel_keeps_existing_live_connection_until_replacement_starts(
         self,

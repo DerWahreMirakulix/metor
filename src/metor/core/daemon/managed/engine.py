@@ -186,7 +186,9 @@ class Daemon:
         if os.name != 'nt':
             signal.signal(signal.SIGINT, self._sig_handler)
             signal.signal(signal.SIGTERM, self._sig_handler)
-            signal.signal(signal.SIGHUP, self._sig_handler)
+            sighup_signal = getattr(signal, 'SIGHUP', None)
+            if sighup_signal is not None:
+                signal.signal(sighup_signal, self._sig_handler)
 
     def _install_runtime(self, runtime: DaemonRuntime) -> None:
         """
@@ -557,6 +559,34 @@ class Daemon:
         )
 
     @staticmethod
+    def _build_local_auth_rate_limited_event(retry_after: int) -> IpcEvent:
+        """
+        Creates one IPC event describing the active local-auth cooldown window.
+
+        Args:
+            retry_after (int): Remaining whole seconds before retry is allowed.
+
+        Returns:
+            IpcEvent: The typed rate-limit event.
+        """
+        return create_event(
+            EventType.LOCAL_AUTH_RATE_LIMITED,
+            {'retry_after': retry_after},
+        )
+
+    def _get_local_auth_lockout_timeout(self) -> float:
+        """
+        Resolves the configured cross-connection local-auth cooldown window.
+
+        Args:
+            None
+
+        Returns:
+            float: The lockout duration in seconds.
+        """
+        return self._pm.config.get_float(SettingKey.LOCAL_AUTH_LOCKOUT_TIMEOUT)
+
+    @staticmethod
     def _disconnect_ipc_client(conn: socket.socket) -> None:
         """
         Forcefully closes one IPC socket after too many invalid local auth attempts.
@@ -584,13 +614,27 @@ class Daemon:
         Returns:
             None
         """
+        with self._client_state_lock:
+            is_authenticated: bool = conn in self._authenticated_clients
+
+        local_auth_retry_after: Optional[int] = (
+            self._local_auth.get_retry_after_seconds()
+        )
+        if (
+            not is_authenticated
+            and local_auth_retry_after is not None
+            and (self._is_locked or self._requires_session_auth())
+        ):
+            self._ipc.send_to(
+                conn,
+                self._build_local_auth_rate_limited_event(local_auth_retry_after),
+            )
+            return
+
         if self._requires_session_auth() and not self._is_locked:
             if not isinstance(
                 cmd, (InitCommand, AuthenticateSessionCommand, UnlockCommand)
             ):
-                with self._client_state_lock:
-                    is_authenticated: bool = conn in self._authenticated_clients
-
                 if not is_authenticated:
                     prompt: Optional[SessionAuthPrompt] = (
                         self._local_auth.issue_session_challenge(conn)
@@ -632,6 +676,7 @@ class Daemon:
             result: SessionAuthAttemptResult = self._local_auth.verify_session_proof(
                 conn,
                 cmd.proof,
+                self._get_local_auth_lockout_timeout(),
             )
 
             if result.authenticated:
@@ -640,6 +685,16 @@ class Daemon:
                 self._ipc.send_to(
                     conn,
                     create_event(EventType.SESSION_AUTHENTICATED),
+                )
+                return
+
+            local_auth_retry_after = self._local_auth.get_retry_after_seconds()
+            if local_auth_retry_after is not None:
+                self._ipc.send_to(
+                    conn,
+                    self._build_local_auth_rate_limited_event(
+                        local_auth_retry_after,
+                    ),
                 )
                 return
 
@@ -669,7 +724,19 @@ class Daemon:
             try:
                 runtime = build_runtime(self._pm, cmd.password)
             except InvalidMasterPasswordError:
-                should_disconnect: bool = self._local_auth.register_invalid_unlock(conn)
+                should_disconnect: bool = self._local_auth.register_invalid_unlock(
+                    conn,
+                    self._get_local_auth_lockout_timeout(),
+                )
+                local_auth_retry_after = self._local_auth.get_retry_after_seconds()
+                if local_auth_retry_after is not None:
+                    self._ipc.send_to(
+                        conn,
+                        self._build_local_auth_rate_limited_event(
+                            local_auth_retry_after,
+                        ),
+                    )
+                    return
                 self._ipc.send_to(
                     conn,
                     create_event(EventType.INVALID_PASSWORD),

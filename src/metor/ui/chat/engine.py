@@ -95,6 +95,7 @@ class Chat:
 
         self._ipc = IpcClient(
             port=ipc_port,
+            timeout=self._pm.config.get_float(SettingKey.IPC_TIMEOUT),
             on_event=self._on_ipc_event,
             on_disconnect=self._on_ipc_disconnect,
         )
@@ -280,6 +281,8 @@ class Chat:
             EventType.DAEMON_UNLOCKED,
             EventType.SESSION_AUTHENTICATED,
             EventType.INVALID_PASSWORD,
+            EventType.LOCAL_AUTH_RATE_LIMITED,
+            EventType.IPC_CLIENT_LIMIT_REACHED,
         ):
             if event.event_type is EventType.INIT and self._handler:
                 self._handler.handle(event)
@@ -388,6 +391,14 @@ class Chat:
                     gate = EventType.DAEMON_LOCKED
                 elif session_auth_prompt is None:
                     continue
+
+            if gate in (
+                EventType.LOCAL_AUTH_RATE_LIMITED,
+                EventType.IPC_CLIENT_LIMIT_REACHED,
+            ):
+                if self._handler:
+                    self._handler.handle(gate_event)
+                return False
 
             if gate is EventType.DAEMON_UNLOCKED:
                 pending_gate = None

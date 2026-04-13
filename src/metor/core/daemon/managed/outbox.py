@@ -46,6 +46,26 @@ if TYPE_CHECKING:
 class OutboxWorker:
     """Background service for processing the Drop & Go offline message queue via Persistent Tunnels."""
 
+    @staticmethod
+    def _is_expected_ack_line(msg_id: str, ack_line: Optional[str]) -> bool:
+        """
+        Validates one drop ACK frame against the exact expected message identifier.
+
+        Args:
+            msg_id (str): The logical message identifier awaiting confirmation.
+            ack_line (Optional[str]): The raw newline-delimited ACK frame.
+
+        Returns:
+            bool: True if the ACK frame is well-formed and matches the message ID.
+        """
+        if ack_line is None:
+            return False
+
+        parts: list[str] = ack_line.strip().split()
+        return (
+            len(parts) == 2 and parts[0] == TorCommand.ACK.value and parts[1] == msg_id
+        )
+
     def __init__(
         self,
         tm: TorManager,
@@ -331,10 +351,7 @@ class OutboxWorker:
                         self._state.touch_drop_tunnel(onion)
 
                     ack_line: Optional[str] = stream.read_line()
-                    if (
-                        not ack_line
-                        or f'{TorCommand.ACK.value} {msg_id}' not in ack_line
-                    ):
+                    if not self._is_expected_ack_line(msg_id, ack_line):
                         raise ConnectionError('Tunnel dropped or invalid ACK received.')
 
                     self._mm.update_message_status(db_id, MessageStatus.DELIVERED)
@@ -407,7 +424,7 @@ class OutboxWorker:
             conn.sendall(drop_msg.encode('utf-8'))
 
             ack_line: Optional[str] = stream.read_line()
-            if not ack_line or f'{TorCommand.ACK.value} {msg_id}' not in ack_line:
+            if not self._is_expected_ack_line(msg_id, ack_line):
                 raise ConnectionError('Tunnel dropped or invalid ACK received.')
 
             self._mm.update_message_status(db_id, MessageStatus.DELIVERED)
