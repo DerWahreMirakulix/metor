@@ -4,10 +4,27 @@ Module defining application-wide constants to adhere to the DRY (Don't Repeat Yo
 
 import os
 from pathlib import Path
-from dotenv import load_dotenv
 
-# Load environment variables from a local .env file if present
-load_dotenv()
+
+def _load_local_dotenv() -> None:
+    """
+    Loads environment variables from a local `.env` file when python-dotenv exists.
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+
+    load_dotenv()
+
+
+_load_local_dotenv()
 
 
 class Constants:
