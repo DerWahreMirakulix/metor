@@ -1,15 +1,15 @@
 """
 Module for managing SQLite database connections and dynamic table setups.
 Ensures single-source-of-truth normalization for contacts and logs.
-Utilizes SQLCipher for secure Data-At-Rest encryption with a Connection Pool.
+Utilizes one supported SQLCipher DB-API backend for secure Data-At-Rest encryption.
 """
 
+import importlib
 import os
 import sys
 import threading
 import tempfile
 from contextlib import contextmanager
-from sqlcipher3 import dbapi2 as sqlite3
 from typing import (
     List,
     Tuple,
@@ -17,6 +17,7 @@ from typing import (
     Iterator,
     Dict,
     Callable,
+    Protocol,
     Union,
     cast,
     TYPE_CHECKING,
@@ -34,6 +35,123 @@ if TYPE_CHECKING:
 
 # Types
 SqlParam = Union[str, int, float, bytes, None]
+
+
+class SqlCipherCursor(Protocol):
+    """Protocol describing the cursor features used by the SQL manager."""
+
+    def execute(
+        self,
+        query: str,
+        params: Tuple[SqlParam, ...] = (),
+    ) -> 'SqlCipherCursor':
+        """Executes one SQL statement and returns the active cursor."""
+
+    def fetchone(self) -> object:
+        """Returns the next row from the current result set."""
+
+    def fetchall(self) -> list[tuple[object, ...]]:
+        """Returns all rows from the current result set."""
+
+
+class SqlCipherConnection(Protocol):
+    """Protocol describing the connection features used by the SQL manager."""
+
+    def __enter__(self) -> 'SqlCipherConnection':
+        """Enters the transactional context manager."""
+
+    def __exit__(
+        self,
+        exc_type: object,
+        exc: object,
+        traceback: object,
+    ) -> object:
+        """Exits the transactional context manager."""
+
+    def cursor(self) -> SqlCipherCursor:
+        """Creates one database cursor."""
+
+    def execute(
+        self,
+        query: str,
+        params: Tuple[SqlParam, ...] = (),
+    ) -> object:
+        """Executes one SQL statement directly on the connection."""
+
+    def commit(self) -> None:
+        """Commits the current transaction."""
+
+    def close(self) -> None:
+        """Closes the database connection."""
+
+
+class SqlCipherDbApi(Protocol):
+    """Protocol describing the DB-API module surface Metor requires."""
+
+    Connection: type[SqlCipherConnection]
+    Cursor: type[SqlCipherCursor]
+    DatabaseError: type[Exception]
+    OperationalError: type[Exception]
+
+    def connect(
+        self,
+        database: str,
+        check_same_thread: bool = False,
+    ) -> SqlCipherConnection:
+        """Opens one SQLCipher connection."""
+
+
+def _import_sqlcipher_module(module_name: str) -> SqlCipherDbApi:
+    """
+    Imports one SQLCipher DB-API module and narrows it to the required protocol.
+
+    Args:
+        module_name (str): The fully qualified module name.
+
+    Returns:
+        SqlCipherDbApi: The imported module narrowed to the required DB-API surface.
+    """
+    return cast(SqlCipherDbApi, importlib.import_module(module_name))
+
+
+def _load_sqlcipher_dbapi(
+    import_module: Callable[[str], SqlCipherDbApi] = _import_sqlcipher_module,
+) -> Tuple[SqlCipherDbApi, str]:
+    """
+    Resolves the first available SQLCipher DB-API module.
+
+    Args:
+        import_module (Callable[[str], SqlCipherDbApi]): Import function used for backend lookup.
+
+    Raises:
+        ImportError: If no supported SQLCipher backend can be imported.
+
+    Returns:
+        Tuple[SqlCipherDbApi, str]: The imported DB-API module and the backend package name.
+    """
+    candidates: Tuple[Tuple[str, str], ...] = (
+        ('sqlcipher3', 'sqlcipher3.dbapi2'),
+        ('pysqlcipher3', 'pysqlcipher3.dbapi2'),
+    )
+    errors: List[str] = []
+
+    for backend_name, module_name in candidates:
+        try:
+            return import_module(module_name), backend_name
+        except ImportError as exc:
+            errors.append(f'{backend_name}: {exc}')
+
+    joined_errors: str = '; '.join(errors)
+    raise ImportError(
+        'No supported SQLCipher backend is installed. '
+        'Install sqlcipher3-binary on Linux, sqlcipher3 on Windows, '
+        'or pysqlcipher3 when managing SQLCipher manually. '
+        f'Import attempts: {joined_errors}'
+    )
+
+
+sqlite3: SqlCipherDbApi
+sqlite3, SQLCIPHER_BACKEND = _load_sqlcipher_dbapi()
 
 
 class DatabaseCorruptedError(ValueError):
@@ -88,7 +206,7 @@ def _capture_c_stderr(
 class SqlManager:
     """Manages SQLite database connections using a Connection Pool to prevent lock crashes."""
 
-    _connections: Dict[str, sqlite3.Connection] = {}
+    _connections: Dict[str, SqlCipherConnection] = {}
     _pool_lock: threading.Lock = threading.Lock()
     _db_lock: threading.Lock = threading.Lock()
     _log_callback: Optional[Callable[[str], None]] = None
@@ -119,7 +237,7 @@ class SqlManager:
         """
         path_str: str = str(Path(db_path).absolute())
         with cls._pool_lock:
-            conn: Optional[sqlite3.Connection] = cls._connections.pop(path_str, None)
+            conn: Optional[SqlCipherConnection] = cls._connections.pop(path_str, None)
 
         if conn is not None:
             try:
@@ -218,7 +336,7 @@ class SqlManager:
         self._password: Optional[str] = password
         self._ensure_tables()
 
-    def _get_connection(self) -> sqlite3.Connection:
+    def _get_connection(self) -> SqlCipherConnection:
         """
         Establishes and returns a persistent connection from the pool.
         Applies SQLCipher encryption pragmas if a password is provided.
@@ -228,7 +346,7 @@ class SqlManager:
             None
 
         Returns:
-            sqlite3.Connection: The active database connection.
+            SqlCipherConnection: The active database connection.
         """
         path_str: str = str(self.db_path.absolute())
 
@@ -261,12 +379,12 @@ class SqlManager:
         """
         return self.db_path.parent / Constants.DB_RUNTIME_FILE
 
-    def _refresh_runtime_mirror(self, conn: sqlite3.Connection) -> None:
+    def _refresh_runtime_mirror(self, conn: SqlCipherConnection) -> None:
         """
         Exports the encrypted SQLCipher database to a plaintext runtime mirror.
 
         Args:
-            conn (sqlite3.Connection): The active encrypted database connection.
+            conn (SqlCipherConnection): The active encrypted database connection.
 
         Returns:
             None
@@ -295,21 +413,20 @@ class SqlManager:
         finally:
             self._detach_runtime_mirror(cursor)
 
-    def _detach_runtime_mirror(self, cursor: sqlite3.Cursor) -> None:
+    def _detach_runtime_mirror(self, cursor: SqlCipherCursor) -> None:
         """
         Detaches an existing runtime mirror alias from the active SQLCipher connection.
 
         Args:
-            cursor (sqlite3.Cursor): The active cursor bound to the encrypted connection.
+            cursor (SqlCipherCursor): The active cursor bound to the encrypted connection.
 
         Returns:
             None
         """
         try:
-            rows: List[Tuple[object, ...]] = cast(
-                List[Tuple[object, ...]],
-                cursor.execute('PRAGMA database_list').fetchall(),
-            )
+            rows: List[Tuple[object, ...]] = cursor.execute(
+                'PRAGMA database_list'
+            ).fetchall()
             for row in rows:
                 if len(row) >= 2 and str(row[1]) == 'runtime':
                     cursor.execute('DETACH DATABASE runtime')

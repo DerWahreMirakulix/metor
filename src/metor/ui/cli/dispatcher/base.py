@@ -305,7 +305,7 @@ class CliDispatcher(MessagesDispatchMixin, HistoryDispatchMixin):
                 else:
                     security_mode: ProfileSecurityMode = (
                         ProfileSecurityMode.PLAINTEXT
-                        if getattr(self._args, 'no_password', False)
+                        if getattr(self._args, 'plaintext', False)
                         else ProfileSecurityMode.ENCRYPTED
                     )
                     result: ProfileOperationResult = ProfileManager.add_profile_folder(

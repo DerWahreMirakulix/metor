@@ -263,11 +263,11 @@ class Settings:
         ),
         SettingKey.REQUIRE_LOCAL_AUTH: SettingSpec(
             key=SettingKey.REQUIRE_LOCAL_AUTH,
-            default=False,
+            default=True,
             category='Core Daemon',
             description='Requires every UI session to authenticate even when the daemon is already running.',
             constraints='Boolean.',
-            security_note='Recommended for remote, shared, or physically exposed hosts.',
+            security_note='Enabled by default for encrypted profiles. Disable it only on trusted single-user hosts.',
         ),
         SettingKey.ALLOW_DROPS: SettingSpec(
             key=SettingKey.ALLOW_DROPS,

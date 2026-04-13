@@ -6,6 +6,7 @@ import socket
 import sys
 import unittest
 from pathlib import Path
+from typing import cast
 
 import nacl.pwhash
 
@@ -35,7 +36,9 @@ class SessionAuthContractTests(unittest.TestCase):
         )
 
         self.assertIsInstance(cmd, AuthenticateSessionCommand)
-        self.assertEqual(cmd.proof, 'abc123')
+        typed_cmd = cast(AuthenticateSessionCommand, cmd)
+
+        self.assertEqual(typed_cmd.proof, 'abc123')
 
     def test_runtime_auth_events_preserve_optional_challenge_payload(self) -> None:
         challenge = 'ab' * Constants.SESSION_AUTH_CHALLENGE_BYTES
@@ -57,11 +60,13 @@ class SessionAuthContractTests(unittest.TestCase):
         )
 
         self.assertIsInstance(auth_event, AuthRequiredEvent)
-        self.assertEqual(auth_event.challenge, challenge)
-        self.assertEqual(auth_event.salt, salt)
+        typed_auth_event = cast(AuthRequiredEvent, auth_event)
+        self.assertEqual(typed_auth_event.challenge, challenge)
+        self.assertEqual(typed_auth_event.salt, salt)
         self.assertIsInstance(invalid_event, InvalidPasswordEvent)
-        self.assertEqual(invalid_event.challenge, challenge)
-        self.assertEqual(invalid_event.salt, salt)
+        typed_invalid_event = cast(InvalidPasswordEvent, invalid_event)
+        self.assertEqual(typed_invalid_event.challenge, challenge)
+        self.assertEqual(typed_invalid_event.salt, salt)
 
     def test_local_auth_tracker_accepts_valid_session_proof(self) -> None:
         tracker = LocalAuthTracker()

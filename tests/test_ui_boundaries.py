@@ -6,12 +6,13 @@ import importlib
 import sys
 import unittest
 from pathlib import Path
-from typing import Callable
+from typing import Callable, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.core.api import (
     MessageDirectionCode,
+    MessageEntry,
     MessageStatusCode,
     MessagesDataEvent,
 )
@@ -196,14 +197,17 @@ class UiBoundaryTests(unittest.TestCase):
 
     def test_messages_data_event_casts_entries_to_api_message_enums(self) -> None:
         event = MessagesDataEvent(
-            messages=[
-                {
-                    'direction': 'out',
-                    'status': 'delivered',
-                    'payload': 'hello',
-                    'timestamp': '2026-04-04T18:30:00+00:00',
-                }
-            ],
+            messages=cast(
+                list[MessageEntry],
+                [
+                    {
+                        'direction': 'out',
+                        'status': 'delivered',
+                        'payload': 'hello',
+                        'timestamp': '2026-04-04T18:30:00+00:00',
+                    }
+                ],
+            ),
             alias='peer',
             onion='peer.onion',
         )

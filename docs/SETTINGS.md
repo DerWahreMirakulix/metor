@@ -425,22 +425,22 @@ Automatically accepts incoming live sessions from saved contacts.
 
 Requires every UI session to authenticate even when the daemon is already running.
 
-| Property         | Value                                                        |
-| ---------------- | ------------------------------------------------------------ |
-| Type             | `bool`                                                       |
-| Default          | `False`                                                      |
-| Category         | `Core Daemon`                                                |
-| Scope            | `Daemon runtime`                                             |
-| Profile Override | `Yes`                                                        |
-| Constraints      | Boolean.                                                     |
-| Security Note    | Recommended for remote, shared, or physically exposed hosts. |
+| Property         | Value                                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| Type             | `bool`                                                                                   |
+| Default          | `True`                                                                                   |
+| Category         | `Core Daemon`                                                                            |
+| Scope            | `Daemon runtime`                                                                         |
+| Profile Override | `Yes`                                                                                    |
+| Constraints      | Boolean.                                                                                 |
+| Security Note    | Enabled by default for encrypted profiles. Disable it only on trusted single-user hosts. |
 
 **CLI Examples**
 
 - `metor settings get daemon.require_local_auth`
-- `metor settings set daemon.require_local_auth false`
+- `metor settings set daemon.require_local_auth true`
 - `metor -p <profile> config get daemon.require_local_auth`
-- `metor -p <profile> config set daemon.require_local_auth false`
+- `metor -p <profile> config set daemon.require_local_auth true`
 
 ---
 
