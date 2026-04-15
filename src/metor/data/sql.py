@@ -24,13 +24,13 @@ from typing import (
 )
 from pathlib import Path
 
-from metor.utils import Constants, secure_shred_file
+from metor.utils import Constants, secure_clear_buffer, secure_shred_file
 
 # Local Package Imports
 from metor.data.settings import SettingKey
 
 if TYPE_CHECKING:
-    from metor.data.profile.config import Config
+    from metor.data.profile import Config
 
 
 # Types
@@ -352,7 +352,10 @@ class SqlManager:
         """
         self.db_path: Path = Path(db_path)
         self._config: 'Config' = config
-        self._password: Optional[str] = password
+        self._password: Optional[bytearray] = None
+        self._uses_sqlcipher_password: bool = password is not None
+        if password is not None:
+            self._password = bytearray(password.encode('utf-8'))
         self._ensure_tables()
 
     def _get_connection(self) -> SqlCipherConnection:
@@ -377,11 +380,13 @@ class SqlManager:
 
             conn = sqlite3.connect(path_str, check_same_thread=False)
             if self._password:
-                safe_password: str = self._password.replace("'", "''")
+                safe_password: str = self._password.decode('utf-8').replace("'", "''")
                 # AUDIT EXCEPTION: SQLite PRAGMA statements do not support parameter binding (?).
                 # F-Strings are required here. The password is mathematically secured by escaping
                 # single quotes above to prevent SQL injection.
                 conn.execute(f"PRAGMA key = '{safe_password}'")
+                secure_clear_buffer(self._password)
+                self._password = None
 
             SqlManager._connections[path_str] = conn
             return conn
@@ -408,7 +413,7 @@ class SqlManager:
         Returns:
             None
         """
-        if not self._password:
+        if not self._uses_sqlcipher_password:
             self.cleanup_runtime_mirror()
             return
 

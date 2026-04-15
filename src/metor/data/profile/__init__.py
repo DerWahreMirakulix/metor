@@ -2,6 +2,7 @@
 Package initializer for the user profile management.
 """
 
+from metor.data.profile.config import Config
 from metor.data.profile.manager import ProfileManager
 from metor.data.profile.models import (
     PROFILE_CONFIG_SPECS,
@@ -16,6 +17,7 @@ from metor.data.profile.models import (
 )
 
 __all__ = [
+    'Config',
     'ProfileManager',
     'PROFILE_CONFIG_SPECS',
     'ProfileConfigKey',

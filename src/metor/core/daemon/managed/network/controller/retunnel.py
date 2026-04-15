@@ -10,6 +10,7 @@ from metor.core.api import (
     ConnectionRetryEvent,
     EventType,
     PeerNotFoundEvent,
+    RuntimeErrorCode,
     RetunnelInitiatedEvent,
     create_event,
 )
@@ -166,7 +167,7 @@ class ConnectionControllerRetunnelMixin(ConnectionControllerSupportMixin):
                     {
                         'alias': alias,
                         'onion': onion,
-                        'error': 'No active connection to retunnel',
+                        'error_code': RuntimeErrorCode.NO_ACTIVE_CONNECTION_TO_RETUNNEL,
                     },
                 )
             )

@@ -30,7 +30,7 @@ from metor.core.daemon.managed.network.stream import TcpStreamReader
 from metor.core.daemon.managed.network.router import MessageRouter
 
 if TYPE_CHECKING:
-    from metor.data.profile.config import Config
+    from metor.data.profile import Config
 
 
 class StreamReceiver:

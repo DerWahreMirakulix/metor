@@ -12,6 +12,7 @@ from metor.core.api import (
     EventType,
     IpcEvent,
     JsonValue,
+    RuntimeErrorCode,
     create_event,
 )
 from metor.core.daemon.managed.crypto import Crypto
@@ -30,7 +31,7 @@ from metor.core.daemon.managed.network.state import StateTracker
 
 if TYPE_CHECKING:
     from metor.core.daemon.managed.network.receiver import StreamReceiver
-    from metor.data.profile.config import Config
+    from metor.data.profile import Config
 
 
 class ConnectionControllerSupportMixin:
@@ -95,8 +96,9 @@ class ConnectionControllerSupportMixin:
             )
         )
         params: Dict[str, JsonValue] = {'alias': alias, 'onion': onion}
+        params['error_code'] = RuntimeErrorCode.RETUNNEL_RECONNECT_FAILED
         if error:
-            params['error'] = error
+            params['error_detail'] = error
         self._broadcast(create_event(EventType.RETUNNEL_FAILED, params))
 
     def _broadcast_retunnel_preserved_failure(
@@ -119,8 +121,9 @@ class ConnectionControllerSupportMixin:
         self._state.mark_live_reconnect_grace(onion, 0.0)
         self._state.clear_retunnel_flow(onion)
         params: Dict[str, JsonValue] = {'alias': alias, 'onion': onion}
+        params['error_code'] = RuntimeErrorCode.RETUNNEL_RECONNECT_FAILED
         if error:
-            params['error'] = error
+            params['error_detail'] = error
         self._broadcast(create_event(EventType.RETUNNEL_FAILED, params))
 
     def _discard_outbound_attempt_if_idle(self, onion: str) -> None:

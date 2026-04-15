@@ -13,6 +13,7 @@ from metor.core.api import (
     ConnectionReasonCode,
     EventType,
     JsonValue,
+    RuntimeErrorCode,
 )
 from metor.utils import TypeCaster
 
@@ -25,6 +26,18 @@ ERROR_DETAIL_CODES: set[EventType] = {
     EventType.RETUNNEL_FAILED,
     EventType.TOR_PROCESS_TERMINATED,
     EventType.TOR_START_FAILED,
+}
+
+RUNTIME_ERROR_TEXT: dict[RuntimeErrorCode, str] = {
+    RuntimeErrorCode.NO_CACHED_DROP_TUNNEL: 'No cached drop tunnel exists',
+    RuntimeErrorCode.NO_ACTIVE_CONNECTION_TO_RETUNNEL: (
+        'No active connection to retunnel'
+    ),
+    RuntimeErrorCode.RETUNNEL_RECONNECT_FAILED: 'Retunnel reconnect failed',
+    RuntimeErrorCode.PENDING_ACCEPTANCE_EXPIRED: 'Pending acceptance expired',
+    RuntimeErrorCode.TOR_LAUNCH_FAILED: 'Failed to launch Tor',
+    RuntimeErrorCode.TOR_BINARY_LAUNCH_FAILED: 'Failed to launch the Tor binary',
+    RuntimeErrorCode.TOR_PROXY_NOT_READY: 'Tor SOCKS proxy did not become ready',
 }
 
 VALIDATION_DETAIL_CODES: set[EventType] = {
@@ -593,7 +606,25 @@ class Translator:
         safe_params: Dict[str, JsonValue] = params.copy() if params else {}
 
         if code in ERROR_DETAIL_CODES:
-            error_text: str = str(safe_params.get('error') or '').strip()
+            error_text: str = ''
+            raw_error_code = safe_params.get('error_code')
+            if raw_error_code is not None:
+                try:
+                    error_code: RuntimeErrorCode = RuntimeErrorCode(str(raw_error_code))
+                    error_text = RUNTIME_ERROR_TEXT.get(error_code, '')
+                except ValueError:
+                    error_text = ''
+
+            if not error_text:
+                error_text = str(safe_params.get('error') or '').strip()
+
+            error_detail_text: str = str(safe_params.get('error_detail') or '').strip()
+            if error_detail_text:
+                if error_text:
+                    error_text = f'{error_text}: {error_detail_text}'
+                else:
+                    error_text = error_detail_text
+
             error_text = error_text.rstrip('.')
             safe_params['error'] = f': {error_text}' if error_text else ''
 

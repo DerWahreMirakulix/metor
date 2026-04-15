@@ -22,6 +22,7 @@ from metor.core.api import (
     DisconnectedEvent,
     IncomingConnectionEvent,
     RetunnelSuccessEvent,
+    RuntimeErrorCode,
     ConnectionRejectedEvent,
     MaxConnectionsReachedEvent,
     create_event,
@@ -49,7 +50,7 @@ from metor.core.daemon.managed.network.router import MessageRouter
 
 if TYPE_CHECKING:
     from metor.core.daemon.managed.network.receiver import StreamReceiver
-    from metor.data.profile.config import Config
+    from metor.data.profile import Config
 
 
 class InboundListener:
@@ -135,14 +136,28 @@ class InboundListener:
         Returns:
             None
         """
-        listener: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        listener.bind((Constants.LOCALHOST, self._tm.incoming_port or 0))
-        listener.listen(Constants.SERVER_BACKLOG)
+        listener: Optional[socket.socket] = None
+        try:
+            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            listener.bind((Constants.LOCALHOST, self._tm.incoming_port or 0))
+            listener.listen(Constants.SERVER_BACKLOG)
 
-        while not self._stop_flag.is_set():
-            try:
-                listener.settimeout(Constants.THREAD_POLL_TIMEOUT)
-                conn, _ = listener.accept()
+            while not self._stop_flag.is_set():
+                try:
+                    listener.settimeout(Constants.THREAD_POLL_TIMEOUT)
+                    conn, _ = listener.accept()
+                except socket.timeout:
+                    continue
+                except OSError as e:
+                    if self._stop_flag.is_set():
+                        break
+                    self._hm.log_event(
+                        HistoryEvent.STREAM_CORRUPTED,
+                        None,
+                        actor=HistoryActor.SYSTEM,
+                        detail_text=str(e).strip() or e.__class__.__name__,
+                    )
+                    continue
 
                 max_conn: int = self._config.get_int(
                     SettingKey.MAX_CONCURRENT_CONNECTIONS
@@ -169,18 +184,44 @@ class InboundListener:
                     continue
 
                 self._state.add_unauthenticated_connection(conn)
-                threading.Thread(
-                    target=self._handle_incoming, args=(conn,), daemon=True
-                ).start()
-            except MemoryError as e:
-                self._hm.log_event(
-                    HistoryEvent.STREAM_CORRUPTED,
-                    None,
-                    actor=HistoryActor.SYSTEM,
-                    detail_text=str(e),
-                )
-            except Exception:
-                continue
+                try:
+                    threading.Thread(
+                        target=self._handle_incoming, args=(conn,), daemon=True
+                    ).start()
+                except Exception:
+                    self._state.remove_unauthenticated_connection(conn)
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    self._hm.log_event(
+                        HistoryEvent.STREAM_CORRUPTED,
+                        None,
+                        actor=HistoryActor.SYSTEM,
+                        detail_text='Inbound listener failed to start handler thread.',
+                    )
+                    continue
+        except MemoryError as e:
+            self._hm.log_event(
+                HistoryEvent.STREAM_CORRUPTED,
+                None,
+                actor=HistoryActor.SYSTEM,
+                detail_text=str(e),
+            )
+        except Exception as e:
+            self._hm.log_event(
+                HistoryEvent.STREAM_CORRUPTED,
+                None,
+                actor=HistoryActor.SYSTEM,
+                detail_text=str(e).strip() or e.__class__.__name__,
+            )
+            self._broadcast(create_event(EventType.INTERNAL_ERROR))
+        finally:
+            if listener is not None:
+                try:
+                    listener.close()
+                except Exception:
+                    pass
 
     def _handle_incoming(self, conn: socket.socket) -> None:
         """
@@ -327,7 +368,7 @@ class InboundListener:
                     {
                         'alias': alias,
                         'onion': onion,
-                        'error': 'Pending acceptance expired',
+                        'error_code': RuntimeErrorCode.PENDING_ACCEPTANCE_EXPIRED,
                     },
                 )
             )
@@ -358,19 +399,21 @@ class InboundListener:
             self._tm.onion, onion, is_outbound_attempt
         )
 
+        transport_state = self._state.get_peer_transport_state(onion)
         grace_reconnect: bool = self._state.has_live_reconnect_grace(onion)
-        retunnel_reconnect: bool = self._state.is_retunneling(onion)
+        retunnel_reconnect: bool = transport_state.is_retunneling
         scheduled_auto_reconnect: bool = self._state.has_scheduled_auto_reconnect(onion)
         duplicate_reason_code: Optional[HistoryReasonCode] = None
 
         if (
-            self._state.is_connected_or_pending(onion)
+            transport_state.live_state
+            in (LiveTransportState.CONNECTED, LiveTransportState.PENDING)
             and not grace_reconnect
             and not retunnel_reconnect
         ):
             duplicate_reason_code = (
                 HistoryReasonCode.DUPLICATE_INCOMING_CONNECTED
-                if self._state.get_live_state(onion) is LiveTransportState.CONNECTED
+                if transport_state.live_state is LiveTransportState.CONNECTED
                 else HistoryReasonCode.DUPLICATE_INCOMING_PENDING
             )
             should_reject = True

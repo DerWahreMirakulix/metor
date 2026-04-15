@@ -19,6 +19,8 @@ from metor.utils import TypeCaster
 class CliProxySettingsActions:
     """Owns settings and config flows for the CLI proxy."""
 
+    _settings_cls = Settings
+
     def __init__(
         self,
         pm: ProfileManager,
@@ -64,7 +66,7 @@ class CliProxySettingsActions:
 
         if key_enum.is_ui:
             try:
-                Settings.set(key_enum, parsed_value)
+                self._pm.config.set(key_enum, parsed_value)
                 return (
                     f"Global setting '{Theme.YELLOW}{key}{Theme.RESET}' updated "
                     'successfully.'

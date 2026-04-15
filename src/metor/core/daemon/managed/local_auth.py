@@ -11,6 +11,7 @@ from metor.utils import (
     Constants,
     create_session_auth_challenge,
     derive_session_auth_proof_key,
+    secure_clear_buffer,
     verify_session_auth_proof,
 )
 
@@ -20,7 +21,7 @@ class SessionAuthContext:
     """In-memory verifier context for daemon-side session authentication."""
 
     salt_hex: str
-    proof_key: bytes
+    proof_key: bytearray
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,8 @@ class LocalAuthTracker:
             None
         """
         with self._lock:
+            if self._context is not None:
+                secure_clear_buffer(self._context.proof_key)
             self._context = context
             self._pending_challenges.clear()
             self._failure_counts.clear()
@@ -336,12 +339,13 @@ class LocalAuthTracker:
         attempts: int = self._failure_counts.get(conn, 0) + 1
         self._failure_counts[conn] = attempts
 
-        if lockout_seconds <= 0.0:
-            return attempts >= Constants.IPC_AUTH_FAILURE_LIMIT
-
         self._global_failure_count += 1
         if self._global_failure_count >= Constants.IPC_AUTH_FAILURE_LIMIT:
-            self._activate_lockout_locked(lockout_seconds)
+            if lockout_seconds > 0.0:
+                self._activate_lockout_locked(lockout_seconds)
             return True
+
+        if lockout_seconds <= 0.0:
+            return attempts >= Constants.IPC_AUTH_FAILURE_LIMIT
 
         return False

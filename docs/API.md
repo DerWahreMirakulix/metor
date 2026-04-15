@@ -2899,11 +2899,13 @@ Synchronizes a peer alias rename across UIs.
 
 Signals that retunneling failed for a peer.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
-| `error` | `Union[str, None]` | `None`   |
+| Field          | Type                                     | Default  |
+| -------------- | ---------------------------------------- | -------- |
+| `alias`        | `str`                                    | Required |
+| `onion`        | `Union[str, None]`                       | `None`   |
+| `error`        | `Union[str, None]`                       | `None`   |
+| `error_code`   | `Union[<enum 'RuntimeErrorCode'>, None]` | `None`   |
+| `error_detail` | `Union[str, None]`                       | `None`   |
 
 **Wire Value:** `retunnel_failed`
 
@@ -3142,9 +3144,11 @@ _No additional payload parameters._
 
 Signals that Tor terminated unexpectedly during startup.
 
-| Field   | Type               | Default |
-| ------- | ------------------ | ------- |
-| `error` | `Union[str, None]` | `None`  |
+| Field          | Type                                     | Default |
+| -------------- | ---------------------------------------- | ------- |
+| `error`        | `Union[str, None]`                       | `None`  |
+| `error_code`   | `Union[<enum 'RuntimeErrorCode'>, None]` | `None`  |
+| `error_detail` | `Union[str, None]`                       | `None`  |
 
 **Wire Value:** `tor_process_terminated`
 
@@ -3162,9 +3166,11 @@ Signals that Tor terminated unexpectedly during startup.
 
 Signals that the Tor process could not be started.
 
-| Field   | Type               | Default |
-| ------- | ------------------ | ------- |
-| `error` | `Union[str, None]` | `None`  |
+| Field          | Type                                     | Default |
+| -------------- | ---------------------------------------- | ------- |
+| `error`        | `Union[str, None]`                       | `None`  |
+| `error_code`   | `Union[<enum 'RuntimeErrorCode'>, None]` | `None`  |
+| `error_detail` | `Union[str, None]`                       | `None`  |
 
 **Wire Value:** `tor_start_failed`
 

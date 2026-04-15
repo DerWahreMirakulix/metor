@@ -2,7 +2,6 @@
 
 from typing import Callable, Optional
 
-from metor.core import TorManager
 from metor.core.daemon.managed import (
     CorruptedDaemonStorageError,
     DaemonStatus,
@@ -10,11 +9,12 @@ from metor.core.daemon.managed import (
     RuntimeStatusCallback,
     create_managed_daemon,
 )
-from metor.data import SqlManager
 from metor.data.profile import ProfileManager
 
 
 RuntimeLogCallback = Callable[[str], None]
+_default_sql_log_callback: Optional[RuntimeLogCallback] = None
+_default_tor_log_callback: Optional[RuntimeLogCallback] = None
 
 __all__ = [
     'CorruptedDaemonStorageError',
@@ -40,8 +40,9 @@ def configure_daemon_runtime_logging(
     Returns:
         None
     """
-    SqlManager.set_log_callback(sql_log_callback)
-    TorManager.set_log_callback(tor_log_callback)
+    global _default_sql_log_callback, _default_tor_log_callback
+    _default_sql_log_callback = sql_log_callback
+    _default_tor_log_callback = tor_log_callback
 
 
 def run_managed_daemon(
@@ -49,6 +50,8 @@ def run_managed_daemon(
     password: Optional[str] = None,
     start_locked: bool = False,
     status_callback: Optional[RuntimeStatusCallback] = None,
+    sql_log_callback: Optional[RuntimeLogCallback] = None,
+    tor_log_callback: Optional[RuntimeLogCallback] = None,
 ) -> None:
     """
     Builds and runs one managed daemon instance for the active profile.
@@ -58,6 +61,8 @@ def run_managed_daemon(
         password (Optional[str]): The master password for unlocked startup.
         start_locked (bool): Whether to start only the IPC surface until unlock.
         status_callback (Optional[RuntimeStatusCallback]): Optional status callback.
+        sql_log_callback (Optional[RuntimeLogCallback]): Optional SQL diagnostics callback.
+        tor_log_callback (Optional[RuntimeLogCallback]): Optional Tor diagnostics callback.
 
     Raises:
         InvalidDaemonPasswordError: If the supplied password cannot unlock storage.
@@ -71,5 +76,7 @@ def run_managed_daemon(
         password=password,
         start_locked=start_locked,
         status_callback=status_callback,
+        sql_log_callback=sql_log_callback or _default_sql_log_callback,
+        tor_log_callback=tor_log_callback or _default_tor_log_callback,
     )
     daemon.run()

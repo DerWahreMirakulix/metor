@@ -11,8 +11,7 @@ from metor.core.api import (
     RenameProfileCommand,
     SetDefaultProfileCommand,
 )
-from metor.data.profile import ProfileManager
-from metor.data.profile.models import ProfileSecurityMode
+from metor.data.profile import ProfileManager, ProfileSecurityMode
 from metor.ui import UIPresenter
 
 

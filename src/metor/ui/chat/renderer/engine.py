@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from typing import Callable, List, Dict, Optional, TYPE_CHECKING
 
 from metor.core.api import JsonValue
-from metor.data.settings import SettingKey
 from metor.ui.models import AliasPolicy, StatusTone
 from metor.ui import UIPresenter
 from metor.ui.chat.models import ChatMessageType, ChatLine
@@ -25,7 +24,12 @@ from metor.ui.chat.renderer.display import Display
 from metor.ui.chat.renderer.input import InputHandler
 
 if TYPE_CHECKING:
-    from metor.data.profile.config import Config
+    from metor.data.profile import Config
+
+
+UI_PROMPT_SIGN_KEY: str = 'ui.prompt_sign'
+UI_CHAT_LIMIT_KEY: str = 'ui.chat_limit'
+UI_CHAT_BUFFER_PADDING_KEY: str = 'ui.chat_buffer_padding'
 
 
 class Renderer:
@@ -42,7 +46,7 @@ class Renderer:
             None
         """
         self._config: 'Config' = config
-        self._initial_prompt: str = f'{self._config.get_str(SettingKey.PROMPT_SIGN)} '
+        self._initial_prompt: str = f'{self._config.get_str(UI_PROMPT_SIGN_KEY)} '
         self._prompt: str = self._initial_prompt
         self._alias_resolver: Callable[
             [Optional[str], Optional[str]], Optional[str]
@@ -173,7 +177,7 @@ class Renderer:
 
             insert_index: int = self._insert_chat_line(chat_line)
 
-            self._trim_message_buffer(self._config.get_int(SettingKey.CHAT_LIMIT))
+            self._trim_message_buffer(self._config.get_int(UI_CHAT_LIMIT_KEY))
 
             if len(self._display.all_msgs) <= previous_count:
                 self._redraw_from_index_locked(0, cols, skip_prompt)
@@ -257,8 +261,8 @@ class Renderer:
                 )
                 self._insert_chat_line(chat_line)
 
-            limit: int = self._config.get_int(SettingKey.CHAT_LIMIT)
-            padding: int = self._config.get_int(SettingKey.CHAT_BUFFER_PADDING)
+            limit: int = self._config.get_int(UI_CHAT_LIMIT_KEY)
+            padding: int = self._config.get_int(UI_CHAT_BUFFER_PADDING_KEY)
             total_limit: int = limit + padding
 
             self._trim_message_buffer(total_limit)

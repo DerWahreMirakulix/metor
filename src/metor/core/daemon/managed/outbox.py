@@ -36,11 +36,14 @@ from metor.utils import Constants
 # Local Package Imports
 from metor.core.daemon.managed.crypto import Crypto
 from metor.core.daemon.managed.models import TorCommand
-from metor.core.daemon.managed.network.handshake import HandshakeProtocol
-from metor.core.daemon.managed.network import StateTracker, TcpStreamReader
+from metor.core.daemon.managed.network import (
+    HandshakeProtocol,
+    StateTracker,
+    TcpStreamReader,
+)
 
 if TYPE_CHECKING:
-    from metor.data.profile.config import Config
+    from metor.data.profile import Config
 
 
 class OutboxWorker:

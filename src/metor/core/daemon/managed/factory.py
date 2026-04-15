@@ -2,7 +2,9 @@
 
 from typing import Callable, Dict, Optional, Union
 
+from metor.core import TorManager
 from metor.core.api import EventType, JsonValue
+from metor.data import SqlManager
 from metor.data.profile import ProfileManager
 
 # Local Package Imports
@@ -19,6 +21,7 @@ RuntimeStatusCallback = Callable[
     [Union[EventType, DaemonStatus], Dict[str, JsonValue]],
     None,
 ]
+RuntimeLogCallback = Callable[[str], None]
 
 __all__ = [
     'CorruptedDaemonStorageError',
@@ -42,6 +45,8 @@ def create_managed_daemon(
     password: Optional[str] = None,
     start_locked: bool = False,
     status_callback: Optional[RuntimeStatusCallback] = None,
+    sql_log_callback: Optional[RuntimeLogCallback] = None,
+    tor_log_callback: Optional[RuntimeLogCallback] = None,
 ) -> Daemon:
     """
     Creates one configured daemon instance for the active profile.
@@ -51,6 +56,8 @@ def create_managed_daemon(
         password (Optional[str]): The master password for unlocked startup.
         start_locked (bool): Whether to start only the IPC surface until unlock.
         status_callback (Optional[RuntimeStatusCallback]): Optional status callback.
+        sql_log_callback (Optional[RuntimeLogCallback]): Optional SQL diagnostics callback.
+        tor_log_callback (Optional[RuntimeLogCallback]): Optional Tor diagnostics callback.
 
     Raises:
         InvalidDaemonPasswordError: If the supplied password cannot unlock storage.
@@ -60,6 +67,11 @@ def create_managed_daemon(
         Daemon: The configured daemon instance.
     """
     pm.initialize()
+
+    if sql_log_callback is not None:
+        SqlManager.set_log_callback(sql_log_callback)
+    if tor_log_callback is not None:
+        TorManager.set_log_callback(tor_log_callback)
 
     if start_locked:
         return Daemon(

@@ -10,6 +10,7 @@ from metor.core.api.codes.history import (
 )
 from metor.core.api.codes.messages import MessageDirectionCode, MessageStatusCode
 from metor.core.api.codes.profile import ProfileOperationCode
+from metor.core.api.codes.runtime import RuntimeErrorCode
 from metor.core.api.codes.routing import CommandType, EventType
 from metor.core.api.codes.transport import (
     ConnectionActor,
@@ -33,4 +34,5 @@ __all__ = [
     'MessageDirectionCode',
     'MessageStatusCode',
     'ProfileOperationCode',
+    'RuntimeErrorCode',
 ]

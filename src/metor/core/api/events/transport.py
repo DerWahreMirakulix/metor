@@ -10,6 +10,7 @@ from metor.core.api.codes import (
     ConnectionOrigin,
     ConnectionReasonCode,
     EventType,
+    RuntimeErrorCode,
 )
 from metor.core.api.registry import register_event
 
@@ -48,6 +49,8 @@ class TorStartFailedEvent(IpcEvent):
     """Signals that the Tor process could not be started."""
 
     error: Optional[str] = None
+    error_code: Optional[RuntimeErrorCode] = None
+    error_detail: Optional[str] = None
     event_type: EventType = field(default=EventType.TOR_START_FAILED, init=False)
 
 
@@ -57,6 +60,8 @@ class TorProcessTerminatedEvent(IpcEvent):
     """Signals that Tor terminated unexpectedly during startup."""
 
     error: Optional[str] = None
+    error_code: Optional[RuntimeErrorCode] = None
+    error_detail: Optional[str] = None
     event_type: EventType = field(
         default=EventType.TOR_PROCESS_TERMINATED,
         init=False,
@@ -418,4 +423,6 @@ class RetunnelFailedEvent(IpcEvent):
     alias: str
     onion: Optional[str] = None
     error: Optional[str] = None
+    error_code: Optional[RuntimeErrorCode] = None
+    error_detail: Optional[str] = None
     event_type: EventType = field(default=EventType.RETUNNEL_FAILED, init=False)

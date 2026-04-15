@@ -12,7 +12,7 @@ from metor.data import ContactManager, HistoryActor, HistoryManager, MessageMana
 
 if TYPE_CHECKING:
     from metor.core.daemon.managed.network.receiver import StreamReceiver
-    from metor.data.profile.config import Config
+    from metor.data.profile import Config
 
 
 class _SessionControllerBaseProtocol(Protocol):

@@ -4,11 +4,13 @@ Provides the clean NetworkManager Facade to the Daemon Engine and exposes
 necessary network components for cross-domain Type Hints.
 """
 
+from metor.core.daemon.managed.network.handshake import HandshakeProtocol
 from metor.core.daemon.managed.network.manager import NetworkManager
 from metor.core.daemon.managed.network.state import StateTracker
 from metor.core.daemon.managed.network.stream import TcpStreamReader
 
 __all__ = [
+    'HandshakeProtocol',
     'NetworkManager',
     'StateTracker',
     'TcpStreamReader',

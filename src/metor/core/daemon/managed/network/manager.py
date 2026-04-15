@@ -15,12 +15,12 @@ from metor.data import HistoryManager, ContactManager, MessageManager
 # Local Package Imports
 from metor.core.daemon.managed.network.state import StateTracker
 from metor.core.daemon.managed.network.router import MessageRouter
-from metor.core.daemon.managed.network.controller import ConnectionController
+from metor.core.daemon.managed.network.controller.base import ConnectionController
 from metor.core.daemon.managed.network.receiver import StreamReceiver
 from metor.core.daemon.managed.network.listener import InboundListener
 
 if TYPE_CHECKING:
-    from metor.data.profile.config import Config
+    from metor.data.profile import Config
 
 
 class NetworkManager:

@@ -29,6 +29,7 @@ from metor.core.api import (
     SwitchCommand,
     SwitchSuccessEvent,
     RetunnelCommand,
+    RuntimeErrorCode,
 )
 from metor.core.daemon.managed.network import NetworkManager
 from metor.data import (
@@ -48,7 +49,7 @@ from metor.utils import clean_onion
 from metor.core.daemon.managed.outbox import OutboxWorker
 
 if TYPE_CHECKING:
-    from metor.data.profile.config import Config
+    from metor.data.profile import Config
 
 
 class NetworkCommandHandler:
@@ -161,7 +162,7 @@ class NetworkCommandHandler:
                     {
                         'alias': alias,
                         'onion': onion,
-                        'error': 'No cached drop tunnel exists',
+                        'error_code': RuntimeErrorCode.NO_CACHED_DROP_TUNNEL,
                     },
                 )
             )

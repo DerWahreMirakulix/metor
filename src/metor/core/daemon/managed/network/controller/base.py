@@ -15,7 +15,7 @@ from metor.core.daemon.managed.network.controller.reconnect import (
 from metor.core.daemon.managed.network.controller.retunnel import (
     ConnectionControllerRetunnelMixin,
 )
-from metor.core.daemon.managed.network.controller.session import (
+from metor.core.daemon.managed.network.controller.session.manager import (
     ConnectionControllerSessionMixin,
 )
 from metor.core.daemon.managed.network.router import MessageRouter
@@ -23,7 +23,7 @@ from metor.core.daemon.managed.network.state import StateTracker
 
 if TYPE_CHECKING:
     from metor.core.daemon.managed.network.receiver import StreamReceiver
-    from metor.data.profile.config import Config
+    from metor.data.profile import Config
 
 
 class ConnectionController(

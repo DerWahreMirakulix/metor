@@ -14,6 +14,7 @@ from metor.core.api import (
     DisconnectedEvent,
     EventType,
     MaxConnectionsReachedEvent,
+    RuntimeErrorCode,
     create_event,
 )
 from metor.core.daemon.managed.models import TorCommand
@@ -228,7 +229,8 @@ def connect_to(
                                     {
                                         'alias': alias,
                                         'onion': onion,
-                                        'error': failure_reason,
+                                        'error_code': RuntimeErrorCode.RETUNNEL_RECONNECT_FAILED,
+                                        'error_detail': failure_reason,
                                     },
                                 )
                             )

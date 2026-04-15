@@ -38,7 +38,7 @@ from metor.core.daemon.managed.network.state import StateTracker
 from metor.core.daemon.managed.network.stream import TcpStreamReader
 
 if TYPE_CHECKING:
-    from metor.data.profile.config import Config
+    from metor.data.profile import Config
 
 
 class MessageRouter:

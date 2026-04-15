@@ -265,8 +265,9 @@ class Daemon:
         Returns:
             None
         """
-        if self._is_stopping:
-            return
+        with self._stop_lock:
+            if self._is_stopping:
+                return
 
         try:
             if self._status_cb is not None:
@@ -433,7 +434,7 @@ class Daemon:
             with self._client_state_lock:
                 self._authenticated_clients.clear()
                 self._live_consumer_clients.clear()
-            self._local_auth.clear_all()
+            self._local_auth.install_context(None)
 
         try:
             if self._outbox is not None:
@@ -479,6 +480,12 @@ class Daemon:
         try:
             if self._tm is not None:
                 self._tm.stop()
+        except Exception:
+            pass
+
+        try:
+            if self._km is not None:
+                self._km.clear_sensitive_state()
         except Exception:
             pass
 

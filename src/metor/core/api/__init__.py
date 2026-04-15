@@ -22,6 +22,7 @@ from metor.core.api.codes import (
     MessageDirectionCode,
     MessageStatusCode,
     ProfileOperationCode,
+    RuntimeErrorCode,
 )
 from metor.core.api.commands import (
     AcceptCommand,
@@ -242,6 +243,7 @@ __all__ = [
     'MessageDirectionCode',
     'MessageStatusCode',
     'ProfileOperationCode',
+    'RuntimeErrorCode',
     'MessageEntry',
     'UnreadMessageEntry',
     'ProfileEntry',
