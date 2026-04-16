@@ -366,8 +366,11 @@ class CommandHandlers:
                 continue
 
             proxy: CliProxy = CliProxy(pm)
-            res: str = proxy.nuke_daemon()
-            if 'Error' in res or 'Failed' in res:
+            event = proxy.nuke_daemon_event()
+            if (
+                event is None
+                or event.event_type is not EventType.SELF_DESTRUCT_INITIATED
+            ):
                 failed_remotes.append(r)
             else:
                 print(f"Remote daemon for profile '{r}' nuked successfully.")

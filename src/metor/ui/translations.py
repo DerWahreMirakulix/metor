@@ -198,6 +198,11 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         StatusTone.INFO,
         AliasPolicy.DYNAMIC,
     ),
+    EventType.AUTO_FALLBACK_QUEUED: TranslationDef(
+        "No live connection to '{alias}'. Queued the message as a drop.",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
+    ),
     EventType.NO_PENDING_LIVE_MSGS: TranslationDef(
         "No pending live messages found for '{alias}'.",
         StatusTone.SYSTEM,

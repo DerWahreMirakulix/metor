@@ -4,6 +4,8 @@
 
 import argparse
 import importlib
+import shutil
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -11,12 +13,14 @@ from tempfile import TemporaryDirectory
 from types import ModuleType
 from typing import Sequence, cast
 from unittest.mock import patch
+from zipfile import ZipFile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.utils.release_bundle import (
     PIP_VERSION,
     build_bundle_name,
+    clean_packaging_artifacts,
     build_install_guide,
     build_release_wheelhouse,
     build_install_shell_script,
@@ -236,6 +240,38 @@ class ReleaseContractTests(unittest.TestCase):
                 for command in commands
             )
         )
+
+    def test_project_wheel_excludes_legacy_cli_proxy_module(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            clean_packaging_artifacts(repo_root)
+            subprocess.run(
+                [
+                    sys.executable,
+                    '-m',
+                    'pip',
+                    'wheel',
+                    '.',
+                    '--no-deps',
+                    '-w',
+                    str(output_dir),
+                ],
+                check=True,
+                cwd=repo_root,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            wheel_files = sorted(output_dir.glob('metor-*.whl'))
+
+            self.assertEqual(len(wheel_files), 1)
+
+            with ZipFile(wheel_files[0]) as wheel_archive:
+                archive_names = set(wheel_archive.namelist())
+
+            self.assertIn('metor/ui/cli/proxy/core.py', archive_names)
+            self.assertNotIn('metor/ui/cli/proxy.py', archive_names)
 
     def test_release_bundle_import_avoids_optional_runtime_utils_dependencies(
         self,

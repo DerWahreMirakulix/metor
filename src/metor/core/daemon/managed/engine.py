@@ -401,7 +401,12 @@ class Daemon:
             self.stop()
             return False
 
-        self._network.start_listener()
+        try:
+            self._network.start_listener()
+        except RuntimeError as exc:
+            self._on_runtime_internal_error(str(exc))
+            self.stop()
+            return False
 
         if not self._ipc.port:
             self._ipc.start()
@@ -657,9 +662,7 @@ class Daemon:
             return
 
         if self._requires_session_auth() and not self._is_locked:
-            if not isinstance(
-                cmd, (InitCommand, AuthenticateSessionCommand, UnlockCommand)
-            ):
+            if not isinstance(cmd, AuthenticateSessionCommand):
                 if not is_authenticated:
                     prompt: Optional[SessionAuthPrompt] = (
                         self._local_auth.issue_session_challenge(conn)

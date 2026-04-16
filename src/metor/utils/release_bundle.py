@@ -20,6 +20,19 @@ INSTALL_WINDOWS_NAME: str = 'install.cmd'
 CHECKSUM_FILE_NAME: str = 'SHA256SUMS.txt'
 
 
+def clean_packaging_artifacts(repo_root: Path) -> None:
+    """Removes stale local packaging outputs before building release wheels.
+
+    Args:
+        repo_root (Path): The repository root containing generated packaging artifacts.
+
+    Returns:
+        None
+    """
+    shutil.rmtree(repo_root / 'build', ignore_errors=True)
+    shutil.rmtree(repo_root / 'src' / 'metor.egg-info', ignore_errors=True)
+
+
 def normalize_machine(machine: str) -> str:
     """
     Normalizes a host machine identifier into a stable artifact label.
@@ -346,6 +359,7 @@ def build_release_wheelhouse(
         shutil.rmtree(bundle_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     wheelhouse_dir.mkdir(parents=True, exist_ok=True)
+    clean_packaging_artifacts(repo_root)
 
     pip_prefix: list[str] = [sys.executable, '-m', 'pip']
     if not skip_pip_upgrade:

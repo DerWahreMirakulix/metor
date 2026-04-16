@@ -68,6 +68,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [AliasSameEvent](#aliassameevent)
 - [AlreadyUnlockedEvent](#alreadyunlockedevent)
 - [AuthRequiredEvent](#authrequiredevent)
+- [AutoFallbackQueuedEvent](#autofallbackqueuedevent)
 - [AutoReconnectScheduledEvent](#autoreconnectscheduledevent)
 - [CannotConnectSelfEvent](#cannotconnectselfevent)
 - [CannotDropSelfEvent](#cannotdropselfevent)
@@ -1227,6 +1228,30 @@ Signals that the session must authenticate first.
 ```json
 {
   "event_type": "auth_required"
+}
+```
+
+---
+
+### `AutoFallbackQueuedEvent`
+
+Signals that one live-send request was queued directly as a drop.
+
+| Field    | Type               | Default  |
+| -------- | ------------------ | -------- |
+| `alias`  | `str`              | Required |
+| `msg_id` | `str`              | Required |
+| `onion`  | `Union[str, None]` | `None`   |
+
+**Wire Value:** `auto_fallback_queued`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "auto_fallback_queued",
+  "alias": "string",
+  "msg_id": "string"
 }
 ```
 

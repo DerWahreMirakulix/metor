@@ -5,6 +5,7 @@ from typing import Dict
 from metor.core.api import (
     AutoReconnectScheduledEvent,
     ConnectedEvent,
+    ConnectionActor,
     ConnectionAutoAcceptedEvent,
     ConnectionConnectingEvent,
     ConnectionFailedEvent,
@@ -20,6 +21,9 @@ from metor.core.api import (
     NoPendingConnectionEvent,
     PendingConnectionExpiredEvent,
     PeerNotFoundEvent,
+    RetunnelFailedEvent,
+    RetunnelInitiatedEvent,
+    RetunnelSuccessEvent,
 )
 
 from metor.ui.chat.event.protocols import EventHandlerProtocol
@@ -229,8 +233,57 @@ def handle_transport_event(handler: EventHandlerProtocol, event: IpcEvent) -> bo
         )
         return True
 
+    if isinstance(event, RetunnelInitiatedEvent):
+        handler._remember_peer(event.alias, event.onion)
+        handler._session.mark_retunneling(event.alias, event.onion)
+        handler._print_translated(
+            event.event_type,
+            alias=event.alias,
+            onion=event.onion,
+        )
+        if handler._session.focused_alias == event.alias:
+            handler._renderer.set_focus(event.alias, is_live=False)
+        return True
+
+    if isinstance(event, RetunnelSuccessEvent):
+        handler._remember_peer(event.alias, event.onion)
+        handler._session.clear_retunneling(event.alias, event.onion)
+        if event.alias not in handler._session.active_connections:
+            handler._session.active_connections.append(event.alias)
+        if event.alias in handler._session.pending_connections:
+            handler._session.pending_connections.remove(event.alias)
+        handler._print_translated(
+            event.event_type,
+            alias=event.alias,
+            onion=event.onion,
+        )
+        if handler._session.focused_alias == event.alias:
+            handler._renderer.set_focus(event.alias, is_live=True)
+        return True
+
+    if isinstance(event, RetunnelFailedEvent):
+        handler._remember_peer(event.alias, event.onion)
+        handler._session.clear_retunneling(event.alias, event.onion)
+        handler._print_translated(
+            event.event_type,
+            {
+                'error': event.error,
+                'error_code': event.error_code,
+                'error_detail': event.error_detail,
+            },
+            alias=event.alias,
+            onion=event.onion,
+        )
+        if (
+            handler._session.focused_alias == event.alias
+            and event.alias in handler._session.active_connections
+        ):
+            handler._renderer.set_focus(event.alias, is_live=True)
+        return True
+
     if isinstance(event, ConnectedEvent):
         handler._remember_peer(event.alias, event.onion)
+        handler._session.clear_retunneling(event.alias, event.onion)
         if event.alias not in handler._session.active_connections:
             handler._session.active_connections.append(event.alias)
         if event.alias in handler._session.pending_connections:
@@ -269,6 +322,7 @@ def handle_transport_event(handler: EventHandlerProtocol, event: IpcEvent) -> bo
 
     if isinstance(event, DisconnectedEvent):
         handler._remember_peer(event.alias, event.onion)
+        handler._session.clear_retunneling(event.alias, event.onion)
         handler._print_translated(
             event.event_type,
             {
@@ -286,7 +340,10 @@ def handle_transport_event(handler: EventHandlerProtocol, event: IpcEvent) -> bo
             handler._session.pending_connections.remove(event.alias)
 
         if handler._session.focused_alias == event.alias:
-            handler._renderer.set_focus(event.alias, is_live=False)
+            if event.actor is ConnectionActor.LOCAL:
+                handler._switch_focus(None, hide_message=True, sync_daemon=True)
+            else:
+                handler._renderer.set_focus(event.alias, is_live=False)
         return True
 
     return False

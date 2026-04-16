@@ -175,6 +175,31 @@ class SessionAuthContractTests(unittest.TestCase):
             second_left.close()
             second_right.close()
 
+    def test_local_auth_disconnect_limit_survives_reconnects_without_cooldown(
+        self,
+    ) -> None:
+        tracker = LocalAuthTracker()
+        first_left, first_right = socket.socketpair()
+        second_left, second_right = socket.socketpair()
+
+        try:
+            for _ in range(Constants.IPC_AUTH_FAILURE_LIMIT - 1):
+                self.assertFalse(
+                    tracker.register_invalid_unlock(first_right, lockout_seconds=0.0)
+                )
+
+            tracker.clear_connection(first_right)
+
+            self.assertTrue(
+                tracker.register_invalid_unlock(second_right, lockout_seconds=0.0)
+            )
+            self.assertIsNone(tracker.get_retry_after_seconds())
+        finally:
+            first_left.close()
+            first_right.close()
+            second_left.close()
+            second_right.close()
+
 
 if __name__ == '__main__':
     unittest.main()

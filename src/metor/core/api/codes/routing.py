@@ -121,6 +121,7 @@ class EventType(str, Enum):
     DROPS_DISABLED = 'drops_disabled'
     CANNOT_DROP_SELF = 'cannot_drop_self'
     DROP_QUEUED = 'drop_queued'
+    AUTO_FALLBACK_QUEUED = 'auto_fallback_queued'
     NO_PENDING_LIVE_MSGS = 'no_pending_live_msgs'
     FALLBACK_SUCCESS = 'fallback_success'
     CONTACT_ADDED = 'contact_added'

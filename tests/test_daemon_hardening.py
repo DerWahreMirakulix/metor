@@ -18,11 +18,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 import nacl.bindings
 
 from metor.core.api import (
+    AutoFallbackQueuedEvent,
+    AutoReconnectScheduledEvent,
+    ConnectionActor,
     ConnectionOrigin,
     EventType,
     InitCommand,
     IpcEvent,
+    RuntimeErrorCode,
     SelfDestructCommand,
+    UnlockCommand,
     create_event,
 )
 from metor.core import TorManager
@@ -34,6 +39,7 @@ from metor.core.daemon.managed.ipc import IpcServer
 from metor.core.daemon.managed.network.controller.retunnel import (
     ConnectionControllerRetunnelMixin,
 )
+from metor.core.daemon.managed.network.listener import InboundListener
 from metor.core.daemon.managed.network.controller.session.connect import (
     connect_to as connect_to_helper,
 )
@@ -261,6 +267,20 @@ class _PassiveThread:
         return False
 
 
+class _ImmediateListenerThread:
+    def __init__(self, target: Any) -> None:
+        self._target = target
+
+    def start(self) -> None:
+        self._target()
+
+
+class _ImmediateListenerThreadFactory:
+    def __call__(self, *args: Any, **kwargs: Any) -> _ImmediateListenerThread:
+        del args
+        return _ImmediateListenerThread(kwargs['target'])
+
+
 class _FakeChatIpcSocket:
     def __init__(self, recv_items: list[object]) -> None:
         self._recv_items: list[object] = recv_items
@@ -383,15 +403,23 @@ class _DummyReceiverSocket:
 
 
 class _ConnectTestConfig:
-    def __init__(self, max_connections: int, max_retries: int = 0) -> None:
+    def __init__(
+        self,
+        max_connections: int,
+        max_retries: int = 0,
+        live_reconnect_delay: int = 0,
+    ) -> None:
         self._max_connections: int = max_connections
         self._max_retries: int = max_retries
+        self._live_reconnect_delay: int = live_reconnect_delay
 
     def get_int(self, key: Any) -> int:
         if key is SettingKey.MAX_CONCURRENT_CONNECTIONS:
             return self._max_connections
         if key is SettingKey.MAX_CONNECT_RETRIES:
             return self._max_retries
+        if key is SettingKey.LIVE_RECONNECT_DELAY:
+            return self._live_reconnect_delay
         if key is SettingKey.LIVE_RECONNECT_GRACE_TIMEOUT:
             return 1
         return 0
@@ -425,6 +453,7 @@ class _ConnectControllerHarness:
         self._hm = cast(HistoryManager, Mock())
         self._mm = cast(MessageManager, Mock())
         self._receiver = None
+        self.enqueued_live_reconnects: list[str] = []
 
     def accept(
         self,
@@ -442,6 +471,48 @@ class _ConnectControllerHarness:
     def _sleep_connect_retry_backoff(self) -> None:
         return None
 
+    def _broadcast_retunnel_failure(
+        self,
+        alias: str,
+        onion: str,
+        error: Optional[str] = None,
+    ) -> None:
+        self._state.clear_retunnel_flow(onion)
+        self._broadcast(
+            create_event(
+                EventType.DISCONNECTED,
+                {
+                    'alias': alias,
+                    'onion': onion,
+                    'actor': ConnectionActor.SYSTEM,
+                    'origin': ConnectionOrigin.RETUNNEL,
+                },
+            )
+        )
+        params: dict[str, Any] = {
+            'alias': alias,
+            'onion': onion,
+            'error_code': RuntimeErrorCode.RETUNNEL_RECONNECT_FAILED,
+        }
+        if error is not None:
+            params['error_detail'] = error
+        self._broadcast(create_event(EventType.RETUNNEL_FAILED, params))
+        self._state.mark_live_reconnect_grace(onion, 1.0)
+        if self._config.get_int(SettingKey.LIVE_RECONNECT_DELAY) > 0:
+            self._state.mark_scheduled_auto_reconnect(onion)
+            if self._enqueue_live_reconnect(onion):
+                self._broadcast(
+                    AutoReconnectScheduledEvent(
+                        alias=alias,
+                        onion=onion,
+                        origin=ConnectionOrigin.AUTO_RECONNECT,
+                        actor=ConnectionActor.SYSTEM,
+                    )
+                )
+            return
+
+        self._state.mark_live_reconnect_grace(onion, 1.0)
+
     def _broadcast_retunnel_preserved_failure(
         self,
         alias: str,
@@ -455,6 +526,10 @@ class _ConnectControllerHarness:
             params['error'] = error
         self._broadcast(create_event(EventType.RETUNNEL_FAILED, params))
 
+    def _enqueue_live_reconnect(self, onion: str) -> bool:
+        self.enqueued_live_reconnects.append(onion)
+        return True
+
 
 class _RetunnelControllerHarness(ConnectionControllerRetunnelMixin):
     def __init__(self) -> None:
@@ -464,7 +539,8 @@ class _RetunnelControllerHarness(ConnectionControllerRetunnelMixin):
         )
         self._cm = cast(ContactManager, self.contact_manager_mock)
         self.state_mock = Mock()
-        self.state_mock.is_connected_or_pending.return_value = True
+        self.state_mock.is_connected_or_pending.side_effect = [True, False]
+        self.state_mock.is_retunneling.return_value = True
         self._state = cast(StateTracker, self.state_mock)
         self.broadcast_mock = Mock()
         self._broadcast = cast(Any, self.broadcast_mock)
@@ -577,6 +653,63 @@ class DaemonHardeningTests(unittest.TestCase):
             f'{Theme.CYAN}[DAEMON-LOG]{Theme.RESET} IPC acceptor recovered cleanly.',
         )
 
+    def test_inbound_listener_start_listener_raises_when_bind_fails(self) -> None:
+        listener = InboundListener(
+            tm=cast(TorManager, Mock(incoming_port=43123)),
+            cm=cast(ContactManager, Mock()),
+            hm=cast(HistoryManager, Mock()),
+            crypto=cast(Crypto, Mock()),
+            state=cast(StateTracker, Mock()),
+            router=cast(MessageRouter, Mock()),
+            receiver=cast(StreamReceiver, Mock()),
+            broadcast_callback=Mock(),
+            has_live_consumers_callback=lambda: False,
+            stop_flag=threading.Event(),
+            config=cast(Config, _DummyConfig()),
+        )
+        socket_mock = Mock()
+        socket_mock.bind.side_effect = OSError('bind failed')
+
+        with (
+            patch(
+                'metor.core.daemon.managed.network.listener.threading.Thread',
+                new=_ImmediateListenerThreadFactory(),
+            ),
+            patch(
+                'metor.core.daemon.managed.network.listener.socket.socket',
+                return_value=socket_mock,
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, 'bind failed'):
+                listener.start_listener()
+
+        listener._hm.log_event.assert_called_once()
+        listener._broadcast.assert_called_once()
+
+    def test_start_subsystems_aborts_when_listener_readiness_fails(self) -> None:
+        daemon = self._build_daemon()
+        daemon._pm.initialize = Mock()
+        daemon._tm = Mock()
+        daemon._tm.start.return_value = (True, None, {})
+        daemon._tm.onion = 'peeronion'
+        daemon._network = Mock()
+        daemon._network.start_listener.side_effect = RuntimeError('listener failed')
+        daemon._outbox = Mock()
+        daemon._ipc = Mock(port=43111)
+        daemon.stop = Mock()
+        status_cb = Mock()
+        daemon._status_cb = status_cb
+
+        result = daemon._start_subsystems()
+
+        self.assertFalse(result)
+        daemon.stop.assert_called_once()
+        daemon._outbox.start.assert_not_called()
+        status_cb.assert_called_once_with(
+            DaemonStatus.RUNTIME_ERROR,
+            {'message': 'listener failed'},
+        )
+
     def test_locked_daemon_rejects_self_destruct_command(self) -> None:
         daemon = self._build_daemon(start_locked=True)
         daemon._ipc = Mock()
@@ -621,6 +754,68 @@ class DaemonHardeningTests(unittest.TestCase):
                 daemon._process_ui_command(SelfDestructCommand(), conn)
 
             thread_cls.assert_not_called()
+            build_auth_event.assert_called_once()
+            daemon._ipc.send_to.assert_called_once()
+            sent_event = daemon._ipc.send_to.call_args.args[1]
+            self.assertIs(sent_event.event_type, EventType.AUTH_REQUIRED)
+        finally:
+            conn.close()
+            peer.close()
+
+    def test_unauthenticated_init_requires_session_auth(self) -> None:
+        daemon = self._build_daemon()
+        daemon._ipc = Mock()
+        daemon._network_handler = Mock()
+        conn, peer = socket.socketpair()
+
+        try:
+            with (
+                patch.object(Daemon, '_requires_session_auth', return_value=True),
+                patch.object(
+                    daemon._local_auth,
+                    'issue_session_challenge',
+                    return_value=object(),
+                ),
+                patch.object(
+                    daemon,
+                    '_build_session_auth_event',
+                    return_value=create_event(EventType.AUTH_REQUIRED),
+                ) as build_auth_event,
+            ):
+                daemon._process_ui_command(InitCommand(), conn)
+
+            build_auth_event.assert_called_once()
+            daemon._network_handler.handle.assert_not_called()
+            daemon._ipc.send_to.assert_called_once()
+            sent_event = daemon._ipc.send_to.call_args.args[1]
+            self.assertIs(sent_event.event_type, EventType.AUTH_REQUIRED)
+        finally:
+            conn.close()
+            peer.close()
+
+    def test_unauthenticated_unlock_requires_session_auth_when_already_unlocked(
+        self,
+    ) -> None:
+        daemon = self._build_daemon()
+        daemon._ipc = Mock()
+        conn, peer = socket.socketpair()
+
+        try:
+            with (
+                patch.object(Daemon, '_requires_session_auth', return_value=True),
+                patch.object(
+                    daemon._local_auth,
+                    'issue_session_challenge',
+                    return_value=object(),
+                ),
+                patch.object(
+                    daemon,
+                    '_build_session_auth_event',
+                    return_value=create_event(EventType.AUTH_REQUIRED),
+                ) as build_auth_event,
+            ):
+                daemon._process_ui_command(UnlockCommand(password='secret'), conn)
+
             build_auth_event.assert_called_once()
             daemon._ipc.send_to.assert_called_once()
             sent_event = daemon._ipc.send_to.call_args.args[1]
@@ -761,14 +956,19 @@ class DaemonHardeningTests(unittest.TestCase):
         client._listener_thread_main()
         disconnect_mock.assert_called_once()
 
-    def test_retunnel_keeps_existing_live_connection_until_replacement_starts(
+    def test_retunnel_disconnects_existing_live_connection_before_replacement(
         self,
     ) -> None:
         controller = _RetunnelControllerHarness()
 
         controller.retunnel('peer')
 
-        controller.disconnect_mock.assert_not_called()
+        controller.disconnect_mock.assert_called_once_with(
+            'peer-onion',
+            initiated_by_self=True,
+            suppress_events=True,
+            origin=ConnectionOrigin.RETUNNEL,
+        )
         controller.state_mock.mark_retunnel_started.assert_called_once_with(
             'peer-onion'
         )
@@ -858,6 +1058,42 @@ class DaemonHardeningTests(unittest.TestCase):
             if conn is not None and conn.fileno() != -1:
                 conn.close()
             active_peer.close()
+
+    def test_retunnel_final_connect_failure_schedules_auto_reconnect(
+        self,
+    ) -> None:
+        state = StateTracker()
+        state.mark_retunnel_started('peer-onion')
+        controller = _ConnectControllerHarness(
+            state,
+            _ConnectTestConfig(
+                max_connections=1,
+                max_retries=0,
+                live_reconnect_delay=15,
+            ),
+            connect_side_effect=ConnectionError('no route'),
+        )
+        try:
+            connect_to_helper(
+                cast(ConnectControllerProtocol, controller),
+                'peer',
+                origin=ConnectionOrigin.RETUNNEL,
+            )
+
+            events = [
+                call.args[0].event_type
+                for call in controller.broadcast_mock.call_args_list
+            ]
+
+            self.assertIn(EventType.DISCONNECTED, events)
+            self.assertIn(EventType.RETUNNEL_FAILED, events)
+            self.assertIn(EventType.AUTO_RECONNECT_SCHEDULED, events)
+            self.assertFalse(state.is_retunneling('peer-onion'))
+            self.assertTrue(state.has_scheduled_auto_reconnect('peer-onion'))
+            self.assertTrue(state.has_live_reconnect_grace('peer-onion'))
+            self.assertEqual(controller.enqueued_live_reconnects, ['peer-onion'])
+        finally:
+            state.clear_scheduled_auto_reconnect('peer-onion')
 
     def test_connect_helper_closes_socket_after_handshake_failure(self) -> None:
         state = StateTracker()
@@ -986,6 +1222,43 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(conn.sent, [])
         self.assertEqual(message_manager.queued, [])
         self.assertEqual(history_manager.events[0][0][0], HistoryEvent.STREAM_CORRUPTED)
+
+    def test_send_message_without_live_connection_emits_auto_fallback_queued_event(
+        self,
+    ) -> None:
+        history_manager = _DummyHistoryManager()
+        message_manager = _DummyMessageManager()
+        broadcasted: list[IpcEvent] = []
+
+        class _ResolvedContactManager(_DummyContactManager):
+            def resolve_target(self, _target: str) -> tuple[str, str]:
+                return 'peer', 'peer-onion'
+
+        class _NoLiveState:
+            def get_connection(self, _onion: str) -> None:
+                return None
+
+        router = MessageRouter(
+            cm=cast(ContactManager, _ResolvedContactManager()),
+            hm=cast(HistoryManager, history_manager),
+            mm=cast(MessageManager, message_manager),
+            state=cast(StateTracker, _NoLiveState()),
+            broadcast_callback=broadcasted.append,
+            has_clients_callback=lambda: False,
+            has_live_consumers_callback=lambda: False,
+            config=cast(Config, _DummyConfig()),
+        )
+
+        router.send_message('peer', 'hello', 'msg-1')
+
+        self.assertEqual(len(message_manager.queued), 1)
+        self.assertEqual(message_manager.queued[0]['msg_id'], 'msg-1')
+        self.assertEqual(message_manager.queued[0]['payload'], 'hello')
+        self.assertEqual(history_manager.events[0][0][0], HistoryEvent.QUEUED)
+        self.assertEqual(len(broadcasted), 1)
+        self.assertIsInstance(broadcasted[0], AutoFallbackQueuedEvent)
+        self.assertIs(broadcasted[0].event_type, EventType.AUTO_FALLBACK_QUEUED)
+        self.assertEqual(cast(AutoFallbackQueuedEvent, broadcasted[0]).msg_id, 'msg-1')
 
     def test_tcp_stream_reader_preserves_partial_buffer_bytes(self) -> None:
         writer, reader = socket.socketpair()

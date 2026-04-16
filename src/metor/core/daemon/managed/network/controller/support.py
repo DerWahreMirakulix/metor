@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 
 from metor.core import TorManager
 from metor.core.api import (
+    AutoReconnectScheduledEvent,
     ConnectionActor,
     ConnectionOrigin,
     EventType,
@@ -19,6 +20,7 @@ from metor.core.daemon.managed.crypto import Crypto
 from metor.data import (
     ContactManager,
     HistoryActor,
+    HistoryEvent,
     HistoryManager,
     MessageManager,
     SettingKey,
@@ -82,7 +84,6 @@ class ConnectionControllerSupportMixin:
         Returns:
             None
         """
-        self._state.mark_live_reconnect_grace(onion, 0.0)
         self._state.clear_retunnel_flow(onion)
         self._broadcast(
             create_event(
@@ -100,6 +101,28 @@ class ConnectionControllerSupportMixin:
         if error:
             params['error_detail'] = error
         self._broadcast(create_event(EventType.RETUNNEL_FAILED, params))
+
+        self._mark_live_reconnect_grace(onion)
+
+        if self._get_live_reconnect_delay() > 0:
+            self._state.mark_scheduled_auto_reconnect(onion)
+            was_scheduled: bool = self._enqueue_live_reconnect(onion)
+            if was_scheduled:
+                self._hm.log_event(
+                    HistoryEvent.AUTO_RECONNECT_SCHEDULED,
+                    onion,
+                    actor=HistoryActor.SYSTEM,
+                    trigger=ConnectionOrigin.AUTO_RECONNECT,
+                )
+                self._broadcast(
+                    AutoReconnectScheduledEvent(
+                        alias=alias,
+                        onion=onion,
+                        origin=ConnectionOrigin.AUTO_RECONNECT,
+                        actor=ConnectionActor.SYSTEM,
+                    )
+                )
+            return
 
     def _broadcast_retunnel_preserved_failure(
         self,
@@ -154,6 +177,18 @@ class ConnectionControllerSupportMixin:
         """
         reconnect_delay_sec: int = self._config.get_int(SettingKey.LIVE_RECONNECT_DELAY)
         return float(max(0, reconnect_delay_sec))
+
+    def _enqueue_live_reconnect(self, onion: str) -> bool:
+        """
+        Adds one peer to the reconnect queue without duplicating entries.
+
+        Args:
+            onion (str): The peer onion identity.
+
+        Returns:
+            bool: True if the peer was newly queued.
+        """
+        raise NotImplementedError
 
     def _allows_headless_live_backlog(self) -> bool:
         """

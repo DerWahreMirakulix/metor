@@ -24,6 +24,7 @@
     "PASSWORDLESS",
     "pathlib",
     "pids",
+    "prechat",
     "PRNG",
     "psutil",
     "pwhash",

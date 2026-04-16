@@ -19,6 +19,7 @@ from metor.core.api import (
     GetMessagesCommand,
     GetRawHistoryCommand,
     IpcCommand,
+    IpcEvent,
     JsonValue,
     MarkReadCommand,
     RemoveContactCommand,
@@ -220,6 +221,21 @@ class CliProxy:
         if err:
             return err
         return self._request_ipc(SelfDestructCommand(), wait_for_response=True)
+
+    def nuke_daemon_event(self) -> Optional[IpcEvent]:
+        """
+        Sends the self-destruct command and returns the terminal typed event.
+
+        Args:
+            None
+
+        Returns:
+            Optional[IpcEvent]: The terminal typed event, if one was received.
+        """
+        err: Optional[str] = self._ensure_profile_exists()
+        if err:
+            return None
+        return self._transport.request_ipc_event(SelfDestructCommand())
 
     def handle_settings_set(self, key: str, value: str) -> str:
         """

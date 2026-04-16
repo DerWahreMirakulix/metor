@@ -146,7 +146,7 @@ class ConnectionControllerRetunnelMixin(ConnectionControllerSupportMixin):
 
     def retunnel(self, target: str) -> None:
         """
-        Forces a Tor circuit rotation and replaces the live route without preemptive teardown.
+        Forces a Tor circuit rotation and replaces the live route after safe teardown.
 
         Args:
             target (str): The target alias or onion address.
@@ -190,6 +190,19 @@ class ConnectionControllerRetunnelMixin(ConnectionControllerSupportMixin):
             return
 
         self._state.mark_retunnel_started(onion)
-        self._mark_live_reconnect_grace(onion)
         self._state.mark_retunnel_reconnect(onion)
+        self.disconnect(
+            onion,
+            initiated_by_self=True,
+            suppress_events=True,
+            origin=ConnectionOrigin.RETUNNEL,
+        )
+        self._mark_live_reconnect_grace(onion)
+        self._sleep_retunnel_reconnect_delay()
+        if self._stop_flag.is_set():
+            return
+        if not self._state.is_retunneling(onion):
+            return
+        if self._state.is_connected_or_pending(onion):
+            return
         self.connect_to(onion, origin=ConnectionOrigin.RETUNNEL)

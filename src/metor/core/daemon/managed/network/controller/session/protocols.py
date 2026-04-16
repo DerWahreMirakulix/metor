@@ -63,6 +63,25 @@ class _SessionControllerBaseProtocol(Protocol):
 class ConnectControllerProtocol(_SessionControllerBaseProtocol, Protocol):
     """Surface required by the outbound connect helper."""
 
+    def _broadcast_retunnel_failure(
+        self,
+        alias: str,
+        onion: str,
+        error: Optional[str] = None,
+    ) -> None:
+        """
+        Broadcasts one retunnel failure and clears the related flow state.
+
+        Args:
+            alias (str): The peer alias.
+            onion (str): The peer onion identity.
+            error (Optional[str]): Optional failure detail.
+
+        Returns:
+            None
+        """
+        ...
+
     def _broadcast_retunnel_preserved_failure(
         self,
         alias: str,

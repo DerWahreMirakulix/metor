@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import List, Tuple, Dict, Callable, Optional, TYPE_CHECKING
 
 from metor.core.api import (
+    AutoFallbackQueuedEvent,
     EventType,
     IpcEvent,
     FallbackSuccessEvent,
@@ -182,11 +183,10 @@ class MessageRouter:
                     detail_code=HistoryReasonCode.AUTO_FALLBACK_TO_DROP,
                 )
                 self._broadcast(
-                    FallbackSuccessEvent(
+                    AutoFallbackQueuedEvent(
                         alias=alias,
                         onion=onion,
-                        count=1,
-                        msg_ids=[msg_id],
+                        msg_id=msg_id,
                     )
                 )
             return

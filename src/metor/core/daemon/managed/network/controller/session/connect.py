@@ -11,11 +11,7 @@ from metor.core.api import (
     ConnectionOrigin,
     ConnectionReasonCode,
     ConnectionRetryEvent,
-    DisconnectedEvent,
-    EventType,
     MaxConnectionsReachedEvent,
-    RuntimeErrorCode,
-    create_event,
 )
 from metor.core.daemon.managed.models import TorCommand
 from metor.data import (
@@ -213,26 +209,10 @@ def connect_to(
                                 failure_reason,
                             )
                         else:
-                            controller._state.clear_retunnel_flow(onion)
-                            controller._broadcast(
-                                DisconnectedEvent(
-                                    alias=alias,
-                                    onion=onion,
-                                    actor=ConnectionActor.SYSTEM,
-                                    origin=ConnectionOrigin.RETUNNEL,
-                                    reason_code=ConnectionReasonCode.RETRY_EXHAUSTED,
-                                )
-                            )
-                            controller._broadcast(
-                                create_event(
-                                    EventType.RETUNNEL_FAILED,
-                                    {
-                                        'alias': alias,
-                                        'onion': onion,
-                                        'error_code': RuntimeErrorCode.RETUNNEL_RECONNECT_FAILED,
-                                        'error_detail': failure_reason,
-                                    },
-                                )
+                            controller._broadcast_retunnel_failure(
+                                alias,
+                                onion,
+                                failure_reason,
                             )
                     else:
                         if origin is ConnectionOrigin.AUTO_RECONNECT:

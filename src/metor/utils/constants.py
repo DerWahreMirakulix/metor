@@ -81,6 +81,9 @@ class Constants:
 
     # Thread Constraints & Timing
     THREAD_POLL_TIMEOUT: float = 1.0  # Timeout for non-blocking accept/recv loops
+    LISTENER_READY_TIMEOUT: float = (
+        5.0  # Startup wait for inbound listener bind/listen readiness
+    )
     WORKER_SLEEP_SEC: float = 1.0  # Standard background worker tick rate
     WORKER_SLEEP_SLOW_SEC: float = 2.0  # Slower background worker tick rate
     LOCK_SLEEP_SEC: float = 0.05  # Sleep interval for FileLock spinlocks

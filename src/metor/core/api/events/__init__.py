@@ -87,6 +87,7 @@ from metor.core.api.events.runtime import (
 )
 from metor.core.api.events.transport import (
     AckEvent,
+    AutoFallbackQueuedEvent,
     AutoReconnectScheduledEvent,
     CannotConnectSelfEvent,
     CannotDropSelfEvent,
@@ -140,6 +141,7 @@ __all__ = [
     'RemoteMsgEvent',
     'AckEvent',
     'DropFailedEvent',
+    'AutoFallbackQueuedEvent',
     'ConnectedEvent',
     'DisconnectedEvent',
     'ConnectionConnectingEvent',

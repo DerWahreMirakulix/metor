@@ -373,6 +373,17 @@ class DropQueuedEvent(IpcEvent):
     event_type: EventType = field(default=EventType.DROP_QUEUED, init=False)
 
 
+@register_event(EventType.AUTO_FALLBACK_QUEUED)
+@dataclass
+class AutoFallbackQueuedEvent(IpcEvent):
+    """Signals that one live-send request was queued directly as a drop."""
+
+    alias: str
+    msg_id: str
+    onion: Optional[str] = None
+    event_type: EventType = field(default=EventType.AUTO_FALLBACK_QUEUED, init=False)
+
+
 @register_event(EventType.NO_PENDING_LIVE_MSGS)
 @dataclass
 class NoPendingLiveMessagesEvent(IpcEvent):

@@ -1,6 +1,6 @@
 """Facade exports for CLI-side IPC request orchestration."""
 
-from metor.ui.cli.ipc.session import IpcRequestSession
+from metor.ui.cli.ipc.request import IpcRequestResult, IpcRequestSession
 
 
-__all__ = ['IpcRequestSession']
+__all__ = ['IpcRequestResult', 'IpcRequestSession']

@@ -100,6 +100,10 @@ class InboundListener:
         self._has_live_consumers: Callable[[], bool] = has_live_consumers_callback
         self._stop_flag: threading.Event = stop_flag
         self._config: 'Config' = config
+        self._listener_thread: Optional[threading.Thread] = None
+        self._startup_event: threading.Event = threading.Event()
+        self._startup_lock: threading.Lock = threading.Lock()
+        self._startup_error: Optional[str] = None
 
     def _allows_headless_live_backlog(self) -> bool:
         """
@@ -113,6 +117,36 @@ class InboundListener:
         """
         return self._config.get_int(SettingKey.MAX_UNSEEN_LIVE_MSGS) != 0
 
+    def _set_startup_error(self, error: str) -> None:
+        """
+        Stores one listener startup failure and releases any waiting starter.
+
+        Args:
+            error (str): The startup failure detail.
+
+        Returns:
+            None
+        """
+        with self._startup_lock:
+            if self._startup_event.is_set():
+                return
+            self._startup_error = error
+            self._startup_event.set()
+
+    def _mark_started(self) -> None:
+        """
+        Marks the inbound listener as successfully bound and listening.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with self._startup_lock:
+            self._startup_error = None
+            self._startup_event.set()
+
     def start_listener(self) -> None:
         """
         Starts the local Tor listener in a background thread.
@@ -123,7 +157,29 @@ class InboundListener:
         Returns:
             None
         """
-        threading.Thread(target=self._listener_target, daemon=True).start()
+        with self._startup_lock:
+            self._startup_error = None
+            self._startup_event.clear()
+
+        self._listener_thread = threading.Thread(
+            target=self._listener_target,
+            daemon=True,
+        )
+        try:
+            self._listener_thread.start()
+        except Exception as exc:
+            self._set_startup_error(str(exc).strip() or exc.__class__.__name__)
+
+        ready: bool = self._startup_event.wait(Constants.LISTENER_READY_TIMEOUT)
+        with self._startup_lock:
+            startup_error: Optional[str] = self._startup_error
+
+        if startup_error is not None:
+            raise RuntimeError(
+                f'Inbound live listener failed to start: {startup_error}'
+            )
+        if not ready:
+            raise RuntimeError('Timed out while waiting for the inbound live listener.')
 
     def _listener_target(self) -> None:
         """
@@ -141,6 +197,7 @@ class InboundListener:
             listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             listener.bind((Constants.LOCALHOST, self._tm.incoming_port or 0))
             listener.listen(Constants.SERVER_BACKLOG)
+            self._mark_started()
 
             while not self._stop_flag.is_set():
                 try:
@@ -202,6 +259,7 @@ class InboundListener:
                     )
                     continue
         except MemoryError as e:
+            self._set_startup_error(str(e))
             self._hm.log_event(
                 HistoryEvent.STREAM_CORRUPTED,
                 None,
@@ -209,11 +267,13 @@ class InboundListener:
                 detail_text=str(e),
             )
         except Exception as e:
+            error_text: str = str(e).strip() or e.__class__.__name__
+            self._set_startup_error(error_text)
             self._hm.log_event(
                 HistoryEvent.STREAM_CORRUPTED,
                 None,
                 actor=HistoryActor.SYSTEM,
-                detail_text=str(e).strip() or e.__class__.__name__,
+                detail_text=error_text,
             )
             self._broadcast(create_event(EventType.INTERNAL_ERROR))
         finally:

@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 
 from metor.core.api import (
     AckEvent,
+    AutoFallbackQueuedEvent,
     ContactsDataEvent,
     DropFailedEvent,
     DropQueuedEvent,
@@ -108,9 +109,14 @@ def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool
             )
         return True
 
-    if isinstance(event, FallbackSuccessEvent):
+    if isinstance(event, (AutoFallbackQueuedEvent, FallbackSuccessEvent)):
         handler._remember_peer(event.alias, event.onion)
-        handler._renderer.apply_fallback_to_drop(event.msg_ids)
+        fallback_msg_ids: List[str]
+        if isinstance(event, AutoFallbackQueuedEvent):
+            fallback_msg_ids = [event.msg_id]
+        else:
+            fallback_msg_ids = event.msg_ids
+        handler._renderer.apply_fallback_to_drop(fallback_msg_ids)
         params_raw = dataclasses.asdict(event)
         params: Dict[str, JsonValue] = {
             key: value

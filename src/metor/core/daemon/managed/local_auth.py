@@ -346,6 +346,6 @@ class LocalAuthTracker:
             return True
 
         if lockout_seconds <= 0.0:
-            return attempts >= Constants.IPC_AUTH_FAILURE_LIMIT
+            return False
 
         return False

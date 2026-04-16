@@ -29,6 +29,13 @@ metor = "metor.main:main"
 [tool.setuptools]
 include-package-data = true
 
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["metor*"]
+
 [tool.setuptools.dynamic]
 version = { attr = "metor.__version__" }
 
