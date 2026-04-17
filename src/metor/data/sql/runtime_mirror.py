@@ -5,7 +5,7 @@ import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Iterator, List, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Callable, Iterator, Optional
 
 from metor.utils import Constants, secure_shred_file
 from metor.data.settings import SettingKey
@@ -99,10 +99,7 @@ def _detach_runtime_mirror(cursor: SqlCipherCursor) -> None:
         None
     """
     try:
-        rows = cast(
-            List[Tuple[object, ...]],
-            cursor.execute('PRAGMA database_list').fetchall(),
-        )
+        rows = cursor.execute('PRAGMA database_list').fetchall()
         for row in rows:
             if len(row) >= 2 and str(row[1]) == 'runtime':
                 cursor.execute('DETACH DATABASE runtime')

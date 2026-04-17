@@ -89,6 +89,7 @@ def reject(
     ):
         inflight_outbound = controller._is_inflight_outbound_socket(
             onion,
+            socket_to_close,
         )
         if not inflight_outbound:
             if not initiated_by_self:

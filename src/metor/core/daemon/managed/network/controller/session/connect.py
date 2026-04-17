@@ -13,7 +13,6 @@ from metor.core.api import (
     ConnectionRetryEvent,
     MaxConnectionsReachedEvent,
 )
-from metor.core.daemon.managed.models import TorCommand
 from metor.data import (
     HistoryActor,
     HistoryEvent,
@@ -147,9 +146,14 @@ def connect_to(
                     conn.close()
                     raise ConnectionError('Failed to sign live handshake challenge.')
 
+                local_onion: Optional[str] = controller._tm.onion
+                if not local_onion:
+                    conn.close()
+                    raise ConnectionError('Local onion unavailable for live handshake.')
+
                 conn.sendall(
                     HandshakeProtocol.build_auth_line(
-                        controller._tm.onion,
+                        local_onion,
                         signature,
                         origin=origin,
                     ).encode('utf-8')

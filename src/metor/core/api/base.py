@@ -8,6 +8,7 @@ import secrets
 from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import (
+    Callable,
     Dict,
     Iterator,
     Mapping,
@@ -21,6 +22,7 @@ from typing import (
     get_origin,
     get_args,
     TypeVar,
+    cast,
 )
 
 # Local Package Imports
@@ -149,6 +151,21 @@ def _coerce_and_validate(
     return coerced
 
 
+def _instantiate_validated_message(cls: Type[T], kwargs: Dict[str, object]) -> T:
+    """
+    Instantiates one validated DTO while keeping the strict runtime validation path.
+
+    Args:
+        cls (Type[T]): The target DTO type.
+        kwargs (Dict[str, object]): The validated constructor payload.
+
+    Returns:
+        T: The instantiated DTO.
+    """
+    constructor: Callable[..., T] = cast(Callable[..., T], cls)
+    return constructor(**kwargs)
+
+
 @dataclass
 class IpcMessage:
     """
@@ -209,7 +226,7 @@ class IpcCommand(IpcMessage):
         }
 
         coerced_kwargs: Dict[str, object] = _coerce_and_validate(target_cls, kwargs)
-        return target_cls(**coerced_kwargs)
+        return _instantiate_validated_message(target_cls, coerced_kwargs)
 
 
 @dataclass
@@ -245,7 +262,7 @@ class IpcEvent(IpcMessage):
         }
 
         coerced_kwargs: Dict[str, object] = _coerce_and_validate(target_cls, kwargs)
-        return target_cls(**coerced_kwargs)
+        return _instantiate_validated_message(target_cls, coerced_kwargs)
 
 
 def create_event(

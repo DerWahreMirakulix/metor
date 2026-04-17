@@ -571,8 +571,13 @@ class OutboxWorker:
                 conn.close()
                 return None
 
+            local_onion: Optional[str] = self._tm.onion
+            if not local_onion:
+                conn.close()
+                return None
+
             auth_msg: str = HandshakeProtocol.build_auth_line(
-                self._tm.onion,
+                local_onion,
                 signature,
                 is_async=True,
             )

@@ -227,13 +227,6 @@ class MessageRepository:
                         (existing.receipt_id,),
                     )
 
-                if direction is MessageDirection.IN:
-                    cursor.execute(
-                        'INSERT INTO inbound_spool (receipt_id, payload) VALUES (?, ?) '
-                        'ON CONFLICT(receipt_id) DO UPDATE SET payload = excluded.payload',
-                        (existing.receipt_id, payload),
-                    )
-
                 return QueuedMessageResult(existing.receipt_id)
 
             cursor.execute(
@@ -251,13 +244,9 @@ class MessageRepository:
                     created_at,
                 ),
             )
-            raw_receipt_id = cast(
-                Tuple[SqlParam, ...],
-                cast(
-                    List[Tuple[SqlParam, ...]],
-                    cursor.execute('SELECT last_insert_rowid()').fetchall(),
-                )[0],
-            )[0]
+            raw_receipt_id = cursor.execute('SELECT last_insert_rowid()').fetchall()[0][
+                0
+            ]
             receipt_id: int = int(str(raw_receipt_id))
 
             if direction is MessageDirection.IN:
