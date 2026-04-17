@@ -11,6 +11,7 @@ from typing import Dict, Optional, TypeVar
 
 from metor.core.api import (
     ConnectionsStateEvent,
+    ensure_request_id,
     EventType,
     IpcEvent,
     InitCommand,
@@ -31,6 +32,7 @@ from metor.ui import (
     PromptAbortedError,
     Theme,
     Translator,
+    get_session_auth_prompt,
     prompt_hidden,
     prompt_session_auth_proof,
 )
@@ -161,10 +163,11 @@ class Chat:
         if self._ipc is None:
             return None
 
+        request_id: str = ensure_request_id(cmd)
         self._ipc.send_command(cmd)
         auth_exchange = IpcAuthExchange(
             prompt_session_proof=lambda challenge, salt: prompt_session_auth_proof(
-                'Enter Master Password: ',
+                get_session_auth_prompt(self._pm),
                 challenge,
                 salt,
             ),
@@ -175,6 +178,7 @@ class Chat:
                 or None
             ),
             send_command=self._ipc.send_command,
+            request_id=request_id,
         )
 
         while True:
@@ -196,6 +200,9 @@ class Chat:
                     f'{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}'
                 )
                 return None
+
+            if event.request_id is not None and event.request_id != request_id:
+                continue
 
             if isinstance(event, expected_event_type):
                 return event

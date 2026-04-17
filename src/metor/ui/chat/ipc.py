@@ -4,7 +4,7 @@ import socket
 import threading
 from typing import Callable, Optional
 
-from metor.core.api import IpcCommand, IpcEvent
+from metor.core.api import ensure_request_id, IpcCommand, IpcEvent
 from metor.ui.ipc import BufferedIpcEventReader
 
 # Local Package Imports
@@ -138,6 +138,7 @@ class IpcClient:
             return
 
         try:
+            ensure_request_id(cmd)
             payload: bytes = (cmd.to_json() + '\n').encode('utf-8')
             self._socket.sendall(payload)
         except Exception:

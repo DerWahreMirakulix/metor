@@ -10,7 +10,15 @@ import threading
 import json
 from typing import List, Callable, Dict, Optional, Iterable
 
-from metor.core.api import IpcCommand, IpcEvent, JsonValue, EventType, create_event
+from metor.core.api import (
+    EventType,
+    IpcCommand,
+    IpcEvent,
+    JsonValue,
+    create_event,
+    request_context,
+    stamp_request_id,
+)
 from metor.data import SettingKey
 from metor.data.profile import ProfileManager
 from metor.utils import Constants
@@ -18,6 +26,23 @@ from metor.utils import Constants
 
 class IpcServer:
     """Manages the local IPC server socket for UI-Daemon communication."""
+
+    @staticmethod
+    def _extract_request_id(payload: JsonValue) -> Optional[str]:
+        """
+        Extracts one request correlation identifier from a raw JSON payload.
+
+        Args:
+            payload (JsonValue): The decoded JSON payload.
+
+        Returns:
+            Optional[str]: The request identifier when present and well-typed.
+        """
+        if not isinstance(payload, dict):
+            return None
+
+        request_id: JsonValue = payload.get('request_id')
+        return request_id if isinstance(request_id, str) else None
 
     @staticmethod
     def _build_client_limit_event(max_clients: int) -> IpcEvent:
@@ -180,6 +205,7 @@ class IpcServer:
         Returns:
             None
         """
+        stamp_request_id(event)
         msg: bytes = (event.to_json() + '\n').encode('utf-8')
         dead_clients: List[socket.socket] = []
 
@@ -220,6 +246,7 @@ class IpcServer:
             None
         """
         try:
+            stamp_request_id(event)
             msg: bytes = (event.to_json() + '\n').encode('utf-8')
             conn.sendall(msg)
         except Exception:
@@ -344,6 +371,7 @@ class IpcServer:
                     while b'\n' in buffer:
                         line_bytes, _, rest = buffer.partition(b'\n')
                         buffer = bytearray(rest)
+                        request_id: Optional[str] = None
 
                         try:
                             line: str = line_bytes.decode('utf-8').strip()
@@ -355,15 +383,33 @@ class IpcServer:
                             continue
                         try:
                             cmd_dict: Dict[str, JsonValue] = json.loads(line)
+                            request_id = self._extract_request_id(cmd_dict)
                             cmd: IpcCommand = IpcCommand.from_dict(cmd_dict)
                         except Exception:
-                            self.send_to(conn, create_event(EventType.UNKNOWN_COMMAND))
+                            self.send_to(
+                                conn,
+                                create_event(
+                                    EventType.UNKNOWN_COMMAND,
+                                    {'request_id': request_id}
+                                    if request_id is not None
+                                    else None,
+                                ),
+                            )
                             continue
 
                         try:
-                            self._command_callback(cmd, conn)
+                            with request_context(cmd.request_id):
+                                self._command_callback(cmd, conn)
                         except Exception:
-                            self.send_to(conn, create_event(EventType.INTERNAL_ERROR))
+                            self.send_to(
+                                conn,
+                                create_event(
+                                    EventType.INTERNAL_ERROR,
+                                    {'request_id': cmd.request_id}
+                                    if cmd.request_id is not None
+                                    else None,
+                                ),
+                            )
                 except socket.timeout:
                     continue
         except Exception:

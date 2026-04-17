@@ -9,6 +9,7 @@ from metor.ui.presenter import UIPresenter
 from metor.ui.prompt import PromptAbortedError, prompt_hidden, prompt_text
 from metor.ui.session_auth import (
     extract_session_auth_prompt,
+    get_session_auth_prompt,
     prompt_session_auth_proof,
 )
 from metor.ui.theme import Theme
@@ -26,6 +27,7 @@ __all__ = [
     'prompt_hidden',
     'prompt_text',
     'extract_session_auth_prompt',
+    'get_session_auth_prompt',
     'prompt_session_auth_proof',
     'Theme',
     'Translator',

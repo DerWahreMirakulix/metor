@@ -18,6 +18,7 @@ from metor.core.api import (
     GetInboxCommand,
     GetMessagesCommand,
     GetRawHistoryCommand,
+    ensure_request_id,
     IpcCommand,
     IpcEvent,
     JsonValue,
@@ -167,6 +168,7 @@ class CliProxy:
         Returns:
             None
         """
+        ensure_request_id(cmd)
         sock.sendall((cmd.to_json() + '\n').encode('utf-8'))
 
     def _request_ipc(self, cmd: IpcCommand, wait_for_response: bool = True) -> str:

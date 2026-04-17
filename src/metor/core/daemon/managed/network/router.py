@@ -9,7 +9,7 @@ import socket
 import base64
 import json
 from datetime import datetime, timezone
-from typing import List, Tuple, Dict, Callable, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, cast
 
 from metor.core.api import (
     AutoFallbackQueuedEvent,
@@ -19,6 +19,7 @@ from metor.core.api import (
     AckEvent,
     InboxNotificationEvent,
     JsonValue,
+    get_current_request_id,
 )
 from metor.core.daemon.managed.models import TorCommand
 from metor.data import (
@@ -83,6 +84,54 @@ class MessageRouter:
         )
         self._config: 'Config' = config
 
+    def _remember_message_request_id(
+        self,
+        msg_id: str,
+        request_id: Optional[str],
+    ) -> None:
+        """
+        Stores request correlation metadata when the shared state tracker supports it.
+
+        Args:
+            msg_id (str): The logical message identifier.
+            request_id (Optional[str]): The originating IPC request identifier.
+
+        Returns:
+            None
+        """
+        remember = getattr(self._state, 'remember_message_request_id', None)
+        if callable(remember):
+            remember(msg_id, request_id)
+
+    def _clear_message_request_id(self, msg_id: str) -> None:
+        """
+        Clears request correlation metadata when the shared state tracker supports it.
+
+        Args:
+            msg_id (str): The logical message identifier.
+
+        Returns:
+            None
+        """
+        clear = getattr(self._state, 'clear_message_request_id', None)
+        if callable(clear):
+            clear(msg_id)
+
+    def _pop_message_request_id(self, msg_id: str) -> Optional[str]:
+        """
+        Retrieves request correlation metadata when the shared state tracker supports it.
+
+        Args:
+            msg_id (str): The logical message identifier.
+
+        Returns:
+            Optional[str]: The originating IPC request identifier, if tracked.
+        """
+        pop = getattr(self._state, 'pop_message_request_id', None)
+        if callable(pop):
+            return cast(Optional[str], pop(msg_id))
+        return None
+
     def force_fallback(
         self, target: str
     ) -> Tuple[bool, EventType, Dict[str, JsonValue]]:
@@ -99,6 +148,7 @@ class MessageRouter:
         if not resolved:
             return False, EventType.PEER_NOT_FOUND, {'target': target}
         alias, onion = resolved
+        request_id: Optional[str] = get_current_request_id()
 
         unacked: Dict[str, Tuple[str, str]] = self._state.pop_unacked_messages(onion)
 
@@ -133,6 +183,7 @@ class MessageRouter:
                 onion=onion,
                 count=len(unacked),
                 msg_ids=list(unacked.keys()),
+                request_id=request_id,
             )
         )
 
@@ -163,6 +214,8 @@ class MessageRouter:
         if not resolved:
             return
         alias, onion = resolved
+        request_id: Optional[str] = get_current_request_id()
+        self._remember_message_request_id(msg_id, request_id)
 
         conn: Optional[socket.socket] = self._state.get_connection(onion)
 
@@ -187,8 +240,11 @@ class MessageRouter:
                         alias=alias,
                         onion=onion,
                         msg_id=msg_id,
+                        request_id=request_id,
                     )
                 )
+            else:
+                self._clear_message_request_id(msg_id)
             return
 
         try:
@@ -206,7 +262,7 @@ class MessageRouter:
 
             conn.sendall(f'{TorCommand.MSG.value} {msg_id} {b64_msg}\n'.encode('utf-8'))
         except Exception:
-            pass
+            self._clear_message_request_id(msg_id)
 
     def process_incoming_msg(
         self, conn: socket.socket, onion: str, payload_id: str, b64_payload: str
@@ -343,7 +399,14 @@ class MessageRouter:
             onion, msg_id
         )
         timestamp: Optional[str] = acked_msg[1] if acked_msg else None
-        self._broadcast(AckEvent(msg_id=msg_id, timestamp=timestamp))
+        request_id: Optional[str] = self._pop_message_request_id(msg_id)
+        self._broadcast(
+            AckEvent(
+                msg_id=msg_id,
+                timestamp=timestamp,
+                request_id=request_id,
+            )
+        )
 
     def _decode_async_drop_payload(
         self,

@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 import nacl.bindings
 
 from metor.core.api import (
+    AckEvent,
     AutoFallbackQueuedEvent,
     AutoReconnectScheduledEvent,
     ConnectionActor,
@@ -26,13 +27,21 @@ from metor.core.api import (
     InitCommand,
     IpcEvent,
     RuntimeErrorCode,
+    SendDropCommand,
     SelfDestructCommand,
     UnlockCommand,
     create_event,
+    request_context,
 )
 from metor.core import TorManager
 from metor.core.key import KeyManager
 from metor.core.daemon.managed.engine import Daemon
+from metor.core.daemon.managed.factory import (
+    PlaintextLockedDaemonError,
+    create_managed_daemon,
+)
+from metor.core.daemon.managed.handlers import NetworkCommandHandler
+from metor.core.daemon.managed.local_auth import create_session_auth_context
 from metor.core.daemon.managed.status import DaemonStatus
 from metor.core.daemon.managed.crypto import Crypto
 from metor.core.daemon.managed.ipc import IpcServer
@@ -94,12 +103,30 @@ class _DropQuotaConfig(_DummyConfig):
 class _DummyProfileManager:
     def __init__(self) -> None:
         self.config: _DummyConfig = _DummyConfig()
+        self.initialized: bool = False
+
+    def initialize(self) -> None:
+        self.initialized = True
+
+    def uses_plaintext_storage(self) -> bool:
+        return False
+
+    def uses_encrypted_storage(self) -> bool:
+        return True
 
     def get_static_port(self) -> None:
         return None
 
     def set_daemon_port(self, _port: int, _pid: int) -> None:
         return None
+
+
+class _PlaintextProfileManager(_DummyProfileManager):
+    def uses_plaintext_storage(self) -> bool:
+        return True
+
+    def uses_encrypted_storage(self) -> bool:
+        return False
 
 
 class _DummyEvent:
@@ -366,6 +393,9 @@ class _DummyState:
     def clear_retunnel_flow(self, _onion: str) -> None:
         return None
 
+    def is_known_socket(self, _onion: str, _conn: socket.socket) -> bool:
+        return True
+
 
 class _DummyContactManagerReceiver:
     def ensure_alias_for_onion(self, _onion: str) -> str:
@@ -400,6 +430,32 @@ class _DummyReceiverSocket:
 
     def close(self) -> None:
         return None
+
+
+class _ListenerTestConfig:
+    def __init__(self, *, allow_headless_live_backlog: bool = True) -> None:
+        self._allow_headless_live_backlog: bool = allow_headless_live_backlog
+
+    def get_bool(self, key: Any) -> bool:
+        if key is SettingKey.AUTO_ACCEPT_CONTACTS:
+            return False
+        return False
+
+    def get_int(self, key: Any) -> int:
+        if key is SettingKey.MAX_UNSEEN_LIVE_MSGS:
+            return 1 if self._allow_headless_live_backlog else 0
+        return 0
+
+    def get_float(self, _key: Any) -> float:
+        return 0.2
+
+
+class _ListenerStream:
+    def __init__(self, buffer: bytes = b'') -> None:
+        self._buffer: bytes = buffer
+
+    def get_buffer(self) -> bytes:
+        return self._buffer
 
 
 class _ConnectTestConfig:
@@ -567,13 +623,17 @@ class _RetunnelControllerHarness(ConnectionControllerRetunnelMixin):
 
 class DaemonHardeningTests(unittest.TestCase):
     @staticmethod
-    def _build_daemon(start_locked: bool = False) -> Daemon:
+    def _build_daemon(
+        start_locked: bool = False,
+        require_session_auth: bool = False,
+    ) -> Daemon:
         with (
             patch('metor.core.daemon.managed.engine.atexit.register'),
             patch('metor.core.daemon.managed.engine.signal.signal'),
         ):
             return Daemon(
                 cast(ProfileManager, _DummyProfileManager()),
+                require_session_auth=require_session_auth,
                 start_locked=start_locked,
             )
 
@@ -591,6 +651,38 @@ class DaemonHardeningTests(unittest.TestCase):
         return hashlib.sha3_256(b'.onion checksum' + public_key + version).digest()[
             : Constants.TOR_V3_CHECKSUM_BYTES
         ]
+
+    @staticmethod
+    def _build_live_listener(
+        state: StateTracker,
+        *,
+        allow_headless_live_backlog: bool = True,
+        has_live_consumers: bool = False,
+    ) -> tuple[InboundListener, Mock]:
+        receiver_mock = Mock()
+        contact_manager_mock = Mock()
+        contact_manager_mock.ensure_alias_for_onion.return_value = 'peer'
+        contact_manager_mock.get_all_contacts.return_value = []
+
+        listener = InboundListener(
+            tm=cast(TorManager, Mock(onion='self-onion')),
+            cm=cast(ContactManager, contact_manager_mock),
+            hm=cast(HistoryManager, Mock()),
+            crypto=cast(Crypto, Mock()),
+            state=state,
+            router=cast(MessageRouter, Mock()),
+            receiver=cast(StreamReceiver, receiver_mock),
+            broadcast_callback=Mock(),
+            has_live_consumers_callback=lambda: has_live_consumers,
+            stop_flag=threading.Event(),
+            config=cast(
+                Config,
+                _ListenerTestConfig(
+                    allow_headless_live_backlog=allow_headless_live_backlog
+                ),
+            ),
+        )
+        return listener, receiver_mock
 
     def test_ipc_broadcast_sends_without_holding_lock(self) -> None:
         server = IpcServer(
@@ -641,6 +733,16 @@ class DaemonHardeningTests(unittest.TestCase):
         )
         daemon._ipc.broadcast.assert_not_called()
         daemon._ipc.broadcast_to.assert_not_called()
+
+    def test_session_auth_requirement_is_frozen_at_daemon_start(self) -> None:
+        daemon = self._build_daemon(require_session_auth=False)
+        daemon._local_auth.install_context(create_session_auth_context('secret'))
+
+        self.assertFalse(daemon._requires_session_auth())
+
+    def test_create_managed_daemon_rejects_plaintext_locked_mode(self) -> None:
+        with self.assertRaises(PlaintextLockedDaemonError):
+            create_managed_daemon(_PlaintextProfileManager(), start_locked=True)
 
     def test_runtime_error_status_formats_daemon_log_prefix(self) -> None:
         formatted = CommandHandlers._format_daemon_status(
@@ -1005,6 +1107,30 @@ class DaemonHardeningTests(unittest.TestCase):
             if conn is not None and conn.fileno() != -1:
                 conn.close()
 
+    def test_state_allows_pending_replacement_for_remote_auto_reconnect(self) -> None:
+        state = StateTracker()
+        active_conn, active_peer = socket.socketpair()
+        pending_conn, pending_peer = socket.socketpair()
+        try:
+            state.add_active_connection('peer', active_conn)
+
+            added = state.add_pending_connection(
+                'peer',
+                pending_conn,
+                b'',
+                reason=PendingConnectionReason.CONSUMER_ABSENT,
+                origin=ConnectionOrigin.AUTO_RECONNECT,
+            )
+
+            self.assertTrue(added)
+            self.assertIn('peer', state.get_pending_connections_keys())
+        finally:
+            active_peer.close()
+            pending_peer.close()
+            conn = state.pop_any_connection('peer')
+            if conn is not None and conn.fileno() != -1:
+                conn.close()
+
     def test_connect_limit_counts_unauthenticated_sockets(self) -> None:
         state = StateTracker()
         unauth_conn, unauth_peer = socket.socketpair()
@@ -1094,6 +1220,42 @@ class DaemonHardeningTests(unittest.TestCase):
             self.assertEqual(controller.enqueued_live_reconnects, ['peer-onion'])
         finally:
             state.clear_scheduled_auto_reconnect('peer-onion')
+
+    def test_connect_helper_tags_retunnel_auth_frames(self) -> None:
+        state = StateTracker()
+        controller = _ConnectControllerHarness(
+            state,
+            _ConnectTestConfig(max_connections=10, max_retries=0),
+        )
+        controller._crypto.sign_challenge = Mock(return_value='signature')
+        controller._receiver = Mock()
+        conn = _NetworkSocket()
+        controller.tor_manager_mock.connect = Mock(return_value=conn)
+
+        class _ChallengeStream:
+            def __init__(self, _conn: Any) -> None:
+                return None
+
+            def read_line(self) -> str:
+                return f'/challenge {"ab" * Constants.TOR_HANDSHAKE_CHALLENGE_BYTES}'
+
+            def get_buffer(self) -> bytes:
+                return b''
+
+        with patch(
+            'metor.core.daemon.managed.network.controller.session.connect.TcpStreamReader',
+            _ChallengeStream,
+        ):
+            connect_to_helper(
+                cast(ConnectControllerProtocol, controller),
+                'peer',
+                origin=ConnectionOrigin.RETUNNEL,
+            )
+
+        self.assertEqual(
+            conn.sent,
+            [b'/auth self-onion signature RECOVER\n'],
+        )
 
     def test_connect_helper_closes_socket_after_handshake_failure(self) -> None:
         state = StateTracker()
@@ -1260,6 +1422,126 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertIs(broadcasted[0].event_type, EventType.AUTO_FALLBACK_QUEUED)
         self.assertEqual(cast(AutoFallbackQueuedEvent, broadcasted[0]).msg_id, 'msg-1')
 
+    def test_live_ack_carries_original_request_id_from_state_tracker(self) -> None:
+        history_manager = _DummyHistoryManager()
+        message_manager = _DummyMessageManager()
+        broadcasted: list[IpcEvent] = []
+        state = StateTracker()
+        router = MessageRouter(
+            cm=cast(ContactManager, _DummyContactManager()),
+            hm=cast(HistoryManager, history_manager),
+            mm=cast(MessageManager, message_manager),
+            state=state,
+            broadcast_callback=broadcasted.append,
+            has_clients_callback=lambda: False,
+            has_live_consumers_callback=lambda: False,
+            config=cast(Config, _DummyConfig()),
+        )
+        state.add_unacked_message(
+            'peer-onion',
+            'msg-1',
+            'hello',
+            '2026-04-04T12:00:00+00:00',
+        )
+        state.remember_message_request_id('msg-1', 'req-live-1')
+
+        router.process_incoming_ack('peer-onion', 'msg-1')
+
+        self.assertEqual(len(broadcasted), 1)
+        self.assertIsInstance(broadcasted[0], AckEvent)
+        self.assertEqual(cast(AckEvent, broadcasted[0]).request_id, 'req-live-1')
+        self.assertIsNone(state.pop_message_request_id('msg-1'))
+
+    def test_send_drop_command_tracks_request_id_for_later_outbox_ack(self) -> None:
+        contact_manager = Mock()
+        contact_manager.resolve_target_for_interaction.return_value = (
+            'peer',
+            'peer-onion',
+        )
+        contact_manager.get_onion_by_alias.return_value = None
+        tor_manager = Mock()
+        tor_manager.onion = 'self-onion'
+        message_manager = Mock()
+        history_manager = Mock()
+        network_manager = Mock()
+        outbox_worker = Mock()
+        sent_events: list[IpcEvent] = []
+        handler = NetworkCommandHandler(
+            tm=cast(TorManager, tor_manager),
+            cm=cast(ContactManager, contact_manager),
+            hm=cast(HistoryManager, history_manager),
+            mm=cast(MessageManager, message_manager),
+            network=cast(Any, network_manager),
+            outbox=cast(OutboxWorker, outbox_worker),
+            broadcast_cb=lambda _event: None,
+            send_to_cb=lambda _conn, event: sent_events.append(event),
+            register_live_consumer_cb=lambda _conn: None,
+            config=cast(Config, _DummyConfig()),
+        )
+        command = SendDropCommand(
+            target='peer',
+            text='hello',
+            msg_id='msg-1',
+            request_id='req-drop-1',
+        )
+
+        with request_context(command.request_id):
+            handler.handle(command, cast(socket.socket, object()))
+
+        outbox_worker.remember_message_request_id.assert_called_once_with(
+            'msg-1',
+            'req-drop-1',
+        )
+        self.assertEqual(len(sent_events), 1)
+        self.assertIs(sent_events[0].event_type, EventType.DROP_QUEUED)
+        self.assertEqual(sent_events[0].request_id, 'req-drop-1')
+
+    def test_outbox_drop_ack_carries_original_request_id_from_state_tracker(
+        self,
+    ) -> None:
+        state = StateTracker()
+        state.remember_message_request_id('msg-1', 'req-drop-ack-1')
+        broadcasted: list[IpcEvent] = []
+        worker = OutboxWorker(
+            tm=cast(TorManager, Mock(onion='self-onion')),
+            mm=cast(MessageManager, Mock()),
+            hm=cast(HistoryManager, Mock()),
+            crypto=cast(Crypto, Mock()),
+            broadcast_callback=broadcasted.append,
+            stop_flag=threading.Event(),
+            config=cast(Config, _DummyConfig()),
+            state=state,
+        )
+        conn = _NetworkSocket()
+
+        with patch.object(
+            worker,
+            '_establish_tunnel',
+            return_value=(
+                cast(socket.socket, conn),
+                cast(TcpStreamReader, _FakeStream(['/ack msg-1'])),
+            ),
+        ):
+            worker._send_single_drop(
+                'peer-onion',
+                (
+                    1,
+                    'peer-onion',
+                    'out',
+                    'hello',
+                    'msg-1',
+                    '2026-04-04T12:00:00+00:00',
+                ),
+            )
+
+        self.assertEqual(len(broadcasted), 1)
+        self.assertIsInstance(broadcasted[0], AckEvent)
+        self.assertEqual(
+            cast(AckEvent, broadcasted[0]).request_id,
+            'req-drop-ack-1',
+        )
+        self.assertIsNone(state.pop_message_request_id('msg-1'))
+
     def test_tcp_stream_reader_preserves_partial_buffer_bytes(self) -> None:
         writer, reader = socket.socketpair()
         try:
@@ -1335,6 +1617,30 @@ class DaemonHardeningTests(unittest.TestCase):
     def test_handshake_protocol_rejects_auth_frame_with_extra_tokens(self) -> None:
         with self.assertRaises(ValueError):
             HandshakeProtocol.parse_auth_line('/auth peer sig ASYNC extra')
+
+    def test_handshake_protocol_round_trips_recovery_auth_hints(self) -> None:
+        for origin in (
+            ConnectionOrigin.AUTO_RECONNECT,
+            ConnectionOrigin.RETUNNEL,
+        ):
+            auth_line = HandshakeProtocol.build_auth_line(
+                'peer-onion',
+                'signature',
+                origin=origin,
+            )
+
+            parsed = HandshakeProtocol.parse_auth_line(auth_line)
+
+            self.assertEqual(
+                parsed,
+                ('peer-onion', 'signature', False, True),
+            )
+
+    def test_handshake_protocol_rejects_unsupported_recovery_hint(self) -> None:
+        with self.assertRaises(ValueError):
+            HandshakeProtocol.parse_auth_line(
+                f'/auth peer sig {ConnectionOrigin.MANUAL.value}'
+            )
 
     def test_crypto_verify_signature_rejects_invalid_onion_checksum(self) -> None:
         seed = b'\x42' * 32
@@ -1503,6 +1809,53 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertFalse(disconnect_calls[0][2])
         self.assertEqual(reject_calls, [])
 
+    def test_receiver_exits_idle_timeout_for_unknown_socket(self) -> None:
+        disconnect_calls: list[tuple[Any, ...]] = []
+        reject_calls: list[tuple[Any, ...]] = []
+
+        class _UnknownSocketState(_DummyState):
+            def is_known_socket(self, _onion: str, _conn: socket.socket) -> bool:
+                return False
+
+        receiver = StreamReceiver(
+            cm=cast(ContactManager, _DummyContactManagerReceiver()),
+            hm=cast(HistoryManager, _DummyHistoryManagerReceiver()),
+            state=cast(StateTracker, _UnknownSocketState()),
+            router=cast(MessageRouter, _DummyRouterReceiver()),
+            broadcast_callback=lambda _event: None,
+            disconnect_cb=lambda *args: disconnect_calls.append(args),
+            reject_cb=lambda *args: reject_calls.append(args),
+            config=cast(Config, _DummyReceiverConfig()),
+        )
+        conn = _DummyReceiverSocket()
+
+        class _PatchedStream:
+            def __init__(self, _conn: Any, _initial_buffer: bytes = b'') -> None:
+                self._actions: list[object] = [socket.timeout(), '/disconnect']
+
+            def read_line(self) -> Optional[str]:
+                action: object = self._actions.pop(0)
+                if isinstance(action, BaseException):
+                    raise action
+                return cast(Optional[str], action)
+
+        with patch(
+            'metor.core.daemon.managed.network.receiver.TcpStreamReader',
+            _PatchedStream,
+        ):
+            receiver._receiver_target(
+                'peer-onion',
+                cast(socket.socket, conn),
+                b'',
+                False,
+                ConnectionOrigin.INCOMING,
+            )
+
+        self.assertEqual(conn.timeouts, [0.2])
+        self.assertEqual(len(disconnect_calls), 1)
+        self.assertTrue(disconnect_calls[0][2])
+        self.assertEqual(reject_calls, [])
+
     def test_receiver_keeps_pending_accept_timeout_behavior(self) -> None:
         disconnect_calls: list[tuple[Any, ...]] = []
         reject_calls: list[tuple[Any, ...]] = []
@@ -1544,6 +1897,89 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(len(disconnect_calls), 1)
         self.assertTrue(disconnect_calls[0][2])
         self.assertEqual(reject_calls, [])
+
+    def test_listener_accepts_remote_retunnel_replacement_over_active_socket(
+        self,
+    ) -> None:
+        state = StateTracker()
+        old_conn = cast(socket.socket, _DummyConn())
+        new_conn = cast(socket.socket, _DummyConn())
+        state.add_active_connection('peer-onion', old_conn)
+        listener, receiver_mock = self._build_live_listener(state)
+
+        listener._handle_live_incoming(
+            new_conn,
+            cast(TcpStreamReader, _ListenerStream()),
+            'peer-onion',
+            True,
+        )
+
+        self.assertIs(state.get_connection('peer-onion'), new_conn)
+        self.assertTrue(cast(_DummyConn, old_conn).closed)
+        self.assertEqual(cast(_DummyConn, new_conn).sent, [b'/accepted\n'])
+        receiver_mock.start_receiving.assert_called_once()
+        self.assertEqual(listener._broadcast.call_count, 1)
+        event = listener._broadcast.call_args.args[0]
+        self.assertIs(event.event_type, EventType.CONNECTED)
+        self.assertEqual(event.origin, ConnectionOrigin.GRACE_RECONNECT)
+
+    def test_listener_tracks_remote_auto_reconnect_replacement_as_pending(
+        self,
+    ) -> None:
+        state = StateTracker()
+        old_conn = cast(socket.socket, _DummyConn())
+        new_conn = cast(socket.socket, _DummyConn())
+        state.add_active_connection('peer-onion', old_conn)
+        listener, receiver_mock = self._build_live_listener(
+            state,
+            allow_headless_live_backlog=False,
+            has_live_consumers=False,
+        )
+
+        with patch(
+            'metor.core.daemon.managed.network.listener.threading.Thread',
+            return_value=_PassiveThread(),
+        ):
+            listener._handle_live_incoming(
+                new_conn,
+                cast(TcpStreamReader, _ListenerStream(b'recovery-buffer')),
+                'peer-onion',
+                True,
+            )
+
+        self.assertIs(state.get_connection('peer-onion'), old_conn)
+        pending_conn, initial_buffer, reason, origin = state.pop_pending_connection(
+            'peer-onion'
+        )
+        self.assertIs(pending_conn, new_conn)
+        self.assertEqual(initial_buffer, b'recovery-buffer')
+        self.assertIs(reason, PendingConnectionReason.CONSUMER_ABSENT)
+        self.assertIs(origin, ConnectionOrigin.GRACE_RECONNECT)
+        self.assertEqual(cast(_DummyConn, new_conn).sent, [b'/pending\n'])
+        receiver_mock.start_receiving.assert_not_called()
+        self.assertEqual(listener._broadcast.call_count, 0)
+
+    def test_listener_rejects_plain_duplicate_incoming_when_live_is_active(
+        self,
+    ) -> None:
+        state = StateTracker()
+        old_conn = cast(socket.socket, _DummyConn())
+        new_conn = cast(socket.socket, _DummyConn())
+        state.add_active_connection('peer-onion', old_conn)
+        listener, receiver_mock = self._build_live_listener(state)
+
+        listener._handle_live_incoming(
+            new_conn,
+            cast(TcpStreamReader, _ListenerStream()),
+            'peer-onion',
+        )
+
+        self.assertIs(state.get_connection('peer-onion'), old_conn)
+        self.assertTrue(cast(_DummyConn, new_conn).closed)
+        self.assertEqual(receiver_mock.start_receiving.call_count, 0)
+        self.assertEqual(listener._broadcast.call_count, 0)
+        self.assertEqual(len(cast(_DummyConn, new_conn).sent), 1)
+        self.assertTrue(cast(_DummyConn, new_conn).sent[0].startswith(b'/reject '))
 
     def test_outbox_establish_tunnel_closes_socket_after_handshake_failure(
         self,

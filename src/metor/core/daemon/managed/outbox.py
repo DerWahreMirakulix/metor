@@ -10,7 +10,7 @@ import socket
 import threading
 import time
 import base64
-from typing import List, Optional, Tuple, Callable, Dict, TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, cast
 
 from metor.core import TorManager
 from metor.core.api import (
@@ -21,6 +21,7 @@ from metor.core.api import (
     RetunnelInitiatedEvent,
     RetunnelSuccessEvent,
     create_event,
+    get_current_request_id,
 )
 from metor.core.daemon.managed.models import PrimaryTransport
 from metor.data import (
@@ -48,6 +49,46 @@ if TYPE_CHECKING:
 
 class OutboxWorker:
     """Background service for processing the Drop & Go offline message queue via Persistent Tunnels."""
+
+    def remember_message_request_id(
+        self,
+        msg_id: str,
+        request_id: Optional[str],
+    ) -> None:
+        """
+        Stores request correlation metadata for one queued drop message when available.
+
+        Args:
+            msg_id (str): The logical message identifier.
+            request_id (Optional[str]): The originating IPC request identifier.
+
+        Returns:
+            None
+        """
+        if self._state is None:
+            return
+
+        remember = getattr(self._state, 'remember_message_request_id', None)
+        if callable(remember):
+            remember(msg_id, request_id)
+
+    def _pop_message_request_id(self, msg_id: str) -> Optional[str]:
+        """
+        Retrieves request correlation metadata for one queued message when available.
+
+        Args:
+            msg_id (str): The logical message identifier.
+
+        Returns:
+            Optional[str]: The originating IPC request identifier, if tracked.
+        """
+        if self._state is None:
+            return None
+
+        pop = getattr(self._state, 'pop_message_request_id', None)
+        if callable(pop):
+            return cast(Optional[str], pop(msg_id))
+        return None
 
     @staticmethod
     def _is_expected_ack_line(msg_id: str, ack_line: Optional[str]) -> bool:
@@ -207,7 +248,14 @@ class OutboxWorker:
         Returns:
             None
         """
-        self._broadcast(RetunnelInitiatedEvent(alias=alias, onion=onion))
+        request_id: Optional[str] = get_current_request_id()
+        self._broadcast(
+            RetunnelInitiatedEvent(
+                alias=alias,
+                onion=onion,
+                request_id=request_id,
+            )
+        )
         self._close_tunnel(onion)
 
         success, event_type, params = self._tm.rotate_circuits()
@@ -220,7 +268,13 @@ class OutboxWorker:
             )
             return
 
-        self._broadcast(RetunnelSuccessEvent(alias=alias, onion=onion))
+        self._broadcast(
+            RetunnelSuccessEvent(
+                alias=alias,
+                onion=onion,
+                request_id=request_id,
+            )
+        )
 
     def _loop(self) -> None:
         """
@@ -363,7 +417,13 @@ class OutboxWorker:
                         onion,
                         actor=HistoryActor.LOCAL,
                     )
-                    self._broadcast(AckEvent(msg_id=msg_id, timestamp=timestamp))
+                    self._broadcast(
+                        AckEvent(
+                            msg_id=msg_id,
+                            timestamp=timestamp,
+                            request_id=self._pop_message_request_id(msg_id),
+                        )
+                    )
                 except Exception as e:
                     self._hm.log_event(
                         HistoryEvent.FAILED,
@@ -436,7 +496,13 @@ class OutboxWorker:
                 onion,
                 actor=HistoryActor.LOCAL,
             )
-            self._broadcast(AckEvent(msg_id=msg_id, timestamp=timestamp))
+            self._broadcast(
+                AckEvent(
+                    msg_id=msg_id,
+                    timestamp=timestamp,
+                    request_id=self._pop_message_request_id(msg_id),
+                )
+            )
         except Exception as e:
             self._hm.log_event(
                 HistoryEvent.FAILED,
@@ -505,8 +571,10 @@ class OutboxWorker:
                 conn.close()
                 return None
 
-            auth_msg: str = (
-                f'{TorCommand.AUTH.value} {self._tm.onion} {signature} ASYNC\n'
+            auth_msg: str = HandshakeProtocol.build_auth_line(
+                self._tm.onion,
+                signature,
+                is_async=True,
             )
             conn.sendall(auth_msg.encode('utf-8'))
             return conn, stream

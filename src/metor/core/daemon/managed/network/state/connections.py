@@ -370,11 +370,19 @@ class StateTrackerConnectionsMixin:
         should_track: bool = True
         with self._lock:
             active_conn = self._connections.get(onion)
-            allow_retunnel_replacement: bool = onion in self._retunnel_in_progress
+            allow_recovery_replacement: bool = (
+                onion in self._retunnel_in_progress
+                or origin
+                in {
+                    ConnectionOrigin.AUTO_RECONNECT,
+                    ConnectionOrigin.GRACE_RECONNECT,
+                    ConnectionOrigin.RETUNNEL,
+                }
+            )
             if (
                 active_conn is not None
                 and active_conn is not conn
-                and not allow_retunnel_replacement
+                and not allow_recovery_replacement
             ):
                 should_track = False
             else:

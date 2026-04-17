@@ -28,8 +28,10 @@ from metor.utils.release_bundle import (
 from metor.data.profile import (
     ProfileManager,
 )
+from metor.data.profile.config import Config
 from metor.data.profile.models import ProfileSecurityMode
 from metor.data.sql import SqlCipherDbApi, _load_sqlcipher_dbapi
+from metor.data.sql.schema import ensure_core_schema
 from metor.data.settings import Settings, SettingKey
 from metor.ui.cli.dispatcher import CliDispatcher
 from metor.ui.cli.proxy import CliProxy
@@ -69,6 +71,17 @@ class _FakeSqlCipherModule:
 
     class OperationalError(Exception):
         pass
+
+
+class _RecordingCursor:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    def execute(
+        self, query: str, _params: tuple[object, ...] = ()
+    ) -> '_RecordingCursor':
+        self.queries.append(query)
+        return self
 
 
 class ReleaseContractTests(unittest.TestCase):
@@ -136,6 +149,21 @@ class ReleaseContractTests(unittest.TestCase):
         spec = Settings.SETTING_SPECS[SettingKey.REQUIRE_LOCAL_AUTH]
 
         self.assertTrue(spec.default)
+
+    def test_plaintext_profiles_no_longer_force_disable_local_auth(self) -> None:
+        self.assertNotIn(
+            SettingKey.REQUIRE_LOCAL_AUTH,
+            Config._PLAINTEXT_DISABLED_SETTING_KEYS,
+        )
+
+    def test_schema_bootstrap_does_not_drop_legacy_tables(self) -> None:
+        cursor = _RecordingCursor()
+
+        ensure_core_schema(cursor)
+
+        self.assertFalse(
+            any('DROP TABLE IF EXISTS' in query for query in cursor.queries)
+        )
 
     def test_local_auth_lockout_timeout_has_secure_default(self) -> None:
         spec = Settings.SETTING_SPECS[SettingKey.LOCAL_AUTH_LOCKOUT_TIMEOUT]

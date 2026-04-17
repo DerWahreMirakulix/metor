@@ -148,9 +148,11 @@ def connect_to(
                     raise ConnectionError('Failed to sign live handshake challenge.')
 
                 conn.sendall(
-                    f'{TorCommand.AUTH.value} {controller._tm.onion} {signature}\n'.encode(
-                        'utf-8'
-                    )
+                    HandshakeProtocol.build_auth_line(
+                        controller._tm.onion,
+                        signature,
+                        origin=origin,
+                    ).encode('utf-8')
                 )
 
                 conn.settimeout(

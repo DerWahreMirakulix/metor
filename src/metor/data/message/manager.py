@@ -1,13 +1,8 @@
-"""Message persistence service backed by SQLite."""
+"""Message persistence service backed by the centralized SQL message store."""
 
-from datetime import datetime, timezone
 from pathlib import Path
-import secrets
 from typing import Dict, List, Optional, Tuple
 
-from metor.utils import Constants, clean_onion
-
-# Local Package Imports
 from metor.data.message.models import (
     MessageClearOperationType,
     MessageClearResult,
@@ -19,22 +14,15 @@ from metor.data.message.models import (
 )
 from metor.data.profile import ProfileManager
 from metor.data.settings import SettingKey
-from metor.data.sql import SqlManager, SqlParam
+from metor.data.sql import MessageRepository, SqlManager
 
 
 class MessageManager:
     """Manages the persistence of asynchronous messages (inbox and outbox)."""
 
-    _DROP_VISIBLE_TYPES: tuple[str, str] = (
-        MessageType.TEXT.value,
-        MessageType.DROP_TEXT.value,
-    )
-
-    _DROP_VISIBLE_PLACEHOLDERS: str = ', '.join('?' for _ in _DROP_VISIBLE_TYPES)
-
     def __init__(self, pm: ProfileManager, password: Optional[str] = None) -> None:
         """
-        Initializes the MessageManager and ensures the database table exists.
+        Initializes the message manager and its centralized persistence repository.
 
         Args:
             pm (ProfileManager): The profile manager instance for context.
@@ -46,39 +34,7 @@ class MessageManager:
         self._pm: ProfileManager = pm
         self._db_path: Path = self._pm.paths.get_db_file()
         self._sql: SqlManager = SqlManager(self._db_path, self._pm.config, password)
-        self._initialize_table()
-
-    def _initialize_table(self) -> None:
-        """
-        Creates the 'messages' table if it does not already exist.
-        Enforces a unique inbound message identity per peer.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-        query: str = """
-            CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                msg_id TEXT NOT NULL CHECK (msg_id <> ''),
-                contact_onion TEXT NOT NULL CHECK (contact_onion <> ''),
-                direction TEXT NOT NULL,
-                msg_type TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                timestamp TEXT NOT NULL CHECK (timestamp <> ''),
-                status TEXT NOT NULL
-            )
-        """
-        self._sql.execute(query)
-        self._sql.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_inbound_msg_id
-            ON messages (contact_onion, msg_id)
-            WHERE direction = 'in' AND msg_id IS NOT NULL
-            """
-        )
+        self._messages: MessageRepository = self._sql.messages
 
     def queue_message(
         self,
@@ -91,65 +47,29 @@ class MessageManager:
         timestamp: Optional[str] = None,
     ) -> QueuedMessageResult:
         """
-        Inserts a new message into the database securely.
-        Enforces atomic deduplication for incoming drops utilizing the network UUID.
+        Inserts one logical message into durable storage.
 
         Args:
             contact_onion (str): The onion address of the remote peer.
             direction (MessageDirection): Whether the message is inbound or outbound.
-            msg_type (MessageType): The type of payload (e.g., text or voice).
-            payload (str): The actual message content or file path.
-            status (MessageStatus): The initial status of the message.
-            msg_id (Optional[str]): Network UUID. Generated if missing.
-            timestamp (Optional[str]): Network ISO timestamp. Generated if missing.
+            msg_type (MessageType): The type of payload.
+            payload (str): The actual message content.
+            status (MessageStatus): The initial persisted status.
+            msg_id (Optional[str]): Stable logical message id.
+            timestamp (Optional[str]): Stable authored ISO timestamp.
 
         Returns:
-            QueuedMessageResult: The inserted row ID and duplicate flag.
+            QueuedMessageResult: The inserted receipt id and duplicate flag.
         """
-        contact_onion = clean_onion(contact_onion)
-        actual_msg_id: str = (
-            msg_id if msg_id else secrets.token_hex(Constants.UUID_MSG_BYTES)
+        return self._messages.queue_message(
+            contact_onion=contact_onion,
+            direction=direction,
+            msg_type=msg_type,
+            payload=payload,
+            status=status,
+            msg_id=msg_id,
+            timestamp=timestamp,
         )
-
-        ts: str = timestamp if timestamp else datetime.now(timezone.utc).isoformat()
-
-        insert_query: str = """
-            INSERT INTO messages (msg_id, contact_onion, direction, msg_type, payload, timestamp, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """
-        params: Tuple[SqlParam, ...] = (
-            actual_msg_id,
-            contact_onion,
-            direction.value,
-            msg_type.value,
-            payload,
-            ts,
-            status.value,
-        )
-
-        if direction is MessageDirection.IN:
-            inbound_query: str = insert_query.replace('INSERT', 'INSERT OR IGNORE', 1)
-            self._sql.execute(inbound_query, params)
-
-            change_rows: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
-                'SELECT changes()'
-            )
-            was_duplicate: bool = bool(
-                change_rows and int(str(change_rows[0][0] or 0)) == 0
-            )
-            result_rows: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
-                'SELECT id FROM messages WHERE contact_onion = ? AND direction = ? AND msg_id = ?',
-                (contact_onion, direction.value, actual_msg_id),
-            )
-            row_id: int = (
-                int(str(result_rows[0][0])) if result_rows and result_rows[0][0] else 0
-            )
-            return QueuedMessageResult(row_id=row_id, was_duplicate=was_duplicate)
-
-        self._sql.execute(insert_query, params)
-        result_rows = self._sql.fetchall('SELECT last_insert_rowid()')
-        row_id = int(str(result_rows[0][0])) if result_rows and result_rows[0][0] else 0
-        return QueuedMessageResult(row_id=row_id)
 
     def has_inbound_message(self, contact_onion: str, msg_id: str) -> bool:
         """
@@ -162,23 +82,11 @@ class MessageManager:
         Returns:
             bool: True if a matching inbound row already exists.
         """
-        query: str = (
-            'SELECT 1 FROM messages '
-            'WHERE contact_onion = ? AND direction = ? AND msg_id = ? LIMIT 1'
-        )
-        rows: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
-            query,
-            (
-                clean_onion(contact_onion),
-                MessageDirection.IN.value,
-                msg_id,
-            ),
-        )
-        return bool(rows)
+        return self._messages.has_inbound_message(contact_onion, msg_id)
 
     def get_unread_live_count(self, contact_onion: str) -> int:
         """
-        Counts crash-safe inbound live messages that still await explicit consume.
+        Counts crash-safe inbound live messages awaiting explicit consume.
 
         Args:
             contact_onion (str): The remote onion identity.
@@ -186,20 +94,7 @@ class MessageManager:
         Returns:
             int: The unread inbound live-message backlog for the peer.
         """
-        query: str = (
-            'SELECT COUNT(*) FROM messages '
-            'WHERE contact_onion = ? AND direction = ? AND msg_type = ? AND status = ?'
-        )
-        rows: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
-            query,
-            (
-                clean_onion(contact_onion),
-                MessageDirection.IN.value,
-                MessageType.LIVE_TEXT.value,
-                MessageStatus.UNREAD.value,
-            ),
-        )
-        return int(str(rows[0][0])) if rows and rows[0][0] is not None else 0
+        return self._messages.count_unread_by_type(contact_onion, MessageType.LIVE_TEXT)
 
     def get_unread_drop_count(self, contact_onion: str) -> int:
         """
@@ -211,180 +106,59 @@ class MessageManager:
         Returns:
             int: The unread inbound drop-message backlog for the peer.
         """
-        query: str = (
-            'SELECT COUNT(*) FROM messages '
-            'WHERE contact_onion = ? AND direction = ? AND msg_type = ? AND status = ?'
-        )
-        rows: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
-            query,
-            (
-                clean_onion(contact_onion),
-                MessageDirection.IN.value,
-                MessageType.DROP_TEXT.value,
-                MessageStatus.UNREAD.value,
-            ),
-        )
-        return int(str(rows[0][0])) if rows and rows[0][0] is not None else 0
+        return self._messages.count_unread_by_type(contact_onion, MessageType.DROP_TEXT)
 
     def get_pending_outbox(self) -> List[Tuple[int, str, str, str, str, str]]:
         """
-        Retrieves all outbound messages that are waiting to be delivered.
-        Fetches UUIDs and timestamps to construct accurate JSON Envelopes.
+        Retrieves all outbound drop-visible messages waiting to be delivered.
 
         Args:
             None
 
         Returns:
-            List[Tuple[int, str, str, str, str, str]]: A list of tuples (id, onion, type, payload, msg_id, timestamp).
+            List[Tuple[int, str, str, str, str, str]]: Pending outbox rows.
         """
-        query: str = (
-            'SELECT id, contact_onion, msg_type, payload, msg_id, timestamp '
-            f'FROM messages WHERE direction = ? AND status = ? AND msg_type IN ({self._DROP_VISIBLE_PLACEHOLDERS}) '
-            'ORDER BY id ASC'
-        )
-        rows: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
-            query,
-            (
-                MessageDirection.OUT.value,
-                MessageStatus.PENDING.value,
-                *self._DROP_VISIBLE_TYPES,
-            ),
-        )
-        return [
-            (
-                int(str(r[0])),
-                str(r[1]),
-                str(r[2]),
-                str(r[3]),
-                str(r[4] or ''),
-                str(r[5] or ''),
-            )
-            for r in rows
-        ]
+        return self._messages.get_pending_outbox()
 
     def update_message_status(self, msg_id: int, new_status: MessageStatus) -> None:
         """
-        Updates the delivery or read status of a specific message via internal SQLite ID.
+        Updates the delivery or read status of a specific durable message receipt.
 
         Args:
-            msg_id (int): The unique internal database ID of the message.
+            msg_id (int): The durable internal receipt id.
             new_status (MessageStatus): The new status to apply.
 
         Returns:
             None
         """
-        query: str = 'UPDATE messages SET status = ? WHERE id = ?'
-        self._sql.execute(query, (new_status.value, msg_id))
+        self._messages.update_message_status(msg_id, new_status)
 
     def get_unread_counts(self) -> Dict[str, int]:
         """
-        Retrieves a count of unread messages grouped by contact onion.
+        Retrieves unread counts grouped by peer onion.
 
         Args:
             None
 
         Returns:
-            Dict[str, int]: A dictionary mapping onion addresses to their unread message count.
+            Dict[str, int]: A dictionary mapping onion addresses to unread counts.
         """
-        query: str = (
-            'SELECT contact_onion, COUNT(*) FROM messages '
-            'WHERE direction = ? AND status = ? GROUP BY contact_onion'
-        )
-        rows: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
-            query,
-            (
-                MessageDirection.IN.value,
-                MessageStatus.UNREAD.value,
-            ),
-        )
-
-        counts: Dict[str, int] = {}
-        for row in rows:
-            onion, count = str(row[0]), int(str(row[1]))
-            counts[onion] = count
-
-        return counts
+        return self._messages.get_unread_counts()
 
     def get_and_read_inbox(self, contact_onion: str) -> List[Tuple[int, str, str, str]]:
         """
-        Retrieves all unread messages for a specific contact and executes the consume policy.
-        Live payloads are always shredded on consume while preserving a dedupe tombstone.
-        Drop payloads are shredded only when EPHEMERAL_MESSAGES is enabled.
+        Retrieves unread inbox rows for one contact and executes the consume policy.
 
         Args:
             contact_onion (str): The target onion address.
 
         Returns:
-            List[Tuple[int, str, str, str]]: A list of message rows (id, msg_type, payload, timestamp).
+            List[Tuple[int, str, str, str]]: Message rows as receipt id, type, payload, timestamp.
         """
-        query: str = """
-            SELECT id, msg_type, payload, timestamp
-            FROM messages
-            WHERE contact_onion = ? AND direction = ? AND status = ?
-            ORDER BY timestamp ASC
-        """
-        raw_messages: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
-            query,
-            (
-                clean_onion(contact_onion),
-                MessageDirection.IN.value,
-                MessageStatus.UNREAD.value,
-            ),
+        return self._messages.get_and_read_inbox(
+            contact_onion,
+            self._pm.config.get_bool(SettingKey.EPHEMERAL_MESSAGES),
         )
-        messages: List[Tuple[int, str, str, str]] = [
-            (int(str(r[0])), str(r[1]), str(r[2]), str(r[3])) for r in raw_messages
-        ]
-
-        if messages:
-            live_scrub_query: str = (
-                'UPDATE messages SET status = ?, payload = ? '
-                'WHERE contact_onion = ? AND direction = ? AND status = ? AND msg_type = ?'
-            )
-            self._sql.execute(
-                live_scrub_query,
-                (
-                    MessageStatus.READ.value,
-                    '',
-                    clean_onion(contact_onion),
-                    MessageDirection.IN.value,
-                    MessageStatus.UNREAD.value,
-                    MessageType.LIVE_TEXT.value,
-                ),
-            )
-
-            if self._pm.config.get_bool(SettingKey.EPHEMERAL_MESSAGES):
-                shred_drop_query: str = (
-                    'UPDATE messages SET status = ?, payload = ? '
-                    f'WHERE contact_onion = ? AND direction = ? AND status = ? AND msg_type IN ({self._DROP_VISIBLE_PLACEHOLDERS})'
-                )
-                self._sql.execute(
-                    shred_drop_query,
-                    (
-                        MessageStatus.READ.value,
-                        '',
-                        clean_onion(contact_onion),
-                        MessageDirection.IN.value,
-                        MessageStatus.UNREAD.value,
-                        *self._DROP_VISIBLE_TYPES,
-                    ),
-                )
-            else:
-                update_query: str = (
-                    'UPDATE messages SET status = ? '
-                    f'WHERE contact_onion = ? AND direction = ? AND status = ? AND msg_type IN ({self._DROP_VISIBLE_PLACEHOLDERS})'
-                )
-                self._sql.execute(
-                    update_query,
-                    (
-                        MessageStatus.READ.value,
-                        clean_onion(contact_onion),
-                        MessageDirection.IN.value,
-                        MessageStatus.UNREAD.value,
-                        *self._DROP_VISIBLE_TYPES,
-                    ),
-                )
-
-        return messages
 
     def get_chat_history(
         self,
@@ -392,56 +166,21 @@ class MessageManager:
         limit: Optional[int] = None,
     ) -> List[StoredMessageRecord]:
         """
-        Retrieves the past message history for a specific contact, ordered chronologically.
+        Retrieves the visible chat history for a specific contact.
 
         Args:
             contact_onion (str): The target onion address.
-            limit (Optional[int]): The maximum number of past messages to fetch. Defaults to None.
+            limit (Optional[int]): The maximum number of past messages to fetch.
 
         Returns:
-            List[StoredMessageRecord]: A list of typed persisted message rows.
+            List[StoredMessageRecord]: Typed persisted message rows.
         """
         actual_limit: int = (
             limit
             if limit is not None
             else self._pm.config.get_int(SettingKey.MESSAGES_LIMIT)
         )
-        query: str = f"""
-            SELECT direction, status, payload, timestamp
-            FROM messages
-            WHERE contact_onion = ?
-              AND payload != ''
-              AND msg_type IN ({self._DROP_VISIBLE_PLACEHOLDERS})
-            ORDER BY timestamp DESC
-            LIMIT ?
-        """
-        rows: List[Tuple[SqlParam, ...]] = self._sql.fetchall(
-            query,
-            (
-                clean_onion(contact_onion),
-                *self._DROP_VISIBLE_TYPES,
-                actual_limit,
-            ),
-        )
-        rows.reverse()
-
-        result: List[StoredMessageRecord] = []
-        for row in rows:
-            direction, status, payload, timestamp = (
-                str(row[0]),
-                str(row[1]),
-                str(row[2]),
-                str(row[3]),
-            )
-            result.append(
-                StoredMessageRecord(
-                    direction=direction,
-                    status=status,
-                    payload=payload,
-                    timestamp=timestamp,
-                )
-            )
-        return result
+        return self._messages.get_chat_history(contact_onion, actual_limit)
 
     def clear_messages(
         self,
@@ -449,36 +188,24 @@ class MessageManager:
         non_contacts_only: bool = False,
     ) -> MessageClearResult:
         """
-        Wipes the message table completely or just for a specific contact.
-        Maintains domain boundaries by leaving contact deletion to the Daemon orchestrator.
+        Clears persisted message state globally or for one peer.
 
         Args:
-            onion (Optional[str]): The target onion identity. If None, deletes globally based on flags.
+            onion (Optional[str]): The target onion identity.
             non_contacts_only (bool): If True, only deletes messages from unsaved peers.
 
         Returns:
             MessageClearResult: The typed clear-messages result.
         """
         try:
+            self._messages.clear_messages(onion, non_contacts_only)
             if non_contacts_only:
                 if onion:
-                    query: str = """
-                        DELETE FROM messages
-                        WHERE contact_onion = ?
-                        AND contact_onion NOT IN (SELECT onion FROM contacts WHERE is_saved = 1)
-                    """
-                    self._sql.execute(query, (onion,))
                     return MessageClearResult(
                         True,
                         MessageClearOperationType.NON_CONTACTS_TARGET_CLEARED,
                         target_onion=onion,
                     )
-
-                delete_all_query: str = """
-                    DELETE FROM messages
-                    WHERE contact_onion NOT IN (SELECT onion FROM contacts WHERE is_saved = 1)
-                """
-                self._sql.execute(delete_all_query)
                 return MessageClearResult(
                     True,
                     MessageClearOperationType.NON_CONTACTS_ALL_CLEARED,
@@ -486,22 +213,17 @@ class MessageManager:
                 )
 
             if onion:
-                self._sql.execute(
-                    'DELETE FROM messages WHERE contact_onion = ?', (onion,)
-                )
                 return MessageClearResult(
                     True,
                     MessageClearOperationType.TARGET_CLEARED,
                     target_onion=onion,
                 )
 
-            self._sql.execute('DELETE FROM messages')
             return MessageClearResult(
                 True,
                 MessageClearOperationType.ALL_CLEARED,
                 profile=self._pm.profile_name,
             )
-
         except Exception:
             return MessageClearResult(
                 False,

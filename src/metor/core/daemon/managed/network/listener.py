@@ -308,8 +308,8 @@ class InboundListener:
             line: Optional[str] = stream.read_line()
 
             if line:
-                remote_onion, signature, is_async = HandshakeProtocol.parse_auth_line(
-                    line
+                remote_onion, signature, is_async, has_recovery_hint = (
+                    HandshakeProtocol.parse_auth_line(line)
                 )
                 if self._crypto.verify_signature(remote_onion, challenge, signature):
                     onion = remote_onion
@@ -337,7 +337,7 @@ class InboundListener:
             self._router.process_async_drop(conn, stream, onion)
             return
 
-        self._handle_live_incoming(conn, stream, onion)
+        self._handle_live_incoming(conn, stream, onion, has_recovery_hint)
 
     def _watch_pending_connection(
         self, onion: str, alias: str, conn: socket.socket
@@ -434,7 +434,11 @@ class InboundListener:
             )
 
     def _handle_live_incoming(
-        self, conn: socket.socket, stream: TcpStreamReader, onion: str
+        self,
+        conn: socket.socket,
+        stream: TcpStreamReader,
+        onion: str,
+        has_recovery_hint: bool = False,
     ) -> None:
         """
         Evaluates tie-breakers and manages interactive live connections.
@@ -443,6 +447,8 @@ class InboundListener:
             conn (socket.socket): The active socket connection.
             stream (TcpStreamReader): The constrained byte stream.
             onion (str): The peer's onion identity.
+            has_recovery_hint (bool): Whether the remote AUTH frame requested a
+                generic recovery replacement path.
 
         Returns:
             None
@@ -470,6 +476,8 @@ class InboundListener:
             in (LiveTransportState.CONNECTED, LiveTransportState.PENDING)
             and not grace_reconnect
             and not retunnel_reconnect
+            and not scheduled_auto_reconnect
+            and not has_recovery_hint
         ):
             duplicate_reason_code = (
                 HistoryReasonCode.DUPLICATE_INCOMING_CONNECTED
@@ -507,26 +515,23 @@ class InboundListener:
                     ConnectionOrigin.MUTUAL_CONNECT,
                 )
 
+            rejection_origin: ConnectionOrigin = (
+                ConnectionOrigin.AUTO_RECONNECT
+                if scheduled_auto_reconnect
+                else ConnectionOrigin.MUTUAL_CONNECT
+            )
             self._hm.log_event(
                 HistoryEvent.REJECTED,
                 onion,
                 actor=HistoryActor.SYSTEM,
-                trigger=(
-                    ConnectionOrigin.AUTO_RECONNECT
-                    if scheduled_auto_reconnect
-                    else ConnectionOrigin.MUTUAL_CONNECT
-                ),
+                trigger=rejection_origin,
                 detail_code=HistoryReasonCode.MUTUAL_TIEBREAKER_LOSER,
             )
             self._broadcast(
                 ConnectionRejectedEvent(
                     alias=alias,
                     onion=onion,
-                    origin=(
-                        ConnectionOrigin.AUTO_RECONNECT
-                        if scheduled_auto_reconnect
-                        else ConnectionOrigin.MUTUAL_CONNECT
-                    ),
+                    origin=rejection_origin,
                     actor=ConnectionActor.SYSTEM,
                     reason_code=ConnectionReasonCode.MUTUAL_TIEBREAKER_LOSER,
                 )
@@ -544,6 +549,8 @@ class InboundListener:
             incoming_origin = ConnectionOrigin.RETUNNEL
         elif scheduled_auto_reconnect:
             incoming_origin = ConnectionOrigin.AUTO_RECONNECT
+        elif has_recovery_hint:
+            incoming_origin = ConnectionOrigin.GRACE_RECONNECT
         elif is_mutual_winner:
             incoming_origin = ConnectionOrigin.MUTUAL_CONNECT
         elif contact_auto_accept:
@@ -553,6 +560,7 @@ class InboundListener:
             grace_reconnect
             or retunnel_reconnect
             or scheduled_auto_reconnect
+            or has_recovery_hint
             or is_mutual_winner
             or contact_auto_accept
         )

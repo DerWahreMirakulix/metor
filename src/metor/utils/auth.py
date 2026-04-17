@@ -64,6 +64,19 @@ def _decode_session_auth_challenge(challenge_hex: str) -> bytes:
     return challenge
 
 
+def create_session_auth_salt() -> bytes:
+    """
+    Creates one fresh salt for a single daemon runtime's session-auth proof key.
+
+    Args:
+        None
+
+    Returns:
+        bytes: The random Argon2 salt bytes.
+    """
+    return secrets.token_bytes(nacl.pwhash.argon2i.SALTBYTES)
+
+
 def _scope_password(password: str) -> bytes:
     """
     Domain-separates one master password before deriving the session-auth proof key.
@@ -79,7 +92,7 @@ def _scope_password(password: str) -> bytes:
 
 def derive_session_auth_proof_key(password: str, salt: bytes) -> bytearray:
     """
-    Derives one password-scoped IPC session-auth proof key from the profile salt.
+    Derives one password-scoped IPC session-auth proof key from the runtime salt.
 
     Args:
         password (str): The master password.

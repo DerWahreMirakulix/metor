@@ -20,6 +20,7 @@ from pathlib import Path
 from metor.core import KeyManager, TorManager
 from metor.core.api import (
     AuthenticateSessionCommand,
+    create_event,
     IpcEvent,
     IpcCommand,
     InitCommand,
@@ -58,7 +59,8 @@ from metor.core.api import (
     RetunnelCommand,
     EventType,
     JsonValue,
-    create_event,
+    request_context,
+    stamp_request_id,
 )
 from metor.data.profile import ProfileManager
 from metor.data import (
@@ -110,6 +112,7 @@ class Daemon:
         status_callback: Optional[
             Callable[[Union[EventType, DaemonStatus], Dict[str, JsonValue]], None]
         ] = None,
+        require_session_auth: bool = False,
         start_locked: bool = False,
     ) -> None:
         """
@@ -124,6 +127,7 @@ class Daemon:
             mm (Optional[MessageManager]): Offline messages storage.
             session_auth (Optional[SessionAuthContext]): Optional verifier context for per-session local auth.
             status_callback (Optional[Callable]): Hook for UI-agnostic startup logging.
+            require_session_auth (bool): Whether this daemon runtime should require per-session auth.
             start_locked (bool): Whether to delay runtime startup until an explicit unlock.
 
         Returns:
@@ -144,6 +148,7 @@ class Daemon:
         self._client_state_lock: threading.Lock = threading.Lock()
         self._is_locked: bool = start_locked
         self._is_stopping: bool = False
+        self._require_session_auth: bool = require_session_auth
         self._authenticated_clients: Set[socket.socket] = set()
         self._live_consumer_clients: Set[socket.socket] = set()
         self._local_auth: LocalAuthTracker = LocalAuthTracker()
@@ -285,6 +290,7 @@ class Daemon:
         Returns:
             None
         """
+        stamp_request_id(event)
         if self._requires_session_auth():
             with self._client_state_lock:
                 recipients: set[socket.socket] = set(self._authenticated_clients)
@@ -338,6 +344,7 @@ class Daemon:
         Returns:
             None
         """
+        stamp_request_id(event)
         self._ipc.send_to(conn, event)
 
     def _sig_handler(self, signum: int, frame: Optional[types.FrameType]) -> None:
@@ -564,9 +571,7 @@ class Daemon:
         Returns:
             bool: True when local auth is enabled and a verifier context exists.
         """
-        return self._pm.config.get_bool(SettingKey.REQUIRE_LOCAL_AUTH) and bool(
-            self._local_auth.is_enabled()
-        )
+        return self._require_session_auth and bool(self._local_auth.is_enabled())
 
     def _build_session_auth_event(
         self,
@@ -636,6 +641,24 @@ class Daemon:
         """
         Routes typed IPC commands from the Chat UI or CLI Proxy to dedicated Handlers.
         Enforces local authentication and controls daemon state operations (Unlock, Purge, Config).
+
+        Args:
+            cmd (IpcCommand): The parsed command object.
+            conn (socket.socket): The connection to respond to.
+
+        Returns:
+            None
+        """
+        with request_context(cmd.request_id):
+            self._process_ui_command_in_context(cmd, conn)
+
+    def _process_ui_command_in_context(
+        self,
+        cmd: IpcCommand,
+        conn: socket.socket,
+    ) -> None:
+        """
+        Routes one request-scoped IPC command after correlation context setup.
 
         Args:
             cmd (IpcCommand): The parsed command object.
@@ -750,7 +773,11 @@ class Daemon:
                 return
 
             try:
-                runtime = build_runtime(self._pm, cmd.password)
+                runtime = build_runtime(
+                    self._pm,
+                    cmd.password,
+                    enable_session_auth=self._require_session_auth,
+                )
             except InvalidMasterPasswordError:
                 should_disconnect: bool = self._local_auth.register_invalid_unlock(
                     conn,

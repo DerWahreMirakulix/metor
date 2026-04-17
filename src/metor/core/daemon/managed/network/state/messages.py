@@ -15,8 +15,56 @@ class StateTrackerMessagesMixin:
     _pending_connections: Dict[str, socket.socket]
     _outbound_sockets: Dict[str, socket.socket]
     _unacked_messages: Dict[str, Dict[str, Tuple[str, str]]]
+    _message_request_ids: Dict[str, str]
     _recent_live_msg_ids: Dict[str, List[str]]
     _unauthenticated_connections: Set[socket.socket]
+
+    def remember_message_request_id(
+        self,
+        msg_id: str,
+        request_id: Optional[str],
+    ) -> None:
+        """
+        Remembers which IPC request created one logical outbound message.
+
+        Args:
+            msg_id (str): The logical message identifier.
+            request_id (Optional[str]): The originating IPC request identifier.
+
+        Returns:
+            None
+        """
+        if request_id is None:
+            return
+
+        with self._lock:
+            self._message_request_ids[msg_id] = request_id
+
+    def pop_message_request_id(self, msg_id: str) -> Optional[str]:
+        """
+        Retrieves and removes the originating IPC request identifier for one message.
+
+        Args:
+            msg_id (str): The logical message identifier.
+
+        Returns:
+            Optional[str]: The originating request identifier, if one was tracked.
+        """
+        with self._lock:
+            return self._message_request_ids.pop(msg_id, None)
+
+    def clear_message_request_id(self, msg_id: str) -> None:
+        """
+        Removes any tracked originating request identifier for one message.
+
+        Args:
+            msg_id (str): The logical message identifier.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            self._message_request_ids.pop(msg_id, None)
 
     def pop_unacked_messages(self, onion: str) -> Dict[str, Tuple[str, str]]:
         """

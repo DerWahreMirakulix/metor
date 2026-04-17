@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from metor.utils.auth import (  # noqa: F401
         build_session_auth_proof,
         build_session_auth_proof_from_key,
+        create_session_auth_salt,
         create_session_auth_challenge,
         derive_session_auth_proof_key,
         verify_session_auth_proof,
@@ -40,6 +41,10 @@ _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     'build_session_auth_proof_from_key': (
         'metor.utils.auth',
         'build_session_auth_proof_from_key',
+    ),
+    'create_session_auth_salt': (
+        'metor.utils.auth',
+        'create_session_auth_salt',
     ),
     'create_session_auth_challenge': (
         'metor.utils.auth',
@@ -109,6 +114,7 @@ __all__ = [
     'Constants',
     'build_session_auth_proof',
     'build_session_auth_proof_from_key',
+    'create_session_auth_salt',
     'create_session_auth_challenge',
     'derive_session_auth_proof_key',
     'FileLock',

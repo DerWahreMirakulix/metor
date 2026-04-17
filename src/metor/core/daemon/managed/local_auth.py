@@ -9,6 +9,7 @@ from typing import Dict, Optional
 
 from metor.utils import (
     Constants,
+    create_session_auth_salt,
     create_session_auth_challenge,
     derive_session_auth_proof_key,
     secure_clear_buffer,
@@ -41,20 +42,24 @@ class SessionAuthAttemptResult:
     retry_prompt: Optional[SessionAuthPrompt] = None
 
 
-def create_session_auth_context(password: str, salt: bytes) -> SessionAuthContext:
+def create_session_auth_context(
+    password: str,
+    salt: Optional[bytes] = None,
+) -> SessionAuthContext:
     """
     Creates one daemon-side verifier context for future session-auth challenges.
 
     Args:
         password (str): The master password.
-        salt (bytes): The persisted profile salt.
+        salt (Optional[bytes]): Optional explicit runtime salt.
 
     Returns:
         SessionAuthContext: The derived verifier context.
     """
+    actual_salt: bytes = salt if salt is not None else create_session_auth_salt()
     return SessionAuthContext(
-        salt_hex=salt.hex(),
-        proof_key=derive_session_auth_proof_key(password, salt),
+        salt_hex=actual_salt.hex(),
+        proof_key=derive_session_auth_proof_key(password, actual_salt),
     )
 
 

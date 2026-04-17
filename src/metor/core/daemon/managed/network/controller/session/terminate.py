@@ -17,6 +17,7 @@ from metor.core.api import (
     FallbackSuccessEvent,
     PeerNotFoundEvent,
     create_event,
+    get_current_request_id,
 )
 from metor.core.daemon.managed.models import TorCommand
 from metor.data import (
@@ -88,7 +89,6 @@ def reject(
     ):
         inflight_outbound = controller._is_inflight_outbound_socket(
             onion,
-            socket_to_close,
         )
         if not inflight_outbound:
             if not initiated_by_self:
@@ -334,6 +334,7 @@ def disconnect(
                     onion=onion,
                     count=len(unacked),
                     msg_ids=list(unacked.keys()),
+                    request_id=get_current_request_id(),
                 )
             )
 
@@ -345,12 +346,15 @@ def disconnect(
                         'utf-8'
                     )
                 )
+                try:
+                    conn.shutdown(socket.SHUT_WR)
+                except OSError:
+                    pass
                 linger_timeout_sec: float = controller._config.get_float(
                     SettingKey.LIVE_DISCONNECT_LINGER_TIMEOUT
                 )
                 if linger_timeout_sec > 0:
                     time.sleep(linger_timeout_sec)
-                conn.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
         _close_socket(conn)

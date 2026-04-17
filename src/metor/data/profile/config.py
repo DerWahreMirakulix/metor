@@ -37,7 +37,6 @@ class Config:
     """Manages reading and writing to the profile's configuration JSON."""
 
     _PLAINTEXT_DISABLED_SETTING_KEYS: tuple[SettingKey, ...] = (
-        SettingKey.REQUIRE_LOCAL_AUTH,
         SettingKey.ENABLE_RUNTIME_DB_MIRROR,
     )
 

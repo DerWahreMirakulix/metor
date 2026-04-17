@@ -1,11 +1,16 @@
 """Facade exports for the strict IPC API layer."""
 
 from metor.core.api.base import (
+    create_request_id,
+    ensure_request_id,
+    get_current_request_id,
     IpcCommand,
     IpcEvent,
     IpcMessage,
     JsonValue,
     create_event,
+    request_context,
+    stamp_request_id,
 )
 from metor.core.api.codes import (
     CommandType,
@@ -194,6 +199,11 @@ __all__ = [
     'IpcCommand',
     'IpcEvent',
     'create_event',
+    'create_request_id',
+    'ensure_request_id',
+    'get_current_request_id',
+    'request_context',
+    'stamp_request_id',
     'InitCommand',
     'GetConnectionsCommand',
     'GetContactsListCommand',

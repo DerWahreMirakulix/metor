@@ -3,13 +3,13 @@
 import socket
 from typing import Callable, Optional
 
-from metor.core.api import EventType, IpcCommand, IpcEvent
+from metor.core.api import ensure_request_id, EventType, IpcCommand, IpcEvent
 from metor.data.profile import ProfileManager
 from metor.data.settings import SettingKey
 from metor.ui.ipc import BufferedIpcEventReader, IpcAuthExchange
-from metor.ui.session_auth import prompt_session_auth_proof
 
 # Local Package Imports
+from metor.ui import get_session_auth_prompt, prompt_session_auth_proof
 from metor.ui.cli.ipc.request.models import IpcRequestResult
 
 
@@ -49,19 +49,24 @@ class IpcRequestSession:
             send_socket_command
         )
 
-    def _build_auth_exchange(self, sock: socket.socket) -> IpcAuthExchange:
+    def _build_auth_exchange(
+        self,
+        sock: socket.socket,
+        request_id: str,
+    ) -> IpcAuthExchange:
         """
         Creates one reusable auth-gate state machine for the active socket.
 
         Args:
             sock (socket.socket): The active IPC socket.
+            request_id (str): The stable request correlation identifier.
 
         Returns:
             IpcAuthExchange: The prepared auth-gate helper.
         """
         return IpcAuthExchange(
             prompt_session_proof=lambda challenge, salt: prompt_session_auth_proof(
-                'Enter Master Password: ',
+                get_session_auth_prompt(self._pm),
                 challenge,
                 salt,
             ),
@@ -69,6 +74,7 @@ class IpcRequestSession:
                 'Enter Master Password to unlock daemon: '
             ),
             send_command=lambda command: self._send_socket_command(sock, command),
+            request_id=request_id,
         )
 
     def execute_result(
@@ -92,7 +98,11 @@ class IpcRequestSession:
             sock.settimeout(self._pm.config.get_float(SettingKey.IPC_TIMEOUT))
             sock.connect(('127.0.0.1', port))
             reader: BufferedIpcEventReader = BufferedIpcEventReader()
-            auth_exchange: IpcAuthExchange = self._build_auth_exchange(sock)
+            request_id: str = ensure_request_id(cmd)
+            auth_exchange: IpcAuthExchange = self._build_auth_exchange(
+                sock,
+                request_id,
+            )
             send_failed: bool = False
             try:
                 self._send_socket_command(sock, cmd)
@@ -110,6 +120,9 @@ class IpcRequestSession:
                 event: Optional[IpcEvent] = reader.read_from_socket(sock)
                 if event is None:
                     break
+
+                if event.request_id is not None and event.request_id != request_id:
+                    continue
 
                 auth_result = auth_exchange.handle(event)
                 if auth_result.handled:

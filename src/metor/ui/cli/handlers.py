@@ -12,10 +12,12 @@ from metor.application import (
     CorruptedDaemonStorageError,
     DaemonStatus,
     InvalidDaemonPasswordError,
+    PlaintextLockedDaemonError,
     configure_daemon_runtime_logging,
     run_managed_daemon,
 )
 from metor.data.profile import ProfileManager
+from metor.data.settings import SettingKey
 from metor.ui import PromptAbortedError, Theme, Translator, prompt_hidden, prompt_text
 from metor.ui.chat import Chat
 from metor.utils import Constants, ProcessManager, secure_remove_path
@@ -84,6 +86,8 @@ class CommandHandlers:
             return
 
         password: Optional[str] = None
+        session_auth_password: Optional[str] = None
+        require_local_auth: bool = pm.config.get_bool(SettingKey.REQUIRE_LOCAL_AUTH)
         if pm.uses_encrypted_storage() and not start_locked:
             try:
                 password = prompt_hidden(
@@ -94,6 +98,17 @@ class CommandHandlers:
 
             if not password:
                 print('Master password cannot be empty.')
+                return
+        elif require_local_auth and not start_locked:
+            try:
+                session_auth_password = prompt_hidden(
+                    f'{Theme.GREEN}Enter Session Auth Password: {Theme.RESET}'
+                )
+            except PromptAbortedError:
+                return
+
+            if not session_auth_password:
+                print('Session auth password cannot be empty.')
                 return
 
         # Inversion of Control: Define UI printing logic here and inject it into Data and Core layers
@@ -128,6 +143,7 @@ class CommandHandlers:
                 run_managed_daemon(
                     pm,
                     password=password,
+                    session_auth_password=session_auth_password,
                     start_locked=True,
                     status_callback=status_cb,
                 )
@@ -139,12 +155,15 @@ class CommandHandlers:
                 print(
                     f"{msg}\nYou need to run 'metor purge' or manually delete the storage.db."
                 )
+            except PlaintextLockedDaemonError:
+                print('Plaintext profiles cannot be started in locked mode.')
             return
 
         try:
             run_managed_daemon(
                 pm,
                 password=password,
+                session_auth_password=session_auth_password,
                 start_locked=False,
                 status_callback=status_cb,
             )
@@ -156,6 +175,8 @@ class CommandHandlers:
             print(
                 f"{msg}\nYou need to run 'metor purge' or manually delete the storage.db."
             )
+        except PlaintextLockedDaemonError:
+            print('Plaintext profiles cannot be started in locked mode.')
 
     @staticmethod
     def handle_profile_security_migration(

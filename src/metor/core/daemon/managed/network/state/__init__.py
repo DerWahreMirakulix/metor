@@ -48,6 +48,7 @@ class StateTracker(
         self._expired_pending_connections: Dict[str, float] = {}
         self._scheduled_auto_reconnects: Set[str] = set()
         self._unacked_messages: Dict[str, Dict[str, Tuple[str, str]]] = {}
+        self._message_request_ids: Dict[str, str] = {}
         self._recent_live_msg_ids: Dict[str, List[str]] = {}
         self._drop_tunnels: Dict[str, DropTunnelState] = {}
         self._live_reconnect_grace: Dict[str, float] = {}

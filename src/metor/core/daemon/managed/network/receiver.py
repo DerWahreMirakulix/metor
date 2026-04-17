@@ -184,6 +184,8 @@ class StreamReceiver:
                 except socket.timeout:
                     if awaiting_acceptance:
                         break
+                    if not self._state.is_known_socket(onion, conn):
+                        break
                     continue
 
                 if not msg:

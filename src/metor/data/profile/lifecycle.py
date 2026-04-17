@@ -436,9 +436,7 @@ def clear_profile_db(name: str) -> ProfileOperationResult:
 
     try:
         sql = SqlManager(db_path, pm.config)
-        sql.execute('DELETE FROM history')
-        sql.execute('DELETE FROM messages')
-        sql.execute('DELETE FROM contacts')
+        sql.clear_all_profile_data()
         return ProfileOperationResult(
             True,
             ProfileOperationType.DATABASE_CLEARED,

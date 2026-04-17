@@ -2,6 +2,7 @@
 
 from typing import Optional
 
+from metor.data.profile import ProfileManager
 from metor.core.api import AuthRequiredEvent, InvalidPasswordEvent, IpcEvent
 from metor.utils import build_session_auth_proof
 
@@ -33,7 +34,7 @@ def prompt_session_auth_proof(
     salt: str,
 ) -> Optional[str]:
     """
-    Prompts for the master password and converts it into one session-auth proof.
+    Prompts for one local auth password and converts it into one session-auth proof.
 
     Args:
         prompt (str): The prompt text shown to the user.
@@ -48,3 +49,18 @@ def prompt_session_auth_proof(
         return None
 
     return build_session_auth_proof(password, challenge, salt)
+
+
+def get_session_auth_prompt(pm: ProfileManager) -> str:
+    """
+    Resolves the user-facing prompt label for per-session daemon auth.
+
+    Args:
+        pm (ProfileManager): The active profile manager.
+
+    Returns:
+        str: The prompt text without terminal styling.
+    """
+    if pm.uses_encrypted_storage():
+        return 'Enter Master Password: '
+    return 'Enter Session Auth Password: '

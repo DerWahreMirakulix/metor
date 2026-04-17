@@ -33,6 +33,7 @@ class IpcAuthExchange:
         prompt_session_proof: Callable[[str, str], Optional[str]],
         prompt_unlock_password: Callable[[], Optional[str]],
         send_command: Callable[[IpcCommand], None],
+        request_id: Optional[str] = None,
     ) -> None:
         """
         Initializes one reusable auth-gate exchange state machine.
@@ -41,6 +42,7 @@ class IpcAuthExchange:
             prompt_session_proof (Callable[[str, str], Optional[str]]): Callback deriving one session-auth proof from a challenge and salt.
             prompt_unlock_password (Callable[[], Optional[str]]): Callback retrieving one daemon-unlock password.
             send_command (Callable[[IpcCommand], None]): Callback used to send follow-up IPC commands.
+            request_id (Optional[str]): Stable request correlation identifier for follow-up auth commands.
 
         Returns:
             None
@@ -48,6 +50,7 @@ class IpcAuthExchange:
         self._prompt_session_proof = prompt_session_proof
         self._prompt_unlock_password = prompt_unlock_password
         self._send_command = send_command
+        self._request_id: Optional[str] = request_id
         self._pending_resume_event: Optional[EventType] = None
         self._auth_failures: int = 0
         self._unlock_failures: int = 0
@@ -84,7 +87,12 @@ class IpcAuthExchange:
                 )
 
             self._pending_resume_event = EventType.SESSION_AUTHENTICATED
-            self._send_command(AuthenticateSessionCommand(proof=proof))
+            self._send_command(
+                AuthenticateSessionCommand(
+                    proof=proof,
+                    request_id=self._request_id,
+                )
+            )
             return IpcAuthResult(handled=True)
 
         if event.event_type is EventType.DAEMON_LOCKED:
@@ -96,7 +104,12 @@ class IpcAuthExchange:
                 )
 
             self._pending_resume_event = EventType.DAEMON_UNLOCKED
-            self._send_command(UnlockCommand(password=password))
+            self._send_command(
+                UnlockCommand(
+                    password=password,
+                    request_id=self._request_id,
+                )
+            )
             return IpcAuthResult(handled=True)
 
         if event.event_type is EventType.INVALID_PASSWORD:
@@ -118,7 +131,12 @@ class IpcAuthExchange:
                         terminal_message='Master password cannot be empty.',
                     )
 
-                self._send_command(AuthenticateSessionCommand(proof=proof))
+                self._send_command(
+                    AuthenticateSessionCommand(
+                        proof=proof,
+                        request_id=self._request_id,
+                    )
+                )
                 return IpcAuthResult(handled=True)
 
             if self._pending_resume_event is EventType.DAEMON_UNLOCKED:
@@ -133,7 +151,12 @@ class IpcAuthExchange:
                         terminal_message='Master password cannot be empty.',
                     )
 
-                self._send_command(UnlockCommand(password=password))
+                self._send_command(
+                    UnlockCommand(
+                        password=password,
+                        request_id=self._request_id,
+                    )
+                )
                 return IpcAuthResult(handled=True)
 
         if (
