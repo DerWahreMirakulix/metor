@@ -12,18 +12,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.data.profile import ProfileManager
 from metor.core.api import (
+    AcceptCommand,
     AutoFallbackQueuedEvent,
     ConnectionActor,
     ConnectionOrigin,
     ConnectionsStateEvent,
     DisconnectedEvent,
     InitEvent,
+    RejectCommand,
     RetunnelInitiatedEvent,
     RetunnelSuccessEvent,
     SendDropCommand,
     SwitchCommand,
 )
 from metor.ui import Theme
+from metor.ui.chat.command import CommandDispatcher
 from metor.ui.chat.engine import Chat
 from metor.ui.chat.event.handler import EventHandler
 from metor.ui.chat.models import ChatMessageType
@@ -435,6 +438,59 @@ class ChatContractTests(unittest.TestCase):
         self.assertEqual(session.focused_alias, 'alice')
         renderer.set_focus.assert_called_once_with('alice', is_live=False)
         ipc.send_command.assert_not_called()
+
+    def test_accept_without_target_uses_implicit_pending_focus(self) -> None:
+        """
+        Verifies that accept resolves the focused pending session implicitly.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        ipc = Mock()
+        renderer = Mock()
+        session = self._build_chat(renderer)._session
+        session.focused_alias = 'alice'
+        session.pending_connections = ['alice', 'bob']
+        dispatcher = CommandDispatcher(ipc=ipc, session=session, renderer=renderer)
+
+        handled = dispatcher.dispatch('/accept')
+
+        self.assertTrue(handled)
+        sent_cmd = ipc.send_command.call_args.args[0]
+        self.assertIsInstance(sent_cmd, AcceptCommand)
+        self.assertEqual(sent_cmd.target, 'alice')
+        self.assertIsNone(session.pending_accept_focus_target)
+        renderer.print_message.assert_not_called()
+
+    def test_reject_without_target_uses_implicit_pending_focus(self) -> None:
+        """
+        Verifies that reject resolves the focused pending session implicitly.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        ipc = Mock()
+        renderer = Mock()
+        session = self._build_chat(renderer)._session
+        session.focused_alias = 'alice'
+        session.pending_connections = ['alice', 'bob']
+        dispatcher = CommandDispatcher(ipc=ipc, session=session, renderer=renderer)
+
+        handled = dispatcher.dispatch('/reject')
+
+        self.assertTrue(handled)
+        sent_cmd = ipc.send_command.call_args.args[0]
+        self.assertIsInstance(sent_cmd, RejectCommand)
+        self.assertEqual(sent_cmd.target, 'alice')
+        renderer.print_message.assert_not_called()
 
 
 if __name__ == '__main__':
