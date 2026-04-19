@@ -1,6 +1,6 @@
 """Settings and config helpers for the CLI proxy facade."""
 
-from typing import Callable, Union
+from typing import Callable, Iterable, Union
 
 from metor.core.api import (
     ConfigListDataEvent,
@@ -12,11 +12,41 @@ from metor.core.api import (
     SettingsListDataEvent,
     SetConfigCommand,
     SetSettingCommand,
+    SettingSnapshotEntry,
     SyncConfigCommand,
 )
-from metor.data import ProfileConfigKey, ProfileManager, Settings, SettingKey
+from metor.data import (
+    ProfileConfigKey,
+    ProfileManager,
+    Settings,
+    SettingKey,
+    SettingSnapshotRow,
+)
 from metor.ui import Theme, UIPresenter
 from metor.utils import TypeCaster
+
+
+def _build_snapshot_entries(
+    rows: Iterable[SettingSnapshotRow],
+) -> list[SettingSnapshotEntry]:
+    """
+    Converts internal snapshot rows into strict UI DTO entries.
+
+    Args:
+        rows (Iterable[SettingSnapshotRow]): The internal snapshot rows.
+
+    Returns:
+        list[SettingSnapshotEntry]: The typed DTO entries for local rendering.
+    """
+    return [
+        SettingSnapshotEntry(
+            key=row['key'],
+            value=row['value'],
+            source=row['source'],
+            category=row['category'],
+        )
+        for row in rows
+    ]
 
 
 class CliProxySettingsActions:
@@ -122,7 +152,9 @@ class CliProxySettingsActions:
             UIPresenter.format_response(
                 SettingsListDataEvent(
                     scope='ui',
-                    entries=list(self._settings_cls.get_snapshots(domain='ui')),
+                    entries=_build_snapshot_entries(
+                        self._settings_cls.get_snapshots(domain='ui')
+                    ),
                 )
             )
         ]
@@ -215,14 +247,18 @@ class CliProxySettingsActions:
                 ConfigListDataEvent(
                     scope='ui',
                     profile=self._pm.profile_name,
-                    entries=list(self._pm.config.get_setting_snapshots(domain='ui')),
+                    entries=_build_snapshot_entries(
+                        self._pm.config.get_setting_snapshots(domain='ui')
+                    ),
                 )
             ),
             UIPresenter.format_response(
                 ConfigListDataEvent(
                     scope='profile',
                     profile=self._pm.profile_name,
-                    entries=list(self._pm.config.get_profile_snapshots()),
+                    entries=_build_snapshot_entries(
+                        self._pm.config.get_profile_snapshots()
+                    ),
                 )
             ),
         ]

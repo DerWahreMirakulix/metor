@@ -8,11 +8,12 @@ Prevents silent overwrites of corrupted JSON configurations.
 
 import json
 from enum import Enum
-from typing import Dict, Union, cast, List, Tuple, Optional
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Union, cast
 
 from metor.data.settings import (
     SettingKey,
+    SettingSnapshotRow,
     Settings,
     SettingValue,
     SettingValidationError,
@@ -155,7 +156,7 @@ class Config:
         self,
         *,
         domain: Optional[str] = None,
-    ) -> Tuple[Dict[str, str], ...]:
+    ) -> Tuple[SettingSnapshotRow, ...]:
         """
         Returns structured snapshots for effective cascading settings.
 
@@ -163,11 +164,11 @@ class Config:
             domain (Optional[str]): Optional `ui` or `daemon` domain filter.
 
         Returns:
-            Tuple[Dict[str, str], ...]: Ordered snapshot rows for CLI presentation.
+            Tuple[SettingSnapshotRow, ...]: Ordered snapshot rows for CLI presentation.
         """
         raw_data: Dict[str, ProfileConfigValue] = self._load_raw_data()
         security_mode: ProfileSecurityMode = self._get_profile_security_mode(raw_data)
-        snapshots: list[Dict[str, str]] = []
+        snapshots: list[SettingSnapshotRow] = []
 
         for spec in Settings.get_specs():
             key_domain: str
@@ -211,7 +212,7 @@ class Config:
 
         return tuple(snapshots)
 
-    def get_profile_snapshots(self) -> Tuple[Dict[str, str], ...]:
+    def get_profile_snapshots(self) -> Tuple[SettingSnapshotRow, ...]:
         """
         Returns structured snapshots for structural profile config keys.
 
@@ -219,10 +220,10 @@ class Config:
             None
 
         Returns:
-            Tuple[Dict[str, str], ...]: Ordered structural config snapshot rows.
+            Tuple[SettingSnapshotRow, ...]: Ordered structural config snapshot rows.
         """
         raw_data: Dict[str, ProfileConfigValue] = self._load_raw_data()
-        snapshots: list[Dict[str, str]] = []
+        snapshots: list[SettingSnapshotRow] = []
 
         for spec in PROFILE_CONFIG_SPECS.values():
             if spec.key.value in raw_data:

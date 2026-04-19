@@ -9,13 +9,35 @@ from dataclasses import dataclass
 import json
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Union, Optional, Tuple
+from typing import Dict, Optional, Tuple, TypeGuard, TypedDict, Union
 
 from metor.utils import Constants, FileLock, TypeCaster, validate_json_file
 
 
 # Types
 SettingValue = Union[str, int, float, bool]
+
+
+class SettingSnapshotRow(TypedDict):
+    """Represents one normalized snapshot row before IPC/UI adaptation."""
+
+    key: str
+    value: str
+    source: str
+    category: str
+
+
+def is_setting_value(value: object) -> TypeGuard[SettingValue]:
+    """
+    Checks whether one raw JSON value is a supported primitive setting value.
+
+    Args:
+        value (object): The raw candidate value.
+
+    Returns:
+        TypeGuard[SettingValue]: True if the value is one supported primitive.
+    """
+    return isinstance(value, (str, int, float, bool))
 
 
 class SettingKey(str, Enum):
@@ -117,7 +139,7 @@ def build_snapshot_row(
     value: SettingValue | None,
     source: str,
     category: str,
-) -> Dict[str, str]:
+) -> SettingSnapshotRow:
     """
     Builds one normalized snapshot row for list-style settings output.
 
@@ -128,7 +150,7 @@ def build_snapshot_row(
         category (str): The grouping label used by the presenter.
 
     Returns:
-        Dict[str, str]: The presenter-ready string snapshot row.
+        SettingSnapshotRow: The presenter-ready string snapshot row.
     """
     return {
         'key': key,
@@ -604,7 +626,7 @@ class Settings:
         cls,
         *,
         domain: Optional[str] = None,
-    ) -> Tuple[Dict[str, str], ...]:
+    ) -> Tuple[SettingSnapshotRow, ...]:
         """
         Returns structured snapshots for the current global settings state.
 
@@ -612,10 +634,10 @@ class Settings:
             domain (Optional[str]): Optional `ui` or `daemon` domain filter.
 
         Returns:
-            Tuple[Dict[str, str], ...]: Ordered snapshot rows for CLI presentation.
+            Tuple[SettingSnapshotRow, ...]: Ordered snapshot rows for CLI presentation.
         """
         raw_data: Dict[str, object] = cls._read_raw_settings_data()
-        snapshots: list[Dict[str, str]] = []
+        snapshots: list[SettingSnapshotRow] = []
 
         for spec in cls.get_specs():
             key_domain: str
@@ -630,11 +652,12 @@ class Settings:
 
             if isinstance(raw_domain, dict) and sub_key in raw_domain:
                 candidate: object = raw_domain[sub_key]
-                try:
-                    raw_value = cls.validate_value(spec.key, candidate)
-                    source = 'global'
-                except (TypeError, SettingValidationError):
-                    raw_value = None
+                if is_setting_value(candidate):
+                    try:
+                        raw_value = cls.validate_value(spec.key, candidate)
+                        source = 'global'
+                    except (TypeError, SettingValidationError):
+                        raw_value = None
 
             value: SettingValue = spec.default if raw_value is None else raw_value
             snapshots.append(
@@ -694,6 +717,11 @@ class Settings:
                     raise ValueError(
                         f"'{path.name}' contains an unknown setting key '{key_name}'."
                     ) from exc
+
+                if not is_setting_value(raw_value):
+                    raise ValueError(
+                        f"'{path.name}' contains an invalid value for '{key_name}': unsupported JSON type."
+                    )
 
                 try:
                     cls.validate_value(setting_key, raw_value)

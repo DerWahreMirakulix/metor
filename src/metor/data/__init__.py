@@ -8,9 +8,11 @@ from metor.data.settings import (
     Settings,
     SettingKey,
     SettingSpec,
+    SettingSnapshotRow,
     SettingValue,
     SettingValidationError,
     build_snapshot_row,
+    is_setting_value,
 )
 from metor.data.sql import DatabaseCorruptedError, SqlManager, SqlParam
 
@@ -56,9 +58,11 @@ __all__ = [
     'Settings',
     'SettingKey',
     'SettingSpec',
+    'SettingSnapshotRow',
     'SettingValue',
     'SettingValidationError',
     'build_snapshot_row',
+    'is_setting_value',
     'PROFILE_CONFIG_SPECS',
     'ProfileConfigKey',
     'ProfileConfigSpec',

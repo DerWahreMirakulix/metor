@@ -4,12 +4,13 @@ Encapsulates operations routing global settings and profile configurations.
 Enforces the Zero-Text Policy by eliminating raw string errors from DTOs.
 """
 
-from typing import Union
+from typing import Iterable, Union
 
 from metor.core.api import (
     EventType,
     IpcCommand,
     IpcEvent,
+    JsonValue,
     create_event,
     SetSettingCommand,
     GetSettingCommand,
@@ -19,12 +20,42 @@ from metor.core.api import (
     GetConfigListCommand,
     SyncConfigCommand,
 )
-from metor.data import Settings, SettingKey, SettingValidationError
+from metor.data import (
+    Settings,
+    SettingKey,
+    SettingSnapshotRow,
+    SettingValidationError,
+)
 from metor.data.profile import (
     ProfileManager,
     ProfileConfigKey,
     ProfileConfigValidationError,
 )
+
+
+def _snapshot_rows_to_json(
+    rows: Iterable[SettingSnapshotRow],
+) -> list[JsonValue]:
+    """
+    Converts internal snapshot rows into strict JSON payload values.
+
+    Args:
+        rows (Iterable[SettingSnapshotRow]): The snapshot rows.
+
+    Returns:
+        list[JsonValue]: JSON-safe dictionaries for IPC event payloads.
+    """
+    json_rows: list[JsonValue] = []
+    for row in rows:
+        payload_row: dict[str, JsonValue] = {
+            'key': row['key'],
+            'value': row['value'],
+            'source': row['source'],
+            'category': row['category'],
+        }
+        json_rows.append(payload_row)
+
+    return json_rows
 
 
 class ConfigCommandHandler:
@@ -98,7 +129,9 @@ class ConfigCommandHandler:
                 EventType.SETTINGS_LIST_DATA,
                 {
                     'scope': 'daemon',
-                    'entries': list(Settings.get_snapshots(domain='daemon')),
+                    'entries': _snapshot_rows_to_json(
+                        Settings.get_snapshots(domain='daemon')
+                    ),
                 },
             )
 
@@ -161,7 +194,7 @@ class ConfigCommandHandler:
                 {
                     'scope': 'daemon',
                     'profile': self._pm.profile_name,
-                    'entries': list(
+                    'entries': _snapshot_rows_to_json(
                         self._pm.config.get_setting_snapshots(domain='daemon')
                     ),
                 },

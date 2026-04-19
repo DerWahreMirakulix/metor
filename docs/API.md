@@ -28,6 +28,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [GenerateAddressCommand](#generateaddresscommand)
 - [GetAddressCommand](#getaddresscommand)
 - [GetConfigCommand](#getconfigcommand)
+- [GetConfigListCommand](#getconfiglistcommand)
 - [GetConnectionsCommand](#getconnectionscommand)
 - [GetContactsListCommand](#getcontactslistcommand)
 - [GetHistoryCommand](#gethistorycommand)
@@ -35,6 +36,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [GetMessagesCommand](#getmessagescommand)
 - [GetRawHistoryCommand](#getrawhistorycommand)
 - [GetSettingCommand](#getsettingcommand)
+- [GetSettingsListCommand](#getsettingslistcommand)
 - [InitCommand](#initcommand)
 - [MarkReadCommand](#markreadcommand)
 - [MigrateProfileSecurityCommand](#migrateprofilesecuritycommand)
@@ -74,6 +76,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [CannotDropSelfEvent](#cannotdropselfevent)
 - [CannotSwitchSelfEvent](#cannotswitchselfevent)
 - [ConfigDataEvent](#configdataevent)
+- [ConfigListDataEvent](#configlistdataevent)
 - [ConfigSyncedEvent](#configsyncedevent)
 - [ConfigUpdateFailedEvent](#configupdatefailedevent)
 - [ConfigUpdatedEvent](#configupdatedevent)
@@ -154,6 +157,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [SettingTypeErrorEvent](#settingtypeerrorevent)
 - [SettingUpdateFailedEvent](#settingupdatefailedevent)
 - [SettingUpdatedEvent](#settingupdatedevent)
+- [SettingsListDataEvent](#settingslistdataevent)
 - [SwitchSuccessEvent](#switchsuccessevent)
 - [TorKeyDecryptFailedEvent](#torkeydecryptfailedevent)
 - [TorKeyWriteFailedEvent](#torkeywritefailedevent)
@@ -447,7 +451,11 @@ Requests the current onion address.
 
 ### `GetConfigCommand`
 
-Requests a profile-specific configuration value.
+Requests one effective profile config value.
+
+Attributes:
+setting_key (str): The fully-qualified config key to fetch.
+command_type (CommandType): The stable IPC routing code.
 
 | Field         | Type               | Default  |
 | ------------- | ------------------ | -------- |
@@ -462,6 +470,29 @@ Requests a profile-specific configuration value.
 {
   "command_type": "get_config",
   "setting_key": "string"
+}
+```
+
+---
+
+### `GetConfigListCommand`
+
+Requests the daemon-side effective profile-config snapshot.
+
+Attributes:
+command_type (CommandType): The stable IPC routing code.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+
+**Wire Value:** `get_config_list`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "get_config_list"
 }
 ```
 
@@ -597,7 +628,11 @@ Requests the raw transport history ledger.
 
 ### `GetSettingCommand`
 
-Requests a global setting value.
+Requests one global settings value.
+
+Attributes:
+setting_key (str): The fully-qualified settings key to fetch.
+command_type (CommandType): The stable IPC routing code.
 
 | Field         | Type               | Default  |
 | ------------- | ------------------ | -------- |
@@ -612,6 +647,29 @@ Requests a global setting value.
 {
   "command_type": "get_setting",
   "setting_key": "string"
+}
+```
+
+---
+
+### `GetSettingsListCommand`
+
+Requests the daemon-side global settings snapshot.
+
+Attributes:
+command_type (CommandType): The stable IPC routing code.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+
+**Wire Value:** `get_settings_list`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "get_settings_list"
 }
 ```
 
@@ -916,7 +974,12 @@ Queues an asynchronous offline message.
 
 ### `SetConfigCommand`
 
-Updates a profile-specific configuration override.
+Requests one profile-local config override update.
+
+Attributes:
+setting_key (str): The fully-qualified config key to update.
+setting_value (Union[str, int, float, bool]): The new primitive value.
+command_type (CommandType): The stable IPC routing code.
 
 | Field           | Type                           | Default  |
 | --------------- | ------------------------------ | -------- |
@@ -962,7 +1025,12 @@ Requests one new default-profile selection.
 
 ### `SetSettingCommand`
 
-Updates a global setting.
+Requests one global settings update.
+
+Attributes:
+setting_key (str): The fully-qualified settings key to update.
+setting_value (Union[str, int, float, bool]): The new primitive value.
+command_type (CommandType): The stable IPC routing code.
 
 | Field           | Type                           | Default  |
 | --------------- | ------------------------------ | -------- |
@@ -1007,7 +1075,10 @@ Changes the active UI focus.
 
 ### `SyncConfigCommand`
 
-Syncs profile configuration overrides with global settings.
+Requests a profile-config sync against global settings.
+
+Attributes:
+command_type (CommandType): The stable IPC routing code.
 
 | Field        | Type               | Default |
 | ------------ | ------------------ | ------- |
@@ -1424,6 +1495,37 @@ Returns a profile-specific config value.
   "event_type": "config_data",
   "key": "string",
   "value": "string"
+}
+```
+
+---
+
+### `ConfigListDataEvent`
+
+Returns a structured effective profile-config snapshot.
+
+Attributes:
+scope (str): The snapshot scope such as `ui`, `profile`, or `daemon`.
+profile (str): The active profile name.
+entries (List[SettingSnapshotEntry]): The ordered snapshot rows.
+event_type (EventType): The stable IPC routing code.
+
+| Field        | Type                         | Default     |
+| ------------ | ---------------------------- | ----------- |
+| `request_id` | `Union[str, None]`           | `None`      |
+| `scope`      | `str`                        | Required    |
+| `profile`    | `str`                        | Required    |
+| `entries`    | `List[SettingSnapshotEntry]` | `Factory()` |
+
+**Wire Value:** `config_list_data`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "config_list_data",
+  "scope": "string",
+  "profile": "string"
 }
 ```
 
@@ -3006,6 +3108,10 @@ Carries one structured local profile-operation result over IPC.
 
 Returns the list of available profiles.
 
+Attributes:
+profiles (List[ProfileEntry]): Structured profile rows.
+event_type (EventType): The stable IPC routing code.
+
 | Field        | Type                 | Default  |
 | ------------ | -------------------- | -------- |
 | `request_id` | `Union[str, None]`   | `None`   |
@@ -3272,6 +3378,34 @@ Signals that a global setting was updated.
 {
   "event_type": "setting_updated",
   "key": "string"
+}
+```
+
+---
+
+### `SettingsListDataEvent`
+
+Returns a structured global settings snapshot.
+
+Attributes:
+scope (str): The snapshot scope such as `ui` or `daemon`.
+entries (List[SettingSnapshotEntry]): The ordered snapshot rows.
+event_type (EventType): The stable IPC routing code.
+
+| Field        | Type                         | Default     |
+| ------------ | ---------------------------- | ----------- |
+| `request_id` | `Union[str, None]`           | `None`      |
+| `scope`      | `str`                        | Required    |
+| `entries`    | `List[SettingSnapshotEntry]` | `Factory()` |
+
+**Wire Value:** `settings_list_data`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "settings_list_data",
+  "scope": "string"
 }
 ```
 
