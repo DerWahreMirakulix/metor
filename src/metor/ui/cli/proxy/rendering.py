@@ -4,6 +4,7 @@ import dataclasses
 from typing import Callable, Dict, Optional
 
 from metor.core.api import (
+    ConfigListDataEvent,
     ContactsDataEvent,
     EventType,
     HistoryDataEvent,
@@ -14,6 +15,7 @@ from metor.core.api import (
     MessagesDataEvent,
     ProfileOperationResultEvent,
     ProfilesDataEvent,
+    SettingsListDataEvent,
     UnreadMessagesEvent,
 )
 from metor.ui import UIPresenter
@@ -78,6 +80,8 @@ class CliProxyEventRenderer:
                 InboxCountsEvent,
                 UnreadMessagesEvent,
                 ProfilesDataEvent,
+                SettingsListDataEvent,
+                ConfigListDataEvent,
             ),
         ):
             text_fmt: str = UIPresenter.format_response(event, chat_mode=False)

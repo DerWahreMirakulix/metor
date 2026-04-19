@@ -203,6 +203,7 @@ class Help:
             subcommands=[
                 SubCommandDef('get <domain.key>', 'Retrieve a global setting.'),
                 SubCommandDef('set <domain.key> <val>', 'Update a global setting.'),
+                SubCommandDef('list', 'List all current global settings.'),
             ],
         ),
         'config': CommandDef(
@@ -217,6 +218,7 @@ class Help:
                 SubCommandDef(
                     'set <domain.key> <val>', 'Override a global setting locally.'
                 ),
+                SubCommandDef('list', 'List the effective settings for this profile.'),
                 SubCommandDef(
                     'sync', 'Wipe all profile overrides to restore global defaults.'
                 ),

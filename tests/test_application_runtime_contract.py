@@ -16,6 +16,10 @@ from metor.utils import Constants, ProcessManager
 
 
 class ApplicationRuntimeContractTests(unittest.TestCase):
+    """
+    Covers application runtime contract regression scenarios.
+    """
+
     @staticmethod
     def _write_runtime_state(
         data_dir: Path,
@@ -24,6 +28,19 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
         daemon_pid: str | None = None,
         daemon_port: str | None = None,
     ) -> Path:
+        """
+        Writes runtime state for the surrounding tests.
+
+        Args:
+            data_dir (Path): The data dir.
+            profile_name (str): The profile name.
+            daemon_pid (str | None): The daemon PID.
+            daemon_port (str | None): The daemon port.
+
+        Returns:
+            Path: The computed return value.
+        """
+
         profile_dir = data_dir / profile_name
         profile_dir.mkdir(parents=True)
 
@@ -38,6 +55,16 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
     def test_cleanup_local_runtime_clears_only_dead_pid_owned_state_by_default(
         self,
     ) -> None:
+        """
+        Verifies that cleanup local runtime clears only dead PID owned state by default.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         with TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
             stale_dir = self._write_runtime_state(
@@ -78,6 +105,16 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
             self.assertTrue((damaged_dir / Constants.DAEMON_PORT_FILE).exists())
 
     def test_cleanup_local_runtime_force_clears_orphaned_runtime_state(self) -> None:
+        """
+        Verifies that cleanup local runtime force clears orphaned runtime state.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         with TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
             damaged_dir = self._write_runtime_state(
@@ -97,6 +134,16 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
             self.assertFalse((damaged_dir / Constants.DAEMON_PORT_FILE).exists())
 
     def test_pid_file_cleanup_preserves_live_state_when_termination_fails(self) -> None:
+        """
+        Verifies that PID file cleanup preserves live state when termination fails.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         with TemporaryDirectory() as temp_dir:
             pid_file = Path(temp_dir) / Constants.DAEMON_PID_FILE
             pid_file.write_text('12345')

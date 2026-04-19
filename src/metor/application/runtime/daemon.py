@@ -10,6 +10,7 @@ from metor.core.daemon.managed import (
     RuntimeStatusCallback,
     create_managed_daemon,
 )
+from metor.data import Settings
 from metor.data.profile import ProfileManager
 
 
@@ -76,6 +77,9 @@ def run_managed_daemon(
     Returns:
         None
     """
+    Settings.validate_integrity()
+    pm.validate_integrity()
+
     daemon = create_managed_daemon(
         pm,
         password=password,

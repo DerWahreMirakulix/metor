@@ -30,21 +30,73 @@ from metor.ui.chat.models import ChatMessageType
 
 
 class _DummyConfig:
+    """
+    Provides a dummy config test double.
+    """
+
     def get_float(self, _key: object) -> float:
+        """
+        Returns float for the test scenario.
+
+        Args:
+            _key (object): The key.
+
+        Returns:
+            float: The computed return value.
+        """
+
         return 0.1
 
 
 class _DummyProfileManager:
+    """
+    Provides a dummy profile manager test double.
+    """
+
     def __init__(self) -> None:
+        """
+        Initializes the dummy profile manager helper.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         self.config: _DummyConfig = _DummyConfig()
 
     def get_daemon_port(self) -> int:
+        """
+        Returns daemon port for the test scenario.
+
+        Args:
+            None
+
+        Returns:
+            int: The computed return value.
+        """
+
         return 43111
 
 
 class ChatContractTests(unittest.TestCase):
+    """
+    Covers chat contract regression scenarios.
+    """
+
     @staticmethod
     def _build_chat(renderer: Mock) -> Chat:
+        """
+        Builds chat for the surrounding tests.
+
+        Args:
+            renderer (Mock): The renderer.
+
+        Returns:
+            Chat: The computed return value.
+        """
+
         with (
             patch('metor.ui.chat.engine.Renderer', return_value=renderer),
             patch('metor.ui.chat.engine.IpcClient'),
@@ -54,12 +106,32 @@ class ChatContractTests(unittest.TestCase):
             return Chat(cast(ProfileManager, _DummyProfileManager()))
 
     def test_disconnect_exit_message_skips_prompt_during_chat_loop(self) -> None:
+        """
+        Verifies that disconnect exit message skips prompt during chat loop.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         renderer = Mock()
         ipc_client = Mock()
         ipc_client.connect.return_value = True
         chat = self._build_chat(renderer)
 
         def trigger_disconnect(_stop_event: object) -> None:
+            """
+            Executes trigger disconnect for the test scenario.
+
+            Args:
+                _stop_event (object): The stop event.
+
+            Returns:
+                None
+            """
+
             chat._disconnect_event.set()
             return None
 
@@ -84,6 +156,16 @@ class ChatContractTests(unittest.TestCase):
         )
 
     def test_disconnect_during_bootstrap_uses_prechat_console_output(self) -> None:
+        """
+        Verifies that disconnect during bootstrap uses prechat console output.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         renderer = Mock()
         chat = self._build_chat(renderer)
         chat._ipc = Mock()
@@ -102,6 +184,16 @@ class ChatContractTests(unittest.TestCase):
         )
 
     def test_bootstrap_populates_session_state_before_header(self) -> None:
+        """
+        Verifies that bootstrap populates session state before header.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         renderer = Mock()
         chat = self._build_chat(renderer)
         chat._ipc = Mock()
@@ -125,6 +217,16 @@ class ChatContractTests(unittest.TestCase):
         renderer.print_message.assert_not_called()
 
     def test_send_chat_message_uses_drop_while_retunneling(self) -> None:
+        """
+        Verifies that send chat message uses drop while retunneling.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         renderer = Mock()
         chat = self._build_chat(renderer)
         chat._ipc = Mock()
@@ -143,6 +245,16 @@ class ChatContractTests(unittest.TestCase):
         self.assertTrue(renderer.print_message.call_args.kwargs['is_pending'])
 
     def test_retunnel_events_toggle_live_send_state(self) -> None:
+        """
+        Verifies that retunnel events toggle live send state.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         renderer = Mock()
         session = self._build_chat(renderer)._session
         session.focused_alias = 'alice'
@@ -171,6 +283,16 @@ class ChatContractTests(unittest.TestCase):
     def test_auto_fallback_queued_event_converts_pending_live_message_to_drop(
         self,
     ) -> None:
+        """
+        Verifies that auto fallback queued event converts pending live message to drop.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         renderer = Mock()
         session = self._build_chat(renderer)._session
         handler = EventHandler(
@@ -195,6 +317,16 @@ class ChatContractTests(unittest.TestCase):
         renderer.apply_fallback_to_drop.assert_called_once_with(['msg-1'])
 
     def test_local_disconnect_of_focused_session_clears_focus(self) -> None:
+        """
+        Verifies that local disconnect of focused session clears focus.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         renderer = Mock()
         ipc = Mock()
         session = self._build_chat(renderer)._session
@@ -226,6 +358,16 @@ class ChatContractTests(unittest.TestCase):
         self.assertIsNone(sent_cmd.target)
 
     def test_local_disconnect_of_other_session_preserves_focus(self) -> None:
+        """
+        Verifies that local disconnect of other session preserves focus.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         renderer = Mock()
         ipc = Mock()
         session = self._build_chat(renderer)._session
@@ -256,6 +398,16 @@ class ChatContractTests(unittest.TestCase):
         ipc.send_command.assert_not_called()
 
     def test_connection_loss_of_focused_session_preserves_focus(self) -> None:
+        """
+        Verifies that connection loss of focused session preserves focus.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         renderer = Mock()
         ipc = Mock()
         session = self._build_chat(renderer)._session

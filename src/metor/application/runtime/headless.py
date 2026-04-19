@@ -3,6 +3,7 @@
 from typing import Callable, Optional, TypeVar
 
 from metor.core.daemon.headless import HeadlessDaemon
+from metor.data import Settings
 from metor.data.profile import ProfileManager
 
 
@@ -25,5 +26,8 @@ def run_with_headless_daemon(
     Returns:
         ResultT: The callback result.
     """
+    Settings.validate_integrity()
+    pm.validate_integrity()
+
     with HeadlessDaemon(pm, password) as headless_daemon:
         return port_handler(headless_daemon.port)

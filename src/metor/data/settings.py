@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import json
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Union, Optional
+from typing import Dict, Union, Optional, Tuple
 
 from metor.utils import Constants, FileLock, TypeCaster, validate_json_file
 
@@ -109,6 +109,33 @@ class SettingSpec:
     allow_empty_string: bool = True
     min_value: Optional[float] = None
     max_value: Optional[float] = None
+
+
+def build_snapshot_row(
+    *,
+    key: str,
+    value: SettingValue | None,
+    source: str,
+    category: str,
+) -> Dict[str, str]:
+    """
+    Builds one normalized snapshot row for list-style settings output.
+
+    Args:
+        key (str): The fully-qualified settings or config key.
+        value (SettingValue | None): The effective primitive value to render.
+        source (str): The source label describing where the value came from.
+        category (str): The grouping label used by the presenter.
+
+    Returns:
+        Dict[str, str]: The presenter-ready string snapshot row.
+    """
+    return {
+        'key': key,
+        'value': TypeCaster.to_str(value),
+        'source': source,
+        'category': category,
+    }
 
 
 class Settings:
@@ -550,6 +577,78 @@ class Settings:
         return data_dir / Constants.SETTINGS_FILE
 
     @classmethod
+    def _read_raw_settings_data(cls) -> Dict[str, object]:
+        """
+        Reads the raw settings JSON payload without applying defaults.
+
+        Args:
+            None
+
+        Returns:
+            Dict[str, object]: The decoded top-level settings payload.
+        """
+        path: Path = cls.get_global_settings_path()
+        if not path.exists():
+            return {}
+
+        with path.open('r', encoding='utf-8') as f:
+            data: object = json.load(f)
+
+        if not isinstance(data, dict):
+            raise ValueError(f"'{path.name}' must contain a top-level JSON object.")
+
+        return dict(data)
+
+    @classmethod
+    def get_snapshots(
+        cls,
+        *,
+        domain: Optional[str] = None,
+    ) -> Tuple[Dict[str, str], ...]:
+        """
+        Returns structured snapshots for the current global settings state.
+
+        Args:
+            domain (Optional[str]): Optional `ui` or `daemon` domain filter.
+
+        Returns:
+            Tuple[Dict[str, str], ...]: Ordered snapshot rows for CLI presentation.
+        """
+        raw_data: Dict[str, object] = cls._read_raw_settings_data()
+        snapshots: list[Dict[str, str]] = []
+
+        for spec in cls.get_specs():
+            key_domain: str
+            sub_key: str
+            key_domain, sub_key = spec.key.value.split('.', 1)
+            if domain is not None and key_domain != domain:
+                continue
+
+            raw_domain: object = raw_data.get(key_domain, {})
+            raw_value: Optional[SettingValue] = None
+            source: str = 'default'
+
+            if isinstance(raw_domain, dict) and sub_key in raw_domain:
+                candidate: object = raw_domain[sub_key]
+                try:
+                    raw_value = cls.validate_value(spec.key, candidate)
+                    source = 'global'
+                except (TypeError, SettingValidationError):
+                    raw_value = None
+
+            value: SettingValue = spec.default if raw_value is None else raw_value
+            snapshots.append(
+                build_snapshot_row(
+                    key=spec.key.value,
+                    value=value,
+                    source=source,
+                    category=spec.category,
+                )
+            )
+
+        return tuple(snapshots)
+
+    @classmethod
     def validate_integrity(cls) -> None:
         """
         Validates the JSON syntax of the global settings file using the generic parser utility.
@@ -566,8 +665,49 @@ class Settings:
         path: Path = cls.get_global_settings_path()
         validate_json_file(path)
 
+        if not path.exists():
+            return
+
+        raw_data: Dict[str, object] = cls._read_raw_settings_data()
+        allowed_domains: set[str] = {'ui', 'daemon'}
+        unknown_domains: list[str] = sorted(
+            key for key in raw_data.keys() if key not in allowed_domains
+        )
+        if unknown_domains:
+            joined: str = ', '.join(unknown_domains)
+            raise ValueError(
+                f"'{path.name}' contains unknown settings domains: {joined}."
+            )
+
+        for domain in allowed_domains:
+            raw_domain: object = raw_data.get(domain, {})
+            if not isinstance(raw_domain, dict):
+                raise ValueError(
+                    f"'{path.name}' contains a non-object '{domain}' section."
+                )
+
+            for sub_key, raw_value in raw_domain.items():
+                key_name: str = f'{domain}.{sub_key}'
+                try:
+                    setting_key: SettingKey = SettingKey(key_name)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"'{path.name}' contains an unknown setting key '{key_name}'."
+                    ) from exc
+
+                try:
+                    cls.validate_value(setting_key, raw_value)
+                except (TypeError, SettingValidationError) as exc:
+                    raise ValueError(
+                        f"'{path.name}' contains an invalid value for '{key_name}': {exc}"
+                    ) from exc
+
     @classmethod
-    def _load_settings(cls) -> Dict[str, Dict[str, SettingValue]]:
+    def _load_settings(
+        cls,
+        *,
+        persist_defaults: bool = True,
+    ) -> Dict[str, Dict[str, SettingValue]]:
         """
         Loads the settings from the JSON file into a nested structure.
         Creates the default structure and writes it to disk if the file is missing.
@@ -600,7 +740,7 @@ class Settings:
             category, sub_key = key_enum.split('.', 1)
             data[category][sub_key] = val
 
-        if not path.exists():
+        if persist_defaults and not path.exists():
             with FileLock(path):
                 with path.open('w', encoding='utf-8') as f:
                     json.dump(data, f, indent=4)
@@ -725,7 +865,9 @@ class Settings:
         path: Path = cls.get_global_settings_path()
 
         with FileLock(path):
-            data: Dict[str, Dict[str, SettingValue]] = cls._load_settings()
+            data: Dict[str, Dict[str, SettingValue]] = cls._load_settings(
+                persist_defaults=False,
+            )
             category: str
             sub_key: str
             category, sub_key = key.value.split('.', 1)

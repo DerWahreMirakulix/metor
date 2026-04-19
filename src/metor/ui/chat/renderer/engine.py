@@ -24,7 +24,7 @@ from metor.ui.chat.renderer.display import Display
 from metor.ui.chat.renderer.input import InputHandler
 
 if TYPE_CHECKING:
-    from metor.data.profile import Config
+    from metor.data import Config
 
 
 UI_PROMPT_SIGN_KEY: str = 'ui.prompt_sign'

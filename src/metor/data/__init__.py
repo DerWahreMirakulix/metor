@@ -10,6 +10,7 @@ from metor.data.settings import (
     SettingSpec,
     SettingValue,
     SettingValidationError,
+    build_snapshot_row,
 )
 from metor.data.sql import DatabaseCorruptedError, SqlManager, SqlParam
 
@@ -27,9 +28,23 @@ from metor.data.message import (
     MessageDirection,
     MessageType,
 )
+from metor.data.profile import (
+    Config,
+    PROFILE_CONFIG_SPECS,
+    ProfileConfigKey,
+    ProfileConfigSpec,
+    ProfileConfigValidationError,
+    ProfileManager,
+    ProfileOperationResult,
+    ProfileOperationType,
+    ProfileSecurityMode,
+    ProfileSummary,
+    validate_profile_config_value,
+)
 
 __all__ = [
     'ContactManager',
+    'Config',
     'HistoryActor',
     'HistoryManager',
     'HistoryEvent',
@@ -43,6 +58,17 @@ __all__ = [
     'SettingSpec',
     'SettingValue',
     'SettingValidationError',
+    'build_snapshot_row',
+    'PROFILE_CONFIG_SPECS',
+    'ProfileConfigKey',
+    'ProfileConfigSpec',
+    'ProfileConfigValidationError',
+    'ProfileManager',
+    'ProfileOperationResult',
+    'ProfileOperationType',
+    'ProfileSecurityMode',
+    'ProfileSummary',
+    'validate_profile_config_value',
     'DatabaseCorruptedError',
     'SqlManager',
     'SqlParam',

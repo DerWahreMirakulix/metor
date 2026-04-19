@@ -2,8 +2,8 @@
 
 from typing import Optional
 
-from metor.data.profile import ProfileManager
 from metor.core.api import AuthRequiredEvent, InvalidPasswordEvent, IpcEvent
+from metor.data import ProfileManager
 from metor.utils import build_session_auth_proof
 
 # Local Package Imports

@@ -51,8 +51,10 @@ from metor.core.api import (
     ClearProfileDbCommand,
     SetSettingCommand,
     GetSettingCommand,
+    GetSettingsListCommand,
     SetConfigCommand,
     GetConfigCommand,
+    GetConfigListCommand,
     SyncConfigCommand,
     SelfDestructCommand,
     UnlockCommand,
@@ -833,8 +835,10 @@ class Daemon:
             (
                 SetSettingCommand,
                 GetSettingCommand,
+                GetSettingsListCommand,
                 SetConfigCommand,
                 GetConfigCommand,
+                GetConfigListCommand,
                 SyncConfigCommand,
             ),
         ):

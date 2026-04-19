@@ -29,7 +29,7 @@ from metor.core.api import (
     SelfDestructCommand,
     UnlockCommand,
 )
-from metor.data.profile import ProfileManager, ProfileSecurityMode
+from metor.data import ProfileManager, ProfileSecurityMode
 from metor.ui import (
     PromptAbortedError,
     Theme,
@@ -264,6 +264,18 @@ class CliProxy:
         """
         return self._settings.handle_settings_get(key)
 
+    def handle_settings_list(self) -> str:
+        """
+        Lists current global settings.
+
+        Args:
+            None
+
+        Returns:
+            str: The formatted snapshot output.
+        """
+        return self._settings.handle_settings_list()
+
     def handle_config_set(self, key: str, value: str) -> str:
         """
         Sets one profile-specific configuration override.
@@ -288,6 +300,18 @@ class CliProxy:
             str: The formatted response containing the config value.
         """
         return self._settings.handle_config_get(key)
+
+    def handle_config_list(self) -> str:
+        """
+        Lists effective configuration values for the active profile.
+
+        Args:
+            None
+
+        Returns:
+            str: The formatted snapshot output.
+        """
+        return self._settings.handle_config_list()
 
     def handle_config_sync(self) -> str:
         """

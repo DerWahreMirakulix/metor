@@ -28,91 +28,330 @@ from metor.utils import Constants
 
 
 class _ChunkSocket:
+    """
+    Provides a chunk socket helper for test scenarios.
+    """
+
     def __init__(self, chunks: list[bytes]) -> None:
+        """
+        Initializes the chunk socket helper.
+        
+        Args:
+            chunks (list[bytes]): The chunks.
+        
+        Returns:
+            None
+        """
+
         self._chunks: list[bytes] = chunks
 
     def recv(self, _size: int) -> bytes:
+        """
+        Returns the next buffered payload chunk.
+        
+        Args:
+            _size (int): The size.
+        
+        Returns:
+            bytes: The computed return value.
+        """
+
         if not self._chunks:
             return b''
         return self._chunks.pop(0)
 
 
 class _RequestSessionSocket:
+    """
+    Provides a request session socket helper for test scenarios.
+    """
+
     def __init__(self, chunks: list[bytes]) -> None:
+        """
+        Initializes the request session socket helper.
+        
+        Args:
+            chunks (list[bytes]): The chunks.
+        
+        Returns:
+            None
+        """
+
         self._chunks: list[bytes] = chunks
         self.connected_to: Optional[tuple[str, int]] = None
         self.sent: list[bytes] = []
         self.timeout: Optional[float] = None
 
     def __enter__(self) -> '_RequestSessionSocket':
+        """
+        Enters the helper context manager.
+        
+        Args:
+            None
+        
+        Returns:
+            '_RequestSessionSocket': The computed return value.
+        """
+
         return self
 
     def __exit__(self, *args: object) -> None:
+        """
+        Exits the helper context manager.
+        
+        Args:
+            *args (object): Extra args values.
+        
+        Returns:
+            None
+        """
+
         del args
         return None
 
     def settimeout(self, timeout: float) -> None:
+        """
+        Captures one timeout value for assertions.
+        
+        Args:
+            timeout (float): The timeout.
+        
+        Returns:
+            None
+        """
+
         self.timeout = timeout
 
     def connect(self, address: tuple[str, int]) -> None:
+        """
+        Captures the requested connection target.
+        
+        Args:
+            address (tuple[str, int]): The address.
+        
+        Returns:
+            None
+        """
+
         self.connected_to = address
 
     def recv(self, _size: int) -> bytes:
+        """
+        Returns the next buffered payload chunk.
+        
+        Args:
+            _size (int): The size.
+        
+        Returns:
+            bytes: The computed return value.
+        """
+
         if not self._chunks:
             return b''
         return self._chunks.pop(0)
 
     def sendall(self, payload: bytes) -> None:
+        """
+        Captures one outgoing payload for assertions.
+        
+        Args:
+            payload (bytes): The payload.
+        
+        Returns:
+            None
+        """
+
         self.sent.append(payload)
 
 
 class _RequestSessionConfig:
+    """
+    Provides a request session config helper for test scenarios.
+    """
+
     def get_float(self, _key: Any) -> float:
+        """
+        Returns float for the test scenario.
+        
+        Args:
+            _key (Any): The key.
+        
+        Returns:
+            float: The computed return value.
+        """
+
         return 1.5
 
 
 class _RequestSessionProfileManager:
+    """
+    Provides a request session profile manager helper for test scenarios.
+    """
+
     def __init__(self) -> None:
+        """
+        Initializes the request session profile manager helper.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         self.config: _RequestSessionConfig = _RequestSessionConfig()
 
     def uses_encrypted_storage(self) -> bool:
+        """
+        Reports whether the helper uses encrypted storage.
+        
+        Args:
+            None
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         return True
 
     def uses_plaintext_storage(self) -> bool:
+        """
+        Reports whether the helper uses plaintext storage.
+        
+        Args:
+            None
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         return False
 
 
 class _AuthPromptConfig:
+    """
+    Provides a auth prompt config helper for test scenarios.
+    """
+
     def __init__(self, require_local_auth: bool) -> None:
+        """
+        Initializes the auth prompt config helper.
+        
+        Args:
+            require_local_auth (bool): The require local auth.
+        
+        Returns:
+            None
+        """
+
         self._require_local_auth: bool = require_local_auth
 
     def get_bool(self, key: Any) -> bool:
+        """
+        Returns bool for the test scenario.
+        
+        Args:
+            key (Any): The key.
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         if key is SettingKey.REQUIRE_LOCAL_AUTH:
             return self._require_local_auth
         return False
 
 
 class _AuthPromptProfileManager:
+    """
+    Provides a auth prompt profile manager helper for test scenarios.
+    """
+
     def __init__(self, *, encrypted: bool, require_local_auth: bool) -> None:
+        """
+        Initializes the auth prompt profile manager helper.
+        
+        Args:
+            encrypted (bool): The encrypted.
+            require_local_auth (bool): The require local auth.
+        
+        Returns:
+            None
+        """
+
         self.profile_name: str = 'default'
         self.config: _AuthPromptConfig = _AuthPromptConfig(require_local_auth)
         self._encrypted: bool = encrypted
 
     def is_remote(self) -> bool:
+        """
+        Reports whether the helper is remote.
+        
+        Args:
+            None
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         return False
 
     def is_daemon_running(self) -> bool:
+        """
+        Reports whether the helper is daemon running.
+        
+        Args:
+            None
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         return False
 
     def uses_encrypted_storage(self) -> bool:
+        """
+        Reports whether the helper uses encrypted storage.
+        
+        Args:
+            None
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         return self._encrypted
 
     def uses_plaintext_storage(self) -> bool:
+        """
+        Reports whether the helper uses plaintext storage.
+        
+        Args:
+            None
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         return not self._encrypted
 
 
 class UiIpcContractTests(unittest.TestCase):
+    """
+    Covers UI IPC contract regression scenarios.
+    """
+
     def test_buffered_event_reader_reassembles_fragmented_ipc_event(self) -> None:
+        """
+        Verifies that buffered event reader reassembles fragmented IPC event.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         reader = BufferedIpcEventReader()
         payload = (
             '\n' + create_event(EventType.DAEMON_UNLOCKED).to_json() + '\n'
@@ -126,6 +365,16 @@ class UiIpcContractTests(unittest.TestCase):
         self.assertIs(event.event_type, EventType.DAEMON_UNLOCKED)
 
     def test_auth_exchange_resends_original_command_after_session_auth(self) -> None:
+        """
+        Verifies that auth exchange resends original command after session auth.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         sent_commands: list[object] = []
         challenge = 'ab' * Constants.SESSION_AUTH_CHALLENGE_BYTES
         salt = 'cd' * nacl.pwhash.argon2i.SALTBYTES
@@ -161,6 +410,16 @@ class UiIpcContractTests(unittest.TestCase):
     def test_request_session_ignores_foreign_request_events_and_reuses_request_id(
         self,
     ) -> None:
+        """
+        Verifies that request session ignores foreign request events and reuses request ID.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         challenge = 'ab' * Constants.SESSION_AUTH_CHALLENGE_BYTES
         salt = 'cd' * nacl.pwhash.argon2i.SALTBYTES
         request_id = 'req-session-1'
@@ -234,6 +493,16 @@ class UiIpcContractTests(unittest.TestCase):
         self.assertEqual(fake_socket.timeout, 1.5)
 
     def test_auth_exchange_returns_terminal_invalid_password_after_limit(self) -> None:
+        """
+        Verifies that auth exchange returns terminal invalid password after limit.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         challenge = 'ab' * Constants.SESSION_AUTH_CHALLENGE_BYTES
         salt = 'cd' * nacl.pwhash.argon2i.SALTBYTES
         exchange = IpcAuthExchange(
@@ -271,6 +540,16 @@ class UiIpcContractTests(unittest.TestCase):
         self.assertIs(result.terminal_event.event_type, EventType.INVALID_PASSWORD)
 
     def test_session_auth_prompt_uses_plaintext_specific_label(self) -> None:
+        """
+        Verifies that session auth prompt uses plaintext specific label.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         prompt = get_session_auth_prompt(
             _AuthPromptProfileManager(encrypted=False, require_local_auth=True)
         )
@@ -278,6 +557,16 @@ class UiIpcContractTests(unittest.TestCase):
         self.assertEqual(prompt, 'Enter Session Auth Password: ')
 
     def test_handle_daemon_prompts_for_plaintext_session_auth_password(self) -> None:
+        """
+        Verifies that handle daemon prompts for plaintext session auth password.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         pm = _AuthPromptProfileManager(encrypted=False, require_local_auth=True)
 
         with (
@@ -303,6 +592,16 @@ class UiIpcContractTests(unittest.TestCase):
         )
 
     def test_remote_nuke_requires_typed_self_destruct_success_event(self) -> None:
+        """
+        Verifies that remote nuke requires typed self destruct success event.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         remote_pm = Mock()
         remote_pm.is_remote.return_value = True
         proxy = Mock()
@@ -321,6 +620,16 @@ class UiIpcContractTests(unittest.TestCase):
         prompt_mock.assert_called_once()
 
     def test_remote_nuke_accepts_typed_self_destruct_success_event(self) -> None:
+        """
+        Verifies that remote nuke accepts typed self destruct success event.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         remote_pm = Mock()
         remote_pm.is_remote.return_value = True
         proxy = Mock()

@@ -229,10 +229,11 @@ Metor's configuration system uses a cascading architecture. You can define **glo
 
 ### Global Settings (`settings`)
 
-Values are persistently stored in `settings.json` and affect all profiles unless overridden locally.
+Values are global defaults. `ui.*` keys are stored in the local client `settings.json`, while `daemon.*` keys target the current daemon host and affect all profiles there unless overridden locally.
 
 - **Set a global value:** `metor settings set daemon.ephemeral_messages true`
 - **Get a global value:** `metor settings get daemon.ephemeral_messages`
+- **List current global values:** `metor settings list`
 
 ### Profile Overrides (`config`)
 
@@ -240,6 +241,7 @@ Values are stored in the active profile's `config.json` and override the global 
 
 - **Set a profile override:** `metor -p my_profile config set daemon.tor_timeout 20`
 - **Get the active value:** `metor -p my_profile config get daemon.tor_timeout` (Returns the local override, or falls back to global if none exists).
+- **List the effective profile values:** `metor -p my_profile config list`
 - **Sync to global:** `metor -p my_profile config sync` (Wipes all local overrides, restoring global defaults for this profile).
 
 ### Advanced Remote Routing
@@ -247,7 +249,9 @@ Values are stored in the active profile's `config.json` and override the global 
 When interacting with a remote daemon over SSH, Metor's CLI acts as a smart router to maintain strict domain boundaries:
 
 - **UI Settings (`ui.*`):** Commands like `metor config set ui.chat_limit 100` are stored **locally** on your laptop. The remote server never sees them, keeping its configuration clean.
+- **Global UI Settings (`metor settings ui.*`):** Commands like `metor settings set ui.prompt_sign '>'` still remain **local** to your client machine, even when the active profile is remote.
 - **Daemon Settings (`daemon.*`):** Commands like `metor config set daemon.tor_timeout 30` are securely transmitted via IPC and stored directly on the **remote server's** disk.
+- **Global Daemon Settings (`metor settings daemon.*`):** Commands like `metor settings set daemon.allow_drops false` are applied on the targeted daemon host, not on the local laptop, so global daemon defaults stay host-correct.
 - **Config Sync:** Running `metor config sync` intelligently wipes UI overrides on your local machine _and_ instructs the remote daemon to wipe its overrides simultaneously.
 
 **Common Security-Relevant Keys:**
@@ -255,7 +259,7 @@ When interacting with a remote daemon over SSH, Metor's CLI acts as a smart rout
 - `daemon.ephemeral_messages` (bool): If true, consumed drop-message payloads are shredded from disk instead of being retained in visible message history.
 - `daemon.enable_runtime_db_mirror` (bool): If true, a plaintext runtime mirror of the encrypted database is written to disk for debugging and external inspection tools. Plaintext profiles force this off because the primary database is already plaintext.
 - `daemon.auto_accept_contacts` (bool): If true, saved contacts may be auto-accepted for inbound live sessions.
-- `daemon.require_local_auth` (bool): Requires each new local encrypted IPC session to authenticate before it can issue runtime commands. Defaults to `true` for encrypted profiles; plaintext profiles force this off because no password exists to validate.
+- `daemon.require_local_auth` (bool): Requires each new local IPC session to authenticate before it can issue runtime commands. Defaults to `true` and remains configurable per profile or host policy.
 - `daemon.allow_drops` (bool): Globally allows or blocks the reception of asynchronous offline messages.
 - `daemon.max_unseen_live_msgs` (int): Caps unread crash-safe live backlog per peer. `0` disables headless live backlog, `-1` removes the limit.
 - `ui.inbox_notification_delay` (float): Delays and aggregates unread-message notifications for unfocused peers on this local UI.

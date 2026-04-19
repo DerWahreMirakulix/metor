@@ -35,12 +35,36 @@ from metor.ui import UIPresenter
 
 
 class HistoryContractTests(unittest.TestCase):
+    """
+    Covers history contract regression scenarios.
+    """
+
     def test_history_event_family_mapping_is_explicit(self) -> None:
+        """
+        Verifies that history event family mapping is explicit.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         self.assertIs(HistoryEvent.REQUESTED.family, HistoryFamily.LIVE)
         self.assertIs(HistoryEvent.QUEUED.family, HistoryFamily.DROP)
         self.assertIs(HistoryEvent.TUNNEL_CLOSED.family, HistoryFamily.DROP)
 
     def test_history_projector_uses_typed_raw_entries(self) -> None:
+        """
+        Verifies that history projector uses typed raw entries.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         entries = [
             HistoryLedgerEntry(
                 timestamp='2026-04-05T10:00:00+00:00',
@@ -91,6 +115,16 @@ class HistoryContractTests(unittest.TestCase):
         self.assertIs(projected[1].family, HistoryFamily.DROP)
 
     def test_history_events_cast_nested_entries_to_typed_codes(self) -> None:
+        """
+        Verifies that history events cast nested entries to typed codes.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         history_event = HistoryDataEvent(
             entries=cast(
                 list[SummaryHistoryEntry],

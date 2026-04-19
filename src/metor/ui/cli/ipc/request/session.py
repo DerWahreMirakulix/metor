@@ -4,8 +4,7 @@ import socket
 from typing import Callable, Optional
 
 from metor.core.api import ensure_request_id, EventType, IpcCommand, IpcEvent
-from metor.data.profile import ProfileManager
-from metor.data.settings import SettingKey
+from metor.data import ProfileManager, SettingKey
 from metor.ui.ipc import BufferedIpcEventReader, IpcAuthExchange
 
 # Local Package Imports

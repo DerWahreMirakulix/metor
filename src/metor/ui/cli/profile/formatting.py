@@ -4,7 +4,7 @@ from typing import Mapping, cast
 
 from metor.core.api import JsonValue
 from metor.core.api.codes import ProfileOperationCode
-from metor.data.profile import ProfileSecurityMode
+from metor.data import ProfileSecurityMode
 
 
 ProfileResultValue = str | int | float | bool | None

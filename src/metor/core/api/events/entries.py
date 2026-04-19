@@ -58,3 +58,21 @@ class ProfileEntry:
     is_active: bool
     is_remote: bool
     port: Optional[int]
+
+
+@dataclass
+class SettingSnapshotEntry:
+    """
+    Represents one settings/config snapshot row.
+
+    Attributes:
+        key (str): The fully-qualified settings or config key.
+        value (str): The rendered effective value.
+        source (str): The source label for the rendered value.
+        category (str): The presenter grouping label.
+    """
+
+    key: str
+    value: str
+    source: str
+    category: str

@@ -16,13 +16,10 @@ from metor.application import (
     configure_daemon_runtime_logging,
     run_managed_daemon,
 )
-from metor.data.profile import ProfileManager
-from metor.data.settings import SettingKey
+from metor.data import ProfileManager, ProfileSecurityMode, SettingKey
 from metor.ui import PromptAbortedError, Theme, Translator, prompt_hidden, prompt_text
 from metor.ui.chat import Chat
 from metor.utils import Constants, ProcessManager, secure_remove_path
-
-from metor.data.profile import ProfileSecurityMode
 from metor.ui.cli.proxy import CliProxy
 
 
@@ -157,6 +154,8 @@ class CommandHandlers:
                 )
             except PlaintextLockedDaemonError:
                 print('Plaintext profiles cannot be started in locked mode.')
+            except ValueError as exc:
+                print(str(exc))
             return
 
         try:
@@ -175,6 +174,8 @@ class CommandHandlers:
             print(
                 f"{msg}\nYou need to run 'metor purge' or manually delete the storage.db."
             )
+        except ValueError as exc:
+            print(str(exc))
         except PlaintextLockedDaemonError:
             print('Plaintext profiles cannot be started in locked mode.')
 

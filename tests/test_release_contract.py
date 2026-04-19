@@ -38,53 +38,164 @@ from metor.ui.cli.proxy import CliProxy
 
 
 class _DummyProfileManager:
+    """
+    Provides a dummy profile manager test double.
+    """
+
     def is_remote(self) -> bool:
+        """
+        Reports whether the helper is remote.
+
+        Args:
+            None
+
+        Returns:
+            bool: The computed return value.
+        """
+
         return False
 
 
 class _DummyUiConfig:
+    """
+    Provides a dummy UI config test double.
+    """
+
     def __init__(self, value: str) -> None:
+        """
+        Initializes the dummy UI config helper.
+
+        Args:
+            value (str): The value.
+
+        Returns:
+            None
+        """
+
         self._value: str = value
 
     def get_str(self, _key: object) -> str:
+        """
+        Returns str for the test scenario.
+
+        Args:
+            _key (object): The key.
+
+        Returns:
+            str: The computed return value.
+        """
+
         return self._value
 
 
 class _DummyUiProfileManager:
+    """
+    Provides a dummy UI profile manager test double.
+    """
+
     def __init__(self, value: str) -> None:
+        """
+        Initializes the dummy UI profile manager helper.
+
+        Args:
+            value (str): The value.
+
+        Returns:
+            None
+        """
+
         self.config: _DummyUiConfig = _DummyUiConfig(value)
         self.profile_name: str = 'default'
 
     def is_remote(self) -> bool:
+        """
+        Reports whether the helper is remote.
+
+        Args:
+            None
+
+        Returns:
+            bool: The computed return value.
+        """
+
         return False
 
 
 class _FakeSqlCipherModule:
+    """
+    Provides a fake SQL cipher module test double.
+    """
+
     class Connection:
+        """
+        Provides a connection helper for test scenarios.
+        """
+
         pass
 
     class Cursor:
+        """
+        Provides a cursor helper for test scenarios.
+        """
+
         pass
 
     class DatabaseError(Exception):
+        """
+        Provides a database error helper for test scenarios.
+        """
+
         pass
 
     class OperationalError(Exception):
+        """
+        Provides a operational error helper for test scenarios.
+        """
+
         pass
 
 
 class _RecordingCursor:
+    """
+    Provides a recording cursor test double.
+    """
+
     def __init__(self) -> None:
+        """
+        Initializes the recording cursor helper.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         self.queries: list[str] = []
 
     def execute(
         self, query: str, _params: tuple[object, ...] = ()
     ) -> '_RecordingCursor':
+        """
+        Executes execute for the test scenario.
+
+        Args:
+            query (str): The query.
+            _params (tuple[object, ...]): The params.
+
+        Returns:
+            '_RecordingCursor': The computed return value.
+        """
+
         self.queries.append(query)
         return self
 
 
 class ReleaseContractTests(unittest.TestCase):
+    """
+    Covers release contract regression scenarios.
+    """
+
     def _build_args(
         self,
         *,
@@ -93,6 +204,19 @@ class ReleaseContractTests(unittest.TestCase):
         port: int | None = None,
         locked: bool = False,
     ) -> argparse.Namespace:
+        """
+        Builds args for the surrounding tests.
+
+        Args:
+            plaintext (bool): The plaintext.
+            remote (bool): The remote.
+            port (int | None): The port.
+            locked (bool): The locked.
+
+        Returns:
+            argparse.Namespace: The computed return value.
+        """
+
         return argparse.Namespace(
             command='profiles',
             subcommand='add',
@@ -104,6 +228,16 @@ class ReleaseContractTests(unittest.TestCase):
         )
 
     def test_profiles_add_maps_plaintext_flag_to_plaintext_security_mode(self) -> None:
+        """
+        Verifies that profiles add maps plaintext flag to plaintext security mode.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         dispatcher = CliDispatcher(
             self._build_args(plaintext=True),
             ['alice'],
@@ -125,6 +259,16 @@ class ReleaseContractTests(unittest.TestCase):
         )
 
     def test_profiles_add_defaults_to_encrypted_security_mode(self) -> None:
+        """
+        Verifies that profiles add defaults to encrypted security mode.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         dispatcher = CliDispatcher(
             self._build_args(),
             ['alice'],
@@ -146,17 +290,47 @@ class ReleaseContractTests(unittest.TestCase):
         )
 
     def test_require_local_auth_defaults_to_enabled(self) -> None:
+        """
+        Verifies that require local auth defaults to enabled.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         spec = Settings.SETTING_SPECS[SettingKey.REQUIRE_LOCAL_AUTH]
 
         self.assertTrue(spec.default)
 
     def test_plaintext_profiles_no_longer_force_disable_local_auth(self) -> None:
+        """
+        Verifies that plaintext profiles no longer force disable local auth.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         self.assertNotIn(
             SettingKey.REQUIRE_LOCAL_AUTH,
             Config._PLAINTEXT_DISABLED_SETTING_KEYS,
         )
 
     def test_schema_bootstrap_does_not_drop_legacy_tables(self) -> None:
+        """
+        Verifies that schema bootstrap does not drop legacy tables.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         cursor = _RecordingCursor()
 
         ensure_core_schema(cursor)
@@ -166,38 +340,116 @@ class ReleaseContractTests(unittest.TestCase):
         )
 
     def test_local_auth_lockout_timeout_has_secure_default(self) -> None:
+        """
+        Verifies that local auth lockout timeout has secure default.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         spec = Settings.SETTING_SPECS[SettingKey.LOCAL_AUTH_LOCKOUT_TIMEOUT]
 
         self.assertEqual(spec.default, 30.0)
 
     def test_max_unseen_drop_msgs_has_bounded_default(self) -> None:
+        """
+        Verifies that max unseen drop msgs has bounded default.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         spec = Settings.SETTING_SPECS[SettingKey.MAX_UNSEEN_DROP_MSGS]
 
         self.assertEqual(spec.default, 20)
 
     def test_max_ipc_clients_has_bounded_default(self) -> None:
+        """
+        Verifies that max IPC clients has bounded default.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         spec = Settings.SETTING_SPECS[SettingKey.MAX_IPC_CLIENTS]
 
         self.assertEqual(spec.default, 8)
 
-    def test_ui_settings_get_uses_effective_profile_config_value(self) -> None:
+    def test_ui_settings_get_uses_global_settings_value(self) -> None:
+        """
+        Verifies that UI settings get uses global settings value.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         proxy = CliProxy(cast(ProfileManager, _DummyUiProfileManager('9.5')))
 
         with patch(
             'metor.ui.cli.proxy.settings.Settings.get_str',
-            side_effect=AssertionError('unexpected global settings lookup'),
+            return_value='7.5',
         ):
             result = proxy.handle_settings_get(SettingKey.IPC_TIMEOUT.value)
 
-        self.assertIn('Effective UI Setting', result)
+        self.assertIn('Global Setting', result)
+        self.assertIn('7.5', result)
+
+    def test_ui_config_get_uses_effective_profile_config_value(self) -> None:
+        """
+        Verifies that UI config get uses effective profile config value.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        proxy = CliProxy(cast(ProfileManager, _DummyUiProfileManager('9.5')))
+
+        result = proxy.handle_config_get(SettingKey.IPC_TIMEOUT.value)
+
+        self.assertIn('Profile Config', result)
         self.assertIn('9.5', result)
 
     def test_release_bundle_name_normalizes_windows_host_labels(self) -> None:
+        """
+        Verifies that release bundle name normalizes windows host labels.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         bundle_name = build_bundle_name('Windows', 'AMD64', 3, 11)
 
         self.assertEqual(bundle_name, 'metor-wheelhouse-windows-x86_64-py311')
 
     def test_release_install_guide_uses_offline_bundle_install(self) -> None:
+        """
+        Verifies that release install guide uses offline bundle install.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         guide = build_install_guide('metor-wheelhouse-linux-x86_64-py311')
 
         self.assertIn('sh install.sh', guide)
@@ -209,6 +461,16 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn('requires no package index access', guide)
 
     def test_release_shell_installer_uses_local_wheelhouse(self) -> None:
+        """
+        Verifies that release shell installer uses local wheelhouse.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         script = build_install_shell_script()
 
         self.assertIn('python3 python', script)
@@ -224,6 +486,16 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn('$venv_dir/bin/metor --help', script)
 
     def test_release_windows_installer_uses_local_wheelhouse(self) -> None:
+        """
+        Verifies that release windows installer uses local wheelhouse.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         script = build_install_windows_script()
 
         self.assertIn(
@@ -239,9 +511,30 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn('Scripts\\metor.exe --help', script)
 
     def test_release_builder_downloads_pip_wheel_for_offline_installs(self) -> None:
+        """
+        Verifies that release builder downloads pip wheel for offline installs.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         commands: list[list[str]] = []
 
         def fake_run_command(command: Sequence[str], cwd: Path) -> None:
+            """
+            Executes fake run command for the test scenario.
+
+            Args:
+                command (Sequence[str]): The command.
+                cwd (Path): The cwd.
+
+            Returns:
+                None
+            """
+
             del cwd
             commands.append(list(command))
 
@@ -269,6 +562,16 @@ class ReleaseContractTests(unittest.TestCase):
         )
 
     def test_project_wheel_excludes_legacy_cli_proxy_module(self) -> None:
+        """
+        Verifies that project wheel excludes legacy cli proxy module.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         repo_root = Path(__file__).resolve().parents[1]
         with TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir)
@@ -303,6 +606,16 @@ class ReleaseContractTests(unittest.TestCase):
     def test_release_bundle_import_avoids_optional_runtime_utils_dependencies(
         self,
     ) -> None:
+        """
+        Verifies that release bundle import avoids optional runtime utils dependencies.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         module_names: tuple[str, ...] = (
             'metor.utils.release_bundle',
             'metor.utils',
@@ -330,6 +643,20 @@ class ReleaseContractTests(unittest.TestCase):
             fromlist: tuple[str, ...] = (),
             level: int = 0,
         ) -> object:
+            """
+            Executes guarded import for the test scenario.
+
+            Args:
+                name (str): The name.
+                globals_ (dict[str, object] | None): The globals.
+                locals_ (dict[str, object] | None): The locals.
+                fromlist (tuple[str, ...]): The fromlist.
+                level (int): The level.
+
+            Returns:
+                object: The computed return value.
+            """
+
             if name in {
                 'metor.utils.auth',
                 'metor.utils.lock',
@@ -354,7 +681,27 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertTrue(hasattr(imported_module, 'build_release_wheelhouse'))
 
     def test_sqlcipher_loader_prefers_sqlcipher3(self) -> None:
+        """
+        Verifies that sqlcipher loader prefers sqlcipher3.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         def importer(module_name: str) -> SqlCipherDbApi:
+            """
+            Executes importer for the test scenario.
+
+            Args:
+                module_name (str): The module name.
+
+            Returns:
+                SqlCipherDbApi: The computed return value.
+            """
+
             if module_name == 'sqlcipher3.dbapi2':
                 return cast(SqlCipherDbApi, _FakeSqlCipherModule)
             raise AssertionError(f'Unexpected module lookup: {module_name}')
@@ -365,7 +712,27 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertEqual(backend, 'sqlcipher3')
 
     def test_sqlcipher_loader_falls_back_to_pysqlcipher3(self) -> None:
+        """
+        Verifies that sqlcipher loader falls back to pysqlcipher3.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         def importer(module_name: str) -> SqlCipherDbApi:
+            """
+            Executes importer for the test scenario.
+
+            Args:
+                module_name (str): The module name.
+
+            Returns:
+                SqlCipherDbApi: The computed return value.
+            """
+
             if module_name == 'sqlcipher3.dbapi2':
                 raise ImportError('sqlcipher3 unavailable')
             if module_name == 'pysqlcipher3.dbapi2':
@@ -378,7 +745,27 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertEqual(backend, 'pysqlcipher3')
 
     def test_sqlcipher_loader_raises_helpful_error_when_backends_missing(self) -> None:
+        """
+        Verifies that sqlcipher loader raises helpful error when backends missing.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         def importer(module_name: str) -> SqlCipherDbApi:
+            """
+            Executes importer for the test scenario.
+
+            Args:
+                module_name (str): The module name.
+
+            Returns:
+                SqlCipherDbApi: The computed return value.
+            """
+
             raise ImportError(f'missing {module_name}')
 
         with self.assertRaises(ImportError) as ctx:

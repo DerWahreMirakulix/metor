@@ -5,8 +5,10 @@ It is the canonical reference for supported user-facing settings and structural 
 
 ## Configuration Model
 
-- `metor settings ...` changes global defaults in `settings.json`.
+- `metor settings ...` changes global defaults. `ui.*` keys are stored in the local client `settings.json`, while `daemon.*` keys are resolved on the targeted daemon host.
 - `metor config ...` writes profile-specific overrides in the active profile `config.json`.
+- `metor settings list` shows the current global UI settings plus the current global daemon settings for the targeted runtime.
+- `metor config list` shows the effective values for the active profile, including local UI overrides, daemon-side effective values, and structural profile metadata.
 - UI settings stay local to the client machine. Daemon settings are applied to the owning daemon runtime.
 - Structural profile config keys are special-case profile metadata, not regular cascading settings.
 

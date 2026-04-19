@@ -24,7 +24,21 @@ from metor.utils import Constants
 
 
 class DataPersistenceContractTests(unittest.TestCase):
+    """
+    Covers data persistence contract regression scenarios.
+    """
+
     def setUp(self) -> None:
+        """
+        Prepares shared fixtures for each test case.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         self._temp_dir = TemporaryDirectory()
         self.addCleanup(self._temp_dir.cleanup)
         self._data_root = Path(self._temp_dir.name) / Constants.DATA_DIR
@@ -42,6 +56,16 @@ class DataPersistenceContractTests(unittest.TestCase):
         self.addCleanup(SqlManager.close_connection, self._pm.paths.get_db_file())
 
     def test_discovered_peer_can_be_renamed_without_promotion(self) -> None:
+        """
+        Verifies that discovered peer can be renamed without promotion.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         onion = 'a' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
         alias = self._cm.ensure_alias_for_onion(onion)
 
@@ -59,6 +83,16 @@ class DataPersistenceContractTests(unittest.TestCase):
         )
 
     def test_promotion_keeps_the_same_discovered_peer_identity(self) -> None:
+        """
+        Verifies that promotion keeps the same discovered peer identity.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         onion = 'b' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
         alias = self._cm.ensure_alias_for_onion(onion)
 
@@ -74,6 +108,16 @@ class DataPersistenceContractTests(unittest.TestCase):
         self.assertEqual(self._cm.get_contacts_data().discovered, ())
 
     def test_saved_contact_with_history_and_ram_alias_is_only_downgraded(self) -> None:
+        """
+        Verifies that saved contact with history and ram alias is only downgraded.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         onion = 'c' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
         alias = self._cm.ensure_alias_for_onion(onion)
 
@@ -94,6 +138,16 @@ class DataPersistenceContractTests(unittest.TestCase):
     def test_saved_contact_with_history_and_custom_alias_is_anonymized_on_remove(
         self,
     ) -> None:
+        """
+        Verifies that saved contact with history and custom alias is anonymized on remove.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         onion = '2' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
         alias = self._cm.ensure_alias_for_onion(onion)
 
@@ -119,6 +173,16 @@ class DataPersistenceContractTests(unittest.TestCase):
         self.assertTrue(self._cm.is_session_alias(new_alias))
 
     def test_discovered_peer_with_history_is_only_anonymized_on_remove(self) -> None:
+        """
+        Verifies that discovered peer with history is only anonymized on remove.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         onion = 'd' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
         alias = self._cm.ensure_alias_for_onion(onion)
 
@@ -139,6 +203,16 @@ class DataPersistenceContractTests(unittest.TestCase):
         self.assertTrue(self._cm.is_session_alias(new_alias))
 
     def test_cleanup_orphans_only_deletes_discovered_peers_without_refs(self) -> None:
+        """
+        Verifies that cleanup orphans only deletes discovered peers without refs.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         kept_onion = 'e' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
         removed_onion = 'f' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
         kept_alias = self._cm.ensure_alias_for_onion(kept_onion)
@@ -166,6 +240,16 @@ class DataPersistenceContractTests(unittest.TestCase):
         self.assertEqual(self._cm.get_alias_by_onion(kept_onion), kept_alias)
 
     def test_saved_contact_without_refs_is_finally_deleted(self) -> None:
+        """
+        Verifies that saved contact without refs is finally deleted.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         onion = '1' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
         alias = self._cm.ensure_alias_for_onion(onion)
 

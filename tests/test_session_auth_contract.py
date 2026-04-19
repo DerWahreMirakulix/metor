@@ -28,7 +28,21 @@ from metor.utils import Constants, build_session_auth_proof
 
 
 class SessionAuthContractTests(unittest.TestCase):
+    """
+    Covers session auth contract regression scenarios.
+    """
+
     def test_authenticate_session_command_uses_proof_field(self) -> None:
+        """
+        Verifies that authenticate session command uses proof field.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         cmd = IpcCommand.from_dict(
             {
                 'command_type': 'authenticate_session',
@@ -42,6 +56,16 @@ class SessionAuthContractTests(unittest.TestCase):
         self.assertEqual(typed_cmd.proof, 'abc123')
 
     def test_runtime_auth_events_preserve_optional_challenge_payload(self) -> None:
+        """
+        Verifies that runtime auth events preserve optional challenge payload.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         challenge = 'ab' * Constants.SESSION_AUTH_CHALLENGE_BYTES
         salt = 'cd' * nacl.pwhash.argon2i.SALTBYTES
 
@@ -70,6 +94,16 @@ class SessionAuthContractTests(unittest.TestCase):
         self.assertEqual(typed_invalid_event.salt, salt)
 
     def test_local_auth_tracker_accepts_valid_session_proof(self) -> None:
+        """
+        Verifies that local auth tracker accepts valid session proof.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         tracker = LocalAuthTracker()
         context = create_session_auth_context(
             'correct horse battery staple',
@@ -101,6 +135,16 @@ class SessionAuthContractTests(unittest.TestCase):
     def test_local_auth_tracker_rotates_challenge_and_disconnects_after_limit(
         self,
     ) -> None:
+        """
+        Verifies that local auth tracker rotates challenge and disconnects after limit.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         tracker = LocalAuthTracker()
         context = create_session_auth_context(
             'correct horse battery staple',
@@ -131,6 +175,16 @@ class SessionAuthContractTests(unittest.TestCase):
     def test_local_auth_lockout_survives_reconnects_until_cooldown_expires(
         self,
     ) -> None:
+        """
+        Verifies that local auth lockout survives reconnects until cooldown expires.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         tracker = LocalAuthTracker()
         first_left, first_right = socket.socketpair()
         second_left, second_right = socket.socketpair()
@@ -178,6 +232,16 @@ class SessionAuthContractTests(unittest.TestCase):
     def test_local_auth_disconnect_limit_survives_reconnects_without_cooldown(
         self,
     ) -> None:
+        """
+        Verifies that local auth disconnect limit survives reconnects without cooldown.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         tracker = LocalAuthTracker()
         first_left, first_right = socket.socketpair()
         second_left, second_right = socket.socketpair()

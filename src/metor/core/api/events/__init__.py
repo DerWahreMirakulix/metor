@@ -24,18 +24,21 @@ from metor.core.api.events.data import (
     AddressCurrentEvent,
     AddressGeneratedEvent,
     AddressNotGeneratedEvent,
+    ConfigListDataEvent,
     ContactsDataEvent,
     InboxCountsEvent,
     InboxDataEvent,
     InboxNotificationEvent,
     MessagesDataEvent,
     ProfilesDataEvent,
+    SettingsListDataEvent,
     UnreadMessagesEvent,
 )
 from metor.core.api.events.entries import (
     ContactEntry,
     MessageEntry,
     ProfileEntry,
+    SettingSnapshotEntry,
     UnreadMessageEntry,
 )
 from metor.core.api.events.history import (
@@ -133,6 +136,7 @@ __all__ = [
     'MessageEntry',
     'UnreadMessageEntry',
     'ProfileEntry',
+    'SettingSnapshotEntry',
     'InitEvent',
     'TorKeyDecryptFailedEvent',
     'TorKeyWriteFailedEvent',
@@ -169,6 +173,8 @@ __all__ = [
     'AddressCantGenerateRunningEvent',
     'AddressNotGeneratedEvent',
     'ProfilesDataEvent',
+    'SettingsListDataEvent',
+    'ConfigListDataEvent',
     'ProfileOperationResultEvent',
     'AuthRequiredEvent',
     'InvalidPasswordEvent',

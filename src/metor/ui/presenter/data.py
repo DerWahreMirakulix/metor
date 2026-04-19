@@ -3,12 +3,15 @@
 from typing import List
 
 from metor.core.api import (
+    ConfigListDataEvent,
     ContactsDataEvent,
     InboxCountsEvent,
     MessageDirectionCode,
     MessageStatusCode,
     MessagesDataEvent,
     ProfilesDataEvent,
+    SettingsListDataEvent,
+    SettingSnapshotEntry,
     UnreadMessagesEvent,
 )
 
@@ -19,6 +22,94 @@ from metor.ui.presenter.shared import (
     get_header_string,
 )
 from metor.ui.theme import Theme
+
+
+def _format_snapshot_source(source: str) -> str:
+    """
+    Formats one internal snapshot source identifier for presentation.
+
+    Args:
+        source (str): The internal source identifier.
+
+    Returns:
+        str: The formatted display label.
+    """
+    labels: dict[str, str] = {
+        'default': 'default',
+        'global': 'global',
+        'profile': 'profile',
+        'profile_override': 'profile override',
+        'plaintext_forced': 'forced by plaintext profile',
+    }
+    return labels.get(source, source.replace('_', ' '))
+
+
+def _format_snapshot_entries(entries: List[SettingSnapshotEntry]) -> List[str]:
+    """
+    Formats grouped snapshot entries with category headings.
+
+    Args:
+        entries (List[SettingSnapshotEntry]): The snapshot rows.
+
+    Returns:
+        List[str]: The formatted lines.
+    """
+    if not entries:
+        return ['No settings available.']
+
+    lines: List[str] = []
+    current_category: str = ''
+    for entry in entries:
+        if entry.category != current_category:
+            if lines:
+                lines.append('')
+            lines.append(f'[{entry.category}]')
+            current_category = entry.category
+
+        lines.append(
+            '  '
+            f'{Theme.CYAN}{entry.key}{Theme.RESET} = '
+            f'{Theme.YELLOW}{entry.value}{Theme.RESET} '
+            f'[{Theme.DARK_GREY}{_format_snapshot_source(entry.source)}{Theme.RESET}]'
+        )
+
+    return lines
+
+
+def format_settings_snapshot(event: SettingsListDataEvent) -> str:
+    """
+    Formats one global settings snapshot section.
+
+    Args:
+        event (SettingsListDataEvent): The settings snapshot DTO.
+
+    Returns:
+        str: The formatted snapshot section.
+    """
+    header: str = (
+        'Global UI Settings' if event.scope == 'ui' else 'Global Daemon Settings'
+    )
+    return '\n'.join([header + ':', *_format_snapshot_entries(event.entries)])
+
+
+def format_config_snapshot(event: ConfigListDataEvent) -> str:
+    """
+    Formats one effective profile-config snapshot section.
+
+    Args:
+        event (ConfigListDataEvent): The config snapshot DTO.
+
+    Returns:
+        str: The formatted snapshot section.
+    """
+    if event.scope == 'ui':
+        header = f"Effective UI Config for profile '{event.profile}'"
+    elif event.scope == 'daemon':
+        header = f"Effective Daemon Config for profile '{event.profile}'"
+    else:
+        header = f"Structural Profile Config for profile '{event.profile}'"
+
+    return '\n'.join([header + ':', *_format_snapshot_entries(event.entries)])
 
 
 def format_contacts(event: ContactsDataEvent, chat_mode: bool) -> str:

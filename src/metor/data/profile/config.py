@@ -8,7 +8,7 @@ Prevents silent overwrites of corrupted JSON configurations.
 
 import json
 from enum import Enum
-from typing import Dict, Union, cast, List
+from typing import Dict, Union, cast, List, Tuple, Optional
 from pathlib import Path
 
 from metor.data.settings import (
@@ -16,6 +16,7 @@ from metor.data.settings import (
     Settings,
     SettingValue,
     SettingValidationError,
+    build_snapshot_row,
 )
 from metor.utils import FileLock, TypeCaster, validate_json_file
 
@@ -69,6 +70,182 @@ class Config:
         config_file: Path = self._paths.get_config_file()
         validate_json_file(config_file)
 
+        if not config_file.exists():
+            return
+
+        raw_data: Dict[str, ProfileConfigValue] = self._load_raw_data()
+
+        for key_str, raw_value in raw_data.items():
+            try:
+                setting_key: SettingKey = SettingKey(key_str)
+            except ValueError:
+                try:
+                    profile_key: ProfileConfigKey = ProfileConfigKey(key_str)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"'{config_file.name}' contains an unknown config key '{key_str}'."
+                    ) from exc
+
+                try:
+                    validate_profile_config_value(profile_key, raw_value)
+                except (ProfileConfigValidationError, TypeError) as exc:
+                    raise ValueError(
+                        f"'{config_file.name}' contains an invalid value for '{key_str}': {exc}"
+                    ) from exc
+                continue
+
+            try:
+                Settings.validate_value(
+                    setting_key,
+                    cast(SettingValue, raw_value),
+                    for_profile_override=True,
+                )
+            except (SettingValidationError, TypeError) as exc:
+                raise ValueError(
+                    f"'{config_file.name}' contains an invalid value for '{key_str}': {exc}"
+                ) from exc
+
+    @staticmethod
+    def _flatten_nested_data(
+        raw_data: NestedConfigDict,
+    ) -> Dict[str, ProfileConfigValue]:
+        """
+        Flattens one nested config payload to dot-notation keys.
+
+        Args:
+            raw_data (NestedConfigDict): The nested JSON-compatible payload.
+
+        Returns:
+            Dict[str, ProfileConfigValue]: The flattened key-value mapping.
+        """
+        flat_data: Dict[str, ProfileConfigValue] = {}
+        for k, v in raw_data.items():
+            if isinstance(v, dict):
+                for sub_k, sub_v in v.items():
+                    flat_data[f'{k}.{sub_k}'] = sub_v
+            else:
+                flat_data[k] = v
+        return flat_data
+
+    def _load_raw_data(self) -> Dict[str, ProfileConfigValue]:
+        """
+        Loads the raw on-disk config payload without applying defaults.
+
+        Args:
+            None
+
+        Returns:
+            Dict[str, ProfileConfigValue]: The flattened raw config mapping.
+        """
+        config_file: Path = self._paths.get_config_file()
+        if not config_file.exists():
+            return {}
+
+        with config_file.open('r', encoding='utf-8') as f:
+            raw_data: object = json.load(f)
+
+        if not isinstance(raw_data, dict):
+            raise ValueError(
+                f"'{config_file.name}' must contain a top-level JSON object."
+            )
+
+        return self._flatten_nested_data(cast(NestedConfigDict, raw_data))
+
+    def get_setting_snapshots(
+        self,
+        *,
+        domain: Optional[str] = None,
+    ) -> Tuple[Dict[str, str], ...]:
+        """
+        Returns structured snapshots for effective cascading settings.
+
+        Args:
+            domain (Optional[str]): Optional `ui` or `daemon` domain filter.
+
+        Returns:
+            Tuple[Dict[str, str], ...]: Ordered snapshot rows for CLI presentation.
+        """
+        raw_data: Dict[str, ProfileConfigValue] = self._load_raw_data()
+        security_mode: ProfileSecurityMode = self._get_profile_security_mode(raw_data)
+        snapshots: list[Dict[str, str]] = []
+
+        for spec in Settings.get_specs():
+            key_domain: str
+            _sub_key: str
+            key_domain, _sub_key = spec.key.value.split('.', 1)
+            if domain is not None and key_domain != domain:
+                continue
+
+            source: str = 'global'
+            if spec.key.value in raw_data:
+                normalized_value = Settings.validate_value(
+                    spec.key,
+                    cast(SettingValue, raw_data[spec.key.value]),
+                    for_profile_override=True,
+                )
+                source = 'profile_override'
+            else:
+                normalized_value = cast(SettingValue, Settings.get(spec.key))
+                if normalized_value is None:
+                    normalized_value = spec.default
+
+            effective_value: SettingValue = self._apply_profile_security_mode(
+                spec.key,
+                normalized_value,
+                security_mode,
+            )
+            if (
+                security_mode is ProfileSecurityMode.PLAINTEXT
+                and spec.key in self._PLAINTEXT_DISABLED_SETTING_KEYS
+            ):
+                source = 'plaintext_forced'
+
+            snapshots.append(
+                build_snapshot_row(
+                    key=spec.key.value,
+                    value=effective_value,
+                    source=source,
+                    category=spec.category,
+                )
+            )
+
+        return tuple(snapshots)
+
+    def get_profile_snapshots(self) -> Tuple[Dict[str, str], ...]:
+        """
+        Returns structured snapshots for structural profile config keys.
+
+        Args:
+            None
+
+        Returns:
+            Tuple[Dict[str, str], ...]: Ordered structural config snapshot rows.
+        """
+        raw_data: Dict[str, ProfileConfigValue] = self._load_raw_data()
+        snapshots: list[Dict[str, str]] = []
+
+        for spec in PROFILE_CONFIG_SPECS.values():
+            if spec.key.value in raw_data:
+                value: ProfileConfigValue = validate_profile_config_value(
+                    spec.key,
+                    raw_data[spec.key.value],
+                )
+                source: str = 'profile'
+            else:
+                value = spec.default
+                source = 'default'
+
+            snapshots.append(
+                build_snapshot_row(
+                    key=spec.key.value,
+                    value=value,
+                    source=source,
+                    category='Structural Profile Config',
+                )
+            )
+
+        return tuple(snapshots)
+
     def _write_nested(self, data: Dict[str, ProfileConfigValue]) -> None:
         """
         Internal helper to convert flat dot-notation dictionaries into nested
@@ -97,7 +274,11 @@ class Config:
         with config_file.open('w', encoding='utf-8') as f:
             json.dump(nested_data, f, indent=4)
 
-    def _load(self) -> Dict[str, ProfileConfigValue]:
+    def _load(
+        self,
+        *,
+        persist_defaults: bool = True,
+    ) -> Dict[str, ProfileConfigValue]:
         """
         Loads the JSON configuration from disk safely. Generates default config if missing.
         Flattens nested dictionary structures into dot-notation keys.
@@ -112,17 +293,7 @@ class Config:
         config_file: Path = self._paths.get_config_file()
         if config_file.exists():
             try:
-                with config_file.open('r', encoding='utf-8') as f:
-                    raw_data: NestedConfigDict = cast(NestedConfigDict, json.load(f))
-
-                flat_data: Dict[str, ProfileConfigValue] = {}
-                for k, v in raw_data.items():
-                    if isinstance(v, dict):
-                        for sub_k, sub_v in v.items():
-                            flat_data[f'{k}.{sub_k}'] = sub_v
-                    else:
-                        flat_data[k] = v
-                return flat_data
+                return self._load_raw_data()
             except (json.JSONDecodeError, IOError):
                 pass
 
@@ -130,7 +301,7 @@ class Config:
             spec.key.value: spec.default for spec in PROFILE_CONFIG_SPECS.values()
         }
 
-        if self._paths.exists() and not config_file.exists():
+        if persist_defaults and self._paths.exists() and not config_file.exists():
             try:
                 with FileLock(config_file):
                     self._write_nested(default_data)
@@ -405,6 +576,7 @@ class Config:
         config_file: Path = self._paths.get_config_file()
 
         with FileLock(config_file):
+            data = self._load(persist_defaults=False)
             data[key_str] = normalized_value
             self._write_nested(data)
 

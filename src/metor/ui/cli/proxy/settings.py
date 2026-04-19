@@ -3,16 +3,19 @@
 from typing import Callable, Union
 
 from metor.core.api import (
+    ConfigListDataEvent,
     EventType,
     GetConfigCommand,
+    GetConfigListCommand,
     GetSettingCommand,
+    GetSettingsListCommand,
+    SettingsListDataEvent,
     SetConfigCommand,
     SetSettingCommand,
     SyncConfigCommand,
 )
-from metor.data.profile import ProfileConfigKey, ProfileManager
-from metor.data.settings import Settings, SettingKey
-from metor.ui import Theme
+from metor.data import ProfileConfigKey, ProfileManager, Settings, SettingKey
+from metor.ui import Theme, UIPresenter
 from metor.utils import TypeCaster
 
 
@@ -66,7 +69,7 @@ class CliProxySettingsActions:
 
         if key_enum.is_ui:
             try:
-                self._pm.config.set(key_enum, parsed_value)
+                self._settings_cls.set(key_enum, parsed_value)
                 return (
                     f"Global setting '{Theme.YELLOW}{key}{Theme.RESET}' updated "
                     'successfully.'
@@ -97,13 +100,34 @@ class CliProxySettingsActions:
             return self._translate_event(EventType.INVALID_SETTING_KEY)
 
         if key_enum.is_ui:
-            val: str = self._pm.config.get_str(key_enum)
-            return (
-                f"Effective UI Setting '{Theme.YELLOW}{key}{Theme.RESET}': "
-                f'{Theme.CYAN}{val}{Theme.RESET}'
+            val: str = self._settings_cls.get_str(key_enum)
+            return self._translate_event(
+                EventType.SETTING_DATA,
+                {'key': key, 'value': val},
             )
 
         return self._request_ipc(GetSettingCommand(setting_key=key))
+
+    def handle_settings_list(self) -> str:
+        """
+        Lists global settings across local UI scope and daemon scope.
+
+        Args:
+            None
+
+        Returns:
+            str: The formatted snapshot output.
+        """
+        sections: list[str] = [
+            UIPresenter.format_response(
+                SettingsListDataEvent(
+                    scope='ui',
+                    entries=list(self._settings_cls.get_snapshots(domain='ui')),
+                )
+            )
+        ]
+        sections.append(self._request_ipc(GetSettingsListCommand()))
+        return '\n\n'.join(section for section in sections if section)
 
     def handle_config_set(self, key: str, value: str) -> str:
         """
@@ -169,12 +193,41 @@ class CliProxySettingsActions:
 
         if isinstance(key_enum, ProfileConfigKey) or key_enum.is_ui:
             val: str = self._pm.config.get_str(key_enum)
-            return (
-                f"Profile Config '{Theme.YELLOW}{key}{Theme.RESET}': "
-                f'{Theme.CYAN}{val}{Theme.RESET}'
+            return self._translate_event(
+                EventType.CONFIG_DATA,
+                {'key': key, 'value': val},
             )
 
         return self._request_ipc(GetConfigCommand(setting_key=key))
+
+    def handle_config_list(self) -> str:
+        """
+        Lists effective config values for the active profile.
+
+        Args:
+            None
+
+        Returns:
+            str: The formatted snapshot output.
+        """
+        sections: list[str] = [
+            UIPresenter.format_response(
+                ConfigListDataEvent(
+                    scope='ui',
+                    profile=self._pm.profile_name,
+                    entries=list(self._pm.config.get_setting_snapshots(domain='ui')),
+                )
+            ),
+            UIPresenter.format_response(
+                ConfigListDataEvent(
+                    scope='profile',
+                    profile=self._pm.profile_name,
+                    entries=list(self._pm.config.get_profile_snapshots()),
+                )
+            ),
+        ]
+        sections.append(self._request_ipc(GetConfigListCommand()))
+        return '\n\n'.join(section for section in sections if section)
 
     def handle_config_sync(self) -> str:
         """

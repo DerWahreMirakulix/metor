@@ -80,182 +80,686 @@ from metor.utils import Constants
 
 
 class _DummyConfig:
+    """
+    Provides a dummy config test double.
+    """
+
     def get_bool(self, _key: Any) -> bool:
+        """
+        Returns bool for the test scenario.
+        
+        Args:
+            _key (Any): The key.
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         return True
 
     def get_int(self, _key: Any) -> int:
+        """
+        Returns int for the test scenario.
+        
+        Args:
+            _key (Any): The key.
+        
+        Returns:
+            int: The computed return value.
+        """
+
         return 1
 
     def get_float(self, _key: Any) -> float:
+        """
+        Returns float for the test scenario.
+        
+        Args:
+            _key (Any): The key.
+        
+        Returns:
+            float: The computed return value.
+        """
+
         return 0.2
 
 
 class _DropQuotaConfig(_DummyConfig):
+    """
+    Provides a drop quota config helper for test scenarios.
+    """
+
     def __init__(self, unread_drop_limit: int) -> None:
+        """
+        Initializes the drop quota config helper.
+        
+        Args:
+            unread_drop_limit (int): The unread drop limit.
+        
+        Returns:
+            None
+        """
+
         self._unread_drop_limit: int = unread_drop_limit
 
     def get_int(self, key: Any) -> int:
+        """
+        Returns int for the test scenario.
+        
+        Args:
+            key (Any): The key.
+        
+        Returns:
+            int: The computed return value.
+        """
+
         if key is SettingKey.MAX_UNSEEN_DROP_MSGS:
             return self._unread_drop_limit
         return super().get_int(key)
 
 
 class _DummyProfileManager:
+    """
+    Provides a dummy profile manager test double.
+    """
+
     def __init__(self) -> None:
+        """
+        Initializes the dummy profile manager helper.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         self.config: _DummyConfig = _DummyConfig()
         self.initialized: bool = False
 
     def initialize(self) -> None:
+        """
+        Executes initialize for the test scenario.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         self.initialized = True
 
     def uses_plaintext_storage(self) -> bool:
+        """
+        Reports whether the helper uses plaintext storage.
+        
+        Args:
+            None
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         return False
 
     def uses_encrypted_storage(self) -> bool:
+        """
+        Reports whether the helper uses encrypted storage.
+        
+        Args:
+            None
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         return True
 
     def get_static_port(self) -> None:
+        """
+        Returns static port for the test scenario.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         return None
 
     def set_daemon_port(self, _port: int, _pid: int) -> None:
+        """
+        Stores daemon port for the test scenario.
+        
+        Args:
+            _port (int): The port.
+            _pid (int): The PID.
+        
+        Returns:
+            None
+        """
+
         return None
 
 
 class _PlaintextProfileManager(_DummyProfileManager):
+    """
+    Provides a plaintext profile manager helper for test scenarios.
+    """
+
     def uses_plaintext_storage(self) -> bool:
+        """
+        Reports whether the helper uses plaintext storage.
+        
+        Args:
+            None
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         return True
 
     def uses_encrypted_storage(self) -> bool:
+        """
+        Reports whether the helper uses encrypted storage.
+        
+        Args:
+            None
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         return False
 
 
 class _DummyEvent:
+    """
+    Provides a dummy event test double.
+    """
+
     def to_json(self) -> str:
+        """
+        Serializes the helper payload to JSON.
+        
+        Args:
+            None
+        
+        Returns:
+            str: The computed return value.
+        """
+
         return json.dumps({'event_type': 'test'})
 
 
 class _InspectingSocket:
+    """
+    Provides a inspecting socket helper for test scenarios.
+    """
+
     def __init__(self, server: IpcServer) -> None:
+        """
+        Initializes the inspecting socket helper.
+        
+        Args:
+            server (IpcServer): The server.
+        
+        Returns:
+            None
+        """
+
         self._server: IpcServer = server
         self.lock_was_held: Optional[bool] = None
         self.payloads: list[bytes] = []
 
     def sendall(self, payload: bytes) -> None:
+        """
+        Captures one outgoing payload for assertions.
+        
+        Args:
+            payload (bytes): The payload.
+        
+        Returns:
+            None
+        """
+
         self.lock_was_held = self._server._lock.locked()
         self.payloads.append(payload)
 
     def close(self) -> None:
+        """
+        Closes the helper resource.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         return None
 
 
 class _QueueResult:
+    """
+    Provides a queue result helper for test scenarios.
+    """
+
     def __init__(self, was_duplicate: bool = False) -> None:
+        """
+        Initializes the queue result helper.
+        
+        Args:
+            was_duplicate (bool): The was duplicate.
+        
+        Returns:
+            None
+        """
+
         self.was_duplicate: bool = was_duplicate
 
 
 class _DummyContactManager:
+    """
+    Provides a dummy contact manager test double.
+    """
+
     def ensure_alias_for_onion(self, _onion: str) -> str:
+        """
+        Ensures alias for onion for the test scenario.
+        
+        Args:
+            _onion (str): The onion.
+        
+        Returns:
+            str: The computed return value.
+        """
+
         return 'peer'
 
     def resolve_target(self, _target: str) -> None:
+        """
+        Resolves target for the test scenario.
+        
+        Args:
+            _target (str): The target.
+        
+        Returns:
+            None
+        """
+
         return None
 
 
 class _DummyHistoryManager:
+    """
+    Provides a dummy history manager test double.
+    """
+
     def __init__(self) -> None:
+        """
+        Initializes the dummy history manager helper.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         self.events: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
     def log_event(self, *args: Any, **kwargs: Any) -> None:
+        """
+        Records event for later assertions.
+        
+        Args:
+            *args (Any): Extra args values.
+            **kwargs (Any): Extra kwargs values.
+        
+        Returns:
+            None
+        """
+
         self.events.append((args, kwargs))
 
 
 class _DummyMessageManager:
+    """
+    Provides a dummy message manager test double.
+    """
+
     def __init__(self) -> None:
+        """
+        Initializes the dummy message manager helper.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         self.queued: list[dict[str, Any]] = []
         self.unread_drop_count: int = 0
 
     def queue_message(self, **kwargs: Any) -> _QueueResult:
+        """
+        Queues message for later assertions.
+        
+        Args:
+            **kwargs (Any): Extra kwargs values.
+        
+        Returns:
+            _QueueResult: The computed return value.
+        """
+
         self.queued.append(kwargs)
         return _QueueResult()
 
     def has_inbound_message(self, _onion: str, _msg_id: str) -> bool:
+        """
+        Reports whether the helper has inbound message.
+        
+        Args:
+            _onion (str): The onion.
+            _msg_id (str): The msg ID.
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         return False
 
     def get_unread_live_count(self, _onion: str) -> int:
+        """
+        Returns unread live count for the test scenario.
+        
+        Args:
+            _onion (str): The onion.
+        
+        Returns:
+            int: The computed return value.
+        """
+
         return 0
 
     def get_unread_drop_count(self, _onion: str) -> int:
+        """
+        Returns unread drop count for the test scenario.
+        
+        Args:
+            _onion (str): The onion.
+        
+        Returns:
+            int: The computed return value.
+        """
+
         return self.unread_drop_count
 
 
 class _DummyConn:
+    """
+    Provides a dummy conn test double.
+    """
+
     def __init__(self) -> None:
+        """
+        Initializes the dummy conn helper.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         self.sent: list[bytes] = []
         self.closed: bool = False
 
     def sendall(self, payload: bytes) -> None:
+        """
+        Captures one outgoing payload for assertions.
+        
+        Args:
+            payload (bytes): The payload.
+        
+        Returns:
+            None
+        """
+
         self.sent.append(payload)
 
     def close(self) -> None:
+        """
+        Closes the helper resource.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         self.closed = True
 
 
 class _NetworkSocket:
+    """
+    Provides a network socket helper for test scenarios.
+    """
+
     def __init__(self) -> None:
+        """
+        Initializes the network socket helper.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         self.closed: bool = False
         self.sent: list[bytes] = []
         self.timeouts: list[float] = []
 
     def settimeout(self, timeout: float) -> None:
+        """
+        Captures one timeout value for assertions.
+        
+        Args:
+            timeout (float): The timeout.
+        
+        Returns:
+            None
+        """
+
         self.timeouts.append(timeout)
 
     def sendall(self, payload: bytes) -> None:
+        """
+        Captures one outgoing payload for assertions.
+        
+        Args:
+            payload (bytes): The payload.
+        
+        Returns:
+            None
+        """
+
         self.sent.append(payload)
 
     def close(self) -> None:
+        """
+        Closes the helper resource.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         self.closed = True
 
 
 class _AcceptedClientSocket:
+    """
+    Provides a accepted client socket helper for test scenarios.
+    """
+
     def __init__(self) -> None:
+        """
+        Initializes the accepted client socket helper.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         self.closed: bool = False
         self.sent: list[bytes] = []
         self.timeouts: list[float] = []
 
     def settimeout(self, timeout: float) -> None:
+        """
+        Captures one timeout value for assertions.
+        
+        Args:
+            timeout (float): The timeout.
+        
+        Returns:
+            None
+        """
+
         self.timeouts.append(timeout)
 
     def sendall(self, payload: bytes) -> None:
+        """
+        Captures one outgoing payload for assertions.
+        
+        Args:
+            payload (bytes): The payload.
+        
+        Returns:
+            None
+        """
+
         self.sent.append(payload)
 
     def close(self) -> None:
+        """
+        Closes the helper resource.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         self.closed = True
 
 
 class _AcceptorSocket:
+    """
+    Provides a acceptor socket helper for test scenarios.
+    """
+
     def __init__(self, accepted_connections: list[_AcceptedClientSocket]) -> None:
+        """
+        Initializes the acceptor socket helper.
+        
+        Args:
+            accepted_connections (list[_AcceptedClientSocket]): The accepted connections.
+        
+        Returns:
+            None
+        """
+
         self._accepted_connections: list[_AcceptedClientSocket] = accepted_connections
         self.timeouts: list[float] = []
 
     def settimeout(self, timeout: float) -> None:
+        """
+        Captures one timeout value for assertions.
+        
+        Args:
+            timeout (float): The timeout.
+        
+        Returns:
+            None
+        """
+
         self.timeouts.append(timeout)
 
     def accept(self) -> tuple[_AcceptedClientSocket, tuple[str, int]]:
+        """
+        Returns the next queued accepted client socket.
+        
+        Args:
+            None
+        
+        Returns:
+            tuple[_AcceptedClientSocket, tuple[str, int]]: The computed return value.
+        """
+
         conn = self._accepted_connections.pop(0)
         return conn, ('127.0.0.1', 0)
 
 
 class _StopAfterRejectSocket:
+    """
+    Provides a stop after reject socket helper for test scenarios.
+    """
+
     def __init__(self, server: IpcServer, conn: _AcceptedClientSocket) -> None:
+        """
+        Initializes the stop after reject socket helper.
+        
+        Args:
+            server (IpcServer): The server.
+            conn (_AcceptedClientSocket): The conn.
+        
+        Returns:
+            None
+        """
+
         self._server: IpcServer = server
         self._conn: _AcceptedClientSocket = conn
         self._accepted: bool = False
         self.timeouts: list[float] = []
 
     def settimeout(self, timeout: float) -> None:
+        """
+        Captures one timeout value for assertions.
+        
+        Args:
+            timeout (float): The timeout.
+        
+        Returns:
+            None
+        """
+
         self.timeouts.append(timeout)
 
     def accept(self) -> tuple[_AcceptedClientSocket, tuple[str, int]]:
+        """
+        Returns the next queued accepted client socket.
+        
+        Args:
+            None
+        
+        Returns:
+            tuple[_AcceptedClientSocket, tuple[str, int]]: The computed return value.
+        """
+
         if not self._accepted:
             self._accepted = True
             return self._conn, ('127.0.0.1', 0)
@@ -265,51 +769,178 @@ class _StopAfterRejectSocket:
 
 
 class _ThreadStartHandle:
+    """
+    Provides a thread start handle helper for test scenarios.
+    """
+
     def __init__(self, index: int, server: IpcServer) -> None:
+        """
+        Initializes the thread start handle helper.
+        
+        Args:
+            index (int): The index.
+            server (IpcServer): The server.
+        
+        Returns:
+            None
+        """
+
         self._index: int = index
         self._server: IpcServer = server
 
     def start(self) -> None:
+        """
+        Marks the helper as started.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         if self._index == 1:
             raise RuntimeError('thread start failed')
         self._server._stop_flag.set()
 
 
 class _ThreadStartFactory:
+    """
+    Provides a thread start factory helper for test scenarios.
+    """
+
     def __init__(self, server: IpcServer) -> None:
+        """
+        Initializes the thread start factory helper.
+        
+        Args:
+            server (IpcServer): The server.
+        
+        Returns:
+            None
+        """
+
         self._server: IpcServer = server
         self.calls: int = 0
 
     def __call__(self, *args: Any, **kwargs: Any) -> _ThreadStartHandle:
+        """
+        Invokes the helper callable for the test scenario.
+        
+        Args:
+            *args (Any): Extra args values.
+            **kwargs (Any): Extra kwargs values.
+        
+        Returns:
+            _ThreadStartHandle: The computed return value.
+        """
+
         del args, kwargs
         self.calls += 1
         return _ThreadStartHandle(self.calls, self._server)
 
 
 class _PassiveThread:
+    """
+    Provides a passive thread helper for test scenarios.
+    """
+
     def start(self) -> None:
+        """
+        Marks the helper as started.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         return None
 
     def is_alive(self) -> bool:
+        """
+        Reports whether the helper is alive.
+        
+        Args:
+            None
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         return False
 
 
 class _ImmediateListenerThread:
+    """
+    Provides a immediate listener thread helper for test scenarios.
+    """
+
     def __init__(self, target: Any) -> None:
+        """
+        Initializes the immediate listener thread helper.
+        
+        Args:
+            target (Any): The target.
+        
+        Returns:
+            None
+        """
+
         self._target = target
 
     def start(self) -> None:
+        """
+        Marks the helper as started.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         self._target()
 
 
 class _ImmediateListenerThreadFactory:
+    """
+    Provides a immediate listener thread factory helper for test scenarios.
+    """
+
     def __call__(self, *args: Any, **kwargs: Any) -> _ImmediateListenerThread:
+        """
+        Invokes the helper callable for the test scenario.
+        
+        Args:
+            *args (Any): Extra args values.
+            **kwargs (Any): Extra kwargs values.
+        
+        Returns:
+            _ImmediateListenerThread: The computed return value.
+        """
+
         del args
         return _ImmediateListenerThread(kwargs['target'])
 
 
 class _FakeChatIpcSocket:
+    """
+    Provides a fake chat IPC socket test double.
+    """
+
     def __init__(self, recv_items: list[object]) -> None:
+        """
+        Initializes the fake chat IPC socket helper.
+        
+        Args:
+            recv_items (list[object]): The recv items.
+        
+        Returns:
+            None
+        """
+
         self._recv_items: list[object] = recv_items
         self.connected_to: Optional[tuple[str, int]] = None
         self.sent: list[bytes] = []
@@ -318,33 +949,117 @@ class _FakeChatIpcSocket:
         self.shutdown_called: bool = False
 
     def settimeout(self, timeout: float) -> None:
+        """
+        Captures one timeout value for assertions.
+        
+        Args:
+            timeout (float): The timeout.
+        
+        Returns:
+            None
+        """
+
         self.timeouts.append(timeout)
 
     def connect(self, address: tuple[str, int]) -> None:
+        """
+        Captures the requested connection target.
+        
+        Args:
+            address (tuple[str, int]): The address.
+        
+        Returns:
+            None
+        """
+
         self.connected_to = address
 
     def recv(self, _size: int) -> bytes:
+        """
+        Returns the next buffered payload chunk.
+        
+        Args:
+            _size (int): The size.
+        
+        Returns:
+            bytes: The computed return value.
+        """
+
         item = self._recv_items.pop(0)
         if isinstance(item, BaseException):
             raise item
         return cast(bytes, item)
 
     def sendall(self, payload: bytes) -> None:
+        """
+        Captures one outgoing payload for assertions.
+        
+        Args:
+            payload (bytes): The payload.
+        
+        Returns:
+            None
+        """
+
         self.sent.append(payload)
 
     def shutdown(self, _how: int) -> None:
+        """
+        Executes shutdown for the test scenario.
+        
+        Args:
+            _how (int): The how.
+        
+        Returns:
+            None
+        """
+
         self.shutdown_called = True
 
     def close(self) -> None:
+        """
+        Closes the helper resource.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         self.closed = True
 
 
 class _FaultingOutboxMessageManager:
+    """
+    Provides a faulting outbox message manager helper for test scenarios.
+    """
+
     def __init__(self, stop_flag: threading.Event) -> None:
+        """
+        Initializes the faulting outbox message manager helper.
+        
+        Args:
+            stop_flag (threading.Event): The stop flag.
+        
+        Returns:
+            None
+        """
+
         self._stop_flag: threading.Event = stop_flag
         self.calls: int = 0
 
     def get_pending_outbox(self) -> list[tuple[int, str, str, str, str, str]]:
+        """
+        Returns pending outbox for the test scenario.
+        
+        Args:
+            None
+        
+        Returns:
+            list[tuple[int, str, str, str, str, str]]: The computed return value.
+        """
+
         self.calls += 1
         if self.calls == 1:
             raise RuntimeError('boom')
@@ -354,19 +1069,67 @@ class _FaultingOutboxMessageManager:
 
 
 class _DummyKeyManager:
+    """
+    Provides a dummy key manager test double.
+    """
+
     def __init__(self, secret_key: bytes) -> None:
+        """
+        Initializes the dummy key manager helper.
+        
+        Args:
+            secret_key (bytes): The secret key.
+        
+        Returns:
+            None
+        """
+
         self._secret_key: bytes = secret_key
 
     def get_metor_key(self) -> bytes:
+        """
+        Returns metor key for the test scenario.
+        
+        Args:
+            None
+        
+        Returns:
+            bytes: The computed return value.
+        """
+
         return self._secret_key
 
 
 class _FakeStream:
+    """
+    Provides a fake stream test double.
+    """
+
     def __init__(self, messages: list[Optional[str]]) -> None:
+        """
+        Initializes the fake stream helper.
+        
+        Args:
+            messages (list[Optional[str]]): The messages.
+        
+        Returns:
+            None
+        """
+
         self._messages: list[Optional[str]] = messages
         self._index: int = 0
 
     def read_line(self) -> Optional[str]:
+        """
+        Reads line from the helper stream.
+        
+        Args:
+            None
+        
+        Returns:
+            Optional[str]: The computed return value.
+        """
+
         if self._index >= len(self._messages):
             return None
 
@@ -376,39 +1139,153 @@ class _FakeStream:
 
 
 class _DummyReceiverConfig:
+    """
+    Provides a dummy receiver config test double.
+    """
+
     def get_float(self, _key: Any) -> float:
+        """
+        Returns float for the test scenario.
+        
+        Args:
+            _key (Any): The key.
+        
+        Returns:
+            float: The computed return value.
+        """
+
         return 0.2
 
 
 class _DummyState:
+    """
+    Provides a dummy state test double.
+    """
+
     def consume_outbound_connected_origin(self, _onion: str) -> None:
+        """
+        Consumes outbound connected origin from the helper state.
+        
+        Args:
+            _onion (str): The onion.
+        
+        Returns:
+            None
+        """
+
         return None
 
     def add_active_connection(self, _onion: str, _conn: socket.socket) -> None:
+        """
+        Adds active connection to the helper state.
+        
+        Args:
+            _onion (str): The onion.
+            _conn (socket.socket): The conn.
+        
+        Returns:
+            None
+        """
+
         return None
 
     def consume_retunnel_reconnect(self, _onion: str) -> bool:
+        """
+        Consumes retunnel reconnect from the helper state.
+        
+        Args:
+            _onion (str): The onion.
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         return False
 
     def clear_retunnel_flow(self, _onion: str) -> None:
+        """
+        Clears retunnel flow from the helper state.
+        
+        Args:
+            _onion (str): The onion.
+        
+        Returns:
+            None
+        """
+
         return None
 
     def is_known_socket(self, _onion: str, _conn: socket.socket) -> bool:
+        """
+        Reports whether the helper is known socket.
+        
+        Args:
+            _onion (str): The onion.
+            _conn (socket.socket): The conn.
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         return True
 
 
 class _DummyContactManagerReceiver:
+    """
+    Provides a dummy contact manager receiver test double.
+    """
+
     def ensure_alias_for_onion(self, _onion: str) -> str:
+        """
+        Ensures alias for onion for the test scenario.
+        
+        Args:
+            _onion (str): The onion.
+        
+        Returns:
+            str: The computed return value.
+        """
+
         return 'peer'
 
 
 class _DummyHistoryManagerReceiver:
+    """
+    Provides a dummy history manager receiver test double.
+    """
+
     def log_event(self, *args: Any, **kwargs: Any) -> None:
+        """
+        Records event for later assertions.
+        
+        Args:
+            *args (Any): Extra args values.
+            **kwargs (Any): Extra kwargs values.
+        
+        Returns:
+            None
+        """
+
         return None
 
 
 class _DummyRouterReceiver:
+    """
+    Provides a dummy router receiver test double.
+    """
+
     def process_incoming_ack(self, _onion: str, _msg_id: str) -> None:
+        """
+        Executes process incoming ack for the test scenario.
+        
+        Args:
+            _onion (str): The onion.
+            _msg_id (str): The msg ID.
+        
+        Returns:
+            None
+        """
+
         return None
 
     def process_incoming_msg(
@@ -418,58 +1295,199 @@ class _DummyRouterReceiver:
         _payload_id: str,
         _b64_payload: str,
     ) -> bool:
+        """
+        Executes process incoming msg for the test scenario.
+        
+        Args:
+            _conn (socket.socket): The conn.
+            _onion (str): The onion.
+            _payload_id (str): The payload ID.
+            _b64_payload (str): The b64 payload.
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         return False
 
 
 class _DummyReceiverSocket:
+    """
+    Provides a dummy receiver socket test double.
+    """
+
     def __init__(self) -> None:
+        """
+        Initializes the dummy receiver socket helper.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         self.timeouts: list[float] = []
 
     def settimeout(self, timeout: float) -> None:
+        """
+        Captures one timeout value for assertions.
+        
+        Args:
+            timeout (float): The timeout.
+        
+        Returns:
+            None
+        """
+
         self.timeouts.append(timeout)
 
     def close(self) -> None:
+        """
+        Closes the helper resource.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         return None
 
 
 class _ListenerTestConfig:
+    """
+    Provides a listener test config helper for test scenarios.
+    """
+
     def __init__(self, *, allow_headless_live_backlog: bool = True) -> None:
+        """
+        Initializes the listener test config helper.
+        
+        Args:
+            allow_headless_live_backlog (bool): The allow headless live backlog.
+        
+        Returns:
+            None
+        """
+
         self._allow_headless_live_backlog: bool = allow_headless_live_backlog
 
     def get_bool(self, key: Any) -> bool:
+        """
+        Returns bool for the test scenario.
+        
+        Args:
+            key (Any): The key.
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         if key is SettingKey.AUTO_ACCEPT_CONTACTS:
             return False
         return False
 
     def get_int(self, key: Any) -> int:
+        """
+        Returns int for the test scenario.
+        
+        Args:
+            key (Any): The key.
+        
+        Returns:
+            int: The computed return value.
+        """
+
         if key is SettingKey.MAX_UNSEEN_LIVE_MSGS:
             return 1 if self._allow_headless_live_backlog else 0
         return 0
 
     def get_float(self, _key: Any) -> float:
+        """
+        Returns float for the test scenario.
+        
+        Args:
+            _key (Any): The key.
+        
+        Returns:
+            float: The computed return value.
+        """
+
         return 0.2
 
 
 class _ListenerStream:
+    """
+    Provides a listener stream helper for test scenarios.
+    """
+
     def __init__(self, buffer: bytes = b'') -> None:
+        """
+        Initializes the listener stream helper.
+        
+        Args:
+            buffer (bytes): The buffer.
+        
+        Returns:
+            None
+        """
+
         self._buffer: bytes = buffer
 
     def get_buffer(self) -> bytes:
+        """
+        Returns buffer for the test scenario.
+        
+        Args:
+            None
+        
+        Returns:
+            bytes: The computed return value.
+        """
+
         return self._buffer
 
 
 class _ConnectTestConfig:
+    """
+    Provides a connect test config helper for test scenarios.
+    """
+
     def __init__(
         self,
         max_connections: int,
         max_retries: int = 0,
         live_reconnect_delay: int = 0,
     ) -> None:
+        """
+        Initializes the connect test config helper.
+        
+        Args:
+            max_connections (int): The max connections.
+            max_retries (int): The max retries.
+            live_reconnect_delay (int): The live reconnect delay.
+        
+        Returns:
+            None
+        """
+
         self._max_connections: int = max_connections
         self._max_retries: int = max_retries
         self._live_reconnect_delay: int = live_reconnect_delay
 
     def get_int(self, key: Any) -> int:
+        """
+        Returns int for the test scenario.
+        
+        Args:
+            key (Any): The key.
+        
+        Returns:
+            int: The computed return value.
+        """
+
         if key is SettingKey.MAX_CONCURRENT_CONNECTIONS:
             return self._max_connections
         if key is SettingKey.MAX_CONNECT_RETRIES:
@@ -481,16 +1499,42 @@ class _ConnectTestConfig:
         return 0
 
     def get_float(self, _key: Any) -> float:
+        """
+        Returns float for the test scenario.
+        
+        Args:
+            _key (Any): The key.
+        
+        Returns:
+            float: The computed return value.
+        """
+
         return 0.0
 
 
 class _ConnectControllerHarness:
+    """
+    Provides a connect controller harness helper for test scenarios.
+    """
+
     def __init__(
         self,
         state: StateTracker,
         config: _ConnectTestConfig,
         connect_side_effect: Optional[BaseException] = None,
     ) -> None:
+        """
+        Initializes the connect controller harness helper.
+        
+        Args:
+            state (StateTracker): The state.
+            config (_ConnectTestConfig): The config.
+            connect_side_effect (Optional[BaseException]): The connect side effect.
+        
+        Returns:
+            None
+        """
+
         self.contact_manager_mock = Mock()
         self.contact_manager_mock.resolve_target_for_interaction = Mock(
             return_value=('peer', 'peer-onion')
@@ -516,15 +1560,56 @@ class _ConnectControllerHarness:
         _target: str,
         origin: ConnectionOrigin = ConnectionOrigin.INCOMING,
     ) -> None:
+        """
+        Returns the next queued accepted client socket.
+        
+        Args:
+            _target (str): The target.
+            origin (ConnectionOrigin): The origin.
+        
+        Returns:
+            None
+        """
+
         del origin
 
     def _get_local_connection_actor(self, _origin: ConnectionOrigin) -> Any:
+        """
+        Returns local connection actor for the test scenario.
+        
+        Args:
+            _origin (ConnectionOrigin): The origin.
+        
+        Returns:
+            Any: The computed return value.
+        """
+
         return None
 
     def _get_local_history_actor(self, _origin: ConnectionOrigin) -> Any:
+        """
+        Returns local history actor for the test scenario.
+        
+        Args:
+            _origin (ConnectionOrigin): The origin.
+        
+        Returns:
+            Any: The computed return value.
+        """
+
         return None
 
     def _sleep_connect_retry_backoff(self) -> None:
+        """
+        Skips connect retry backoff delays for the test scenario.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         return None
 
     def _broadcast_retunnel_failure(
@@ -533,6 +1618,18 @@ class _ConnectControllerHarness:
         onion: str,
         error: Optional[str] = None,
     ) -> None:
+        """
+        Broadcasts retunnel failure for the test scenario.
+        
+        Args:
+            alias (str): The alias.
+            onion (str): The onion.
+            error (Optional[str]): The error.
+        
+        Returns:
+            None
+        """
+
         self._state.clear_retunnel_flow(onion)
         self._broadcast(
             create_event(
@@ -575,6 +1672,18 @@ class _ConnectControllerHarness:
         onion: str,
         error: Optional[str] = None,
     ) -> None:
+        """
+        Broadcasts retunnel preserved failure for the test scenario.
+        
+        Args:
+            alias (str): The alias.
+            onion (str): The onion.
+            error (Optional[str]): The error.
+        
+        Returns:
+            None
+        """
+
         self._state.mark_live_reconnect_grace(onion, 0.0)
         self._state.clear_retunnel_flow(onion)
         params: dict[str, Any] = {'alias': alias, 'onion': onion}
@@ -583,12 +1692,36 @@ class _ConnectControllerHarness:
         self._broadcast(create_event(EventType.RETUNNEL_FAILED, params))
 
     def _enqueue_live_reconnect(self, onion: str) -> bool:
+        """
+        Enqueues live reconnect for later assertions.
+        
+        Args:
+            onion (str): The onion.
+        
+        Returns:
+            bool: The computed return value.
+        """
+
         self.enqueued_live_reconnects.append(onion)
         return True
 
 
 class _RetunnelControllerHarness(ConnectionControllerRetunnelMixin):
+    """
+    Provides a retunnel controller harness helper for test scenarios.
+    """
+
     def __init__(self) -> None:
+        """
+        Initializes the retunnel controller harness helper.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         self.contact_manager_mock = Mock()
         self.contact_manager_mock.resolve_target = Mock(
             return_value=('peer', 'peer-onion')
@@ -615,18 +1748,55 @@ class _RetunnelControllerHarness(ConnectionControllerRetunnelMixin):
         target: str,
         origin: ConnectionOrigin = ConnectionOrigin.INCOMING,
     ) -> None:
+        """
+        Executes connect to for the test scenario.
+        
+        Args:
+            target (str): The target.
+            origin (ConnectionOrigin): The origin.
+        
+        Returns:
+            None
+        """
+
         self.connect_to_mock(target, origin=origin)
 
     def disconnect(self, *args: Any, **kwargs: Any) -> None:
+        """
+        Executes disconnect for the test scenario.
+        
+        Args:
+            *args (Any): Extra args values.
+            **kwargs (Any): Extra kwargs values.
+        
+        Returns:
+            None
+        """
+
         self.disconnect_mock(*args, **kwargs)
 
 
 class DaemonHardeningTests(unittest.TestCase):
+    """
+    Covers daemon hardening regression scenarios.
+    """
+
     @staticmethod
     def _build_daemon(
         start_locked: bool = False,
         require_session_auth: bool = False,
     ) -> Daemon:
+        """
+        Builds daemon for the surrounding tests.
+        
+        Args:
+            start_locked (bool): The start locked.
+            require_session_auth (bool): The require session auth.
+        
+        Returns:
+            Daemon: The computed return value.
+        """
+
         with (
             patch('metor.core.daemon.managed.engine.atexit.register'),
             patch('metor.core.daemon.managed.engine.signal.signal'),
@@ -639,6 +1809,18 @@ class DaemonHardeningTests(unittest.TestCase):
 
     @staticmethod
     def _build_v3_onion(public_key: bytes, checksum: bytes, version: bytes) -> str:
+        """
+        Builds v3 onion for the surrounding tests.
+        
+        Args:
+            public_key (bytes): The public key.
+            checksum (bytes): The checksum.
+            version (bytes): The version.
+        
+        Returns:
+            str: The computed return value.
+        """
+
         return (
             base64.b32encode(public_key + checksum + version)
             .decode('ascii')
@@ -648,6 +1830,17 @@ class DaemonHardeningTests(unittest.TestCase):
 
     @staticmethod
     def _build_v3_checksum(public_key: bytes, version: bytes) -> bytes:
+        """
+        Builds v3 checksum for the surrounding tests.
+        
+        Args:
+            public_key (bytes): The public key.
+            version (bytes): The version.
+        
+        Returns:
+            bytes: The computed return value.
+        """
+
         return hashlib.sha3_256(b'.onion checksum' + public_key + version).digest()[
             : Constants.TOR_V3_CHECKSUM_BYTES
         ]
@@ -659,6 +1852,18 @@ class DaemonHardeningTests(unittest.TestCase):
         allow_headless_live_backlog: bool = True,
         has_live_consumers: bool = False,
     ) -> tuple[InboundListener, Mock]:
+        """
+        Builds live listener for the surrounding tests.
+        
+        Args:
+            state (StateTracker): The state.
+            allow_headless_live_backlog (bool): The allow headless live backlog.
+            has_live_consumers (bool): The has live consumers.
+        
+        Returns:
+            tuple[InboundListener, Mock]: The computed return value.
+        """
+
         receiver_mock = Mock()
         contact_manager_mock = Mock()
         contact_manager_mock.ensure_alias_for_onion.return_value = 'peer'
@@ -685,6 +1890,16 @@ class DaemonHardeningTests(unittest.TestCase):
         return listener, receiver_mock
 
     def test_ipc_broadcast_sends_without_holding_lock(self) -> None:
+        """
+        Verifies that IPC broadcast sends without holding lock.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         server = IpcServer(
             cast(ProfileManager, _DummyProfileManager()),
             lambda _cmd, _conn: None,
@@ -698,6 +1913,16 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertFalse(client.lock_was_held)
 
     def test_daemon_broadcast_targets_only_authenticated_clients(self) -> None:
+        """
+        Verifies that daemon broadcast targets only authenticated clients.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         daemon = self._build_daemon()
         daemon._ipc = Mock()
         authenticated_conn, peer = socket.socketpair()
@@ -720,6 +1945,16 @@ class DaemonHardeningTests(unittest.TestCase):
             peer.close()
 
     def test_runtime_internal_error_uses_daemon_status_callback(self) -> None:
+        """
+        Verifies that runtime internal error uses daemon status callback.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         daemon = self._build_daemon()
         daemon._ipc = Mock()
         status_cb = Mock()
@@ -735,16 +1970,46 @@ class DaemonHardeningTests(unittest.TestCase):
         daemon._ipc.broadcast_to.assert_not_called()
 
     def test_session_auth_requirement_is_frozen_at_daemon_start(self) -> None:
+        """
+        Verifies that session auth requirement is frozen at daemon start.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         daemon = self._build_daemon(require_session_auth=False)
         daemon._local_auth.install_context(create_session_auth_context('secret'))
 
         self.assertFalse(daemon._requires_session_auth())
 
     def test_create_managed_daemon_rejects_plaintext_locked_mode(self) -> None:
+        """
+        Verifies that create managed daemon rejects plaintext locked mode.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         with self.assertRaises(PlaintextLockedDaemonError):
             create_managed_daemon(_PlaintextProfileManager(), start_locked=True)
 
     def test_runtime_error_status_formats_daemon_log_prefix(self) -> None:
+        """
+        Verifies that runtime error status formats daemon log prefix.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         formatted = CommandHandlers._format_daemon_status(
             DaemonStatus.RUNTIME_ERROR,
             {'message': 'IPC acceptor recovered cleanly.'},
@@ -756,6 +2021,16 @@ class DaemonHardeningTests(unittest.TestCase):
         )
 
     def test_inbound_listener_start_listener_raises_when_bind_fails(self) -> None:
+        """
+        Verifies that inbound listener start listener raises when bind fails.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         listener = InboundListener(
             tm=cast(TorManager, Mock(incoming_port=43123)),
             cm=cast(ContactManager, Mock()),
@@ -789,6 +2064,16 @@ class DaemonHardeningTests(unittest.TestCase):
         listener._broadcast.assert_called_once()
 
     def test_start_subsystems_aborts_when_listener_readiness_fails(self) -> None:
+        """
+        Verifies that start subsystems aborts when listener readiness fails.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         daemon = self._build_daemon()
         daemon._pm.initialize = Mock()
         daemon._tm = Mock()
@@ -813,6 +2098,16 @@ class DaemonHardeningTests(unittest.TestCase):
         )
 
     def test_locked_daemon_rejects_self_destruct_command(self) -> None:
+        """
+        Verifies that locked daemon rejects self destruct command.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         daemon = self._build_daemon(start_locked=True)
         daemon._ipc = Mock()
         conn, peer = socket.socketpair()
@@ -832,6 +2127,16 @@ class DaemonHardeningTests(unittest.TestCase):
             peer.close()
 
     def test_unauthenticated_self_destruct_requires_session_auth(self) -> None:
+        """
+        Verifies that unauthenticated self destruct requires session auth.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         daemon = self._build_daemon()
         daemon._ipc = Mock()
         conn, peer = socket.socketpair()
@@ -865,6 +2170,16 @@ class DaemonHardeningTests(unittest.TestCase):
             peer.close()
 
     def test_unauthenticated_init_requires_session_auth(self) -> None:
+        """
+        Verifies that unauthenticated init requires session auth.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         daemon = self._build_daemon()
         daemon._ipc = Mock()
         daemon._network_handler = Mock()
@@ -898,6 +2213,16 @@ class DaemonHardeningTests(unittest.TestCase):
     def test_unauthenticated_unlock_requires_session_auth_when_already_unlocked(
         self,
     ) -> None:
+        """
+        Verifies that unauthenticated unlock requires session auth when already unlocked.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         daemon = self._build_daemon()
         daemon._ipc = Mock()
         conn, peer = socket.socketpair()
@@ -927,6 +2252,16 @@ class DaemonHardeningTests(unittest.TestCase):
             peer.close()
 
     def test_ipc_acceptor_recovers_after_handler_thread_start_failure(self) -> None:
+        """
+        Verifies that IPC acceptor recovers after handler thread start failure.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         errors: list[str] = []
         server = IpcServer(
             cast(ProfileManager, _DummyProfileManager()),
@@ -957,6 +2292,16 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertIn(second_conn, server._clients)
 
     def test_ipc_acceptor_rejects_clients_over_limit(self) -> None:
+        """
+        Verifies that IPC acceptor rejects clients over limit.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         server = IpcServer(
             cast(ProfileManager, _DummyProfileManager()),
             lambda _cmd, _conn: None,
@@ -980,6 +2325,16 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(getattr(event, 'max_clients'), 1)
 
     def test_daemon_reports_local_auth_rate_limit_during_locked_startup(self) -> None:
+        """
+        Verifies that daemon reports local auth rate limit during locked startup.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         daemon = self._build_daemon(start_locked=True)
         daemon._ipc = Mock()
         conn, peer = socket.socketpair()
@@ -1003,6 +2358,16 @@ class DaemonHardeningTests(unittest.TestCase):
     def test_outbox_worker_reports_unexpected_loop_error_without_history_noise(
         self,
     ) -> None:
+        """
+        Verifies that outbox worker reports unexpected loop error without history noise.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         stop_flag = threading.Event()
         history_manager = _DummyHistoryManager()
         message_manager = _FaultingOutboxMessageManager(stop_flag)
@@ -1029,6 +2394,16 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(history_manager.events, [])
 
     def test_outbox_worker_requires_exact_ack_frames(self) -> None:
+        """
+        Verifies that outbox worker requires exact ack frames.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         self.assertTrue(OutboxWorker._is_expected_ack_line('msg-1', '/ack msg-1'))
         self.assertFalse(
             OutboxWorker._is_expected_ack_line('msg-1', '/ack msg-1 extra')
@@ -1039,6 +2414,16 @@ class DaemonHardeningTests(unittest.TestCase):
         )
 
     def test_chat_ipc_client_applies_timeout_and_ignores_read_timeouts(self) -> None:
+        """
+        Verifies that chat IPC client applies timeout and ignores read timeouts.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         disconnect_mock = Mock()
         fake_socket = _FakeChatIpcSocket([socket.timeout(), b''])
         client = IpcClient(
@@ -1061,6 +2446,16 @@ class DaemonHardeningTests(unittest.TestCase):
     def test_retunnel_disconnects_existing_live_connection_before_replacement(
         self,
     ) -> None:
+        """
+        Verifies that retunnel disconnects existing live connection before replacement.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         controller = _RetunnelControllerHarness()
 
         controller.retunnel('peer')
@@ -1083,6 +2478,16 @@ class DaemonHardeningTests(unittest.TestCase):
         )
 
     def test_state_allows_pending_replacement_during_retunnel(self) -> None:
+        """
+        Verifies that state allows pending replacement during retunnel.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         state = StateTracker()
         active_conn, active_peer = socket.socketpair()
         pending_conn, pending_peer = socket.socketpair()
@@ -1108,6 +2513,16 @@ class DaemonHardeningTests(unittest.TestCase):
                 conn.close()
 
     def test_state_allows_pending_replacement_for_remote_auto_reconnect(self) -> None:
+        """
+        Verifies that state allows pending replacement for remote auto reconnect.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         state = StateTracker()
         active_conn, active_peer = socket.socketpair()
         pending_conn, pending_peer = socket.socketpair()
@@ -1132,6 +2547,16 @@ class DaemonHardeningTests(unittest.TestCase):
                 conn.close()
 
     def test_connect_limit_counts_unauthenticated_sockets(self) -> None:
+        """
+        Verifies that connect limit counts unauthenticated sockets.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         state = StateTracker()
         unauth_conn, unauth_peer = socket.socketpair()
         state.add_unauthenticated_connection(unauth_conn)
@@ -1156,6 +2581,16 @@ class DaemonHardeningTests(unittest.TestCase):
             unauth_peer.close()
 
     def test_retunnel_connect_failure_preserves_current_live_connection(self) -> None:
+        """
+        Verifies that retunnel connect failure preserves current live connection.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         state = StateTracker()
         active_conn, active_peer = socket.socketpair()
         state.add_active_connection('peer-onion', active_conn)
@@ -1188,6 +2623,16 @@ class DaemonHardeningTests(unittest.TestCase):
     def test_retunnel_final_connect_failure_schedules_auto_reconnect(
         self,
     ) -> None:
+        """
+        Verifies that retunnel final connect failure schedules auto reconnect.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         state = StateTracker()
         state.mark_retunnel_started('peer-onion')
         controller = _ConnectControllerHarness(
@@ -1222,6 +2667,16 @@ class DaemonHardeningTests(unittest.TestCase):
             state.clear_scheduled_auto_reconnect('peer-onion')
 
     def test_connect_helper_tags_retunnel_auth_frames(self) -> None:
+        """
+        Verifies that connect helper tags retunnel auth frames.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         state = StateTracker()
         controller = _ConnectControllerHarness(
             state,
@@ -1233,13 +2688,47 @@ class DaemonHardeningTests(unittest.TestCase):
         controller.tor_manager_mock.connect = Mock(return_value=conn)
 
         class _ChallengeStream:
+            """
+            Provides a challenge stream helper for test scenarios.
+            """
+
             def __init__(self, _conn: Any) -> None:
+                """
+                Initializes the challenge stream helper.
+                
+                Args:
+                    _conn (Any): The conn.
+                
+                Returns:
+                    None
+                """
+
                 return None
 
             def read_line(self) -> str:
+                """
+                Reads line from the helper stream.
+                
+                Args:
+                    None
+                
+                Returns:
+                    str: The computed return value.
+                """
+
                 return f'/challenge {"ab" * Constants.TOR_HANDSHAKE_CHALLENGE_BYTES}'
 
             def get_buffer(self) -> bytes:
+                """
+                Returns buffer for the test scenario.
+                
+                Args:
+                    None
+                
+                Returns:
+                    bytes: The computed return value.
+                """
+
                 return b''
 
         with patch(
@@ -1258,6 +2747,16 @@ class DaemonHardeningTests(unittest.TestCase):
         )
 
     def test_connect_helper_closes_socket_after_handshake_failure(self) -> None:
+        """
+        Verifies that connect helper closes socket after handshake failure.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         state = StateTracker()
         controller = _ConnectControllerHarness(
             state,
@@ -1267,10 +2766,34 @@ class DaemonHardeningTests(unittest.TestCase):
         controller.tor_manager_mock.connect = Mock(return_value=conn)
 
         class _InvalidChallengeStream:
+            """
+            Provides a invalid challenge stream helper for test scenarios.
+            """
+
             def __init__(self, _conn: Any) -> None:
+                """
+                Initializes the invalid challenge stream helper.
+                
+                Args:
+                    _conn (Any): The conn.
+                
+                Returns:
+                    None
+                """
+
                 return None
 
             def read_line(self) -> str:
+                """
+                Reads line from the helper stream.
+                
+                Args:
+                    None
+                
+                Returns:
+                    str: The computed return value.
+                """
+
                 return '/msg invalid'
 
         with patch(
@@ -1287,6 +2810,16 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(state.get_tracked_live_socket_count(), 0)
 
     def test_async_drop_skips_invalid_payload_and_processes_next_message(self) -> None:
+        """
+        Verifies that async drop skips invalid payload and processes next message.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         history_manager = _DummyHistoryManager()
         message_manager = _DummyMessageManager()
         router = MessageRouter(
@@ -1327,6 +2860,16 @@ class DaemonHardeningTests(unittest.TestCase):
     def test_async_drop_stops_without_ack_when_drop_backlog_limit_is_reached(
         self,
     ) -> None:
+        """
+        Verifies that async drop stops without ack when drop backlog limit is reached.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         history_manager = _DummyHistoryManager()
         message_manager = _DummyMessageManager()
         message_manager.unread_drop_count = 1
@@ -1359,6 +2902,16 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(history_manager.events[0][0][0], HistoryEvent.FAILED)
 
     def test_live_router_disconnects_on_invalid_payload_without_ack(self) -> None:
+        """
+        Verifies that live router disconnects on invalid payload without ack.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         history_manager = _DummyHistoryManager()
         message_manager = _DummyMessageManager()
         router = MessageRouter(
@@ -1388,16 +2941,54 @@ class DaemonHardeningTests(unittest.TestCase):
     def test_send_message_without_live_connection_emits_auto_fallback_queued_event(
         self,
     ) -> None:
+        """
+        Verifies that send message without live connection emits auto fallback queued event.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         history_manager = _DummyHistoryManager()
         message_manager = _DummyMessageManager()
         broadcasted: list[IpcEvent] = []
 
         class _ResolvedContactManager(_DummyContactManager):
+            """
+            Provides a resolved contact manager helper for test scenarios.
+            """
+
             def resolve_target(self, _target: str) -> tuple[str, str]:
+                """
+                Resolves target for the test scenario.
+                
+                Args:
+                    _target (str): The target.
+                
+                Returns:
+                    tuple[str, str]: The computed return value.
+                """
+
                 return 'peer', 'peer-onion'
 
         class _NoLiveState:
+            """
+            Provides a no live state helper for test scenarios.
+            """
+
             def get_connection(self, _onion: str) -> None:
+                """
+                Returns connection for the test scenario.
+                
+                Args:
+                    _onion (str): The onion.
+                
+                Returns:
+                    None
+                """
+
                 return None
 
         router = MessageRouter(
@@ -1423,6 +3014,16 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(cast(AutoFallbackQueuedEvent, broadcasted[0]).msg_id, 'msg-1')
 
     def test_live_ack_carries_original_request_id_from_state_tracker(self) -> None:
+        """
+        Verifies that live ack carries original request ID from state tracker.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         history_manager = _DummyHistoryManager()
         message_manager = _DummyMessageManager()
         broadcasted: list[IpcEvent] = []
@@ -1453,6 +3054,16 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertIsNone(state.pop_message_request_id('msg-1'))
 
     def test_send_drop_command_tracks_request_id_for_later_outbox_ack(self) -> None:
+        """
+        Verifies that send drop command tracks request ID for later outbox ack.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         contact_manager = Mock()
         contact_manager.resolve_target_for_interaction.return_value = (
             'peer',
@@ -1499,6 +3110,16 @@ class DaemonHardeningTests(unittest.TestCase):
     def test_outbox_drop_ack_carries_original_request_id_from_state_tracker(
         self,
     ) -> None:
+        """
+        Verifies that outbox drop ack carries original request ID from state tracker.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         state = StateTracker()
         state.remember_message_request_id('msg-1', 'req-drop-ack-1')
         broadcasted: list[IpcEvent] = []
@@ -1543,6 +3164,16 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertIsNone(state.pop_message_request_id('msg-1'))
 
     def test_tcp_stream_reader_preserves_partial_buffer_bytes(self) -> None:
+        """
+        Verifies that TCP stream reader preserves partial buffer bytes.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         writer, reader = socket.socketpair()
         try:
             writer.sendall(b'/msg abc payload\nrest\xe2')
@@ -1559,6 +3190,16 @@ class DaemonHardeningTests(unittest.TestCase):
     def test_add_pending_connection_rejects_shadow_socket_when_active_exists(
         self,
     ) -> None:
+        """
+        Verifies that add pending connection rejects shadow socket when active exists.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         state = StateTracker()
         active_conn, active_peer = socket.socketpair()
         pending_conn, pending_peer = socket.socketpair()
@@ -1582,6 +3223,16 @@ class DaemonHardeningTests(unittest.TestCase):
                 active_conn.close()
 
     def test_pop_any_connection_closes_shadow_pending_socket(self) -> None:
+        """
+        Verifies that pop any connection closes shadow pending socket.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         state = StateTracker()
         active_conn, active_peer = socket.socketpair()
         pending_conn, pending_peer = socket.socketpair()
@@ -1605,20 +3256,60 @@ class DaemonHardeningTests(unittest.TestCase):
                 active_conn.close()
 
     def test_handshake_protocol_rejects_non_challenge_frame(self) -> None:
+        """
+        Verifies that handshake protocol rejects non challenge frame.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         with self.assertRaises(ValueError):
             HandshakeProtocol.parse_challenge_line('/msg deadbeef')
 
     def test_handshake_protocol_rejects_wrong_challenge_length(self) -> None:
+        """
+        Verifies that handshake protocol rejects wrong challenge length.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         with self.assertRaises(ValueError):
             HandshakeProtocol.parse_challenge_line(
                 f'/challenge {"ab" * (Constants.TOR_HANDSHAKE_CHALLENGE_BYTES - 1)}'
             )
 
     def test_handshake_protocol_rejects_auth_frame_with_extra_tokens(self) -> None:
+        """
+        Verifies that handshake protocol rejects auth frame with extra tokens.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         with self.assertRaises(ValueError):
             HandshakeProtocol.parse_auth_line('/auth peer sig ASYNC extra')
 
     def test_handshake_protocol_round_trips_recovery_auth_hints(self) -> None:
+        """
+        Verifies that handshake protocol round trips recovery auth hints.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         for origin in (
             ConnectionOrigin.AUTO_RECONNECT,
             ConnectionOrigin.RETUNNEL,
@@ -1637,12 +3328,32 @@ class DaemonHardeningTests(unittest.TestCase):
             )
 
     def test_handshake_protocol_rejects_unsupported_recovery_hint(self) -> None:
+        """
+        Verifies that handshake protocol rejects unsupported recovery hint.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         with self.assertRaises(ValueError):
             HandshakeProtocol.parse_auth_line(
                 f'/auth peer sig {ConnectionOrigin.MANUAL.value}'
             )
 
     def test_crypto_verify_signature_rejects_invalid_onion_checksum(self) -> None:
+        """
+        Verifies that crypto verify signature rejects invalid onion checksum.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         seed = b'\x42' * 32
         public_key, secret_key = nacl.bindings.crypto_sign_seed_keypair(seed)
         crypto = Crypto(cast(KeyManager, _DummyKeyManager(secret_key)))
@@ -1664,6 +3375,16 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertFalse(crypto.verify_signature(invalid_onion, challenge, signature))
 
     def test_crypto_verify_signature_rejects_invalid_onion_version(self) -> None:
+        """
+        Verifies that crypto verify signature rejects invalid onion version.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         seed = b'\x24' * 32
         public_key, secret_key = nacl.bindings.crypto_sign_seed_keypair(seed)
         crypto = Crypto(cast(KeyManager, _DummyKeyManager(secret_key)))
@@ -1683,6 +3404,16 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertFalse(crypto.verify_signature(onion, challenge, signature))
 
     def test_receiver_accepts_zero_argument_disconnect(self) -> None:
+        """
+        Verifies that receiver accepts zero argument disconnect.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         disconnect_calls: list[tuple[Any, ...]] = []
         reject_calls: list[tuple[Any, ...]] = []
         receiver = StreamReceiver(
@@ -1719,12 +3450,37 @@ class DaemonHardeningTests(unittest.TestCase):
                 reader.close()
 
     def test_receiver_ignores_malformed_ack_frame(self) -> None:
+        """
+        Verifies that receiver ignores malformed ack frame.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         disconnect_calls: list[tuple[Any, ...]] = []
         reject_calls: list[tuple[Any, ...]] = []
         acked_msg_ids: list[str] = []
 
         class _AckTrackingRouter:
+            """
+            Provides a ack tracking router helper for test scenarios.
+            """
+
             def process_incoming_ack(self, _onion: str, msg_id: str) -> None:
+                """
+                Executes process incoming ack for the test scenario.
+                
+                Args:
+                    _onion (str): The onion.
+                    msg_id (str): The msg ID.
+                
+                Returns:
+                    None
+                """
+
                 acked_msg_ids.append(msg_id)
 
             def process_incoming_msg(
@@ -1734,6 +3490,19 @@ class DaemonHardeningTests(unittest.TestCase):
                 _payload_id: str,
                 _b64_payload: str,
             ) -> bool:
+                """
+                Executes process incoming msg for the test scenario.
+                
+                Args:
+                    _conn (socket.socket): The conn.
+                    _onion (str): The onion.
+                    _payload_id (str): The payload ID.
+                    _b64_payload (str): The b64 payload.
+                
+                Returns:
+                    bool: The computed return value.
+                """
+
                 return False
 
         receiver = StreamReceiver(
@@ -1768,6 +3537,16 @@ class DaemonHardeningTests(unittest.TestCase):
                 reader.close()
 
     def test_receiver_ignores_idle_timeout_for_active_live_socket(self) -> None:
+        """
+        Verifies that receiver ignores idle timeout for active live socket.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         disconnect_calls: list[tuple[Any, ...]] = []
         reject_calls: list[tuple[Any, ...]] = []
         receiver = StreamReceiver(
@@ -1783,10 +3562,35 @@ class DaemonHardeningTests(unittest.TestCase):
         conn = _DummyReceiverSocket()
 
         class _PatchedStream:
+            """
+            Provides a patched stream helper for test scenarios.
+            """
+
             def __init__(self, _conn: Any, _initial_buffer: bytes = b'') -> None:
+                """
+                Initializes the patched stream helper.
+                
+                Args:
+                    _conn (Any): The conn.
+                    _initial_buffer (bytes): The initial buffer.
+                
+                Returns:
+                    None
+                """
+
                 self._actions: list[object] = [socket.timeout(), '/disconnect']
 
             def read_line(self) -> Optional[str]:
+                """
+                Reads line from the helper stream.
+                
+                Args:
+                    None
+                
+                Returns:
+                    Optional[str]: The computed return value.
+                """
+
                 action: object = self._actions.pop(0)
                 if isinstance(action, BaseException):
                     raise action
@@ -1810,11 +3614,36 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(reject_calls, [])
 
     def test_receiver_exits_idle_timeout_for_unknown_socket(self) -> None:
+        """
+        Verifies that receiver exits idle timeout for unknown socket.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         disconnect_calls: list[tuple[Any, ...]] = []
         reject_calls: list[tuple[Any, ...]] = []
 
         class _UnknownSocketState(_DummyState):
+            """
+            Provides a unknown socket state helper for test scenarios.
+            """
+
             def is_known_socket(self, _onion: str, _conn: socket.socket) -> bool:
+                """
+                Reports whether the helper is known socket.
+                
+                Args:
+                    _onion (str): The onion.
+                    _conn (socket.socket): The conn.
+                
+                Returns:
+                    bool: The computed return value.
+                """
+
                 return False
 
         receiver = StreamReceiver(
@@ -1830,10 +3659,35 @@ class DaemonHardeningTests(unittest.TestCase):
         conn = _DummyReceiverSocket()
 
         class _PatchedStream:
+            """
+            Provides a patched stream helper for test scenarios.
+            """
+
             def __init__(self, _conn: Any, _initial_buffer: bytes = b'') -> None:
+                """
+                Initializes the patched stream helper.
+                
+                Args:
+                    _conn (Any): The conn.
+                    _initial_buffer (bytes): The initial buffer.
+                
+                Returns:
+                    None
+                """
+
                 self._actions: list[object] = [socket.timeout(), '/disconnect']
 
             def read_line(self) -> Optional[str]:
+                """
+                Reads line from the helper stream.
+                
+                Args:
+                    None
+                
+                Returns:
+                    Optional[str]: The computed return value.
+                """
+
                 action: object = self._actions.pop(0)
                 if isinstance(action, BaseException):
                     raise action
@@ -1857,6 +3711,16 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(reject_calls, [])
 
     def test_receiver_keeps_pending_accept_timeout_behavior(self) -> None:
+        """
+        Verifies that receiver keeps pending accept timeout behavior.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         disconnect_calls: list[tuple[Any, ...]] = []
         reject_calls: list[tuple[Any, ...]] = []
         receiver = StreamReceiver(
@@ -1872,10 +3736,35 @@ class DaemonHardeningTests(unittest.TestCase):
         conn = _DummyReceiverSocket()
 
         class _PatchedStream:
+            """
+            Provides a patched stream helper for test scenarios.
+            """
+
             def __init__(self, _conn: Any, _initial_buffer: bytes = b'') -> None:
+                """
+                Initializes the patched stream helper.
+                
+                Args:
+                    _conn (Any): The conn.
+                    _initial_buffer (bytes): The initial buffer.
+                
+                Returns:
+                    None
+                """
+
                 self._actions: list[object] = [socket.timeout()]
 
             def read_line(self) -> Optional[str]:
+                """
+                Reads line from the helper stream.
+                
+                Args:
+                    None
+                
+                Returns:
+                    Optional[str]: The computed return value.
+                """
+
                 action: object = self._actions.pop(0)
                 if isinstance(action, BaseException):
                     raise action
@@ -1901,6 +3790,16 @@ class DaemonHardeningTests(unittest.TestCase):
     def test_listener_accepts_remote_retunnel_replacement_over_active_socket(
         self,
     ) -> None:
+        """
+        Verifies that listener accepts remote retunnel replacement over active socket.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         state = StateTracker()
         old_conn = cast(socket.socket, _DummyConn())
         new_conn = cast(socket.socket, _DummyConn())
@@ -1926,6 +3825,16 @@ class DaemonHardeningTests(unittest.TestCase):
     def test_listener_tracks_remote_auto_reconnect_replacement_as_pending(
         self,
     ) -> None:
+        """
+        Verifies that listener tracks remote auto reconnect replacement as pending.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         state = StateTracker()
         old_conn = cast(socket.socket, _DummyConn())
         new_conn = cast(socket.socket, _DummyConn())
@@ -1962,6 +3871,16 @@ class DaemonHardeningTests(unittest.TestCase):
     def test_listener_rejects_plain_duplicate_incoming_when_live_is_active(
         self,
     ) -> None:
+        """
+        Verifies that listener rejects plain duplicate incoming when live is active.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         state = StateTracker()
         old_conn = cast(socket.socket, _DummyConn())
         new_conn = cast(socket.socket, _DummyConn())
@@ -1984,6 +3903,16 @@ class DaemonHardeningTests(unittest.TestCase):
     def test_outbox_establish_tunnel_closes_socket_after_handshake_failure(
         self,
     ) -> None:
+        """
+        Verifies that outbox establish tunnel closes socket after handshake failure.
+        
+        Args:
+            None
+        
+        Returns:
+            None
+        """
+
         conn = _NetworkSocket()
         tor_manager = Mock()
         tor_manager.connect.return_value = conn
@@ -1999,10 +3928,34 @@ class DaemonHardeningTests(unittest.TestCase):
         )
 
         class _InvalidChallengeStream:
+            """
+            Provides a invalid challenge stream helper for test scenarios.
+            """
+
             def __init__(self, _conn: Any) -> None:
+                """
+                Initializes the invalid challenge stream helper.
+                
+                Args:
+                    _conn (Any): The conn.
+                
+                Returns:
+                    None
+                """
+
                 return None
 
             def read_line(self) -> str:
+                """
+                Reads line from the helper stream.
+                
+                Args:
+                    None
+                
+                Returns:
+                    str: The computed return value.
+                """
+
                 return '/msg invalid'
 
         with patch(

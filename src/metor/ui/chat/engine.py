@@ -24,8 +24,7 @@ from metor.core.api import (
     GetConnectionsCommand,
     SwitchCommand,
 )
-from metor.data.profile import ProfileManager
-from metor.data.settings import SettingKey
+from metor.data import ProfileManager, SettingKey
 from metor.ui.ipc import IpcAuthExchange
 from metor.ui import (
     Help,

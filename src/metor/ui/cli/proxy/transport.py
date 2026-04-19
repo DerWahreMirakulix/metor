@@ -7,14 +7,16 @@ from metor.application import run_with_headless_daemon
 from metor.core.api import (
     EventType,
     GetConfigCommand,
+    GetConfigListCommand,
     GetSettingCommand,
+    GetSettingsListCommand,
     IpcCommand,
     IpcEvent,
     SetConfigCommand,
     SetSettingCommand,
     SyncConfigCommand,
 )
-from metor.data.profile import ProfileManager
+from metor.data import ProfileManager
 from metor.ui import PromptAbortedError, Theme
 from metor.ui.cli.ipc import IpcRequestSession
 
@@ -111,7 +113,9 @@ class CliProxyTransport:
                     (
                         GetSettingCommand,
                         SetSettingCommand,
+                        GetSettingsListCommand,
                         GetConfigCommand,
+                        GetConfigListCommand,
                         SetConfigCommand,
                         SyncConfigCommand,
                     ),
@@ -133,6 +137,8 @@ class CliProxyTransport:
             return self.send_to_port(port, cmd, wait_for_response)
         except PromptAbortedError:
             return self._prefix_remote('Aborted.')
+        except ValueError as exc:
+            return self._prefix_remote(str(exc))
 
     def request_ipc_event(self, cmd: IpcCommand) -> Optional[IpcEvent]:
         """
@@ -157,7 +163,9 @@ class CliProxyTransport:
                     (
                         GetSettingCommand,
                         SetSettingCommand,
+                        GetSettingsListCommand,
                         GetConfigCommand,
+                        GetConfigListCommand,
                         SetConfigCommand,
                         SyncConfigCommand,
                     ),
@@ -174,6 +182,8 @@ class CliProxyTransport:
 
             return self.send_to_port_event(port, cmd)
         except PromptAbortedError:
+            return None
+        except ValueError:
             return None
 
     def request_local_headless(
@@ -204,6 +214,8 @@ class CliProxyTransport:
             )
         except PromptAbortedError:
             return 'Aborted.'
+        except ValueError as exc:
+            return str(exc)
 
     def send_to_port(
         self,

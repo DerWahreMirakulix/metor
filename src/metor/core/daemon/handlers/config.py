@@ -13,8 +13,10 @@ from metor.core.api import (
     create_event,
     SetSettingCommand,
     GetSettingCommand,
+    GetSettingsListCommand,
     SetConfigCommand,
     GetConfigCommand,
+    GetConfigListCommand,
     SyncConfigCommand,
 )
 from metor.data import Settings, SettingKey, SettingValidationError
@@ -91,6 +93,15 @@ class ConfigCommandHandler:
             except ValueError:
                 return create_event(EventType.INVALID_SETTING_KEY)
 
+        if isinstance(cmd, GetSettingsListCommand):
+            return create_event(
+                EventType.SETTINGS_LIST_DATA,
+                {
+                    'scope': 'daemon',
+                    'entries': list(Settings.get_snapshots(domain='daemon')),
+                },
+            )
+
         if isinstance(cmd, SetConfigCommand):
             set_config_key: Union[SettingKey, ProfileConfigKey]
             try:
@@ -143,6 +154,18 @@ class ConfigCommandHandler:
                 )
             except ValueError:
                 return create_event(EventType.INVALID_CONFIG_KEY)
+
+        if isinstance(cmd, GetConfigListCommand):
+            return create_event(
+                EventType.CONFIG_LIST_DATA,
+                {
+                    'scope': 'daemon',
+                    'profile': self._pm.profile_name,
+                    'entries': list(
+                        self._pm.config.get_setting_snapshots(domain='daemon')
+                    ),
+                },
+            )
 
         if isinstance(cmd, SyncConfigCommand):
             try:

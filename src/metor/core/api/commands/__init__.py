@@ -44,7 +44,9 @@ from metor.core.api.commands.session import (
 )
 from metor.core.api.commands.settings import (
     GetConfigCommand,
+    GetConfigListCommand,
     GetSettingCommand,
+    GetSettingsListCommand,
     SetConfigCommand,
     SetSettingCommand,
     SyncConfigCommand,
@@ -88,8 +90,10 @@ __all__ = [
     'GenerateAddressCommand',
     'SetSettingCommand',
     'GetSettingCommand',
+    'GetSettingsListCommand',
     'SetConfigCommand',
     'GetConfigCommand',
+    'GetConfigListCommand',
     'SyncConfigCommand',
     'ClearProfileDbCommand',
     'SelfDestructCommand',
