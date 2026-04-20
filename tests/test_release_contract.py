@@ -190,6 +190,32 @@ class _RecordingCursor:
         self.queries.append(query)
         return self
 
+    def fetchone(self) -> object:
+        """
+        Returns one row for the test scenario.
+
+        Args:
+            None
+
+        Returns:
+            object: The computed return value.
+        """
+
+        return None
+
+    def fetchall(self) -> list[tuple[object, ...]]:
+        """
+        Returns all rows for the test scenario.
+
+        Args:
+            None
+
+        Returns:
+            list[tuple[object, ...]]: The computed return value.
+        """
+
+        return []
+
 
 class ReleaseContractTests(unittest.TestCase):
     """

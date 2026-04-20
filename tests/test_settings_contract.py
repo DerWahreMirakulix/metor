@@ -7,12 +7,14 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any, cast
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.core.api import EventType, GetSettingCommand
 from metor.core.daemon.handlers import ConfigCommandHandler
+from metor.data.profile import ProfileManager
 from metor.data.profile.config import Config
 from metor.data.settings import Settings, SettingKey
 from metor.ui.cli.proxy.settings import CliProxySettingsActions
@@ -94,7 +96,7 @@ class _DummyProfileManager:
         """
 
         self.profile_name: str = profile_name
-        self.config: Config = Config(_DummyPaths(profile_root))
+        self.config: Config = Config(cast(Any, _DummyPaths(profile_root)))
 
     def is_daemon_running(self) -> bool:
         """
@@ -136,7 +138,7 @@ def _translate_event(
         return 'Invalid profile config key provided.'
     if code is EventType.SETTING_TYPE_ERROR:
         return str(payload.get('reason', 'invalid value'))
-    return code.value
+    return str(code.value)
 
 
 class SettingsContractTests(unittest.TestCase):
@@ -165,7 +167,7 @@ class SettingsContractTests(unittest.TestCase):
         profile_root = root / 'alpha'
         pm = _DummyProfileManager(profile_root)
         actions = CliProxySettingsActions(
-            pm,
+            cast(ProfileManager, pm),
             is_remote=False,
             request_ipc=lambda *_args, **_kwargs: request_ipc_result,
             translate_event=_translate_event,
@@ -374,7 +376,7 @@ class SettingsContractTests(unittest.TestCase):
             ):
                 Settings.set(SettingKey.DAEMON_IPC_TIMEOUT, 22.0)
 
-                event = ConfigCommandHandler(pm).handle(
+                event = ConfigCommandHandler(cast(ProfileManager, pm)).handle(
                     GetSettingCommand(setting_key=SettingKey.DAEMON_IPC_TIMEOUT.value)
                 )
 

@@ -6,7 +6,6 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import cast
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
@@ -152,7 +151,7 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
                 patch.object(ProcessManager, 'is_pid_running', return_value=True),
                 patch(
                     'metor.utils.process.psutil.Process',
-                    return_value=cast(object, object()),
+                    return_value=object(),
                 ),
                 patch.object(ProcessManager, '_terminate_process', return_value=False),
             ):
