@@ -189,12 +189,12 @@ class FileLock:
         Returns:
             None
         """
+        fd_stat: Optional[os.stat_result] = None
         try:
             if self._lock_fd is None:
                 return
 
-            fd_stat: os.stat_result = os.fstat(self._lock_fd)
-            self._unlink_if_unchanged(fd_stat)
+            fd_stat = os.fstat(self._lock_fd)
         except (OSError, ValueError):
             pass
         finally:
@@ -204,3 +204,11 @@ class FileLock:
                 except OSError:
                     pass
                 self._lock_fd = None
+
+        if fd_stat is None:
+            return
+
+        try:
+            self._unlink_if_unchanged(fd_stat)
+        except (OSError, ValueError):
+            pass

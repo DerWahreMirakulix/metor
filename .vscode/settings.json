@@ -8,6 +8,7 @@
     "CREAT",
     "docstrings",
     "dotenv",
+    "fstat",
     "getpid",
     "getwch",
     "Headful",
