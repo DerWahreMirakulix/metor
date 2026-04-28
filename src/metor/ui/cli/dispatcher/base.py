@@ -135,7 +135,7 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                 print(self._proxy.handle_settings_set(self._extra[0], self._extra[1]))
             elif sub == 'get' and len(self._extra) >= 1:
                 print(self._proxy.handle_settings_get(self._extra[0]))
-            elif sub == 'list':
+            elif sub == 'list' or (sub is None and not self._extra):
                 print(self._proxy.handle_settings_list())
             else:
                 print(self._help.show_command_help(cmd))
@@ -145,7 +145,7 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                 print(self._proxy.handle_config_set(self._extra[0], self._extra[1]))
             elif sub == 'get' and len(self._extra) >= 1:
                 print(self._proxy.handle_config_get(self._extra[0]))
-            elif sub == 'list':
+            elif sub == 'list' or (sub is None and not self._extra):
                 print(self._proxy.handle_config_list())
             elif sub == 'sync':
                 print(self._proxy.handle_config_sync())

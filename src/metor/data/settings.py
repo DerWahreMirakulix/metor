@@ -66,6 +66,7 @@ class SettingKey(str, Enum):
     ENABLE_RUNTIME_DB_MIRROR = 'daemon.enable_runtime_db_mirror'
     AUTO_ACCEPT_CONTACTS = 'daemon.auto_accept_contacts'
     REQUIRE_LOCAL_AUTH = 'daemon.require_local_auth'
+    LOCAL_AUTH_FAILURE_LIMIT = 'daemon.local_auth_failure_limit'
     LOCAL_AUTH_LOCKOUT_TIMEOUT = 'daemon.local_auth_lockout_timeout'
     ALLOW_DROPS = 'daemon.allow_drops'
     EPHEMERAL_MESSAGES = 'daemon.ephemeral_messages'
@@ -329,6 +330,15 @@ class Settings:
             description='Requires every UI session to authenticate even when the daemon is already running.',
             constraints='Boolean.',
             security_note='Enabled by default for encrypted profiles. Disable it only on trusted single-user hosts.',
+        ),
+        SettingKey.LOCAL_AUTH_FAILURE_LIMIT: SettingSpec(
+            key=SettingKey.LOCAL_AUTH_FAILURE_LIMIT,
+            default=Constants.IPC_AUTH_FAILURE_LIMIT,
+            category='Core Daemon',
+            description='Maximum invalid local unlock or session-auth attempts before the daemon disconnects the client. `1` disconnects immediately.',
+            constraints='Integer >= 1.',
+            security_note='Caps online local password guessing attempts per auth window before disconnect and optional cooldown apply.',
+            min_value=1,
         ),
         SettingKey.LOCAL_AUTH_LOCKOUT_TIMEOUT: SettingSpec(
             key=SettingKey.LOCAL_AUTH_LOCKOUT_TIMEOUT,

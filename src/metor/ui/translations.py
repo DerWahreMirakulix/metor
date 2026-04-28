@@ -521,12 +521,20 @@ class Translator:
         )
 
         if code is EventType.CONNECTED:
-            safe_params['origin_text'] = 'Connected to'
+            if origin in (
+                ConnectionOrigin.AUTO_RECONNECT,
+                ConnectionOrigin.GRACE_RECONNECT,
+            ):
+                safe_params['origin_text'] = 'Reconnected to'
+            else:
+                safe_params['origin_text'] = 'Connected to'
             return
 
         if code is EventType.CONNECTION_CONNECTING:
             if origin is ConnectionOrigin.AUTO_RECONNECT:
                 safe_params['origin_text'] = 'Automatically reconnecting to'
+            elif origin is ConnectionOrigin.GRACE_RECONNECT:
+                safe_params['origin_text'] = 'Reconnecting to'
             elif origin is ConnectionOrigin.RETUNNEL:
                 safe_params['origin_text'] = 'Retunnel reconnecting to'
             else:
@@ -536,6 +544,8 @@ class Translator:
         if code is EventType.CONNECTION_PENDING:
             if origin is ConnectionOrigin.AUTO_RECONNECT:
                 safe_params['origin_text'] = 'Automatic reconnect request sent to'
+            elif origin is ConnectionOrigin.GRACE_RECONNECT:
+                safe_params['origin_text'] = 'Reconnect request sent to'
             elif origin is ConnectionOrigin.RETUNNEL:
                 safe_params['origin_text'] = 'Retunnel reconnect request sent to'
             else:
@@ -545,6 +555,8 @@ class Translator:
         if code in (EventType.CONNECTION_RETRY, EventType.CONNECTION_FAILED):
             if origin is ConnectionOrigin.AUTO_RECONNECT:
                 safe_params['origin_text'] = 'Automatic reconnect to'
+            elif origin is ConnectionOrigin.GRACE_RECONNECT:
+                safe_params['origin_text'] = 'Reconnect to'
             elif origin is ConnectionOrigin.RETUNNEL:
                 safe_params['origin_text'] = 'Retunnel reconnect to'
             else:
@@ -559,6 +571,8 @@ class Translator:
                 safe_params['reject_text'] = (
                     "Automatic reconnect to '{alias}' rejected."
                 )
+            elif origin is ConnectionOrigin.GRACE_RECONNECT:
+                safe_params['reject_text'] = "Reconnect to '{alias}' rejected."
             elif origin is ConnectionOrigin.RETUNNEL:
                 safe_params['reject_text'] = "Retunnel reconnect to '{alias}' rejected."
             else:

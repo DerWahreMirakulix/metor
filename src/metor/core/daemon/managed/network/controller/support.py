@@ -11,10 +11,12 @@ from metor.core.api import (
     ConnectionActor,
     ConnectionOrigin,
     EventType,
+    FallbackSuccessEvent,
     IpcEvent,
     JsonValue,
     RuntimeErrorCode,
     create_event,
+    get_current_request_id,
 )
 from metor.core.daemon.managed.crypto import Crypto
 from metor.data import (
@@ -22,7 +24,11 @@ from metor.data import (
     HistoryActor,
     HistoryEvent,
     HistoryManager,
+    HistoryReasonCode,
     MessageManager,
+    MessageDirection,
+    MessageStatus,
+    MessageType,
     SettingKey,
 )
 from metor.utils import Constants
@@ -123,6 +129,8 @@ class ConnectionControllerSupportMixin:
                     )
                 )
             return
+
+        self._convert_unacked_live_to_drops(alias, onion)
 
     def _broadcast_retunnel_preserved_failure(
         self,
@@ -228,6 +236,58 @@ class ConnectionControllerSupportMixin:
             SettingKey.LIVE_RECONNECT_GRACE_TIMEOUT
         )
         self._state.mark_live_reconnect_grace(onion, float(grace_timeout_sec))
+
+    def _convert_unacked_live_to_drops(
+        self,
+        alias: str,
+        onion: str,
+        emit_event: bool = True,
+    ) -> bool:
+        """
+        Converts retained unacknowledged live messages into pending drops.
+
+        Args:
+            alias (str): The peer alias.
+            onion (str): The peer onion identity.
+            emit_event (bool): Whether to emit a fallback-success event.
+
+        Returns:
+            bool: True if at least one unacknowledged live message was converted.
+        """
+        unacked = self._state.pop_unacked_messages(onion)
+        if not unacked:
+            return False
+
+        for msg_id, pending_msg in unacked.items():
+            content, timestamp = pending_msg
+            self._mm.queue_message(
+                contact_onion=onion,
+                direction=MessageDirection.OUT,
+                msg_type=MessageType.DROP_TEXT,
+                payload=content,
+                status=MessageStatus.PENDING,
+                msg_id=msg_id,
+                timestamp=timestamp,
+            )
+            self._hm.log_event(
+                HistoryEvent.QUEUED,
+                onion,
+                actor=HistoryActor.SYSTEM,
+                detail_code=HistoryReasonCode.UNACKED_LIVE_CONVERTED_TO_DROP,
+            )
+
+        if emit_event:
+            self._broadcast(
+                FallbackSuccessEvent(
+                    alias=alias,
+                    onion=onion,
+                    count=len(unacked),
+                    msg_ids=list(unacked.keys()),
+                    request_id=get_current_request_id(),
+                )
+            )
+
+        return True
 
     @staticmethod
     def _get_local_history_actor(origin: ConnectionOrigin) -> HistoryActor:

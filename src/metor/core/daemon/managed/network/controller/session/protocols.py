@@ -63,6 +63,25 @@ class _SessionControllerBaseProtocol(Protocol):
 class ConnectControllerProtocol(_SessionControllerBaseProtocol, Protocol):
     """Surface required by the outbound connect helper."""
 
+    def _convert_unacked_live_to_drops(
+        self,
+        alias: str,
+        onion: str,
+        emit_event: bool = True,
+    ) -> bool:
+        """
+        Converts retained unacknowledged live messages into pending drops.
+
+        Args:
+            alias (str): The peer alias.
+            onion (str): The peer onion identity.
+            emit_event (bool): Whether to emit a fallback-success event.
+
+        Returns:
+            bool: True if any live messages were converted.
+        """
+        ...
+
     def _broadcast_retunnel_failure(
         self,
         alias: str,
@@ -134,6 +153,25 @@ class ConnectControllerProtocol(_SessionControllerBaseProtocol, Protocol):
 class AcceptControllerProtocol(_SessionControllerBaseProtocol, Protocol):
     """Surface required by the pending-accept helper."""
 
+    def _convert_unacked_live_to_drops(
+        self,
+        alias: str,
+        onion: str,
+        emit_event: bool = True,
+    ) -> bool:
+        """
+        Converts retained unacknowledged live messages into pending drops.
+
+        Args:
+            alias (str): The peer alias.
+            onion (str): The peer onion identity.
+            emit_event (bool): Whether to emit a fallback-success event.
+
+        Returns:
+            bool: True if any live messages were converted.
+        """
+        ...
+
     def _broadcast_retunnel_preserved_failure(
         self,
         alias: str,
@@ -175,6 +213,25 @@ class AcceptControllerProtocol(_SessionControllerBaseProtocol, Protocol):
 
 class TerminateControllerProtocol(_SessionControllerBaseProtocol, Protocol):
     """Surface required by the reject and disconnect helpers."""
+
+    def _convert_unacked_live_to_drops(
+        self,
+        alias: str,
+        onion: str,
+        emit_event: bool = True,
+    ) -> bool:
+        """
+        Converts retained unacknowledged live messages into pending drops.
+
+        Args:
+            alias (str): The peer alias.
+            onion (str): The peer onion identity.
+            emit_event (bool): Whether to emit a fallback-success event.
+
+        Returns:
+            bool: True if any live messages were converted.
+        """
+        ...
 
     def _broadcast_retunnel_preserved_failure(
         self,

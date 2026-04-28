@@ -1,7 +1,7 @@
 """Protocol definitions for the modular chat event helpers."""
 
 import threading
-from typing import Dict, Optional, Protocol, Type
+from typing import Callable, Dict, Optional, Protocol, Type
 
 from metor.core.api import EventType, JsonValue, MarkReadCommand
 from metor.ui.chat.ipc import IpcClient
@@ -18,6 +18,7 @@ class EventHandlerProtocol(Protocol):
     _init_event: threading.Event
     _conn_event: threading.Event
     _mark_read_command_type: Type[MarkReadCommand]
+    _has_auto_reconnect: Callable[[], bool]
 
     def _remember_peer(
         self,

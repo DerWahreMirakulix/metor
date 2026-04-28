@@ -196,6 +196,7 @@ class LocalAuthTracker:
         self,
         conn: socket.socket,
         lockout_seconds: float = 0.0,
+        failure_limit: int = Constants.IPC_AUTH_FAILURE_LIMIT,
     ) -> bool:
         """
         Counts one invalid unlock attempt and reports whether the socket should close.
@@ -203,18 +204,24 @@ class LocalAuthTracker:
         Args:
             conn (socket.socket): The IPC client socket.
             lockout_seconds (float): Global cooldown duration after repeated failures.
+            failure_limit (int): Maximum invalid attempts before disconnect.
 
         Returns:
             bool: True when the client reached the disconnect threshold.
         """
         with self._lock:
-            return self._increment_failures_locked(conn, lockout_seconds)
+            return self._increment_failures_locked(
+                conn,
+                lockout_seconds,
+                failure_limit,
+            )
 
     def verify_session_proof(
         self,
         conn: socket.socket,
         proof: str,
         lockout_seconds: float = 0.0,
+        failure_limit: int = Constants.IPC_AUTH_FAILURE_LIMIT,
     ) -> SessionAuthAttemptResult:
         """
         Verifies one client-supplied session-auth proof against the active challenge.
@@ -223,6 +230,7 @@ class LocalAuthTracker:
             conn (socket.socket): The IPC client socket.
             proof (str): The client-supplied proof digest.
             lockout_seconds (float): Global cooldown duration after repeated failures.
+            failure_limit (int): Maximum invalid attempts before disconnect.
 
         Returns:
             SessionAuthAttemptResult: The verification result and optional retry prompt.
@@ -257,6 +265,7 @@ class LocalAuthTracker:
             should_disconnect: bool = self._increment_failures_locked(
                 conn,
                 lockout_seconds,
+                failure_limit,
             )
             if should_disconnect:
                 return SessionAuthAttemptResult(False, True)
@@ -327,6 +336,7 @@ class LocalAuthTracker:
         self,
         conn: socket.socket,
         lockout_seconds: float,
+        failure_limit: int,
     ) -> bool:
         """
         Increments one connection's auth failure counter under the internal lock.
@@ -334,6 +344,7 @@ class LocalAuthTracker:
         Args:
             conn (socket.socket): The IPC client socket.
             lockout_seconds (float): Global cooldown duration after repeated failures.
+            failure_limit (int): Maximum invalid attempts before disconnect.
 
         Returns:
             bool: True when the disconnect threshold was reached.
@@ -345,7 +356,7 @@ class LocalAuthTracker:
         self._failure_counts[conn] = attempts
 
         self._global_failure_count += 1
-        if self._global_failure_count >= Constants.IPC_AUTH_FAILURE_LIMIT:
+        if self._global_failure_count >= max(1, failure_limit):
             if lockout_seconds > 0.0:
                 self._activate_lockout_locked(lockout_seconds)
             return True

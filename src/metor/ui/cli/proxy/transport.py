@@ -18,6 +18,7 @@ from metor.core.api import (
 )
 from metor.data import ProfileManager
 from metor.ui import PromptAbortedError, Theme
+from metor.ui.cli.errors import format_safe_local_runtime_error
 from metor.ui.cli.ipc import IpcRequestSession
 
 
@@ -138,7 +139,7 @@ class CliProxyTransport:
         except PromptAbortedError:
             return self._prefix_remote('Aborted.')
         except ValueError as exc:
-            return self._prefix_remote(str(exc))
+            return self._prefix_remote(format_safe_local_runtime_error(exc))
 
     def request_ipc_event(self, cmd: IpcCommand) -> Optional[IpcEvent]:
         """

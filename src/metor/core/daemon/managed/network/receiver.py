@@ -36,6 +36,24 @@ if TYPE_CHECKING:
 class StreamReceiver:
     """Manages the background read-loop for fully established Tor sockets."""
 
+    @staticmethod
+    def _socket_appears_closed(conn: socket.socket) -> bool:
+        """
+        Performs one cheap liveness probe after an idle timeout.
+
+        Args:
+            conn (socket.socket): The tracked live socket.
+
+        Returns:
+            bool: True if the socket already looks closed locally.
+        """
+        try:
+            return conn.recv(1, socket.MSG_PEEK) == b''
+        except (AttributeError, BlockingIOError, InterruptedError, socket.timeout):
+            return False
+        except OSError:
+            return True
+
     def __init__(
         self,
         cm: ContactManager,
@@ -186,6 +204,8 @@ class StreamReceiver:
                         break
                     if not self._state.is_known_socket(onion, conn):
                         break
+                    if self._socket_appears_closed(conn):
+                        break
                     continue
 
                 if not msg:
@@ -232,6 +252,8 @@ class StreamReceiver:
                                 ),
                             )
                         )
+
+                    self._router.replay_unacked_messages(onion)
 
                 elif msg == TorCommand.PENDING.value:
                     awaiting_acceptance = True

@@ -86,10 +86,12 @@ def format_settings_snapshot(event: SettingsListDataEvent) -> str:
     Returns:
         str: The formatted snapshot section.
     """
-    header: str = (
+    header: str = '\n' + (
         'Global UI Settings' if event.scope == 'ui' else 'Global Daemon Settings'
     )
-    return '\n'.join([header + ':', *_format_snapshot_entries(event.entries)])
+    return (
+        '\n'.join([header + ':', '\n', *_format_snapshot_entries(event.entries)]) + '\n'
+    )
 
 
 def format_config_snapshot(event: ConfigListDataEvent) -> str:
@@ -102,14 +104,17 @@ def format_config_snapshot(event: ConfigListDataEvent) -> str:
     Returns:
         str: The formatted snapshot section.
     """
+    header: str = '\n'
     if event.scope == 'ui':
-        header = f"Effective UI Config for profile '{event.profile}'"
+        header += f"Effective UI Config for profile '{event.profile}'"
     elif event.scope == 'daemon':
-        header = f"Effective Daemon Config for profile '{event.profile}'"
+        header += f"Effective Daemon Config for profile '{event.profile}'"
     else:
-        header = f"Structural Profile Config for profile '{event.profile}'"
+        header += f"Structural Profile Config for profile '{event.profile}'"
 
-    return '\n'.join([header + ':', *_format_snapshot_entries(event.entries)])
+    return (
+        '\n'.join([header + ':', '\n', *_format_snapshot_entries(event.entries)]) + '\n'
+    )
 
 
 def format_contacts(event: ContactsDataEvent, chat_mode: bool) -> str:

@@ -1,12 +1,14 @@
 """Connection rejection and disconnect helpers for the connection controller."""
 
 import socket
+import threading
 import time
 from typing import Dict, Optional, Tuple
 
 from metor.core.api import (
     AutoReconnectScheduledEvent,
     ConnectionActor,
+    ConnectionConnectingEvent,
     ConnectionFailedEvent,
     ConnectionOrigin,
     ConnectionReasonCode,
@@ -14,21 +16,17 @@ from metor.core.api import (
     ContactRemovedEvent,
     DisconnectedEvent,
     EventType,
-    FallbackSuccessEvent,
     PeerNotFoundEvent,
     create_event,
-    get_current_request_id,
 )
 from metor.core.daemon.managed.models import TorCommand
 from metor.data import (
     HistoryActor,
     HistoryEvent,
     HistoryReasonCode,
-    MessageDirection,
-    MessageStatus,
-    MessageType,
     SettingKey,
 )
+from metor.utils import Constants
 
 from metor.core.daemon.managed.network.controller.session.protocols import (
     TerminateControllerProtocol,
@@ -49,6 +47,104 @@ def _close_socket(sock: socket.socket) -> None:
         sock.close()
     except OSError:
         pass
+
+
+def _sleep_reconnect_grace(controller: TerminateControllerProtocol) -> None:
+    """
+    Waits for the configured reconnect-grace window while respecting shutdown.
+
+    Args:
+        controller (TerminateControllerProtocol): The owning connection controller instance.
+
+    Returns:
+        None
+    """
+    remaining_sec: float = float(
+        controller._config.get_int(SettingKey.LIVE_RECONNECT_GRACE_TIMEOUT)
+    )
+    while remaining_sec > 0:
+        if controller._stop_flag.is_set():
+            return
+
+        sleep_sec: float = min(Constants.WORKER_SLEEP_SEC, remaining_sec)
+        time.sleep(sleep_sec)
+        remaining_sec -= sleep_sec
+
+
+def _finalize_deferred_remote_fallback(
+    controller: TerminateControllerProtocol,
+    alias: str,
+    onion: str,
+    origin: Optional[ConnectionOrigin],
+) -> None:
+    """
+    Emits a delayed remote-fallback disconnect only if recovery never arrived.
+
+    Args:
+        controller (TerminateControllerProtocol): The owning connection controller instance.
+        alias (str): The peer alias.
+        onion (str): The peer onion identity.
+        origin (Optional[ConnectionOrigin]): The original disconnect origin.
+
+    Returns:
+        None
+    """
+    _sleep_reconnect_grace(controller)
+    if controller._stop_flag.is_set():
+        return
+
+    if controller._state.is_connected_or_pending(onion):
+        return
+
+    if controller._state.has_outbound_attempt(onion):
+        return
+
+    controller._state.mark_live_reconnect_grace(onion, 0.0)
+    controller._hm.log_event(
+        HistoryEvent.CONNECTION_LOST,
+        onion,
+        actor=HistoryActor.SYSTEM,
+        trigger=origin,
+    )
+    controller._broadcast(
+        DisconnectedEvent(
+            alias=alias,
+            onion=onion,
+            actor=ConnectionActor.SYSTEM,
+            origin=origin or ConnectionOrigin.MANUAL,
+        )
+    )
+
+    deleted_peers: list[Tuple[str, str]] = controller._cm.cleanup_orphans(
+        controller._state.get_active_onions()
+    )
+    for removed_alias, removed_onion in deleted_peers:
+        controller._broadcast(
+            ContactRemovedEvent(alias=removed_alias, onion=removed_onion)
+        )
+
+    if controller._get_live_reconnect_delay() <= 0:
+        return
+
+    controller._state.mark_scheduled_auto_reconnect(onion)
+    was_scheduled: bool = controller._enqueue_live_reconnect(onion)
+    if not was_scheduled:
+        return
+
+    controller._hm.log_event(
+        HistoryEvent.AUTO_RECONNECT_SCHEDULED,
+        onion,
+        actor=HistoryActor.SYSTEM,
+        trigger=ConnectionOrigin.AUTO_RECONNECT,
+    )
+    controller._broadcast(
+        AutoReconnectScheduledEvent(
+            alias=alias,
+            onion=onion,
+            origin=ConnectionOrigin.AUTO_RECONNECT,
+            actor=ConnectionActor.SYSTEM,
+        )
+    )
 
 
 def reject(
@@ -137,6 +233,7 @@ def reject(
 
         if origin is ConnectionOrigin.AUTO_RECONNECT:
             controller._state.clear_scheduled_auto_reconnect(onion)
+            controller._convert_unacked_live_to_drops(alias, onion)
 
         controller._broadcast(
             ConnectionRejectedEvent(
@@ -224,6 +321,11 @@ def disconnect(
             controller._broadcast(PeerNotFoundEvent(target=target))
         return
     alias, onion = resolved
+    defer_remote_fallback: bool = (
+        is_fallback
+        and not initiated_by_self
+        and controller._config.get_int(SettingKey.LIVE_RECONNECT_GRACE_TIMEOUT) > 0
+    )
 
     if initiated_by_self:
         controller._state.clear_scheduled_auto_reconnect(onion)
@@ -277,6 +379,7 @@ def disconnect(
         else:
             if origin is ConnectionOrigin.AUTO_RECONNECT:
                 controller._state.clear_scheduled_auto_reconnect(onion)
+                controller._convert_unacked_live_to_drops(alias, onion)
             controller._broadcast(
                 ConnectionFailedEvent(
                     alias=alias,
@@ -293,11 +396,23 @@ def disconnect(
 
     conn: Optional[socket.socket] = controller._state.pop_any_connection(onion)
     unacked: Dict[str, Tuple[str, str]] = {}
+    retain_unacked_for_recovery: bool = (
+        controller._state.is_retunneling(onion)
+        or defer_remote_fallback
+        or (is_fallback and controller._get_live_reconnect_delay() > 0)
+    )
 
-    if controller._config.get_bool(SettingKey.FALLBACK_TO_DROP):
+    if (
+        controller._config.get_bool(SettingKey.FALLBACK_TO_DROP)
+        and not retain_unacked_for_recovery
+    ):
         unacked = controller._state.pop_unacked_messages(onion)
 
-    if not conn and not unacked and not inflight_outbound:
+    held_unacked_messages: bool = bool(
+        retain_unacked_for_recovery and controller._state.has_unacked_messages(onion)
+    )
+
+    if not conn and not unacked and not inflight_outbound and not held_unacked_messages:
         if not initiated_by_self:
             controller._mark_live_reconnect_grace(onion)
         controller._discard_outbound_attempt_if_idle(onion)
@@ -311,33 +426,11 @@ def disconnect(
         return
 
     if unacked:
-        for msg_id, pending_msg in unacked.items():
-            content, timestamp = pending_msg
-            controller._mm.queue_message(
-                contact_onion=onion,
-                direction=MessageDirection.OUT,
-                msg_type=MessageType.DROP_TEXT,
-                payload=content,
-                status=MessageStatus.PENDING,
-                msg_id=msg_id,
-                timestamp=timestamp,
-            )
-            controller._hm.log_event(
-                HistoryEvent.QUEUED,
-                onion,
-                actor=HistoryActor.SYSTEM,
-                detail_code=HistoryReasonCode.UNACKED_LIVE_CONVERTED_TO_DROP,
-            )
-        if not suppress_events:
-            controller._broadcast(
-                FallbackSuccessEvent(
-                    alias=alias,
-                    onion=onion,
-                    count=len(unacked),
-                    msg_ids=list(unacked.keys()),
-                    request_id=get_current_request_id(),
-                )
-            )
+        controller._convert_unacked_live_to_drops(
+            alias,
+            onion,
+            emit_event=not suppress_events,
+        )
 
     if conn:
         if initiated_by_self:
@@ -359,6 +452,24 @@ def disconnect(
             except OSError:
                 pass
         _close_socket(conn)
+
+    if defer_remote_fallback:
+        controller._mark_live_reconnect_grace(onion)
+        if not suppress_events:
+            controller._broadcast(
+                ConnectionConnectingEvent(
+                    alias=alias,
+                    onion=onion,
+                    origin=ConnectionOrigin.GRACE_RECONNECT,
+                    actor=ConnectionActor.SYSTEM,
+                )
+            )
+        threading.Thread(
+            target=_finalize_deferred_remote_fallback,
+            args=(controller, alias, onion, origin),
+            daemon=True,
+        ).start()
+        return
 
     if is_fallback:
         status = HistoryEvent.CONNECTION_LOST

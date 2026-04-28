@@ -178,6 +178,7 @@ class Chat:
             ),
             send_command=self._ipc.send_command,
             request_id=request_id,
+            failure_limit=self._pm.config.get_int(SettingKey.LOCAL_AUTH_FAILURE_LIMIT),
         )
 
         while True:
@@ -299,6 +300,7 @@ class Chat:
             self._init_event,
             self._conn_event,
             lambda: self._pm.config.get_float(SettingKey.INBOX_NOTIFICATION_DELAY),
+            lambda: self._pm.config.get_float(SettingKey.LIVE_RECONNECT_DELAY) > 0.0,
         )
         self._dispatcher = CommandDispatcher(self._ipc, self._session, self._renderer)
 
@@ -382,14 +384,12 @@ class Chat:
             )
             return
 
+        target_alias: str = self._session.focused_alias
         msg_id: str = secrets.token_hex(Constants.UUID_MSG_BYTES)
-        is_live: bool = self._session.is_live_transport_available(
-            self._session.focused_alias
-        )
+        is_live: bool = self._session.is_live_transport_available(target_alias)
+        should_buffer: bool = self._session.should_buffer_outgoing(target_alias)
         timestamp: str = datetime.now(timezone.utc).isoformat()
-        peer_onion: Optional[str] = self._session.get_peer_onion(
-            self._session.focused_alias
-        )
+        peer_onion: Optional[str] = self._session.get_peer_onion(target_alias)
         alias_policy: AliasPolicy = (
             AliasPolicy.DYNAMIC if peer_onion else AliasPolicy.STATIC
         )
@@ -397,7 +397,7 @@ class Chat:
         if is_live:
             self._ipc.send_command(
                 MsgCommand(
-                    target=self._session.focused_alias,
+                    target=target_alias,
                     text=msg_text,
                     msg_id=msg_id,
                 )
@@ -405,17 +405,35 @@ class Chat:
             self._renderer.print_message(
                 msg_text,
                 msg_type=ChatMessageType.SELF,
-                alias=self._session.focused_alias,
+                alias=target_alias,
                 peer_onion=peer_onion,
                 alias_policy=alias_policy,
                 timestamp=timestamp,
                 msg_id=msg_id,
                 is_drop=False,
             )
+        elif should_buffer:
+            self._session.buffer_outgoing_message(
+                alias=target_alias,
+                text=msg_text,
+                msg_id=msg_id,
+                onion=peer_onion,
+            )
+            self._renderer.print_message(
+                msg_text,
+                msg_type=ChatMessageType.SELF,
+                alias=target_alias,
+                peer_onion=peer_onion,
+                alias_policy=alias_policy,
+                timestamp=timestamp,
+                msg_id=msg_id,
+                is_drop=False,
+                is_pending=True,
+            )
         else:
             self._ipc.send_command(
                 SendDropCommand(
-                    target=self._session.focused_alias,
+                    target=target_alias,
                     text=msg_text,
                     msg_id=msg_id,
                 )
@@ -423,7 +441,7 @@ class Chat:
             self._renderer.print_message(
                 msg_text,
                 msg_type=ChatMessageType.SELF,
-                alias=self._session.focused_alias,
+                alias=target_alias,
                 peer_onion=peer_onion,
                 alias_policy=alias_policy,
                 timestamp=timestamp,

@@ -223,6 +223,7 @@ def connect_to(
                     else:
                         if origin is ConnectionOrigin.AUTO_RECONNECT:
                             controller._state.clear_scheduled_auto_reconnect(onion)
+                            controller._convert_unacked_live_to_drops(alias, onion)
                         controller._state.discard_retunnel_reconnect(onion)
                         controller._broadcast(
                             ConnectionFailedEvent(

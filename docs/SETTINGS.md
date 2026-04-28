@@ -469,6 +469,29 @@ Requires every UI session to authenticate even when the daemon is already runnin
 
 ---
 
+#### `daemon.local_auth_failure_limit`
+
+Maximum invalid local unlock or session-auth attempts before the daemon disconnects the client. `1` disconnects immediately.
+
+| Property         | Value                                                                                                       |
+| ---------------- | ----------------------------------------------------------------------------------------------------------- |
+| Type             | `int`                                                                                                       |
+| Default          | `3`                                                                                                         |
+| Category         | `Core Daemon`                                                                                               |
+| Scope            | `Daemon runtime`                                                                                            |
+| Profile Override | `Yes`                                                                                                       |
+| Constraints      | Integer >= 1.                                                                                               |
+| Security Note    | Caps online local password guessing attempts per auth window before disconnect and optional cooldown apply. |
+
+**CLI Examples**
+
+- `metor settings get daemon.local_auth_failure_limit`
+- `metor settings set daemon.local_auth_failure_limit 3`
+- `metor -p <profile> config get daemon.local_auth_failure_limit`
+- `metor -p <profile> config set daemon.local_auth_failure_limit 3`
+
+---
+
 #### `daemon.local_auth_lockout_timeout`
 
 Temporarily blocks new local unlock or session-auth attempts after too many invalid passwords. `0` disables the cross-connection lockout window.

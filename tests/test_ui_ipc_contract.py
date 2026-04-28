@@ -185,6 +185,21 @@ class _RequestSessionConfig:
 
         return 1.5
 
+    def get_int(self, key: Any) -> int:
+        """
+        Returns int for the test scenario.
+
+        Args:
+            key (Any): The key.
+
+        Returns:
+            int: The computed return value.
+        """
+
+        if key is SettingKey.LOCAL_AUTH_FAILURE_LIMIT:
+            return 3
+        return 0
+
 
 class _RequestSessionProfileManager:
     """
@@ -544,6 +559,50 @@ class UiIpcContractTests(unittest.TestCase):
         assert result.terminal_event is not None
         self.assertIs(result.terminal_event.event_type, EventType.INVALID_PASSWORD)
 
+    def test_auth_exchange_honors_custom_failure_limit(self) -> None:
+        """
+        Verifies that auth exchange honors the configured failure limit.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        challenge = 'ab' * Constants.SESSION_AUTH_CHALLENGE_BYTES
+        salt = 'cd' * nacl.pwhash.argon2i.SALTBYTES
+        exchange = IpcAuthExchange(
+            prompt_session_proof=lambda _challenge, _salt: 'proof',
+            prompt_unlock_password=lambda: 'secret',
+            send_command=lambda _command: None,
+            failure_limit=1,
+        )
+        exchange.handle(
+            IpcEvent.from_dict(
+                {
+                    'event_type': 'auth_required',
+                    'challenge': challenge,
+                    'salt': salt,
+                }
+            )
+        )
+
+        result = exchange.handle(
+            IpcEvent.from_dict(
+                {
+                    'event_type': 'invalid_password',
+                    'challenge': challenge,
+                    'salt': salt,
+                }
+            )
+        )
+
+        self.assertTrue(result.handled)
+        self.assertIsNotNone(result.terminal_event)
+        assert result.terminal_event is not None
+        self.assertIs(result.terminal_event.event_type, EventType.INVALID_PASSWORD)
+
     def test_session_auth_prompt_uses_plaintext_specific_label(self) -> None:
         """
         Verifies that session auth prompt uses plaintext specific label.
@@ -603,6 +662,41 @@ class UiIpcContractTests(unittest.TestCase):
         self.assertEqual(
             run_daemon.call_args.kwargs['session_auth_password'],
             'session-secret',
+        )
+
+    def test_handle_daemon_sanitizes_sensitive_value_errors(self) -> None:
+        """
+        Verifies that daemon startup sanitizes sensitive local runtime validation errors.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        pm = cast(
+            ProfileManager,
+            _AuthPromptProfileManager(encrypted=True, require_local_auth=True),
+        )
+
+        with (
+            patch(
+                'metor.ui.cli.handlers.prompt_hidden',
+                return_value='secret',
+            ),
+            patch('metor.ui.cli.handlers.configure_daemon_runtime_logging'),
+            patch(
+                'metor.ui.cli.handlers.run_managed_daemon',
+                side_effect=ValueError('/home/yoda/secret/storage.db: invalid state'),
+            ),
+            patch('builtins.print') as print_mock,
+        ):
+            CommandHandlers.handle_daemon(pm)
+
+        self.assertEqual(
+            print_mock.call_args_list[-1].args[0],
+            'Failed to validate local daemon state.',
         )
 
     def test_remote_nuke_requires_typed_self_destruct_success_event(self) -> None:

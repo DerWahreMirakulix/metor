@@ -37,6 +37,7 @@ class EventHandler:
         init_event: threading.Event,
         conn_event: threading.Event,
         get_notification_buffer_seconds: Callable[[], float],
+        has_auto_reconnect: Callable[[], bool],
     ) -> None:
         """
         Initializes the EventHandler with dependencies.
@@ -48,6 +49,7 @@ class EventHandler:
             init_event (threading.Event): Event to signal successful initialization.
             conn_event (threading.Event): Event to signal connection state updates.
             get_notification_buffer_seconds (Callable[[], float]): Lazy accessor for the local inbox-notification buffer window.
+            has_auto_reconnect (Callable[[], bool]): Lazy accessor for whether automatic reconnect is enabled locally.
 
         Returns:
             None
@@ -60,6 +62,7 @@ class EventHandler:
         self._get_notification_buffer_seconds: Callable[[], float] = (
             get_notification_buffer_seconds
         )
+        self._has_auto_reconnect: Callable[[], bool] = has_auto_reconnect
         self._notification_lock: threading.Lock = threading.Lock()
         self._buffered_inbox_notifications: Dict[str, BufferedInboxNotification] = {}
 
@@ -381,9 +384,7 @@ class EventHandler:
             return
 
         self._session.focused_alias = alias
-        is_live: bool = self._session.is_connected(alias)
-
-        self._renderer.set_focus(alias, is_live)
+        self._renderer.set_focus(alias, self._session.get_transport_state(alias))
 
         if sync_daemon:
             self._ipc.send_command(SwitchCommand(target=alias))

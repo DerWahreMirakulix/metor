@@ -34,6 +34,7 @@ class IpcAuthExchange:
         prompt_unlock_password: Callable[[], Optional[str]],
         send_command: Callable[[IpcCommand], None],
         request_id: Optional[str] = None,
+        failure_limit: int = Constants.IPC_AUTH_FAILURE_LIMIT,
     ) -> None:
         """
         Initializes one reusable auth-gate exchange state machine.
@@ -43,6 +44,7 @@ class IpcAuthExchange:
             prompt_unlock_password (Callable[[], Optional[str]]): Callback retrieving one daemon-unlock password.
             send_command (Callable[[IpcCommand], None]): Callback used to send follow-up IPC commands.
             request_id (Optional[str]): Stable request correlation identifier for follow-up auth commands.
+            failure_limit (int): Maximum invalid attempts before the UI stops retrying locally.
 
         Returns:
             None
@@ -51,6 +53,7 @@ class IpcAuthExchange:
         self._prompt_unlock_password = prompt_unlock_password
         self._send_command = send_command
         self._request_id: Optional[str] = request_id
+        self._failure_limit: int = max(1, failure_limit)
         self._pending_resume_event: Optional[EventType] = None
         self._auth_failures: int = 0
         self._unlock_failures: int = 0
@@ -115,7 +118,7 @@ class IpcAuthExchange:
         if event.event_type is EventType.INVALID_PASSWORD:
             if self._pending_resume_event is EventType.SESSION_AUTHENTICATED:
                 self._auth_failures += 1
-                if self._auth_failures >= Constants.IPC_AUTH_FAILURE_LIMIT:
+                if self._auth_failures >= self._failure_limit:
                     return IpcAuthResult(handled=True, terminal_event=event)
 
                 if session_auth_prompt is None:
@@ -141,7 +144,7 @@ class IpcAuthExchange:
 
             if self._pending_resume_event is EventType.DAEMON_UNLOCKED:
                 self._unlock_failures += 1
-                if self._unlock_failures >= Constants.IPC_AUTH_FAILURE_LIMIT:
+                if self._unlock_failures >= self._failure_limit:
                     return IpcAuthResult(handled=True, terminal_event=event)
 
                 password = self._prompt_unlock_password()

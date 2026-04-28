@@ -264,6 +264,43 @@ class SessionAuthContractTests(unittest.TestCase):
             second_left.close()
             second_right.close()
 
+    def test_local_auth_tracker_honors_custom_failure_limit(self) -> None:
+        """
+        Verifies that local auth tracker honors a configured failure limit override.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        tracker = LocalAuthTracker()
+        context = create_session_auth_context(
+            'correct horse battery staple',
+            b'\x33' * nacl.pwhash.argon2i.SALTBYTES,
+        )
+        tracker.install_context(context)
+
+        left, right = socket.socketpair()
+        try:
+            prompt = tracker.issue_session_challenge(right)
+
+            self.assertIsNotNone(prompt)
+
+            result = tracker.verify_session_proof(
+                right,
+                'deadbeef',
+                failure_limit=1,
+            )
+
+            self.assertFalse(result.authenticated)
+            self.assertTrue(result.should_disconnect)
+            self.assertIsNone(result.retry_prompt)
+        finally:
+            left.close()
+            right.close()
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -14,11 +14,16 @@ from metor.data.profile import ProfileManager
 from metor.core.api import (
     AcceptCommand,
     AutoFallbackQueuedEvent,
+    AutoReconnectScheduledEvent,
     ConnectionActor,
+    ConnectionConnectingEvent,
     ConnectionOrigin,
+    ConnectionFailedEvent,
+    ConnectedEvent,
     ConnectionsStateEvent,
     DisconnectedEvent,
     InitEvent,
+    RenameSuccessEvent,
     RejectCommand,
     RetunnelInitiatedEvent,
     RetunnelSuccessEvent,
@@ -29,7 +34,7 @@ from metor.ui import Theme
 from metor.ui.chat.command import CommandDispatcher
 from metor.ui.chat.engine import Chat
 from metor.ui.chat.event.handler import EventHandler
-from metor.ui.chat.models import ChatMessageType
+from metor.ui.chat.models import ChatMessageType, ChatTransportState
 
 
 class _DummyConfig:
@@ -49,6 +54,19 @@ class _DummyConfig:
         """
 
         return 0.1
+
+    def get_int(self, _key: object) -> int:
+        """
+        Returns int for the test scenario.
+
+        Args:
+            _key (object): The key.
+
+        Returns:
+            int: The computed return value.
+        """
+
+        return 3
 
 
 class _DummyProfileManager:
@@ -219,9 +237,9 @@ class ChatContractTests(unittest.TestCase):
         self.assertEqual(chat._session.header_contacts, ['alice', 'bob', 'carol'])
         renderer.print_message.assert_not_called()
 
-    def test_send_chat_message_uses_drop_while_retunneling(self) -> None:
+    def test_send_chat_message_buffers_while_retunneling(self) -> None:
         """
-        Verifies that send chat message uses drop while retunneling.
+        Verifies that send chat message buffers locally while retunneling.
 
         Args:
             None
@@ -240,11 +258,15 @@ class ChatContractTests(unittest.TestCase):
 
         chat._send_chat_message('hello during retunnel')
 
-        sent_cmd = chat._ipc.send_command.call_args.args[0]
-        self.assertIsInstance(sent_cmd, SendDropCommand)
-        self.assertEqual(sent_cmd.target, 'alice')
+        chat._ipc.send_command.assert_not_called()
+        self.assertTrue(
+            chat._session.has_buffered_outgoing_messages(
+                'alice',
+                'aliceonion1234567890',
+            )
+        )
         renderer.print_message.assert_called_once()
-        self.assertTrue(renderer.print_message.call_args.kwargs['is_drop'])
+        self.assertFalse(renderer.print_message.call_args.kwargs['is_drop'])
         self.assertTrue(renderer.print_message.call_args.kwargs['is_pending'])
 
     def test_retunnel_events_toggle_live_send_state(self) -> None:
@@ -269,6 +291,7 @@ class ChatContractTests(unittest.TestCase):
             init_event=Mock(),
             conn_event=Mock(),
             get_notification_buffer_seconds=lambda: 0.0,
+            has_auto_reconnect=lambda: True,
         )
 
         handler.handle(
@@ -276,12 +299,207 @@ class ChatContractTests(unittest.TestCase):
         )
         self.assertTrue(session.is_retunneling('alice'))
         self.assertFalse(session.is_live_transport_available('alice'))
+        renderer.set_focus.assert_called_once_with(
+            'alice',
+            ChatTransportState.SWITCHING,
+        )
 
         handler.handle(
             RetunnelSuccessEvent(alias='alice', onion='aliceonion1234567890')
         )
         self.assertFalse(session.is_retunneling('alice'))
         self.assertTrue(session.is_live_transport_available('alice'))
+        self.assertEqual(renderer.set_focus.call_args.args[1], ChatTransportState.LIVE)
+
+    def test_retunnel_success_flushes_buffered_messages_live(self) -> None:
+        """
+        Verifies that buffered retunnel messages flush as live after recovery.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        renderer = Mock()
+        ipc = Mock()
+        session = self._build_chat(renderer)._session
+        session.focused_alias = 'alice'
+        session.active_connections = ['alice']
+        session.remember_peer('alice', 'aliceonion1234567890')
+        session.mark_retunneling('alice', 'aliceonion1234567890')
+        session.buffer_outgoing_message(
+            alias='alice',
+            text='hello during retunnel',
+            msg_id='msg-1',
+            onion='aliceonion1234567890',
+        )
+        handler = EventHandler(
+            ipc=ipc,
+            session=session,
+            renderer=renderer,
+            init_event=Mock(),
+            conn_event=Mock(),
+            get_notification_buffer_seconds=lambda: 0.0,
+            has_auto_reconnect=lambda: True,
+        )
+
+        handler.handle(
+            RetunnelSuccessEvent(alias='alice', onion='aliceonion1234567890')
+        )
+
+        sent_cmd = ipc.send_command.call_args.args[0]
+        self.assertEqual(sent_cmd.msg_id, 'msg-1')
+        self.assertFalse(
+            session.has_buffered_outgoing_messages('alice', 'aliceonion1234567890')
+        )
+
+    def test_auto_reconnect_failure_flushes_buffered_messages_to_drop(self) -> None:
+        """
+        Verifies that buffered reconnect messages fall back to drops on terminal failure.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        renderer = Mock()
+        ipc = Mock()
+        session = self._build_chat(renderer)._session
+        session.focused_alias = 'alice'
+        session.remember_peer('alice', 'aliceonion1234567890')
+        session.set_transport_state(
+            ChatTransportState.RECONNECTING,
+            'alice',
+            'aliceonion1234567890',
+        )
+        session.buffer_outgoing_message(
+            alias='alice',
+            text='hello during reconnect',
+            msg_id='msg-1',
+            onion='aliceonion1234567890',
+        )
+        handler = EventHandler(
+            ipc=ipc,
+            session=session,
+            renderer=renderer,
+            init_event=Mock(),
+            conn_event=Mock(),
+            get_notification_buffer_seconds=lambda: 0.0,
+            has_auto_reconnect=lambda: True,
+        )
+
+        handler.handle(
+            ConnectionFailedEvent(
+                alias='alice',
+                onion='aliceonion1234567890',
+                actor=ConnectionActor.SYSTEM,
+                origin=ConnectionOrigin.AUTO_RECONNECT,
+                reason_code=None,
+                error=None,
+            )
+        )
+
+        sent_cmd = ipc.send_command.call_args.args[0]
+        self.assertIsInstance(sent_cmd, SendDropCommand)
+        renderer.apply_fallback_to_drop.assert_called_once_with(['msg-1'])
+        self.assertEqual(session.get_transport_state('alice'), ChatTransportState.DROP)
+
+    def test_auto_reconnect_schedule_updates_prompt_state(self) -> None:
+        """
+        Verifies that automatic reconnect uses the reconnecting prompt state.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        renderer = Mock()
+        session = self._build_chat(renderer)._session
+        session.focused_alias = 'alice'
+        session.remember_peer('alice', 'aliceonion1234567890')
+        handler = EventHandler(
+            ipc=Mock(),
+            session=session,
+            renderer=renderer,
+            init_event=Mock(),
+            conn_event=Mock(),
+            get_notification_buffer_seconds=lambda: 0.0,
+            has_auto_reconnect=lambda: True,
+        )
+
+        handler.handle(
+            AutoReconnectScheduledEvent(
+                alias='alice',
+                onion='aliceonion1234567890',
+                actor=ConnectionActor.SYSTEM,
+                origin=ConnectionOrigin.AUTO_RECONNECT,
+            )
+        )
+
+        renderer.set_focus.assert_called_once_with(
+            'alice',
+            ChatTransportState.RECONNECTING,
+        )
+
+    def test_grace_reconnect_updates_prompt_and_uses_reconnected_copy(self) -> None:
+        """
+        Verifies that grace reconnect uses peer-side reconnecting/live UX.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        renderer = Mock()
+        session = self._build_chat(renderer)._session
+        session.focused_alias = 'alice'
+        session.remember_peer('alice', 'aliceonion1234567890')
+        handler = EventHandler(
+            ipc=Mock(),
+            session=session,
+            renderer=renderer,
+            init_event=Mock(),
+            conn_event=Mock(),
+            get_notification_buffer_seconds=lambda: 0.0,
+            has_auto_reconnect=lambda: True,
+        )
+
+        handler.handle(
+            ConnectionConnectingEvent(
+                alias='alice',
+                onion='aliceonion1234567890',
+                origin=ConnectionOrigin.GRACE_RECONNECT,
+                actor=ConnectionActor.SYSTEM,
+            )
+        )
+
+        renderer.set_focus.assert_called_once_with(
+            'alice',
+            ChatTransportState.RECONNECTING,
+        )
+        renderer.print_message.reset_mock()
+        renderer.set_focus.reset_mock()
+
+        handler.handle(
+            ConnectedEvent(
+                alias='alice',
+                onion='aliceonion1234567890',
+                origin=ConnectionOrigin.GRACE_RECONNECT,
+                actor=ConnectionActor.SYSTEM,
+            )
+        )
+
+        self.assertTrue(session.is_live_transport_available('alice'))
+        renderer.set_focus.assert_called_once_with('alice', ChatTransportState.LIVE)
+        self.assertIn('Reconnected to', renderer.print_message.call_args.args[0])
 
     def test_auto_fallback_queued_event_converts_pending_live_message_to_drop(
         self,
@@ -305,6 +523,7 @@ class ChatContractTests(unittest.TestCase):
             init_event=Mock(),
             conn_event=Mock(),
             get_notification_buffer_seconds=lambda: 0.0,
+            has_auto_reconnect=lambda: True,
         )
 
         handler.handle(
@@ -343,6 +562,7 @@ class ChatContractTests(unittest.TestCase):
             init_event=Mock(),
             conn_event=Mock(),
             get_notification_buffer_seconds=lambda: 0.0,
+            has_auto_reconnect=lambda: True,
         )
 
         handler.handle(
@@ -355,7 +575,7 @@ class ChatContractTests(unittest.TestCase):
         )
 
         self.assertIsNone(session.focused_alias)
-        renderer.set_focus.assert_called_once_with(None, False)
+        renderer.set_focus.assert_called_once_with(None, ChatTransportState.DROP)
         sent_cmd = ipc.send_command.call_args.args[0]
         self.assertIsInstance(sent_cmd, SwitchCommand)
         self.assertIsNone(sent_cmd.target)
@@ -385,6 +605,7 @@ class ChatContractTests(unittest.TestCase):
             init_event=Mock(),
             conn_event=Mock(),
             get_notification_buffer_seconds=lambda: 0.0,
+            has_auto_reconnect=lambda: True,
         )
 
         handler.handle(
@@ -424,6 +645,7 @@ class ChatContractTests(unittest.TestCase):
             init_event=Mock(),
             conn_event=Mock(),
             get_notification_buffer_seconds=lambda: 0.0,
+            has_auto_reconnect=lambda: True,
         )
 
         handler.handle(
@@ -436,7 +658,72 @@ class ChatContractTests(unittest.TestCase):
         )
 
         self.assertEqual(session.focused_alias, 'alice')
-        renderer.set_focus.assert_called_once_with('alice', is_live=False)
+        renderer.set_focus.assert_called_once_with(
+            'alice',
+            ChatTransportState.DROP,
+        )
+        ipc.send_command.assert_not_called()
+
+    def test_rename_during_reconnect_preserves_focus_and_updates_alias_lists(
+        self,
+    ) -> None:
+        """
+        Verifies that renaming a reconnecting peer keeps focus stable and updates alias-backed lists.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        renderer = Mock()
+        ipc = Mock()
+        session = self._build_chat(renderer)._session
+        session.focused_alias = 'alice'
+        session.active_connections = ['alice', 'bob']
+        session.pending_connections = ['alice']
+        session.header_active = ['alice', 'bob']
+        session.header_pending = ['alice']
+        session.header_contacts = ['alice', 'bob']
+        session.remember_peer('alice', 'aliceonion1234567890')
+        session.set_transport_state(
+            ChatTransportState.RECONNECTING,
+            'alice',
+            'aliceonion1234567890',
+        )
+        handler = EventHandler(
+            ipc=ipc,
+            session=session,
+            renderer=renderer,
+            init_event=Mock(),
+            conn_event=Mock(),
+            get_notification_buffer_seconds=lambda: 0.0,
+            has_auto_reconnect=lambda: True,
+        )
+
+        handler.handle(
+            RenameSuccessEvent(
+                old_alias='alice',
+                new_alias='eve',
+                onion='aliceonion1234567890',
+            )
+        )
+
+        self.assertEqual(session.focused_alias, 'eve')
+        self.assertEqual(session.active_connections, ['eve', 'bob'])
+        self.assertEqual(session.pending_connections, ['eve'])
+        self.assertEqual(session.header_active, ['eve', 'bob'])
+        self.assertEqual(session.header_pending, ['eve'])
+        self.assertEqual(session.header_contacts, ['eve', 'bob'])
+        self.assertEqual(
+            session.get_transport_state('eve'),
+            ChatTransportState.RECONNECTING,
+        )
+        renderer.set_focus.assert_called_once_with(
+            'eve', ChatTransportState.RECONNECTING
+        )
+        renderer.refresh_alias_bindings.assert_not_called()
         ipc.send_command.assert_not_called()
 
     def test_accept_without_target_uses_implicit_pending_focus(self) -> None:

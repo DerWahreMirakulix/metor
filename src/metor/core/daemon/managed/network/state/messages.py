@@ -79,6 +79,32 @@ class StateTrackerMessagesMixin:
         with self._lock:
             return self._unacked_messages.pop(onion, {})
 
+    def get_unacked_messages(self, onion: str) -> Dict[str, Tuple[str, str]]:
+        """
+        Returns a snapshot of all currently unacknowledged messages for one peer.
+
+        Args:
+            onion (str): The peer onion identity.
+
+        Returns:
+            Dict[str, Tuple[str, str]]: Mapping of message IDs to payload and timestamp.
+        """
+        with self._lock:
+            return dict(self._unacked_messages.get(onion, {}))
+
+    def has_unacked_messages(self, onion: str) -> bool:
+        """
+        Checks whether one peer currently has unacknowledged live messages.
+
+        Args:
+            onion (str): The peer onion identity.
+
+        Returns:
+            bool: True if at least one unacknowledged live message exists.
+        """
+        with self._lock:
+            return bool(self._unacked_messages.get(onion))
+
     def add_unacked_message(
         self, onion: str, msg_id: str, msg: str, timestamp: str
     ) -> None:

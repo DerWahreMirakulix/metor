@@ -110,6 +110,7 @@ class NetworkManager:
             receiver=self._receiver,
             broadcast_callback=broadcast_callback,
             has_live_consumers_callback=has_live_consumers_callback,
+            enqueue_live_reconnect_callback=self._controller._enqueue_live_reconnect,
             stop_flag=stop_flag,
             config=config,
         )

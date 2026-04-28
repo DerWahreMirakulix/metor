@@ -252,6 +252,7 @@ class StateTrackerConnectionsMixin:
             self._outbound_attempts.discard(onion)
             self._outbound_attempt_origins.pop(onion, None)
             self._outbound_sockets.pop(onion, None)
+            self._recent_outbound_attempts.pop(onion, None)
             self._outbound_connected_origin_overrides.pop(onion, None)
 
     def bind_outbound_socket(self, onion: str, conn: socket.socket) -> None:

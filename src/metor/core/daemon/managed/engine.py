@@ -623,6 +623,18 @@ class Daemon:
         """
         return self._pm.config.get_float(SettingKey.LOCAL_AUTH_LOCKOUT_TIMEOUT)
 
+    def _get_local_auth_failure_limit(self) -> int:
+        """
+        Resolves the configured local-auth failure limit for one auth window.
+
+        Args:
+            None
+
+        Returns:
+            int: The maximum invalid attempts before disconnect.
+        """
+        return max(1, self._pm.config.get_int(SettingKey.LOCAL_AUTH_FAILURE_LIMIT))
+
     @staticmethod
     def _disconnect_ipc_client(conn: socket.socket) -> None:
         """
@@ -730,6 +742,7 @@ class Daemon:
                 conn,
                 cmd.proof,
                 self._get_local_auth_lockout_timeout(),
+                self._get_local_auth_failure_limit(),
             )
 
             if result.authenticated:
@@ -784,6 +797,7 @@ class Daemon:
                 should_disconnect: bool = self._local_auth.register_invalid_unlock(
                     conn,
                     self._get_local_auth_lockout_timeout(),
+                    self._get_local_auth_failure_limit(),
                 )
                 local_auth_retry_after = self._local_auth.get_retry_after_seconds()
                 if local_auth_retry_after is not None:

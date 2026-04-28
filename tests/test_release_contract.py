@@ -330,6 +330,95 @@ class ReleaseContractTests(unittest.TestCase):
 
         self.assertTrue(spec.default)
 
+    def test_local_auth_failure_limit_defaults_to_existing_threshold(self) -> None:
+        """
+        Verifies that local auth failure limit defaults to the existing threshold.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        spec = Settings.SETTING_SPECS[SettingKey.LOCAL_AUTH_FAILURE_LIMIT]
+
+        self.assertEqual(spec.default, 3)
+
+    def test_settings_defaults_to_list_when_no_subcommand_is_given(self) -> None:
+        """
+        Verifies that bare settings dispatches to the list action.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        dispatcher = CliDispatcher(
+            argparse.Namespace(
+                command='settings',
+                subcommand=None,
+                profile='default',
+                remote=False,
+                port=None,
+                locked=False,
+                plaintext=False,
+            ),
+            [],
+            cast(ProfileManager, _DummyProfileManager()),
+        )
+
+        with (
+            patch(
+                'metor.ui.cli.dispatcher.base.CliProxy.handle_settings_list',
+                return_value='settings-list',
+            ) as handle_settings_list,
+            patch('builtins.print') as print_mock,
+        ):
+            dispatcher.dispatch()
+
+        handle_settings_list.assert_called_once_with()
+        print_mock.assert_called_once_with('settings-list')
+
+    def test_config_defaults_to_list_when_no_subcommand_is_given(self) -> None:
+        """
+        Verifies that bare config dispatches to the list action.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        dispatcher = CliDispatcher(
+            argparse.Namespace(
+                command='config',
+                subcommand=None,
+                profile='default',
+                remote=False,
+                port=None,
+                locked=False,
+                plaintext=False,
+            ),
+            [],
+            cast(ProfileManager, _DummyProfileManager()),
+        )
+
+        with (
+            patch(
+                'metor.ui.cli.dispatcher.base.CliProxy.handle_config_list',
+                return_value='config-list',
+            ) as handle_config_list,
+            patch('builtins.print') as print_mock,
+        ):
+            dispatcher.dispatch()
+
+        handle_config_list.assert_called_once_with()
+        print_mock.assert_called_once_with('config-list')
+
     def test_plaintext_profiles_no_longer_force_disable_local_auth(self) -> None:
         """
         Verifies that plaintext profiles no longer force disable local auth.

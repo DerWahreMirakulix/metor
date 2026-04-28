@@ -15,7 +15,7 @@ from typing import Callable, List, Dict, Optional, TYPE_CHECKING
 from metor.core.api import JsonValue
 from metor.ui.models import AliasPolicy, StatusTone
 from metor.ui import UIPresenter
-from metor.ui.chat.models import ChatMessageType, ChatLine
+from metor.ui.chat.models import ChatLine, ChatMessageType, ChatTransportState
 from metor.ui.chat.presenter import ChatPresenter
 from metor.utils import Constants
 
@@ -30,6 +30,11 @@ if TYPE_CHECKING:
 UI_PROMPT_SIGN_KEY: str = 'ui.prompt_sign'
 UI_CHAT_LIMIT_KEY: str = 'ui.chat_limit'
 UI_CHAT_BUFFER_PADDING_KEY: str = 'ui.chat_buffer_padding'
+FOCUS_STATE_TAGS: dict[ChatTransportState, str] = {
+    ChatTransportState.SWITCHING: ' [Switching]',
+    ChatTransportState.RECONNECTING: ' [Reconnecting]',
+    ChatTransportState.DROP: ' [Drop]',
+}
 
 
 class Renderer:
@@ -59,7 +64,7 @@ class Renderer:
         self._input: InputHandler = InputHandler()
 
         self._current_focus: Optional[str] = None
-        self._is_live_focus: bool = False
+        self._focus_transport_state: ChatTransportState = ChatTransportState.DROP
 
         self._last_visual_lines: int = 1
         self._last_cols: int = shutil.get_terminal_size().columns
@@ -97,23 +102,27 @@ class Renderer:
             return self._alias_resolver(chat_line.peer_onion, chat_line.alias)
         return chat_line.alias
 
-    def set_focus(self, alias: Optional[str], is_live: bool = False) -> None:
+    def set_focus(
+        self,
+        alias: Optional[str],
+        transport_state: ChatTransportState = ChatTransportState.DROP,
+    ) -> None:
         """
         Updates the prompt string to reflect the focused alias.
 
         Args:
             alias (Optional[str]): The alias to focus on.
-            is_live (bool): Whether the connection is active/live.
+            transport_state (ChatTransportState): The current transport state.
 
         Returns:
             None
         """
         with self._display.print_lock:
             self._current_focus = alias
-            self._is_live_focus = is_live
+            self._focus_transport_state = transport_state
             if alias:
-                drop_tag: str = '' if is_live else ' [Drop]'
-                self._prompt = f'{alias}{drop_tag}{self._initial_prompt}'
+                state_tag: str = FOCUS_STATE_TAGS.get(transport_state, '')
+                self._prompt = f'{alias}{state_tag}{self._initial_prompt}'
             else:
                 self._prompt = self._initial_prompt
         self.full_redraw()

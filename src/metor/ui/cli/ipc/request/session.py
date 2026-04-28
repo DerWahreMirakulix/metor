@@ -74,6 +74,7 @@ class IpcRequestSession:
             ),
             send_command=lambda command: self._send_socket_command(sock, command),
             request_id=request_id,
+            failure_limit=self._pm.config.get_int(SettingKey.LOCAL_AUTH_FAILURE_LIMIT),
         )
 
     def execute_result(

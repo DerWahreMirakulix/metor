@@ -178,6 +178,223 @@ The outbox worker and the network stack must both read and write this shared sta
 - Retunnel success/failure is transport-specific and explicit.
 - The chat UI renders focus independently from transport state and only decorates the prompt based on the current primary route.
 
+## Live Reconnect and Retunnel Recovery Model
+
+This section is the canonical reference for how live-session recovery works.
+It exists to keep reconnect, retunnel, fallback, and UI buffering in one coherent model instead of splitting the behavior across tests, transport code, and prompt translations.
+
+### State Ownership and Sources of Truth
+
+1. The daemon `StateTracker` owns all transport truth.
+   It tracks active live sockets, pending live sockets, outbound attempts, reconnect-grace windows, scheduled auto-reconnect intent, retunnel markers, and per-peer unacknowledged live messages.
+
+2. Live lifecycle state is derived, not stored redundantly.
+   For each peer the daemon derives one `LiveTransportState`: `DISCONNECTED`, `CONNECTING`, `PENDING`, `CONNECTED`, or `RETUNNELING`.
+
+3. The chat UI owns presentation-only transport state.
+   The UI may mark one peer as `LIVE`, `SWITCHING`, `RECONNECTING`, or `DROP`, but that state is only a rendering/send-policy mirror driven by typed IPC events.
+
+4. The UI owns one local outgoing buffer that is distinct from daemon transport buffers.
+   Messages typed while the prompt is in `SWITCHING` or `RECONNECTING` remain in the UI session until recovery succeeds or terminal failure forces them to drop.
+
+5. The daemon owns one unacknowledged-live buffer that is distinct from the UI buffer.
+   Messages that were already sent over a live socket are kept in `StateTracker` until the peer daemon ACKs them, a terminal failure converts them to drops, or an explicit fallback path consumes them.
+
+6. The UI must never infer recovery from time or socket silence.
+   It reacts only to typed IPC transport events, fallback events, and ACK events.
+
+### Recovery Origins and Their Meaning
+
+- `MANUAL` means the local user explicitly started or stopped the flow.
+- `INCOMING` means the peer initiated a normal incoming live session.
+- `GRACE_RECONNECT` means a generic recovery replacement path was accepted.
+- `RETUNNEL` means the local daemon is executing the user-requested retunnel flow.
+- `AUTO_RECONNECT` means the daemon-owned reconnect worker is trying to recover a lost live session.
+- `MUTUAL_CONNECT` means both peers initiated a connection simultaneously and the tie-breaker chose one winner.
+- `AUTO_ACCEPT_CONTACT` means an incoming request was auto-accepted because policy allowed it.
+
+These origins are semantic, not cosmetic. The daemon uses them for state transitions, history projection, and typed IPC.
+The UI may translate them differently, but it must not reinterpret them.
+
+### Normal Outbound Live Connect
+
+1. `connect_to()` resolves the peer, registers an outbound attempt, and emits `ConnectionConnectingEvent`.
+
+2. The outbound socket completes the challenge-response handshake.
+   Until the peer replies with `PENDING` or `ACCEPTED`, that socket is an outbound attempt, not an active live session.
+
+3. If the peer replies with `PENDING`, the receiver emits `ConnectionPendingEvent` and keeps the socket under late-acceptance timeout.
+
+4. If the peer replies with `ACCEPTED`, the receiver promotes the socket to active live state, clears reconnect/scheduled flags, logs the connection, and emits `ConnectedEvent`.
+
+5. If the successful connection was reserved as the completion of a retunnel flow, the daemon emits `RetunnelSuccessEvent` instead of a generic `ConnectedEvent` on the initiating side.
+
+6. After the new socket becomes active, the daemon replays any retained unacknowledged live messages over that socket.
+
+### Incoming Connect, Tie-Break, and Replacement Rules
+
+1. The listener evaluates every authenticated incoming socket against the current peer transport state.
+
+2. If the peer is already `CONNECTED` or `PENDING` and there is no reconnect grace, no retunnel marker, no scheduled auto reconnect, and no generic recovery hint, the incoming socket is treated as a duplicate and rejected.
+
+3. If both peers initiated a connection simultaneously, the deterministic tie-breaker decides the winner.
+   The loser is rejected with `MUTUAL_CONNECT` semantics instead of appearing as a random failure.
+
+4. If reconnect grace, retunnel recovery, scheduled auto reconnect, or a generic recovery hint is present, the listener may auto-accept the incoming socket as a recovery replacement.
+
+5. If the replacement arrives while the old live socket is still tracked as connected, the listener treats that as a seamless recovery replacement.
+   In that special case it preserves peer-visible generic reconnect UX, suppresses duplicate generic connect history, and may force fallback of old-socket unacknowledged messages before swapping sockets because the old route is still ambiguous.
+
+6. A recovery replacement is only auto-accepted when live delivery is allowed now.
+   If there is no interactive live consumer and headless live backlog is disabled, the socket remains pending even if its semantic origin is recovery-related.
+
+### Remote Disconnect and Deferred Fallback
+
+1. When the daemon loses a live socket that was not locally initiated, it enters a fallback path with `initiated_by_self = False` and `is_fallback = True`.
+
+2. If `daemon.live_reconnect_grace_timeout > 0`, the daemon enters deferred remote fallback instead of immediately treating the loss as final.
+
+3. Deferred remote fallback performs these steps:
+   it closes the old socket, marks reconnect grace, retains already-sent unacknowledged live messages, emits `ConnectionConnectingEvent(origin = GRACE_RECONNECT)`, and delays the visible `DisconnectedEvent`.
+
+4. If a replacement socket arrives before grace expires, the delayed worker exits quietly.
+   The peer only sees generic reconnect lifecycle, not a disconnect followed by a fresh incoming request.
+
+5. If grace expires without recovery, the daemon emits `DisconnectedEvent` and cleans up orphaned contacts.
+
+6. If `daemon.live_reconnect_delay > 0`, the daemon then schedules `AUTO_RECONNECT`.
+
+7. If `daemon.live_reconnect_delay = 0`, the daemon does not schedule a reconnect worker.
+   The current design still keeps retained unacknowledged live messages instead of converting them immediately at grace expiry, because a hinted late recovery replacement may still arrive and replay them.
+
+### Automatic Live Reconnect
+
+1. Automatic reconnect is daemon-owned only.
+   It uses `daemon.live_reconnect_delay`, `daemon.max_connect_retries`, and `daemon.connect_retry_backoff_delay`.
+
+2. When auto reconnect is scheduled, the daemon emits `AutoReconnectScheduledEvent` and the chat UI moves into `RECONNECTING` state.
+
+3. The reconnect worker later calls the normal outbound `connect_to()` path with `origin = AUTO_RECONNECT`.
+
+4. Successful auto reconnect behaves like a normal successful connect, except the origin remains `AUTO_RECONNECT` and the UI renders it as reconnect lifecycle rather than as a first connect.
+
+5. Terminal auto-reconnect failure is one of the explicit terminal points for retained unacknowledged live messages.
+   When retries are exhausted, the outbound attempt is rejected, or the attempt closes before acceptance, the daemon converts retained unacknowledged live messages to drops and then emits `ConnectionFailedEvent`.
+
+### Explicit Local Retunnel
+
+1. `/retunnel` is a local transport-maintenance operation.
+   The initiating UI receives `RetunnelInitiatedEvent`, `RetunnelSuccessEvent`, or `RetunnelFailedEvent`.
+
+2. Retunnel is not allowed to tear down the old live session before Tor circuit rotation succeeds.
+   If circuit rotation fails, the daemon emits a retunnel failure and leaves the old live socket intact.
+
+3. After successful circuit rotation, the daemon marks the peer as retunneling, marks that the next successful live connection should finalize retunnel, disconnects the old live socket silently, marks reconnect grace, waits `daemon.retunnel_reconnect_delay`, and then starts a reconnect attempt with `origin = RETUNNEL` unless recovery already happened.
+
+4. A successful retunnel completes only when a replacement live route is active.
+   On the initiating side that completion is surfaced as `RetunnelSuccessEvent`, not as generic connect noise.
+
+5. If the reconnect attempt fails while the old live socket is still active, the daemon emits `RetunnelFailedEvent` but preserves the old live session.
+
+6. If the old live socket is already gone, the daemon may schedule bounded delayed recovery retries using `daemon.retunnel_reconnect_delay` and `daemon.retunnel_recovery_retries` before declaring terminal failure.
+
+7. If retunnel becomes terminal after the old live path is gone, the daemon emits `DisconnectedEvent(origin = RETUNNEL)` plus `RetunnelFailedEvent` locally.
+   If auto reconnect is enabled it schedules `AUTO_RECONNECT`; otherwise it converts retained unacknowledged live messages to drops.
+
+### Message Retention, Replay, and Drop Conversion
+
+1. There are two different outbound message buffers and they solve different problems.
+
+2. The UI-local outgoing buffer contains messages the user typed while the prompt was `SWITCHING` or `RECONNECTING`.
+   Those messages were never sent over the network yet.
+
+3. The daemon unacknowledged-live buffer contains messages that were already sent over a live socket but not yet acknowledged by the peer daemon.
+
+4. The UI-local buffer flushes to live when `ConnectedEvent` or `RetunnelSuccessEvent` restores usable live transport.
+
+5. The UI-local buffer flushes to drop only on terminal recovery failure, such as `ConnectionFailedEvent(origin = AUTO_RECONNECT)` or a retunnel failure path that does not continue into reconnecting.
+
+6. The daemon unacknowledged-live buffer is populated immediately before a live envelope is sent and is cleared only by ACK, explicit fallback conversion, or terminal failure conversion.
+
+7. When a recovered live socket becomes active, the daemon replays retained unacknowledged live messages over the new socket.
+
+8. Terminal conversion to drop is intentionally narrower than generic disconnect handling.
+   Already-sent unacknowledged live messages should survive recoverable grace, retunnel, and auto-reconnect paths and only become drops when the daemon concludes that the live recovery path is terminal.
+
+9. A seamless replacement over a still-connected old socket is the main special case.
+   The daemon may force fallback of old-socket unacknowledged messages before accepting the replacement because replaying them over the new socket while the old route is still ambiguous would risk duplicate delivery.
+
+10. ACK remains transport acceptance, not a read receipt.
+    A green sender-side message means the peer daemon accepted the logical message durably, not that the peer user read it.
+
+### Chat UI Recovery Semantics
+
+1. `SWITCHING` means a local retunnel is in progress.
+   The user may keep typing, but new outgoing messages remain local until the daemon reports retunnel success or terminal failure.
+
+2. `RECONNECTING` means the daemon is recovering a lost live session through grace reconnect or auto reconnect.
+   The prompt changes immediately, but the UI still waits for typed IPC events before deciding whether to flush or drop buffered content.
+
+3. `DROP` means live transport is unavailable now.
+   New outgoing messages no longer stay in the UI buffer and instead follow normal drop behavior.
+
+4. Recovery prompt state and transport history state are intentionally coupled but not identical.
+   Prompt decoration reacts immediately to typed lifecycle events, while visible chat lines such as `FallbackSuccessEvent`, `AckEvent`, and drop conversions continue to reflect daemon transport truth.
+
+### OPSEC Rules for Recovery
+
+1. Peer-visible retunnel disclosure is intentionally disabled.
+   The remote peer must not learn whether a replacement live socket was caused by `/retunnel`, automatic reconnect, or another local recovery decision.
+
+2. The only peer-visible recovery semantics should be generic reconnect behavior.
+   On the non-initiating side, reconnect lifecycle must surface as generic `GRACE_RECONNECT` messaging such as `Reconnecting` and `Reconnected`, not as explicit retunnel disclosure.
+
+3. A generic recovery hint in the authenticated live handshake is acceptable only as a corroborating signal.
+   It may help the listener classify a new socket as a recovery replacement, but it must not override the absence of local recovery evidence such as reconnect grace, scheduled auto reconnect, retunnel state, or a very recent pending expiry.
+
+4. Local observability is allowed to be richer than peer observability.
+   The initiating UI may see `RetunnelInitiatedEvent`, `RetunnelSuccessEvent`, and `RetunnelFailedEvent` because that information never crosses the peer protocol boundary.
+
+5. Timing settings are not only UX knobs; they are part of the OPSEC and recovery contract.
+   `daemon.live_reconnect_grace_timeout`, `daemon.live_reconnect_delay`, `daemon.live_disconnect_linger_timeout`, `daemon.retunnel_reconnect_delay`, and `daemon.retunnel_recovery_retries` together define whether recovery looks seamless, noisy, or terminal.
+
+### Recommended Recovery Tuning
+
+For slower Tor routes or environments where retunnel replacement can legitimately take longer than the default grace window, prefer one coherent profile instead of tweaking one timeout in isolation.
+
+1. Set `daemon.live_reconnect_grace_timeout` above the observed worst-case retunnel replacement time.
+   If retunnel recovery often takes around 15 to 20 seconds end to end, use 25 to 30 seconds so the passive peer stays in generic reconnect grace instead of surfacing a premature disconnect-plus-auto-reconnect schedule.
+
+2. Keep `daemon.retunnel_reconnect_delay` short.
+   Values around 1 to 2 seconds are usually enough to let the controlled disconnect flush while still letting retunnel recovery start promptly.
+
+3. Keep `daemon.live_disconnect_linger_timeout` non-zero on slower routes.
+   Around 1.0 to 1.5 seconds usually improves in-band disconnect delivery and reduces duplicate-live races during retunnel.
+
+4. Treat `daemon.live_reconnect_delay` as the safety-net delay, not the main retunnel knob.
+   It only matters after grace expires and no recovery won. Typical values around 10 to 15 seconds are reasonable; the key anti-noise control is still the grace timeout.
+
+5. Increase `daemon.retunnel_recovery_retries` only when transient reject or early-close races are common.
+   A small budget such as 2 or 3 retries is appropriate. Higher values make recovery more persistent but can also prolong a terminal failure.
+
+6. Change the settings together and validate with real logs.
+   The target symptom profile is: peer sees `Reconnecting` then `Reconnected`, no premature `Automatic reconnect scheduled`, and retained unacknowledged live messages replay after recovery instead of converting to drops.
+
+### Edge-Case Rules That Must Remain Stable
+
+1. Mutual connect races must never tear down a newer winning socket because of stale callbacks from the losing socket.
+
+2. Duplicate incoming live sockets must be rejected unless reconnect grace, retunnel recovery, scheduled auto reconnect, or the generic recovery hint makes the replacement legitimate.
+
+3. Pending live sockets use late-acceptance timeout, even during reconnect flows.
+   A reconnect that never reaches `ACCEPTED` is still a failure path and must not stay pending forever.
+
+4. If the local daemon has no live socket when sending and `daemon.fallback_to_drop` is enabled, new outbound messages may queue directly as drops.
+   During reconnect grace, the daemon may suppress the immediate auto-fallback status line to keep the transient remote loss visually quiet.
+
+5. Retunnel recovery and auto reconnect are separate machines.
+   Retunnel may hand off into auto reconnect after terminal retunnel failure, but the two flows must not collapse into indistinguishable controller state.
+
 ## Extending the Architecture
 
 When you add a new architecture-relevant behavior:

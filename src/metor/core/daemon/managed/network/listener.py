@@ -13,7 +13,9 @@ from typing import Optional, Callable, TYPE_CHECKING
 
 from metor.core import TorManager
 from metor.core.api import (
+    AutoReconnectScheduledEvent,
     ConnectionActor,
+    ConnectionConnectingEvent,
     ConnectionOrigin,
     ConnectionReasonCode,
     EventType,
@@ -67,6 +69,7 @@ class InboundListener:
         receiver: 'StreamReceiver',
         broadcast_callback: Callable[[IpcEvent], None],
         has_live_consumers_callback: Callable[[], bool],
+        enqueue_live_reconnect_callback: Callable[[str], bool],
         stop_flag: threading.Event,
         config: 'Config',
     ) -> None:
@@ -83,6 +86,7 @@ class InboundListener:
             receiver (StreamReceiver): The stream receiver to instantiate upon acceptance.
             broadcast_callback (Callable): IPC broadcaster.
             has_live_consumers_callback (Callable[[], bool]): Callback to check whether an interactive live consumer is attached.
+            enqueue_live_reconnect_callback (Callable[[str], bool]): Callback to queue one delayed automatic reconnect attempt.
             stop_flag (threading.Event): Global daemon termination flag.
             config (Config): The profile configuration instance.
 
@@ -98,6 +102,9 @@ class InboundListener:
         self._receiver: 'StreamReceiver' = receiver
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
         self._has_live_consumers: Callable[[], bool] = has_live_consumers_callback
+        self._enqueue_live_reconnect: Callable[[str], bool] = (
+            enqueue_live_reconnect_callback
+        )
         self._stop_flag: threading.Event = stop_flag
         self._config: 'Config' = config
         self._listener_thread: Optional[threading.Thread] = None
@@ -116,6 +123,52 @@ class InboundListener:
             bool: True if headless live backlog is allowed.
         """
         return self._config.get_int(SettingKey.MAX_UNSEEN_LIVE_MSGS) != 0
+
+    def _mark_live_reconnect_grace(self, onion: str) -> None:
+        """
+        Marks one incoming reconnect grace window using the profile configuration.
+
+        Args:
+            onion (str): The peer onion identity.
+
+        Returns:
+            None
+        """
+        grace_timeout_sec: int = self._config.get_int(
+            SettingKey.LIVE_RECONNECT_GRACE_TIMEOUT
+        )
+        self._state.mark_live_reconnect_grace(onion, float(grace_timeout_sec))
+
+    def _schedule_live_reconnect(self, alias: str, onion: str) -> None:
+        """
+        Queues one automatic reconnect attempt and emits the scheduling lifecycle.
+
+        Args:
+            alias (str): The peer alias.
+            onion (str): The peer onion identity.
+
+        Returns:
+            None
+        """
+        self._state.mark_scheduled_auto_reconnect(onion)
+        was_scheduled: bool = self._enqueue_live_reconnect(onion)
+        if not was_scheduled:
+            return
+
+        self._hm.log_event(
+            HistoryEvent.AUTO_RECONNECT_SCHEDULED,
+            onion,
+            actor=HistoryActor.SYSTEM,
+            trigger=ConnectionOrigin.AUTO_RECONNECT,
+        )
+        self._broadcast(
+            AutoReconnectScheduledEvent(
+                alias=alias,
+                onion=onion,
+                origin=ConnectionOrigin.AUTO_RECONNECT,
+                actor=ConnectionActor.SYSTEM,
+            )
+        )
 
     def _set_startup_error(self, error: str) -> None:
         """
@@ -410,15 +463,17 @@ class InboundListener:
 
         if self._state.is_retunneling(onion):
             preserved_live_connection: bool = self._state.is_live_active(onion)
-            self._state.mark_live_reconnect_grace(onion, 0.0)
             self._state.clear_retunnel_flow(onion)
-            if not preserved_live_connection:
+            if preserved_live_connection:
+                self._state.mark_live_reconnect_grace(onion, 0.0)
+            else:
+                self._mark_live_reconnect_grace(onion)
                 self._broadcast(
                     DisconnectedEvent(
                         alias=alias,
                         onion=onion,
                         actor=ConnectionActor.SYSTEM,
-                        origin=ConnectionOrigin.INCOMING,
+                        origin=ConnectionOrigin.RETUNNEL,
                         reason_code=ConnectionReasonCode.PENDING_ACCEPTANCE_EXPIRED,
                     )
                 )
@@ -432,6 +487,11 @@ class InboundListener:
                     },
                 )
             )
+            if not preserved_live_connection:
+                if self._config.get_int(SettingKey.LIVE_RECONNECT_DELAY) > 0:
+                    self._schedule_live_reconnect(alias, onion)
+                else:
+                    self._router.convert_unacked_messages_to_drop(alias, onion)
 
     def _handle_live_incoming(
         self,
@@ -469,6 +529,14 @@ class InboundListener:
         grace_reconnect: bool = self._state.has_live_reconnect_grace(onion)
         retunnel_reconnect: bool = transport_state.is_retunneling
         scheduled_auto_reconnect: bool = self._state.has_scheduled_auto_reconnect(onion)
+        trusted_recovery_hint: bool = False
+        if has_recovery_hint:
+            trusted_recovery_hint = (
+                grace_reconnect
+                or retunnel_reconnect
+                or scheduled_auto_reconnect
+                or self._state.consume_recent_pending_expiry(onion)
+            )
         duplicate_reason_code: Optional[HistoryReasonCode] = None
 
         if (
@@ -477,7 +545,7 @@ class InboundListener:
             and not grace_reconnect
             and not retunnel_reconnect
             and not scheduled_auto_reconnect
-            and not has_recovery_hint
+            and not trusted_recovery_hint
         ):
             duplicate_reason_code = (
                 HistoryReasonCode.DUPLICATE_INCOMING_CONNECTED
@@ -549,18 +617,23 @@ class InboundListener:
             incoming_origin = ConnectionOrigin.RETUNNEL
         elif scheduled_auto_reconnect:
             incoming_origin = ConnectionOrigin.AUTO_RECONNECT
-        elif has_recovery_hint:
+        elif trusted_recovery_hint:
             incoming_origin = ConnectionOrigin.GRACE_RECONNECT
         elif is_mutual_winner:
             incoming_origin = ConnectionOrigin.MUTUAL_CONNECT
         elif contact_auto_accept:
             incoming_origin = ConnectionOrigin.AUTO_ACCEPT_CONTACT
 
+        seamless_recovery_replacement: bool = (
+            transport_state.live_state is LiveTransportState.CONNECTED
+            and incoming_origin is ConnectionOrigin.GRACE_RECONNECT
+        )
+
         should_auto_accept_now: bool = (
             grace_reconnect
             or retunnel_reconnect
             or scheduled_auto_reconnect
-            or has_recovery_hint
+            or trusted_recovery_hint
             or is_mutual_winner
             or contact_auto_accept
         )
@@ -570,6 +643,8 @@ class InboundListener:
         if should_auto_accept_now and (
             self._has_live_consumers() or self._allows_headless_live_backlog()
         ):
+            if seamless_recovery_replacement:
+                self._router.force_fallback(onion)
             if grace_reconnect:
                 self._state.consume_live_reconnect_grace(onion)
             self._state.add_active_connection(onion, conn)
@@ -602,12 +677,23 @@ class InboundListener:
             except Exception:
                 pass
 
-            self._hm.log_event(
-                HistoryEvent.CONNECTED,
-                onion,
-                actor=HistoryActor.SYSTEM,
-                trigger=incoming_origin,
-            )
+            if seamless_recovery_replacement:
+                self._broadcast(
+                    ConnectionConnectingEvent(
+                        alias=alias,
+                        onion=onion,
+                        origin=ConnectionOrigin.GRACE_RECONNECT,
+                        actor=ConnectionActor.SYSTEM,
+                    )
+                )
+
+            if not seamless_recovery_replacement:
+                self._hm.log_event(
+                    HistoryEvent.CONNECTED,
+                    onion,
+                    actor=HistoryActor.SYSTEM,
+                    trigger=incoming_origin,
+                )
             if self._state.consume_retunnel_reconnect(onion):
                 self._hm.log_event(
                     HistoryEvent.RETUNNEL_SUCCEEDED,
@@ -633,6 +719,7 @@ class InboundListener:
                     stream.get_buffer(),
                     connection_origin=incoming_origin,
                 )
+            self._router.replay_unacked_messages(onion)
         else:
             self._hm.log_event(
                 HistoryEvent.REQUESTED,

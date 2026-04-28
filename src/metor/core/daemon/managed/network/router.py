@@ -132,6 +132,120 @@ class MessageRouter:
             return cast(Optional[str], pop(msg_id))
         return None
 
+    @staticmethod
+    def _send_live_envelope(
+        conn: socket.socket,
+        msg_id: str,
+        msg: str,
+        timestamp: str,
+    ) -> None:
+        """
+        Sends one strict live JSON envelope over an already authenticated socket.
+
+        Args:
+            conn (socket.socket): The active live socket.
+            msg_id (str): The stable logical message identifier.
+            msg (str): The message payload.
+            timestamp (str): The daemon-authored send timestamp.
+
+        Returns:
+            None
+        """
+        envelope: Dict[str, JsonValue] = {
+            'id': msg_id,
+            'timestamp': timestamp,
+            'text': msg,
+        }
+        envelope_str: str = json.dumps(envelope)
+        b64_msg: str = base64.b64encode(envelope_str.encode('utf-8')).decode('utf-8')
+        conn.sendall(f'{TorCommand.MSG.value} {msg_id} {b64_msg}\n'.encode('utf-8'))
+
+    def convert_unacked_messages_to_drop(
+        self,
+        alias: str,
+        onion: str,
+        request_id: Optional[str] = None,
+        emit_event: bool = True,
+        history_actor: HistoryActor = HistoryActor.SYSTEM,
+        history_reason_code: HistoryReasonCode = (
+            HistoryReasonCode.UNACKED_LIVE_CONVERTED_TO_DROP
+        ),
+    ) -> Dict[str, Tuple[str, str]]:
+        """
+        Converts tracked unacknowledged live messages into pending drops.
+
+        Args:
+            alias (str): The peer alias.
+            onion (str): The peer onion identity.
+            request_id (Optional[str]): Optional request correlation identifier.
+            emit_event (bool): Whether to emit a fallback-success event.
+            history_actor (HistoryActor): The history actor for queued-drop logging.
+            history_reason_code (HistoryReasonCode): The reason code for queued-drop logging.
+
+        Returns:
+            Dict[str, Tuple[str, str]]: The converted unacknowledged messages.
+        """
+        unacked: Dict[str, Tuple[str, str]] = self._state.pop_unacked_messages(onion)
+        if not unacked:
+            return {}
+
+        for msg_id, pending_msg in unacked.items():
+            content, timestamp = pending_msg
+            self._mm.queue_message(
+                contact_onion=onion,
+                direction=MessageDirection.OUT,
+                msg_type=MessageType.DROP_TEXT,
+                payload=content,
+                status=MessageStatus.PENDING,
+                msg_id=msg_id,
+                timestamp=timestamp,
+            )
+            self._hm.log_event(
+                HistoryEvent.QUEUED,
+                onion,
+                actor=history_actor,
+                detail_code=history_reason_code,
+            )
+
+        if emit_event:
+            self._broadcast(
+                FallbackSuccessEvent(
+                    alias=alias,
+                    onion=onion,
+                    count=len(unacked),
+                    msg_ids=list(unacked.keys()),
+                    request_id=request_id,
+                )
+            )
+
+        return unacked
+
+    def replay_unacked_messages(self, onion: str) -> list[str]:
+        """
+        Replays still-unacknowledged live messages over the current active socket.
+
+        Args:
+            onion (str): The peer onion identity.
+
+        Returns:
+            list[str]: The message IDs that were replayed successfully.
+        """
+        conn: Optional[socket.socket] = self._state.get_connection(onion)
+        if conn is None:
+            return []
+
+        replayed_msg_ids: list[str] = []
+        unacked: Dict[str, Tuple[str, str]] = self._state.get_unacked_messages(onion)
+        for msg_id, pending_msg in unacked.items():
+            content, timestamp = pending_msg
+            try:
+                self._send_live_envelope(conn, msg_id, content, timestamp)
+            except Exception:
+                break
+            replayed_msg_ids.append(msg_id)
+
+        return replayed_msg_ids
+
     def force_fallback(
         self, target: str
     ) -> Tuple[bool, EventType, Dict[str, JsonValue]]:
@@ -150,7 +264,14 @@ class MessageRouter:
         alias, onion = resolved
         request_id: Optional[str] = get_current_request_id()
 
-        unacked: Dict[str, Tuple[str, str]] = self._state.pop_unacked_messages(onion)
+        unacked: Dict[str, Tuple[str, str]] = self.convert_unacked_messages_to_drop(
+            alias,
+            onion,
+            request_id=request_id,
+            emit_event=True,
+            history_actor=HistoryActor.LOCAL,
+            history_reason_code=HistoryReasonCode.MANUAL_FALLBACK_TO_DROP,
+        )
 
         if not unacked:
             return (
@@ -158,34 +279,6 @@ class MessageRouter:
                 EventType.NO_PENDING_LIVE_MSGS,
                 {'alias': alias, 'onion': onion},
             )
-
-        for msg_id, pending_msg in unacked.items():
-            content, timestamp = pending_msg
-            self._mm.queue_message(
-                contact_onion=onion,
-                direction=MessageDirection.OUT,
-                msg_type=MessageType.TEXT,
-                payload=content,
-                status=MessageStatus.PENDING,
-                msg_id=msg_id,
-                timestamp=timestamp,
-            )
-            self._hm.log_event(
-                HistoryEvent.QUEUED,
-                onion,
-                actor=HistoryActor.LOCAL,
-                detail_code=HistoryReasonCode.MANUAL_FALLBACK_TO_DROP,
-            )
-
-        self._broadcast(
-            FallbackSuccessEvent(
-                alias=alias,
-                onion=onion,
-                count=len(unacked),
-                msg_ids=list(unacked.keys()),
-                request_id=request_id,
-            )
-        )
 
         return (
             True,
@@ -217,6 +310,11 @@ class MessageRouter:
         request_id: Optional[str] = get_current_request_id()
         self._remember_message_request_id(msg_id, request_id)
 
+        has_reconnect_grace_fn = getattr(self._state, 'has_live_reconnect_grace', None)
+        silent_grace_fallback: bool = bool(
+            callable(has_reconnect_grace_fn) and has_reconnect_grace_fn(onion)
+        )
+
         conn: Optional[socket.socket] = self._state.get_connection(onion)
 
         if not conn:
@@ -235,14 +333,15 @@ class MessageRouter:
                     actor=HistoryActor.SYSTEM,
                     detail_code=HistoryReasonCode.AUTO_FALLBACK_TO_DROP,
                 )
-                self._broadcast(
-                    AutoFallbackQueuedEvent(
-                        alias=alias,
-                        onion=onion,
-                        msg_id=msg_id,
-                        request_id=request_id,
+                if not silent_grace_fallback:
+                    self._broadcast(
+                        AutoFallbackQueuedEvent(
+                            alias=alias,
+                            onion=onion,
+                            msg_id=msg_id,
+                            request_id=request_id,
+                        )
                     )
-                )
             else:
                 self._clear_message_request_id(msg_id)
             return
@@ -250,17 +349,7 @@ class MessageRouter:
         try:
             timestamp: str = datetime.now(timezone.utc).isoformat()
             self._state.add_unacked_message(onion, msg_id, msg, timestamp)
-            envelope: Dict[str, JsonValue] = {
-                'id': msg_id,
-                'timestamp': timestamp,
-                'text': msg,
-            }
-            envelope_str: str = json.dumps(envelope)
-            b64_msg: str = base64.b64encode(envelope_str.encode('utf-8')).decode(
-                'utf-8'
-            )
-
-            conn.sendall(f'{TorCommand.MSG.value} {msg_id} {b64_msg}\n'.encode('utf-8'))
+            self._send_live_envelope(conn, msg_id, msg, timestamp)
         except Exception:
             self._clear_message_request_id(msg_id)
 
