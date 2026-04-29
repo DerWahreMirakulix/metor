@@ -151,8 +151,9 @@ class CommandDispatcher:
             else:
                 self._print_system(Help.show_command_help(cmd).strip())
         elif cmd == '/reject':
-            if arg:
-                self._ipc.send_command(RejectCommand(target=arg))
+            target = arg if arg else self._resolve_pending_target()
+            if target:
+                self._ipc.send_command(RejectCommand(target=target))
             else:
                 self._print_system(Help.show_command_help(cmd).strip())
         elif cmd == '/switch':

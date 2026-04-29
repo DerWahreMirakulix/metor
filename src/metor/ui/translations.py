@@ -13,6 +13,7 @@ from metor.core.api import (
     ConnectionReasonCode,
     EventType,
     JsonValue,
+    RuntimeErrorCode,
 )
 from metor.utils import TypeCaster
 
@@ -25,6 +26,20 @@ ERROR_DETAIL_CODES: set[EventType] = {
     EventType.RETUNNEL_FAILED,
     EventType.TOR_PROCESS_TERMINATED,
     EventType.TOR_START_FAILED,
+}
+
+RUNTIME_ERROR_TEXT: dict[RuntimeErrorCode, str] = {
+    RuntimeErrorCode.NO_CACHED_DROP_TUNNEL: 'No cached drop tunnel exists',
+    RuntimeErrorCode.NO_ACTIVE_CONNECTION_TO_RETUNNEL: (
+        'No active connection to retunnel'
+    ),
+    RuntimeErrorCode.PEER_ENDED_SESSION: 'Peer ended the session',
+    RuntimeErrorCode.PEER_REJECTED_RECONNECT: 'Peer rejected retunnel reconnect',
+    RuntimeErrorCode.RETUNNEL_RECONNECT_FAILED: 'Retunnel reconnect failed',
+    RuntimeErrorCode.PENDING_ACCEPTANCE_EXPIRED: 'Pending acceptance expired',
+    RuntimeErrorCode.TOR_LAUNCH_FAILED: 'Failed to launch Tor',
+    RuntimeErrorCode.TOR_BINARY_LAUNCH_FAILED: 'Failed to launch the Tor binary',
+    RuntimeErrorCode.TOR_PROXY_NOT_READY: 'Tor SOCKS proxy did not become ready',
 }
 
 VALIDATION_DETAIL_CODES: set[EventType] = {
@@ -44,6 +59,10 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
     ),
     EventType.INVALID_PASSWORD: TranslationDef(
         'Invalid master password.', StatusTone.ERROR
+    ),
+    EventType.LOCAL_AUTH_RATE_LIMITED: TranslationDef(
+        'Too many invalid local authentication attempts. Retry in {retry_after}s.',
+        StatusTone.ERROR,
     ),
     EventType.DB_CORRUPTED: TranslationDef(
         'Profile database is corrupted.', StatusTone.ERROR
@@ -133,6 +152,10 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
     EventType.DAEMON_OFFLINE: TranslationDef(
         'Local daemon is not running.', StatusTone.SYSTEM
     ),
+    EventType.IPC_CLIENT_LIMIT_REACHED: TranslationDef(
+        'Daemon IPC client limit reached ({max_clients} sessions). Close another local session and retry.',
+        StatusTone.ERROR,
+    ),
     EventType.CANNOT_CONNECT_SELF: TranslationDef(
         'You cannot connect to yourself.', StatusTone.SYSTEM
     ),
@@ -174,6 +197,11 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
     ),
     EventType.DROP_QUEUED: TranslationDef(
         "Message successfully queued for '{alias}'.",
+        StatusTone.INFO,
+        AliasPolicy.DYNAMIC,
+    ),
+    EventType.AUTO_FALLBACK_QUEUED: TranslationDef(
+        "No live connection to '{alias}'. Queued the message as a drop.",
         StatusTone.INFO,
         AliasPolicy.DYNAMIC,
     ),
@@ -495,12 +523,20 @@ class Translator:
         )
 
         if code is EventType.CONNECTED:
-            safe_params['origin_text'] = 'Connected to'
+            if origin in (
+                ConnectionOrigin.AUTO_RECONNECT,
+                ConnectionOrigin.GRACE_RECONNECT,
+            ):
+                safe_params['origin_text'] = 'Reconnected to'
+            else:
+                safe_params['origin_text'] = 'Connected to'
             return
 
         if code is EventType.CONNECTION_CONNECTING:
             if origin is ConnectionOrigin.AUTO_RECONNECT:
                 safe_params['origin_text'] = 'Automatically reconnecting to'
+            elif origin is ConnectionOrigin.GRACE_RECONNECT:
+                safe_params['origin_text'] = 'Reconnecting to'
             elif origin is ConnectionOrigin.RETUNNEL:
                 safe_params['origin_text'] = 'Retunnel reconnecting to'
             else:
@@ -510,6 +546,8 @@ class Translator:
         if code is EventType.CONNECTION_PENDING:
             if origin is ConnectionOrigin.AUTO_RECONNECT:
                 safe_params['origin_text'] = 'Automatic reconnect request sent to'
+            elif origin is ConnectionOrigin.GRACE_RECONNECT:
+                safe_params['origin_text'] = 'Reconnect request sent to'
             elif origin is ConnectionOrigin.RETUNNEL:
                 safe_params['origin_text'] = 'Retunnel reconnect request sent to'
             else:
@@ -519,6 +557,8 @@ class Translator:
         if code in (EventType.CONNECTION_RETRY, EventType.CONNECTION_FAILED):
             if origin is ConnectionOrigin.AUTO_RECONNECT:
                 safe_params['origin_text'] = 'Automatic reconnect to'
+            elif origin is ConnectionOrigin.GRACE_RECONNECT:
+                safe_params['origin_text'] = 'Reconnect to'
             elif origin is ConnectionOrigin.RETUNNEL:
                 safe_params['origin_text'] = 'Retunnel reconnect to'
             else:
@@ -533,6 +573,8 @@ class Translator:
                 safe_params['reject_text'] = (
                     "Automatic reconnect to '{alias}' rejected."
                 )
+            elif origin is ConnectionOrigin.GRACE_RECONNECT:
+                safe_params['reject_text'] = "Reconnect to '{alias}' rejected."
             elif origin is ConnectionOrigin.RETUNNEL:
                 safe_params['reject_text'] = "Retunnel reconnect to '{alias}' rejected."
             else:
@@ -541,7 +583,10 @@ class Translator:
 
         if code is EventType.DISCONNECTED:
             if actor is ConnectionActor.REMOTE:
-                safe_params['disconnect_text'] = "Peer '{alias}' disconnected."
+                if reason_code is ConnectionReasonCode.PEER_ENDED_SESSION:
+                    safe_params['disconnect_text'] = "Peer '{alias}' ended the session."
+                else:
+                    safe_params['disconnect_text'] = "Peer '{alias}' disconnected."
             elif actor is ConnectionActor.SYSTEM or reason_code is not None:
                 safe_params['disconnect_text'] = "Connection to '{alias}' lost."
             else:
@@ -585,7 +630,25 @@ class Translator:
         safe_params: Dict[str, JsonValue] = params.copy() if params else {}
 
         if code in ERROR_DETAIL_CODES:
-            error_text: str = str(safe_params.get('error') or '').strip()
+            error_text: str = ''
+            raw_error_code = safe_params.get('error_code')
+            if raw_error_code is not None:
+                try:
+                    error_code: RuntimeErrorCode = RuntimeErrorCode(str(raw_error_code))
+                    error_text = RUNTIME_ERROR_TEXT.get(error_code, '')
+                except ValueError:
+                    error_text = ''
+
+            if not error_text:
+                error_text = str(safe_params.get('error') or '').strip()
+
+            error_detail_text: str = str(safe_params.get('error_detail') or '').strip()
+            if error_detail_text:
+                if error_text:
+                    error_text = f'{error_text}: {error_detail_text}'
+                else:
+                    error_text = error_detail_text
+
             error_text = error_text.rstrip('.')
             safe_params['error'] = f': {error_text}' if error_text else ''
 

@@ -51,6 +51,7 @@ class _HistoryEntryCastingMixin:
     detail_code: Optional[HistoryEntryReasonCode]
 
     def _cast_common_fields(self) -> None:
+        """Coerces shared string-backed family, actor, trigger, and detail_code fields to typed enums."""
         self.family = _coerce_enum(HistoryEntryFamily, self.family)
         self.actor = _coerce_enum(HistoryEntryActor, self.actor)
         self.trigger = _coerce_optional_enum(HistoryEntryTrigger, self.trigger)
@@ -76,6 +77,7 @@ class SummaryHistoryEntry(_HistoryEntryCastingMixin):
     alias: Optional[str] = None
 
     def __post_init__(self) -> None:
+        """Coerces the common history fields and the summary event_code to their typed enums."""
         self._cast_common_fields()
         self.event_code = _coerce_enum(HistorySummaryEventCode, self.event_code)
 
@@ -96,6 +98,7 @@ class RawHistoryEntry(_HistoryEntryCastingMixin):
     alias: Optional[str] = None
 
     def __post_init__(self) -> None:
+        """Coerces the common history fields and the raw event_code to their typed enums."""
         self._cast_common_fields()
         self.event_code = _coerce_enum(HistoryRawEventCode, self.event_code)
 

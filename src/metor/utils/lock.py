@@ -5,7 +5,7 @@ Ensures that files are not concurrently modified by different processes.
 
 import os
 import time
-import psutil  # type: ignore
+import psutil
 from typing import Optional, Type
 from types import TracebackType
 from pathlib import Path
@@ -42,6 +42,78 @@ class FileLock:
         self.timeout: float = timeout
         self.stale_age: float = stale_age
         self._pid: int = os.getpid()
+        self._pid_create_time: float = psutil.Process(self._pid).create_time()
+        self._lock_fd: Optional[int] = None
+
+    @staticmethod
+    def _parse_lock_metadata(raw_text: str) -> tuple[Optional[int], Optional[float]]:
+        """
+        Parses one lockfile metadata payload.
+
+        Args:
+            raw_text (str): The raw lockfile text.
+
+        Returns:
+            tuple[Optional[int], Optional[float]]: The parsed PID and create time.
+        """
+        content: str = raw_text.strip()
+        if not content:
+            return None, None
+
+        if ':' not in content:
+            if content.isdigit():
+                return int(content), None
+            return None, None
+
+        pid_text, created_text = content.split(':', 1)
+        try:
+            return int(pid_text), float(created_text)
+        except ValueError:
+            return None, None
+
+    @staticmethod
+    def _is_same_process(pid: int, create_time: Optional[float]) -> bool:
+        """
+        Checks whether one PID still refers to the same process instance.
+
+        Args:
+            pid (int): The process ID to inspect.
+            create_time (Optional[float]): The expected process create time.
+
+        Returns:
+            bool: True if the process still exists and matches the expected lifetime.
+        """
+        try:
+            proc = psutil.Process(pid)
+            if create_time is None:
+                return bool(proc.is_running())
+            return bool(abs(proc.create_time() - create_time) < 0.01)
+        except (psutil.Error, ValueError):
+            return False
+
+    def _unlink_if_unchanged(self, expected_stat: os.stat_result) -> bool:
+        """
+        Removes the lock path only if it still references the expected inode.
+
+        Args:
+            expected_stat (os.stat_result): The previously observed file stat.
+
+        Returns:
+            bool: True if the lock path was removed.
+        """
+        try:
+            current_stat: os.stat_result = self.lock_path.stat()
+        except OSError:
+            return False
+
+        if (
+            current_stat.st_ino != expected_stat.st_ino
+            or current_stat.st_dev != expected_stat.st_dev
+        ):
+            return False
+
+        self.lock_path.unlink(missing_ok=True)
+        return True
 
     def __enter__(self) -> 'FileLock':
         """
@@ -63,19 +135,32 @@ class FileLock:
             try:
                 # O_CREAT | O_EXCL ensures atomic creation. Fails if the file already exists.
                 fd = os.open(str(self.lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                with os.fdopen(fd, 'w') as f:
-                    f.write(str(self._pid))
+                self._lock_fd = fd
+                lock_payload: str = f'{self._pid}:{self._pid_create_time}'
+                os.write(fd, lock_payload.encode('utf-8'))
+                os.fsync(fd)
                 return self
             except FileExistsError:
                 # Check if the lock file is old (crashed process)
                 try:
-                    if time.time() - self.lock_path.stat().st_mtime > self.stale_age:
+                    stat_before: os.stat_result = self.lock_path.stat()
+                    if time.time() - stat_before.st_mtime > self.stale_age:
                         with self.lock_path.open('r') as f:
-                            pid_str: str = f.read().strip()
+                            pid, create_time = self._parse_lock_metadata(f.read())
 
-                        if pid_str.isdigit() and not psutil.pid_exists(int(pid_str)):
-                            self.lock_path.unlink(missing_ok=True)
-                            continue  # Try acquiring again immediately
+                        stat_after: os.stat_result = self.lock_path.stat()
+                        if (
+                            stat_after.st_ino != stat_before.st_ino
+                            or stat_after.st_dev != stat_before.st_dev
+                        ):
+                            continue
+
+                        if pid is not None and not self._is_same_process(
+                            pid,
+                            create_time,
+                        ):
+                            if self._unlink_if_unchanged(stat_before):
+                                continue
                 except (OSError, ValueError):
                     pass
 
@@ -104,10 +189,26 @@ class FileLock:
         Returns:
             None
         """
+        fd_stat: Optional[os.stat_result] = None
         try:
-            with self.lock_path.open('r') as f:
-                pid_str: str = f.read().strip()
-            if pid_str == str(self._pid):
-                self.lock_path.unlink(missing_ok=True)
+            if self._lock_fd is None:
+                return
+
+            fd_stat = os.fstat(self._lock_fd)
+        except (OSError, ValueError):
+            pass
+        finally:
+            if self._lock_fd is not None:
+                try:
+                    os.close(self._lock_fd)
+                except OSError:
+                    pass
+                self._lock_fd = None
+
+        if fd_stat is None:
+            return
+
+        try:
+            self._unlink_if_unchanged(fd_stat)
         except (OSError, ValueError):
             pass

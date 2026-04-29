@@ -13,10 +13,9 @@ from datetime import datetime, timezone
 from typing import Callable, List, Dict, Optional, TYPE_CHECKING
 
 from metor.core.api import JsonValue
-from metor.data.settings import SettingKey
 from metor.ui.models import AliasPolicy, StatusTone
 from metor.ui import UIPresenter
-from metor.ui.chat.models import ChatMessageType, ChatLine
+from metor.ui.chat.models import ChatLine, ChatMessageType, ChatTransportState
 from metor.ui.chat.presenter import ChatPresenter
 from metor.utils import Constants
 
@@ -25,7 +24,17 @@ from metor.ui.chat.renderer.display import Display
 from metor.ui.chat.renderer.input import InputHandler
 
 if TYPE_CHECKING:
-    from metor.data.profile.config import Config
+    from metor.data import Config
+
+
+UI_PROMPT_SIGN_KEY: str = 'ui.prompt_sign'
+UI_CHAT_LIMIT_KEY: str = 'ui.chat_limit'
+UI_CHAT_BUFFER_PADDING_KEY: str = 'ui.chat_buffer_padding'
+FOCUS_STATE_TAGS: dict[ChatTransportState, str] = {
+    ChatTransportState.SWITCHING: ' [Switching]',
+    ChatTransportState.RECONNECTING: ' [Reconnecting]',
+    ChatTransportState.DROP: ' [Drop]',
+}
 
 
 class Renderer:
@@ -42,7 +51,7 @@ class Renderer:
             None
         """
         self._config: 'Config' = config
-        self._initial_prompt: str = f'{self._config.get_str(SettingKey.PROMPT_SIGN)} '
+        self._initial_prompt: str = f'{self._config.get_str(UI_PROMPT_SIGN_KEY)} '
         self._prompt: str = self._initial_prompt
         self._alias_resolver: Callable[
             [Optional[str], Optional[str]], Optional[str]
@@ -55,7 +64,7 @@ class Renderer:
         self._input: InputHandler = InputHandler()
 
         self._current_focus: Optional[str] = None
-        self._is_live_focus: bool = False
+        self._focus_transport_state: ChatTransportState = ChatTransportState.DROP
 
         self._last_visual_lines: int = 1
         self._last_cols: int = shutil.get_terminal_size().columns
@@ -93,23 +102,27 @@ class Renderer:
             return self._alias_resolver(chat_line.peer_onion, chat_line.alias)
         return chat_line.alias
 
-    def set_focus(self, alias: Optional[str], is_live: bool = False) -> None:
+    def set_focus(
+        self,
+        alias: Optional[str],
+        transport_state: ChatTransportState = ChatTransportState.DROP,
+    ) -> None:
         """
         Updates the prompt string to reflect the focused alias.
 
         Args:
             alias (Optional[str]): The alias to focus on.
-            is_live (bool): Whether the connection is active/live.
+            transport_state (ChatTransportState): The current transport state.
 
         Returns:
             None
         """
         with self._display.print_lock:
             self._current_focus = alias
-            self._is_live_focus = is_live
+            self._focus_transport_state = transport_state
             if alias:
-                drop_tag: str = '' if is_live else ' [Drop]'
-                self._prompt = f'{alias}{drop_tag}{self._initial_prompt}'
+                state_tag: str = FOCUS_STATE_TAGS.get(transport_state, '')
+                self._prompt = f'{alias}{state_tag}{self._initial_prompt}'
             else:
                 self._prompt = self._initial_prompt
         self.full_redraw()
@@ -173,7 +186,7 @@ class Renderer:
 
             insert_index: int = self._insert_chat_line(chat_line)
 
-            self._trim_message_buffer(self._config.get_int(SettingKey.CHAT_LIMIT))
+            self._trim_message_buffer(self._config.get_int(UI_CHAT_LIMIT_KEY))
 
             if len(self._display.all_msgs) <= previous_count:
                 self._redraw_from_index_locked(0, cols, skip_prompt)
@@ -257,8 +270,8 @@ class Renderer:
                 )
                 self._insert_chat_line(chat_line)
 
-            limit: int = self._config.get_int(SettingKey.CHAT_LIMIT)
-            padding: int = self._config.get_int(SettingKey.CHAT_BUFFER_PADDING)
+            limit: int = self._config.get_int(UI_CHAT_LIMIT_KEY)
+            padding: int = self._config.get_int(UI_CHAT_BUFFER_PADDING_KEY)
             total_limit: int = limit + padding
 
             self._trim_message_buffer(total_limit)
@@ -416,7 +429,10 @@ class Renderer:
         self.print_message(' ', msg_type=ChatMessageType.RAW, skip_prompt=True)
 
     def print_divider(
-        self, msg_type: ChatMessageType = ChatMessageType.RAW, compact: bool = False
+        self,
+        msg_type: ChatMessageType = ChatMessageType.RAW,
+        compact: bool = False,
+        skip_prompt: bool = False,
     ) -> None:
         """
         Prints a visual divider line.
@@ -424,6 +440,7 @@ class Renderer:
         Args:
             msg_type (ChatMessageType): The message type for the divider.
             compact (bool): Whether to use a compact divider.
+            skip_prompt (bool): Whether to avoid redrawing the prompt afterward.
 
         Returns:
             None
@@ -433,6 +450,7 @@ class Renderer:
             if not compact
             else UIPresenter.get_divider_string(3, add_spaces=True),
             msg_type=msg_type,
+            skip_prompt=skip_prompt,
         )
 
     def clear_input_area(self) -> None:

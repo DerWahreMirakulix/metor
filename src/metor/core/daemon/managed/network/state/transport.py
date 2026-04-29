@@ -1,8 +1,9 @@
 """Transport, focus, and derived transport snapshot state mixins."""
 
+import socket
 import threading
 import time
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Dict, Optional, Set
 
 from metor.core.daemon.managed.models import (
     DropTunnelState,
@@ -16,6 +17,10 @@ class StateTrackerTransportMixin:
     """Encapsulates focus counters, drop tunnels, and transport snapshots."""
 
     _lock: threading.Lock
+    _connections: Dict[str, socket.socket]
+    _pending_connections: Dict[str, socket.socket]
+    _outbound_attempts: Set[str]
+    _retunnel_in_progress: Set[str]
     _drop_tunnels: Dict[str, DropTunnelState]
     _ui_focus_counts: Dict[str, int]
 
@@ -198,14 +203,10 @@ class StateTrackerTransportMixin:
         Returns:
             PrimaryTransport: The peer's current primary transport.
         """
-        live_state: LiveTransportState = self.get_live_state(onion)
-        if live_state is not LiveTransportState.DISCONNECTED:
-            return PrimaryTransport.LIVE
-
-        if self.has_drop_tunnel(onion):
-            return PrimaryTransport.DROP
-
-        return PrimaryTransport.NONE
+        return self.get_peer_transport_state(
+            onion,
+            standby_drop_allowed=standby_drop_allowed,
+        ).primary_transport
 
     def get_peer_transport_state(
         self, onion: str, standby_drop_allowed: bool = False
@@ -220,15 +221,32 @@ class StateTrackerTransportMixin:
         Returns:
             PeerTransportState: The derived transport snapshot for the peer.
         """
-        return PeerTransportState(
-            onion=onion,
-            live_state=self.get_live_state(onion),
-            primary_transport=self.get_primary_transport(
-                onion,
+        with self._lock:
+            if onion in self._connections:
+                live_state: LiveTransportState = LiveTransportState.CONNECTED
+            elif onion in self._pending_connections:
+                live_state = LiveTransportState.PENDING
+            elif onion in self._retunnel_in_progress:
+                live_state = LiveTransportState.RETUNNELING
+            elif onion in self._outbound_attempts:
+                live_state = LiveTransportState.CONNECTING
+            else:
+                live_state = LiveTransportState.DISCONNECTED
+
+            has_drop_tunnel: bool = onion in self._drop_tunnels
+            primary_transport: PrimaryTransport = (
+                PrimaryTransport.LIVE
+                if live_state is not LiveTransportState.DISCONNECTED
+                else (
+                    PrimaryTransport.DROP if has_drop_tunnel else PrimaryTransport.NONE
+                )
+            )
+            return PeerTransportState(
+                onion=onion,
+                live_state=live_state,
+                primary_transport=primary_transport,
+                has_drop_tunnel=has_drop_tunnel,
+                focus_count=self._ui_focus_counts.get(onion, 0),
                 standby_drop_allowed=standby_drop_allowed,
-            ),
-            has_drop_tunnel=self.has_drop_tunnel(onion),
-            focus_count=self.get_focus_count(onion),
-            standby_drop_allowed=standby_drop_allowed,
-            is_retunneling=self.is_retunneling(onion),
-        )
+                is_retunneling=onion in self._retunnel_in_progress,
+            )

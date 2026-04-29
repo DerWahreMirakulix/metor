@@ -8,19 +8,19 @@ import threading
 from typing import Dict, List, Callable, Optional, Tuple, TYPE_CHECKING
 
 from metor.core import TorManager
-from metor.core.api import EventType, IpcEvent, JsonValue
+from metor.core.api import ConnectionOrigin, EventType, IpcEvent, JsonValue
 from metor.core.daemon.managed.crypto import Crypto
 from metor.data import HistoryManager, ContactManager, MessageManager
 
 # Local Package Imports
 from metor.core.daemon.managed.network.state import StateTracker
 from metor.core.daemon.managed.network.router import MessageRouter
-from metor.core.daemon.managed.network.controller import ConnectionController
+from metor.core.daemon.managed.network.controller.base import ConnectionController
 from metor.core.daemon.managed.network.receiver import StreamReceiver
 from metor.core.daemon.managed.network.listener import InboundListener
 
 if TYPE_CHECKING:
-    from metor.data.profile.config import Config
+    from metor.data.profile import Config
 
 
 class NetworkManager:
@@ -93,7 +93,6 @@ class NetworkManager:
             state=self._state,
             router=self._router,
             broadcast_callback=broadcast_callback,
-            has_clients_callback=has_clients_callback,
             disconnect_cb=self._controller.disconnect,
             reject_cb=self._controller.reject,
             config=config,
@@ -111,6 +110,7 @@ class NetworkManager:
             receiver=self._receiver,
             broadcast_callback=broadcast_callback,
             has_live_consumers_callback=has_live_consumers_callback,
+            enqueue_live_reconnect_callback=self._controller._enqueue_live_reconnect,
             stop_flag=stop_flag,
             config=config,
         )
@@ -175,7 +175,11 @@ class NetworkManager:
         Returns:
             None
         """
-        self._controller.disconnect(target, initiated_by_self)
+        self._controller.disconnect(
+            target,
+            initiated_by_self,
+            origin=(ConnectionOrigin.MANUAL if initiated_by_self else None),
+        )
 
     def disconnect_all(self) -> None:
         """
@@ -188,6 +192,7 @@ class NetworkManager:
             None
         """
         self._controller.disconnect_all()
+        self._router.finalize_pending_live_messages()
 
     def retunnel(self, target: str) -> None:
         """

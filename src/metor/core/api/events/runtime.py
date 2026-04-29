@@ -29,6 +29,18 @@ class InvalidPasswordEvent(IpcEvent):
     event_type: EventType = field(default=EventType.INVALID_PASSWORD, init=False)
 
 
+@register_event(EventType.LOCAL_AUTH_RATE_LIMITED)
+@dataclass
+class LocalAuthRateLimitedEvent(IpcEvent):
+    """Signals that local daemon auth is temporarily rate-limited."""
+
+    retry_after: int
+    event_type: EventType = field(
+        default=EventType.LOCAL_AUTH_RATE_LIMITED,
+        init=False,
+    )
+
+
 @register_event(EventType.DB_CORRUPTED)
 @dataclass
 class DatabaseCorruptedEvent(IpcEvent):
@@ -89,6 +101,18 @@ class DaemonOfflineEvent(IpcEvent):
     """Signals that no local daemon is running."""
 
     event_type: EventType = field(default=EventType.DAEMON_OFFLINE, init=False)
+
+
+@register_event(EventType.IPC_CLIENT_LIMIT_REACHED)
+@dataclass
+class IpcClientLimitReachedEvent(IpcEvent):
+    """Signals that the daemon rejected a new IPC session due to client saturation."""
+
+    max_clients: int
+    event_type: EventType = field(
+        default=EventType.IPC_CLIENT_LIMIT_REACHED,
+        init=False,
+    )
 
 
 @register_event(EventType.UNKNOWN_COMMAND)

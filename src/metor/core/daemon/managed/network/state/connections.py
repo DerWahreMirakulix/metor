@@ -44,6 +44,7 @@ class StateTrackerConnectionsMixin:
     _expired_pending_connections: Dict[str, float]
     _scheduled_auto_reconnects: Set[str]
     _live_reconnect_grace: Dict[str, float]
+    _local_recovery_opt_outs: Dict[str, float]
     _retunnel_in_progress: Set[str]
 
     def get_active_onions(self) -> List[str]:
@@ -252,6 +253,7 @@ class StateTrackerConnectionsMixin:
             self._outbound_attempts.discard(onion)
             self._outbound_attempt_origins.pop(onion, None)
             self._outbound_sockets.pop(onion, None)
+            self._recent_outbound_attempts.pop(onion, None)
             self._outbound_connected_origin_overrides.pop(onion, None)
 
     def bind_outbound_socket(self, onion: str, conn: socket.socket) -> None:
@@ -271,6 +273,47 @@ class StateTrackerConnectionsMixin:
             self._recent_outbound_attempts[onion] = (
                 time.time() + Constants.MUTUAL_CONNECT_RACE_WINDOW_SEC
             )
+
+    def clear_bound_outbound_socket(
+        self,
+        onion: str,
+        conn: Optional[socket.socket] = None,
+    ) -> None:
+        """
+        Removes one bound outbound socket while keeping the attempt bookkeeping intact.
+
+        Args:
+            onion (str): The peer onion identity.
+            conn (Optional[socket.socket]): Optional guard socket that must still match
+                the tracked outbound socket.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            current_conn: Optional[socket.socket] = self._outbound_sockets.get(onion)
+            if conn is not None and current_conn is not conn:
+                return
+
+            self._outbound_sockets.pop(onion, None)
+
+    def pop_outbound_socket(self, onion: str) -> Optional[socket.socket]:
+        """
+        Removes and returns the current outbound-attempt socket while clearing its bookkeeping.
+
+        Args:
+            onion (str): The peer onion identity.
+
+        Returns:
+            Optional[socket.socket]: The bound outbound socket, if present.
+        """
+        with self._lock:
+            conn: Optional[socket.socket] = self._outbound_sockets.pop(onion, None)
+            self._outbound_attempts.discard(onion)
+            self._outbound_attempt_origins.pop(onion, None)
+            self._recent_outbound_attempts.pop(onion, None)
+            self._outbound_connected_origin_overrides.pop(onion, None)
+            return conn
 
     def is_current_outbound_socket(self, onion: str, sock: socket.socket) -> bool:
         """
@@ -310,6 +353,7 @@ class StateTrackerConnectionsMixin:
             self._recent_outbound_attempts.pop(onion, None)
             self._scheduled_auto_reconnects.discard(onion)
             self._live_reconnect_grace.pop(onion, None)
+            self._local_recovery_opt_outs.pop(onion, None)
             self._pending_connection_reasons.pop(onion, None)
             self._pending_connection_origins.pop(onion, None)
             self._initial_buffers.pop(onion, None)
@@ -347,7 +391,20 @@ class StateTrackerConnectionsMixin:
         should_track: bool = True
         with self._lock:
             active_conn = self._connections.get(onion)
-            if active_conn is not None and active_conn is not conn:
+            allow_recovery_replacement: bool = (
+                onion in self._retunnel_in_progress
+                or origin
+                in {
+                    ConnectionOrigin.AUTO_RECONNECT,
+                    ConnectionOrigin.GRACE_RECONNECT,
+                    ConnectionOrigin.RETUNNEL,
+                }
+            )
+            if (
+                active_conn is not None
+                and active_conn is not conn
+                and not allow_recovery_replacement
+            ):
                 should_track = False
             else:
                 replaced_pending = self._pending_connections.get(onion)

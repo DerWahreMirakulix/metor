@@ -49,8 +49,8 @@ class CommandDef:
 class Help:
     """Static help generator utilizing a DRY data-driven command registry."""
 
-    DESC_COLUMN: int = 50
-    SUBCOMMAND_DESC_COLUMN: int = 50
+    DESC_COLUMN: int = 58
+    SUBCOMMAND_DESC_COLUMN: int = 58
 
     CLI_CATEGORIES: List[str] = [
         'Global Options',
@@ -146,14 +146,14 @@ class Help:
             description='Manage your address book.',
             category='Contact Management',
             subcommands=[
-                SubCommandDef('list', 'List saved contacts and discovered peers.'),
+                SubCommandDef('list', 'List saved and discovered peers.'),
                 SubCommandDef(
                     'add <alias> [onion]',
                     'Promote a discovered peer or add a new contact.',
                 ),
                 SubCommandDef(
                     'rm <onion|alias>',
-                    'Remove from disk (active peers may be anonymized instead).',
+                    'Anonymize (and demote) a saved or discovered peer.',
                 ),
                 SubCommandDef(
                     'rename <old> <new>', 'Rename a saved or discovered peer.'
@@ -203,6 +203,7 @@ class Help:
             subcommands=[
                 SubCommandDef('get <domain.key>', 'Retrieve a global setting.'),
                 SubCommandDef('set <domain.key> <val>', 'Update a global setting.'),
+                SubCommandDef('list', 'List all current global settings.'),
             ],
         ),
         'config': CommandDef(
@@ -217,6 +218,7 @@ class Help:
                 SubCommandDef(
                     'set <domain.key> <val>', 'Override a global setting locally.'
                 ),
+                SubCommandDef('list', 'List the effective settings for this profile.'),
                 SubCommandDef(
                     'sync', 'Wipe all profile overrides to restore global defaults.'
                 ),
@@ -303,14 +305,14 @@ class Help:
             description='Manage your address book in chat.',
             category='Contact Management',
             subcommands=[
-                SubCommandDef('list', 'Show saved contacts and discovered peers.'),
+                SubCommandDef('list', 'List saved and discovered peers.'),
                 SubCommandDef(
                     'add <alias> [onion]',
                     'Promote a discovered peer or add a new manual contact.',
                 ),
                 SubCommandDef(
                     'rm <onion|alias>',
-                    'Remove from disk (active peers may be anonymized instead).',
+                    'Anonymize (and demote) a saved or discovered peer.',
                 ),
                 SubCommandDef(
                     'rename <old> <new>',

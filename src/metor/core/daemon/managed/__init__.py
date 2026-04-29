@@ -3,6 +3,7 @@
 from metor.core.daemon.managed.factory import (
     CorruptedDaemonStorageError,
     InvalidDaemonPasswordError,
+    PlaintextLockedDaemonError,
     RuntimeStatusCallback,
     create_managed_daemon,
 )
@@ -13,6 +14,7 @@ __all__ = [
     'CorruptedDaemonStorageError',
     'DaemonStatus',
     'InvalidDaemonPasswordError',
+    'PlaintextLockedDaemonError',
     'RuntimeStatusCallback',
     'create_managed_daemon',
 ]

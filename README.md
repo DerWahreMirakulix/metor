@@ -33,6 +33,13 @@ Use this README as the landing page, then jump to the specialized documents belo
 - **Remote Capability (VPS / SSH):**
   Run the Metor daemon 24/7 on a secure remote server and securely connect your local laptop UI to it via an SSH tunnel forwarding the IPC port.
 
+## Supported Hosts
+
+- **Linux:** Fully supported. GitHub Releases publish a compiler-free runtime wheel bundle and the source install path uses the prebuilt `sqlcipher3-binary` wheel.
+- **Windows:** Fully supported. GitHub Releases publish a compiler-free runtime wheel bundle; source installs still build `sqlcipher3` from source.
+
+For Windows source installs from a checkout, make sure the Microsoft C++ Build Tools are available before running `pip install`.
+
 ## 🏗️ Architecture & API
 
 Metor strictly separates presentation (UI) from domain logic (Core/Data). Communication between the CLI and the background process occurs via rigidly defined **Data Transfer Objects (DTOs)**.
@@ -46,7 +53,7 @@ Recommended reading order:
 
 ### OPSEC & Security Concepts
 
-- **Data-at-Rest Encryption:** All local data (history, address book, queues) are stored in an SQLite database encrypted via `sqlcipher3`. Master keys are heavily derived using Argon2i and protected via NaCL SecretBoxes.
+- **Data-at-Rest Encryption:** All local data (history, address book, queues) are stored in an SQLite database encrypted via SQLCipher. Master keys are heavily derived using Argon2i and protected via NaCL SecretBoxes.
 - **Network Anti-DoS:** Incoming TCP streams (both Tor and local IPC) enforce strict stream framing and length limitations (`MAX_STREAM_BYTES`) to thwart Out-Of-Memory (OOM) and UTF-8 fragmentation attacks.
 - **Thread Safety:** Address book mutations and session state transitions are safeguarded by deterministic locks (`FileLock` across processes, `threading.Lock` in memory) preventing race conditions and database corruption.
 
@@ -54,7 +61,44 @@ Recommended reading order:
 
 For security reasons and to prevent supply-chain attacks, Metor **does not** bundle the Tor binary. You must install it from the official Tor Project sources.
 
-### 1. Clone the Repository
+Choose the install path that matches your role:
+
+- **End users:** Use the **Release Wheel Bundle** from GitHub Releases. This is the recommended install path for normal runtime use on Linux and Windows.
+- **Developers / contributors:** Use a **source checkout** and install Metor into your own Python environment, preferably with the editable developer install.
+
+The wheel bundle is a **release artifact**, not a normal repository file. A plain `git clone` does not contain `install.sh`, `install.cmd`, or the bundled wheelhouse. Those artifacts are produced by the release workflow for tagged GitHub Releases.
+
+### 1. Install Tor
+
+- **Windows (Manual Security Install):** Download the [Tor Expert Bundle](https://www.torproject.org/download/tor/). Extract it and either set `METOR_TOR_PATH=C:\path\to\tor.exe` in your environment or a local `.env` file, or copy `tor.exe` into `C:\Users\YourName\.metor\tor.exe`. If `METOR_TOR_PATH` is unset, Metor first tries `tor.exe` from `PATH` and then falls back to `.metor\tor.exe`.
+- **Linux (Debian/Ubuntu):** `sudo apt update && sudo apt install tor`
+- **Linux (Fedora):** `sudo dnf install tor`
+
+### 2. Install From The Release Wheel Bundle
+
+GitHub Releases publish one wheel bundle per supported host platform. Each archive contains the Metor wheel plus all Python runtime wheels needed for an offline install, including the SQLCipher backend.
+
+This path is intended for end users consuming an official release. If you cloned the repository directly, use the source checkout path below instead.
+
+1. Download the matching archive for your host from the latest GitHub Release.
+2. Extract the archive and enter the extracted folder.
+3. Run the included installer:
+
+```bash
+sh install.sh
+```
+
+On Windows, run `install.cmd` from the extracted bundle folder.
+
+The installer creates a local `.venv` inside the extracted bundle and installs Metor entirely from the bundled wheelhouse, including the pinned `pip` wheel. This path is the recommended runtime install for both Linux and Windows because it does not require a local C/C++ build toolchain or package index access during installation.
+
+This self-contained installer is intentionally local to the extracted bundle folder. If you want the old "global command on my chosen environment" behavior, use the source checkout path below or run `pip install --no-index --find-links wheelhouse metor` inside your own already activated venv or user-managed Python environment.
+
+### 3. Install From A Source Checkout
+
+Python 3.11 or higher is required.
+
+This is the normal path for developers, contributors, and advanced users who want to choose their own Python environment instead of using the release bundle installer.
 
 ```bash
 # Clone the project to your local machine
@@ -63,16 +107,6 @@ git clone https://github.com/DerWahreMirakulix/metor.git
 # Enter the repository
 cd metor
 ```
-
-### 2. Install Tor
-
-- **Windows (Manual Security Install):** Download the [Tor Expert Bundle](https://www.torproject.org/download/tor/). Extract it and either set `METOR_TOR_PATH=C:\path\to\tor.exe` in your environment or a local `.env` file, or copy `tor.exe` into `C:\Users\YourName\.metor\tor.exe`. If `METOR_TOR_PATH` is unset, Metor first tries `tor.exe` from `PATH` and then falls back to `.metor\tor.exe`.
-- **Linux (Debian/Ubuntu):** `sudo apt update && sudo apt install tor`
-- **Linux (Fedora):** `sudo dnf install tor`
-
-### 3. Install the Python Package
-
-Python 3.11 or higher is required.
 
 ```bash
 # Recommended security-conscious runtime installation
@@ -87,6 +121,10 @@ pip install --no-deps --no-build-isolation -e .
 ```
 
 The lock files pin the full tested dependency set so normal resolver drift does not silently pull newer transitive packages.
+
+Unlike the release bundle installer, this path installs into whichever Python environment you chose before running `pip install`.
+
+On Linux the source install path selects the prebuilt `sqlcipher3-binary` wheel. On Windows it selects `sqlcipher3`, which builds the bundled SQLCipher sources locally. If you maintain your own SQLCipher toolchain, Metor also accepts `pysqlcipher3` as a manual fallback backend.
 
 ## 💻 Usage & Commands
 
@@ -115,7 +153,7 @@ Use `metor unlock` only to unlock a daemon that was explicitly started in locked
 metor unlock
 ```
 
-If `daemon.require_local_auth` is enabled for an encrypted profile, every CLI command and every chat window authenticates on its own persistent IPC session. Chat and one-shot CLI commands prompt automatically on the same socket that will execute the real command.
+Encrypted profiles enable `daemon.require_local_auth` by default, so every CLI command and every chat window authenticates on its own persistent IPC session. Chat and one-shot CLI commands prompt automatically on the same socket that will execute the real command. Disable it only on trusted single-user hosts.
 
 ### 2. The Live Chat (Multiplexed UI)
 
@@ -135,9 +173,14 @@ Inside the Chat UI, you have access to the following slash commands:
 | `/switch [..\|<onion\|alias>]`  | Switches focus between active chats (use `..` to unfocus).           |
 | `/end [onion\|alias]`           | Terminates the connection to the specified peer.                     |
 | `/fallback [onion\|alias]`      | Forces unacknowledged live messages into the offline drop queue.     |
+| `/sessions`                     | Lists all active and pending sessions.                               |
 | `/retunnel [onion\|alias]`      | Forces a Tor circuit rotation (`NEWNYM`) and reconnects to the peer. |
+| `/inbox [onion\|alias]`         | Shows inbox counts or consumes unread messages for one peer.         |
+| `/clear`                        | Clears the current chat display.                                     |
 | `/contacts list`                | Displays the address book and temporary discovered peers.            |
 | `/contacts add <alias> [onion]` | Saves a temporary RAM peer permanently to disk.                      |
+| `/contacts rm <onion\|alias>`   | Removes a saved contact or demotes an active peer gracefully.        |
+| `/contacts rename <old> <new>`  | Renames a saved or discovered peer.                                  |
 | `/exit`                         | Closes the UI (the daemon remains active in the background).         |
 
 ### 3. Headless CLI Commands
@@ -186,10 +229,11 @@ Metor's configuration system uses a cascading architecture. You can define **glo
 
 ### Global Settings (`settings`)
 
-Values are persistently stored in `settings.json` and affect all profiles unless overridden locally.
+Values are global defaults. `ui.*` keys are stored in the local client `settings.json`, while `daemon.*` keys target the current daemon host and affect all profiles there unless overridden locally.
 
 - **Set a global value:** `metor settings set daemon.ephemeral_messages true`
 - **Get a global value:** `metor settings get daemon.ephemeral_messages`
+- **List current global values:** `metor settings list`
 
 ### Profile Overrides (`config`)
 
@@ -197,6 +241,7 @@ Values are stored in the active profile's `config.json` and override the global 
 
 - **Set a profile override:** `metor -p my_profile config set daemon.tor_timeout 20`
 - **Get the active value:** `metor -p my_profile config get daemon.tor_timeout` (Returns the local override, or falls back to global if none exists).
+- **List the effective profile values:** `metor -p my_profile config list`
 - **Sync to global:** `metor -p my_profile config sync` (Wipes all local overrides, restoring global defaults for this profile).
 
 ### Advanced Remote Routing
@@ -204,7 +249,9 @@ Values are stored in the active profile's `config.json` and override the global 
 When interacting with a remote daemon over SSH, Metor's CLI acts as a smart router to maintain strict domain boundaries:
 
 - **UI Settings (`ui.*`):** Commands like `metor config set ui.chat_limit 100` are stored **locally** on your laptop. The remote server never sees them, keeping its configuration clean.
+- **Global UI Settings (`metor settings ui.*`):** Commands like `metor settings set ui.prompt_sign '>'` still remain **local** to your client machine, even when the active profile is remote.
 - **Daemon Settings (`daemon.*`):** Commands like `metor config set daemon.tor_timeout 30` are securely transmitted via IPC and stored directly on the **remote server's** disk.
+- **Global Daemon Settings (`metor settings daemon.*`):** Commands like `metor settings set daemon.allow_drops false` are applied on the targeted daemon host, not on the local laptop, so global daemon defaults stay host-correct.
 - **Config Sync:** Running `metor config sync` intelligently wipes UI overrides on your local machine _and_ instructs the remote daemon to wipe its overrides simultaneously.
 
 **Common Security-Relevant Keys:**
@@ -212,7 +259,7 @@ When interacting with a remote daemon over SSH, Metor's CLI acts as a smart rout
 - `daemon.ephemeral_messages` (bool): If true, consumed drop-message payloads are shredded from disk instead of being retained in visible message history.
 - `daemon.enable_runtime_db_mirror` (bool): If true, a plaintext runtime mirror of the encrypted database is written to disk for debugging and external inspection tools. Plaintext profiles force this off because the primary database is already plaintext.
 - `daemon.auto_accept_contacts` (bool): If true, saved contacts may be auto-accepted for inbound live sessions.
-- `daemon.require_local_auth` (bool): Requires each new local encrypted IPC session to authenticate before it can issue runtime commands. Plaintext profiles force this off because no password exists to validate.
+- `daemon.require_local_auth` (bool): Requires each new local IPC session to authenticate before it can issue runtime commands. Defaults to `true` and remains configurable per profile or host policy.
 - `daemon.allow_drops` (bool): Globally allows or blocks the reception of asynchronous offline messages.
 - `daemon.max_unseen_live_msgs` (int): Caps unread crash-safe live backlog per peer. `0` disables headless live backlog, `-1` removes the limit.
 - `ui.inbox_notification_delay` (float): Delays and aggregates unread-message notifications for unfocused peers on this local UI.
@@ -221,6 +268,8 @@ When interacting with a remote daemon over SSH, Metor's CLI acts as a smart rout
 The full list, including all network and transport tuning knobs, is documented in [SETTINGS.md](docs/SETTINGS.md).
 
 ## 🧰 Development Workflow
+
+The release bundle workflow is separate from the normal developer workflow. Day-to-day development should happen from a source checkout with the editable install above. The wheel bundle is mainly for tagged releases and end-user distribution.
 
 Generated documentation is part of the project maintenance pipeline.
 

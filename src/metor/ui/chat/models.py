@@ -16,6 +16,15 @@ class ChatMessageType(str, Enum):
     REMOTE = 'remote'
 
 
+class ChatTransportState(str, Enum):
+    """Enumeration for the current prompt/send transport state of one peer."""
+
+    LIVE = 'live'
+    SWITCHING = 'switching'
+    RECONNECTING = 'reconnecting'
+    DROP = 'drop'
+
+
 @dataclass
 class ChatLine:
     """Strongly typed data object representing a single rendered line in the UI."""
@@ -31,3 +40,13 @@ class ChatLine:
     msg_id: Optional[str] = None
     is_drop: bool = False
     is_failed: bool = False
+
+
+@dataclass
+class BufferedOutgoingMessage:
+    """Typed container for one locally buffered outgoing self-message."""
+
+    alias: str
+    text: str
+    msg_id: str
+    onion: Optional[str] = None

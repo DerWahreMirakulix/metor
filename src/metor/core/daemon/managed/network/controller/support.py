@@ -7,19 +7,28 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 
 from metor.core import TorManager
 from metor.core.api import (
+    AutoReconnectScheduledEvent,
     ConnectionActor,
     ConnectionOrigin,
     EventType,
+    FallbackSuccessEvent,
     IpcEvent,
     JsonValue,
+    RuntimeErrorCode,
     create_event,
+    get_current_request_id,
 )
 from metor.core.daemon.managed.crypto import Crypto
 from metor.data import (
     ContactManager,
     HistoryActor,
+    HistoryEvent,
     HistoryManager,
+    HistoryReasonCode,
     MessageManager,
+    MessageDirection,
+    MessageStatus,
+    MessageType,
     SettingKey,
 )
 from metor.utils import Constants
@@ -30,7 +39,7 @@ from metor.core.daemon.managed.network.state import StateTracker
 
 if TYPE_CHECKING:
     from metor.core.daemon.managed.network.receiver import StreamReceiver
-    from metor.data.profile.config import Config
+    from metor.data.profile import Config
 
 
 class ConnectionControllerSupportMixin:
@@ -94,8 +103,58 @@ class ConnectionControllerSupportMixin:
             )
         )
         params: Dict[str, JsonValue] = {'alias': alias, 'onion': onion}
+        params['error_code'] = RuntimeErrorCode.RETUNNEL_RECONNECT_FAILED
         if error:
-            params['error'] = error
+            params['error_detail'] = error
+        self._broadcast(create_event(EventType.RETUNNEL_FAILED, params))
+
+        self._mark_live_reconnect_grace(onion)
+
+        if self._get_live_reconnect_delay() > 0:
+            self._state.mark_scheduled_auto_reconnect(onion)
+            was_scheduled: bool = self._enqueue_live_reconnect(onion)
+            if was_scheduled:
+                self._hm.log_event(
+                    HistoryEvent.AUTO_RECONNECT_SCHEDULED,
+                    onion,
+                    actor=HistoryActor.SYSTEM,
+                    trigger=ConnectionOrigin.AUTO_RECONNECT,
+                )
+                self._broadcast(
+                    AutoReconnectScheduledEvent(
+                        alias=alias,
+                        onion=onion,
+                        origin=ConnectionOrigin.AUTO_RECONNECT,
+                        actor=ConnectionActor.SYSTEM,
+                    )
+                )
+            return
+
+        self._convert_unacked_live_to_drops(alias, onion)
+
+    def _broadcast_retunnel_preserved_failure(
+        self,
+        alias: str,
+        onion: str,
+        error: Optional[str] = None,
+    ) -> None:
+        """
+        Clears retunnel state and emits failure while keeping the old live session.
+
+        Args:
+            alias (str): The peer alias.
+            onion (str): The peer onion identity.
+            error (Optional[str]): Optional failure detail.
+
+        Returns:
+            None
+        """
+        self._state.mark_live_reconnect_grace(onion, 0.0)
+        self._state.clear_retunnel_flow(onion)
+        params: Dict[str, JsonValue] = {'alias': alias, 'onion': onion}
+        params['error_code'] = RuntimeErrorCode.RETUNNEL_RECONNECT_FAILED
+        if error:
+            params['error_detail'] = error
         self._broadcast(create_event(EventType.RETUNNEL_FAILED, params))
 
     def _discard_outbound_attempt_if_idle(self, onion: str) -> None:
@@ -126,6 +185,18 @@ class ConnectionControllerSupportMixin:
         """
         reconnect_delay_sec: int = self._config.get_int(SettingKey.LIVE_RECONNECT_DELAY)
         return float(max(0, reconnect_delay_sec))
+
+    def _enqueue_live_reconnect(self, onion: str) -> bool:
+        """
+        Adds one peer to the reconnect queue without duplicating entries.
+
+        Args:
+            onion (str): The peer onion identity.
+
+        Returns:
+            bool: True if the peer was newly queued.
+        """
+        raise NotImplementedError
 
     def _allows_headless_live_backlog(self) -> bool:
         """
@@ -165,6 +236,78 @@ class ConnectionControllerSupportMixin:
             SettingKey.LIVE_RECONNECT_GRACE_TIMEOUT
         )
         self._state.mark_live_reconnect_grace(onion, float(grace_timeout_sec))
+
+    def _convert_unacked_live_to_drops(
+        self,
+        alias: str,
+        onion: str,
+        emit_event: bool = True,
+    ) -> bool:
+        """
+        Converts retained unacknowledged live messages into pending drops.
+
+        Args:
+            alias (str): The peer alias.
+            onion (str): The peer onion identity.
+            emit_event (bool): Whether to emit a fallback-success event.
+
+        Returns:
+            bool: True if at least one unacknowledged live message was converted.
+        """
+        convert_unacked_messages_to_drop = getattr(
+            getattr(self, '_router', None),
+            'convert_unacked_messages_to_drop',
+            None,
+        )
+        if callable(convert_unacked_messages_to_drop):
+            converted = convert_unacked_messages_to_drop(
+                alias,
+                onion,
+                request_id=get_current_request_id(),
+                emit_event=emit_event,
+                history_actor=HistoryActor.SYSTEM,
+                history_reason_code=(HistoryReasonCode.UNACKED_LIVE_CONVERTED_TO_DROP),
+            )
+            return bool(converted)
+
+        unacked = self._state.pop_unacked_messages(onion)
+        get_pending_live_outbox = getattr(self._mm, 'get_pending_live_outbox', None)
+        if callable(get_pending_live_outbox):
+            for _, _, payload, msg_id, timestamp in get_pending_live_outbox(onion):
+                unacked.setdefault(msg_id, (payload, timestamp))
+        if not unacked:
+            return False
+
+        for msg_id, pending_msg in unacked.items():
+            content, timestamp = pending_msg
+            self._mm.queue_message(
+                contact_onion=onion,
+                direction=MessageDirection.OUT,
+                msg_type=MessageType.DROP_TEXT,
+                payload=content,
+                status=MessageStatus.PENDING,
+                msg_id=msg_id,
+                timestamp=timestamp,
+            )
+            self._hm.log_event(
+                HistoryEvent.QUEUED,
+                onion,
+                actor=HistoryActor.SYSTEM,
+                detail_code=HistoryReasonCode.UNACKED_LIVE_CONVERTED_TO_DROP,
+            )
+
+        if emit_event:
+            self._broadcast(
+                FallbackSuccessEvent(
+                    alias=alias,
+                    onion=onion,
+                    count=len(unacked),
+                    msg_ids=list(unacked.keys()),
+                    request_id=get_current_request_id(),
+                )
+            )
+
+        return True
 
     @staticmethod
     def _get_local_history_actor(origin: ConnectionOrigin) -> HistoryActor:
@@ -229,7 +372,7 @@ class ConnectionControllerSupportMixin:
 
     def _get_retunnel_reconnect_delay(self) -> float:
         """
-        Returns the configured reconnect delay between retunnel teardown and retry.
+        Returns the configured delay between delayed retunnel recovery attempts.
 
         Args:
             None
@@ -253,8 +396,7 @@ class ConnectionControllerSupportMixin:
 
     def _sleep_retunnel_reconnect_delay(self) -> None:
         """
-        Waits briefly before reconnecting a live retunnel to let the old session
-        teardown propagate to the remote peer.
+        Waits briefly before a delayed retunnel recovery retry.
 
         Args:
             None

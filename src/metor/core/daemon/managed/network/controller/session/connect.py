@@ -11,12 +11,8 @@ from metor.core.api import (
     ConnectionOrigin,
     ConnectionReasonCode,
     ConnectionRetryEvent,
-    DisconnectedEvent,
-    EventType,
     MaxConnectionsReachedEvent,
-    create_event,
 )
-from metor.core.daemon.managed.models import TorCommand
 from metor.data import (
     HistoryActor,
     HistoryEvent,
@@ -30,6 +26,25 @@ from metor.core.daemon.managed.network.controller.session.protocols import (
     ConnectControllerProtocol,
 )
 from metor.core.daemon.managed.network.stream import TcpStreamReader
+
+
+def _close_socket(conn: Optional[socket.socket]) -> None:
+    """
+    Closes one failed outbound socket quietly.
+
+    Args:
+        conn (Optional[socket.socket]): The socket to close.
+
+    Returns:
+        None
+    """
+    if conn is None:
+        return
+
+    try:
+        conn.close()
+    except OSError:
+        pass
 
 
 def connect_to(
@@ -54,11 +69,17 @@ def connect_to(
     if not resolved or resolved[1] == controller._tm.onion:
         return
     alias, onion = resolved
+    retunnel_reconnect: bool = (
+        origin is ConnectionOrigin.RETUNNEL and controller._state.is_retunneling(onion)
+    )
+
+    if origin is ConnectionOrigin.MANUAL:
+        controller._state.clear_local_recovery_opt_out(onion)
 
     if origin is not ConnectionOrigin.AUTO_RECONNECT:
         controller._state.clear_scheduled_auto_reconnect(onion)
 
-    if controller._state.get_connection(onion):
+    if controller._state.get_connection(onion) and not retunnel_reconnect:
         return
 
     implicit_accept: bool = False
@@ -80,7 +101,8 @@ def connect_to(
         return
 
     max_conn: int = controller._config.get_int(SettingKey.MAX_CONCURRENT_CONNECTIONS)
-    if len(controller._state.get_active_onions()) >= max_conn:
+    tracked_socket_count: int = controller._state.get_tracked_live_socket_count()
+    if tracked_socket_count >= max_conn and not retunnel_reconnect:
         controller._state.discard_outbound_attempt(onion)
         if origin is ConnectionOrigin.AUTO_RECONNECT:
             controller._state.clear_scheduled_auto_reconnect(onion)
@@ -108,8 +130,13 @@ def connect_to(
         for retry_index in range(max_retries + 1):
             if controller._stop_flag.is_set():
                 break
+            if not retunnel_reconnect and controller._state.is_connected_or_pending(
+                onion
+            ):
+                return
+            conn: Optional[socket.socket] = None
             try:
-                conn: socket.socket = controller._tm.connect(onion)
+                conn = controller._tm.connect(onion)
                 controller._state.bind_outbound_socket(onion, conn)
                 conn.settimeout(controller._config.get_float(SettingKey.TOR_TIMEOUT))
 
@@ -126,10 +153,17 @@ def connect_to(
                     conn.close()
                     raise ConnectionError('Failed to sign live handshake challenge.')
 
+                local_onion: Optional[str] = controller._tm.onion
+                if not local_onion:
+                    conn.close()
+                    raise ConnectionError('Local onion unavailable for live handshake.')
+
                 conn.sendall(
-                    f'{TorCommand.AUTH.value} {controller._tm.onion} {signature}\n'.encode(
-                        'utf-8'
-                    )
+                    HandshakeProtocol.build_auth_line(
+                        local_onion,
+                        signature,
+                        origin=origin,
+                    ).encode('utf-8')
                 )
 
                 conn.settimeout(
@@ -151,8 +185,18 @@ def connect_to(
                         connection_origin=origin,
                     )
                 handshake_success = True
+                conn = None
                 return
             except Exception as exc:
+                _close_socket(conn)
+                if conn is not None:
+                    controller._state.clear_bound_outbound_socket(onion, conn)
+                if not controller._state.has_outbound_attempt(onion):
+                    return
+                if not retunnel_reconnect and controller._state.is_connected_or_pending(
+                    onion
+                ):
+                    return
                 last_error = str(exc).strip() or exc.__class__.__name__
                 if retry_index < max_retries:
                     controller._broadcast(
@@ -177,29 +221,22 @@ def connect_to(
                         detail_code=HistoryReasonCode.RETRY_EXHAUSTED,
                     )
                     if controller._state.is_retunneling(onion):
-                        controller._state.clear_retunnel_flow(onion)
-                        controller._broadcast(
-                            DisconnectedEvent(
-                                alias=alias,
-                                onion=onion,
-                                actor=ConnectionActor.SYSTEM,
-                                origin=ConnectionOrigin.RETUNNEL,
-                                reason_code=ConnectionReasonCode.RETRY_EXHAUSTED,
+                        if controller._state.is_live_active(onion):
+                            controller._broadcast_retunnel_preserved_failure(
+                                alias,
+                                onion,
+                                failure_reason,
                             )
-                        )
-                        controller._broadcast(
-                            create_event(
-                                EventType.RETUNNEL_FAILED,
-                                {
-                                    'alias': alias,
-                                    'onion': onion,
-                                    'error': failure_reason,
-                                },
+                        else:
+                            controller._broadcast_retunnel_failure(
+                                alias,
+                                onion,
+                                failure_reason,
                             )
-                        )
                     else:
                         if origin is ConnectionOrigin.AUTO_RECONNECT:
                             controller._state.clear_scheduled_auto_reconnect(onion)
+                            controller._convert_unacked_live_to_drops(alias, onion)
                         controller._state.discard_retunnel_reconnect(onion)
                         controller._broadcast(
                             ConnectionFailedEvent(

@@ -4,10 +4,27 @@ Module defining application-wide constants to adhere to the DRY (Don't Repeat Yo
 
 import os
 from pathlib import Path
-from dotenv import load_dotenv
 
-# Load environment variables from a local .env file if present
-load_dotenv()
+
+def _load_local_dotenv() -> None:
+    """
+    Loads environment variables from a local `.env` file when python-dotenv exists.
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+
+    load_dotenv()
+
+
+_load_local_dotenv()
 
 
 class Constants:
@@ -64,6 +81,9 @@ class Constants:
 
     # Thread Constraints & Timing
     THREAD_POLL_TIMEOUT: float = 1.0  # Timeout for non-blocking accept/recv loops
+    LISTENER_READY_TIMEOUT: float = (
+        5.0  # Startup wait for inbound listener bind/listen readiness
+    )
     WORKER_SLEEP_SEC: float = 1.0  # Standard background worker tick rate
     WORKER_SLEEP_SLOW_SEC: float = 2.0  # Slower background worker tick rate
     LOCK_SLEEP_SEC: float = 0.05  # Sleep interval for FileLock spinlocks

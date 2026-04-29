@@ -36,13 +36,21 @@ class DaemonRuntime:
     session_auth: Optional[SessionAuthContext]
 
 
-def build_runtime(pm: ProfileManager, password: Optional[str]) -> DaemonRuntime:
+def build_runtime(
+    pm: ProfileManager,
+    password: Optional[str],
+    *,
+    enable_session_auth: bool,
+    session_auth_password: Optional[str] = None,
+) -> DaemonRuntime:
     """
     Builds the authenticated runtime objects required for a full daemon startup.
 
     Args:
         pm (ProfileManager): The active profile manager.
         password (Optional[str]): The master password, if the profile uses encrypted storage.
+        enable_session_auth (bool): Whether the current daemon runtime should require per-session auth.
+        session_auth_password (Optional[str]): Optional plaintext-profile session-auth password.
 
     Returns:
         DaemonRuntime: The authenticated runtime bundle.
@@ -57,10 +65,14 @@ def build_runtime(pm: ProfileManager, password: Optional[str]) -> DaemonRuntime:
         if not password:
             raise InvalidMasterPasswordError()
         verify_master_password(km)
-        session_auth = create_session_auth_context(
-            password,
-            km.get_or_create_password_salt(),
+
+    if enable_session_auth:
+        auth_password: Optional[str] = (
+            password if pm.uses_encrypted_storage() else session_auth_password
         )
+        if not auth_password:
+            raise InvalidMasterPasswordError()
+        session_auth = create_session_auth_context(auth_password)
 
     try:
         cm = ContactManager(pm, password)

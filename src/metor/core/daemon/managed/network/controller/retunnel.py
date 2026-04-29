@@ -10,6 +10,7 @@ from metor.core.api import (
     ConnectionRetryEvent,
     EventType,
     PeerNotFoundEvent,
+    RuntimeErrorCode,
     RetunnelInitiatedEvent,
     create_event,
 )
@@ -145,7 +146,7 @@ class ConnectionControllerRetunnelMixin(ConnectionControllerSupportMixin):
 
     def retunnel(self, target: str) -> None:
         """
-        Forces a Tor circuit rotation and reconnects to the target.
+        Forces a Tor circuit rotation and replaces the live route after safe teardown.
 
         Args:
             target (str): The target alias or onion address.
@@ -166,7 +167,7 @@ class ConnectionControllerRetunnelMixin(ConnectionControllerSupportMixin):
                     {
                         'alias': alias,
                         'onion': onion,
-                        'error': 'No active connection to retunnel',
+                        'error_code': RuntimeErrorCode.NO_ACTIVE_CONNECTION_TO_RETUNNEL,
                     },
                 )
             )
@@ -189,6 +190,7 @@ class ConnectionControllerRetunnelMixin(ConnectionControllerSupportMixin):
             return
 
         self._state.mark_retunnel_started(onion)
+        self._state.mark_retunnel_reconnect(onion)
         self.disconnect(
             onion,
             initiated_by_self=True,
@@ -197,6 +199,10 @@ class ConnectionControllerRetunnelMixin(ConnectionControllerSupportMixin):
         )
         self._mark_live_reconnect_grace(onion)
         self._sleep_retunnel_reconnect_delay()
-
-        self._state.mark_retunnel_reconnect(onion)
+        if self._stop_flag.is_set():
+            return
+        if not self._state.is_retunneling(onion):
+            return
+        if self._state.is_connected_or_pending(onion):
+            return
         self.connect_to(onion, origin=ConnectionOrigin.RETUNNEL)

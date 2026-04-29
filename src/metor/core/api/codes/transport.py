@@ -26,6 +26,7 @@ class ConnectionActor(str, Enum):
 class ConnectionReasonCode(str, Enum):
     """Enumeration of machine-readable live lifecycle subreasons shared across the IPC boundary."""
 
+    PEER_ENDED_SESSION = 'peer_ended_session'
     RETRY_EXHAUSTED = 'retry_exhausted'
     MAX_CONNECTIONS_REACHED = 'max_connections_reached'
     RETUNNEL_PENDING_CONNECTION_MISSING = 'retunnel_pending_connection_missing'

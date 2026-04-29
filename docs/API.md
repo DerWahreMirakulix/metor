@@ -16,6 +16,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 
 - [AcceptCommand](#acceptcommand)
 - [AddContactCommand](#addcontactcommand)
+- [AddProfileCommand](#addprofilecommand)
 - [AuthenticateSessionCommand](#authenticatesessioncommand)
 - [ClearContactsCommand](#clearcontactscommand)
 - [ClearHistoryCommand](#clearhistorycommand)
@@ -27,6 +28,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [GenerateAddressCommand](#generateaddresscommand)
 - [GetAddressCommand](#getaddresscommand)
 - [GetConfigCommand](#getconfigcommand)
+- [GetConfigListCommand](#getconfiglistcommand)
 - [GetConnectionsCommand](#getconnectionscommand)
 - [GetContactsListCommand](#getcontactslistcommand)
 - [GetHistoryCommand](#gethistorycommand)
@@ -34,17 +36,22 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [GetMessagesCommand](#getmessagescommand)
 - [GetRawHistoryCommand](#getrawhistorycommand)
 - [GetSettingCommand](#getsettingcommand)
+- [GetSettingsListCommand](#getsettingslistcommand)
 - [InitCommand](#initcommand)
 - [MarkReadCommand](#markreadcommand)
+- [MigrateProfileSecurityCommand](#migrateprofilesecuritycommand)
 - [MsgCommand](#msgcommand)
 - [RegisterLiveConsumerCommand](#registerliveconsumercommand)
 - [RejectCommand](#rejectcommand)
 - [RemoveContactCommand](#removecontactcommand)
+- [RemoveProfileCommand](#removeprofilecommand)
 - [RenameContactCommand](#renamecontactcommand)
+- [RenameProfileCommand](#renameprofilecommand)
 - [RetunnelCommand](#retunnelcommand)
 - [SelfDestructCommand](#selfdestructcommand)
 - [SendDropCommand](#senddropcommand)
 - [SetConfigCommand](#setconfigcommand)
+- [SetDefaultProfileCommand](#setdefaultprofilecommand)
 - [SetSettingCommand](#setsettingcommand)
 - [SwitchCommand](#switchcommand)
 - [SyncConfigCommand](#syncconfigcommand)
@@ -63,11 +70,13 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [AliasSameEvent](#aliassameevent)
 - [AlreadyUnlockedEvent](#alreadyunlockedevent)
 - [AuthRequiredEvent](#authrequiredevent)
+- [AutoFallbackQueuedEvent](#autofallbackqueuedevent)
 - [AutoReconnectScheduledEvent](#autoreconnectscheduledevent)
 - [CannotConnectSelfEvent](#cannotconnectselfevent)
 - [CannotDropSelfEvent](#cannotdropselfevent)
 - [CannotSwitchSelfEvent](#cannotswitchselfevent)
 - [ConfigDataEvent](#configdataevent)
+- [ConfigListDataEvent](#configlistdataevent)
 - [ConfigSyncedEvent](#configsyncedevent)
 - [ConfigUpdateFailedEvent](#configupdatefailedevent)
 - [ConfigUpdatedEvent](#configupdatedevent)
@@ -115,6 +124,8 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [InvalidPasswordEvent](#invalidpasswordevent)
 - [InvalidSettingKeyEvent](#invalidsettingkeyevent)
 - [InvalidTargetEvent](#invalidtargetevent)
+- [IpcClientLimitReachedEvent](#ipcclientlimitreachedevent)
+- [LocalAuthRateLimitedEvent](#localauthratelimitedevent)
 - [MaxConnectionsReachedEvent](#maxconnectionsreachedevent)
 - [MessagesClearFailedEvent](#messagesclearfailedevent)
 - [MessagesClearedEvent](#messagesclearedevent)
@@ -133,6 +144,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [PeerPromotedEvent](#peerpromotedevent)
 - [PeerRemovedEvent](#peerremovedevent)
 - [PendingConnectionExpiredEvent](#pendingconnectionexpiredevent)
+- [ProfileOperationResultEvent](#profileoperationresultevent)
 - [ProfilesDataEvent](#profilesdataevent)
 - [RemoteMsgEvent](#remotemsgevent)
 - [RenameSuccessEvent](#renamesuccessevent)
@@ -145,6 +157,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [SettingTypeErrorEvent](#settingtypeerrorevent)
 - [SettingUpdateFailedEvent](#settingupdatefailedevent)
 - [SettingUpdatedEvent](#settingupdatedevent)
+- [SettingsListDataEvent](#settingslistdataevent)
 - [SwitchSuccessEvent](#switchsuccessevent)
 - [TorKeyDecryptFailedEvent](#torkeydecryptfailedevent)
 - [TorKeyWriteFailedEvent](#torkeywritefailedevent)
@@ -159,9 +172,10 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 
 Accepts a pending live connection.
 
-| Field    | Type  | Default  |
-| -------- | ----- | -------- |
-| `target` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `target`     | `str`              | Required |
 
 **Wire Value:** `accept`
 
@@ -180,10 +194,11 @@ Accepts a pending live connection.
 
 Adds a new contact or promotes a discovered peer.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `add_contact`
 
@@ -198,13 +213,39 @@ Adds a new contact or promotes a discovered peer.
 
 ---
 
+### `AddProfileCommand`
+
+Requests creation of one local or remote profile entry.
+
+| Field           | Type               | Default     |
+| --------------- | ------------------ | ----------- |
+| `request_id`    | `Union[str, None]` | `None`      |
+| `name`          | `str`              | Required    |
+| `is_remote`     | `bool`             | `False`     |
+| `port`          | `Union[int, None]` | `None`      |
+| `security_mode` | `str`              | `encrypted` |
+
+**Wire Value:** `add_profile`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "add_profile",
+  "name": "string"
+}
+```
+
+---
+
 ### `AuthenticateSessionCommand`
 
 Authenticates the current IPC session using one daemon-issued proof challenge.
 
-| Field   | Type  | Default  |
-| ------- | ----- | -------- |
-| `proof` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `proof`      | `str`              | Required |
 
 **Wire Value:** `authenticate_session`
 
@@ -223,7 +264,9 @@ Authenticates the current IPC session using one daemon-issued proof challenge.
 
 Clears the complete address book.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `clear_contacts`
 
@@ -241,9 +284,10 @@ _No additional payload parameters._
 
 Clears persisted history rows.
 
-| Field    | Type               | Default |
-| -------- | ------------------ | ------- |
-| `target` | `Union[str, None]` | `None`  |
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `target`     | `Union[str, None]` | `None`  |
 
 **Wire Value:** `clear_history`
 
@@ -263,6 +307,7 @@ Clears stored message history.
 
 | Field               | Type               | Default |
 | ------------------- | ------------------ | ------- |
+| `request_id`        | `Union[str, None]` | `None`  |
 | `target`            | `Union[str, None]` | `None`  |
 | `non_contacts_only` | `bool`             | `False` |
 
@@ -282,7 +327,9 @@ Clears stored message history.
 
 Requests a full profile-database wipe.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `clear_profile_db`
 
@@ -300,9 +347,10 @@ _No additional payload parameters._
 
 Requests a live connection to a target peer.
 
-| Field    | Type  | Default  |
-| -------- | ----- | -------- |
-| `target` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `target`     | `str`              | Required |
 
 **Wire Value:** `connect`
 
@@ -321,9 +369,10 @@ Requests a live connection to a target peer.
 
 Requests disconnection from an active peer.
 
-| Field    | Type  | Default  |
-| -------- | ----- | -------- |
-| `target` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `target`     | `str`              | Required |
 
 **Wire Value:** `disconnect`
 
@@ -342,9 +391,10 @@ Requests disconnection from an active peer.
 
 Forces pending live messages into the drop queue.
 
-| Field    | Type  | Default  |
-| -------- | ----- | -------- |
-| `target` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `target`     | `str`              | Required |
 
 **Wire Value:** `fallback`
 
@@ -363,7 +413,9 @@ Forces pending live messages into the drop queue.
 
 Requests generation of a new onion address.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `generate_address`
 
@@ -381,7 +433,9 @@ _No additional payload parameters._
 
 Requests the current onion address.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `get_address`
 
@@ -397,11 +451,16 @@ _No additional payload parameters._
 
 ### `GetConfigCommand`
 
-Requests a profile-specific configuration value.
+Requests one effective profile config value.
 
-| Field         | Type  | Default  |
-| ------------- | ----- | -------- |
-| `setting_key` | `str` | Required |
+Attributes:
+setting_key (str): The fully-qualified config key to fetch.
+command_type (CommandType): The stable IPC routing code.
+
+| Field         | Type               | Default  |
+| ------------- | ------------------ | -------- |
+| `request_id`  | `Union[str, None]` | `None`   |
+| `setting_key` | `str`              | Required |
 
 **Wire Value:** `get_config`
 
@@ -416,13 +475,37 @@ Requests a profile-specific configuration value.
 
 ---
 
+### `GetConfigListCommand`
+
+Requests the daemon-side effective profile-config snapshot.
+
+Attributes:
+command_type (CommandType): The stable IPC routing code.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+
+**Wire Value:** `get_config_list`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "get_config_list"
+}
+```
+
+---
+
 ### `GetConnectionsCommand`
 
 Requests the current connection state.
 
-| Field       | Type   | Default |
-| ----------- | ------ | ------- |
-| `is_header` | `bool` | `False` |
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `is_header`  | `bool`             | `False` |
 
 **Wire Value:** `get_connections`
 
@@ -440,9 +523,10 @@ Requests the current connection state.
 
 Requests the structured address book.
 
-| Field       | Type   | Default |
-| ----------- | ------ | ------- |
-| `chat_mode` | `bool` | `False` |
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `chat_mode`  | `bool`             | `False` |
 
 **Wire Value:** `get_contacts_list`
 
@@ -460,10 +544,11 @@ Requests the structured address book.
 
 Requests projected user-facing history summary.
 
-| Field    | Type               | Default |
-| -------- | ------------------ | ------- |
-| `target` | `Union[str, None]` | `None`  |
-| `limit`  | `Union[int, None]` | `None`  |
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `target`     | `Union[str, None]` | `None`  |
+| `limit`      | `Union[int, None]` | `None`  |
 
 **Wire Value:** `get_history`
 
@@ -481,7 +566,9 @@ Requests projected user-facing history summary.
 
 Requests unread-message counters.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `get_inbox`
 
@@ -499,10 +586,11 @@ _No additional payload parameters._
 
 Requests stored message history.
 
-| Field    | Type               | Default |
-| -------- | ------------------ | ------- |
-| `target` | `Union[str, None]` | `None`  |
-| `limit`  | `Union[int, None]` | `None`  |
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `target`     | `Union[str, None]` | `None`  |
+| `limit`      | `Union[int, None]` | `None`  |
 
 **Wire Value:** `get_messages`
 
@@ -520,10 +608,11 @@ Requests stored message history.
 
 Requests the raw transport history ledger.
 
-| Field    | Type               | Default |
-| -------- | ------------------ | ------- |
-| `target` | `Union[str, None]` | `None`  |
-| `limit`  | `Union[int, None]` | `None`  |
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `target`     | `Union[str, None]` | `None`  |
+| `limit`      | `Union[int, None]` | `None`  |
 
 **Wire Value:** `get_raw_history`
 
@@ -539,11 +628,16 @@ Requests the raw transport history ledger.
 
 ### `GetSettingCommand`
 
-Requests a global setting value.
+Requests one global settings value.
 
-| Field         | Type  | Default  |
-| ------------- | ----- | -------- |
-| `setting_key` | `str` | Required |
+Attributes:
+setting_key (str): The fully-qualified settings key to fetch.
+command_type (CommandType): The stable IPC routing code.
+
+| Field         | Type               | Default  |
+| ------------- | ------------------ | -------- |
+| `request_id`  | `Union[str, None]` | `None`   |
+| `setting_key` | `str`              | Required |
 
 **Wire Value:** `get_setting`
 
@@ -558,11 +652,36 @@ Requests a global setting value.
 
 ---
 
+### `GetSettingsListCommand`
+
+Requests the daemon-side global settings snapshot.
+
+Attributes:
+command_type (CommandType): The stable IPC routing code.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+
+**Wire Value:** `get_settings_list`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "get_settings_list"
+}
+```
+
+---
+
 ### `InitCommand`
 
 Requests daemon-session initialization.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `init`
 
@@ -580,9 +699,10 @@ _No additional payload parameters._
 
 Reads and clears unread messages for a peer.
 
-| Field    | Type  | Default  |
-| -------- | ----- | -------- |
-| `target` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `target`     | `str`              | Required |
 
 **Wire Value:** `mark_read`
 
@@ -597,15 +717,42 @@ Reads and clears unread messages for a peer.
 
 ---
 
+### `MigrateProfileSecurityCommand`
+
+Requests migration of one local profile between encrypted and plaintext storage.
+
+| Field              | Type               | Default  |
+| ------------------ | ------------------ | -------- |
+| `request_id`       | `Union[str, None]` | `None`   |
+| `name`             | `str`              | Required |
+| `target_mode`      | `str`              | Required |
+| `current_password` | `Union[str, None]` | `None`   |
+| `new_password`     | `Union[str, None]` | `None`   |
+
+**Wire Value:** `migrate_profile_security`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "migrate_profile_security",
+  "name": "string",
+  "target_mode": "string"
+}
+```
+
+---
+
 ### `MsgCommand`
 
 Sends a live chat message to a peer.
 
-| Field    | Type  | Default  |
-| -------- | ----- | -------- |
-| `target` | `str` | Required |
-| `text`   | `str` | Required |
-| `msg_id` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `target`     | `str`              | Required |
+| `text`       | `str`              | Required |
+| `msg_id`     | `str`              | Required |
 
 **Wire Value:** `msg`
 
@@ -626,7 +773,9 @@ Sends a live chat message to a peer.
 
 Marks the current IPC session as an interactive live consumer.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `register_live_consumer`
 
@@ -644,9 +793,10 @@ _No additional payload parameters._
 
 Rejects a pending live connection.
 
-| Field    | Type  | Default  |
-| -------- | ----- | -------- |
-| `target` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `target`     | `str`              | Required |
 
 **Wire Value:** `reject`
 
@@ -665,9 +815,10 @@ Rejects a pending live connection.
 
 Removes a saved contact or discovered peer.
 
-| Field   | Type  | Default  |
-| ------- | ----- | -------- |
-| `alias` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
 
 **Wire Value:** `remove_contact`
 
@@ -682,14 +833,38 @@ Removes a saved contact or discovered peer.
 
 ---
 
+### `RemoveProfileCommand`
+
+Requests complete local removal of one profile.
+
+| Field            | Type               | Default  |
+| ---------------- | ------------------ | -------- |
+| `request_id`     | `Union[str, None]` | `None`   |
+| `name`           | `str`              | Required |
+| `active_profile` | `Union[str, None]` | `None`   |
+
+**Wire Value:** `remove_profile`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "remove_profile",
+  "name": "string"
+}
+```
+
+---
+
 ### `RenameContactCommand`
 
 Renames an existing contact or discovered peer.
 
-| Field       | Type  | Default  |
-| ----------- | ----- | -------- |
-| `old_alias` | `str` | Required |
-| `new_alias` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `old_alias`  | `str`              | Required |
+| `new_alias`  | `str`              | Required |
 
 **Wire Value:** `rename_contact`
 
@@ -705,13 +880,38 @@ Renames an existing contact or discovered peer.
 
 ---
 
+### `RenameProfileCommand`
+
+Requests renaming of one local profile directory.
+
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `old_name`   | `str`              | Required |
+| `new_name`   | `str`              | Required |
+
+**Wire Value:** `rename_profile`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "rename_profile",
+  "old_name": "string",
+  "new_name": "string"
+}
+```
+
+---
+
 ### `RetunnelCommand`
 
 Retunnels an active connection over a new Tor circuit.
 
-| Field    | Type  | Default  |
-| -------- | ----- | -------- |
-| `target` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `target`     | `str`              | Required |
 
 **Wire Value:** `retunnel`
 
@@ -730,7 +930,9 @@ Retunnels an active connection over a new Tor circuit.
 
 Triggers daemon self-destruction.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `self_destruct`
 
@@ -748,11 +950,12 @@ _No additional payload parameters._
 
 Queues an asynchronous offline message.
 
-| Field    | Type  | Default  |
-| -------- | ----- | -------- |
-| `target` | `str` | Required |
-| `text`   | `str` | Required |
-| `msg_id` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `target`     | `str`              | Required |
+| `text`       | `str`              | Required |
+| `msg_id`     | `str`              | Required |
 
 **Wire Value:** `send_drop`
 
@@ -771,10 +974,16 @@ Queues an asynchronous offline message.
 
 ### `SetConfigCommand`
 
-Updates a profile-specific configuration override.
+Requests one profile-local config override update.
+
+Attributes:
+setting_key (str): The fully-qualified config key to update.
+setting_value (Union[str, int, float, bool]): The new primitive value.
+command_type (CommandType): The stable IPC routing code.
 
 | Field           | Type                           | Default  |
 | --------------- | ------------------------------ | -------- |
+| `request_id`    | `Union[str, None]`             | `None`   |
 | `setting_key`   | `str`                          | Required |
 | `setting_value` | `Union[str, int, float, bool]` | Required |
 
@@ -792,12 +1001,40 @@ Updates a profile-specific configuration override.
 
 ---
 
+### `SetDefaultProfileCommand`
+
+Requests one new default-profile selection.
+
+| Field          | Type               | Default  |
+| -------------- | ------------------ | -------- |
+| `request_id`   | `Union[str, None]` | `None`   |
+| `profile_name` | `str`              | Required |
+
+**Wire Value:** `set_default_profile`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "set_default_profile",
+  "profile_name": "string"
+}
+```
+
+---
+
 ### `SetSettingCommand`
 
-Updates a global setting.
+Requests one global settings update.
+
+Attributes:
+setting_key (str): The fully-qualified settings key to update.
+setting_value (Union[str, int, float, bool]): The new primitive value.
+command_type (CommandType): The stable IPC routing code.
 
 | Field           | Type                           | Default  |
 | --------------- | ------------------------------ | -------- |
+| `request_id`    | `Union[str, None]`             | `None`   |
 | `setting_key`   | `str`                          | Required |
 | `setting_value` | `Union[str, int, float, bool]` | Required |
 
@@ -819,9 +1056,10 @@ Updates a global setting.
 
 Changes the active UI focus.
 
-| Field    | Type               | Default |
-| -------- | ------------------ | ------- |
-| `target` | `Union[str, None]` | `None`  |
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `target`     | `Union[str, None]` | `None`  |
 
 **Wire Value:** `switch`
 
@@ -837,9 +1075,14 @@ Changes the active UI focus.
 
 ### `SyncConfigCommand`
 
-Syncs profile configuration overrides with global settings.
+Requests a profile-config sync against global settings.
 
-_No additional payload parameters._
+Attributes:
+command_type (CommandType): The stable IPC routing code.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `sync_config`
 
@@ -857,9 +1100,10 @@ _No additional payload parameters._
 
 Unlocks a daemon that was started in locked mode.
 
-| Field      | Type  | Default  |
-| ---------- | ----- | -------- |
-| `password` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `password`   | `str`              | Required |
 
 **Wire Value:** `unlock`
 
@@ -878,11 +1122,12 @@ Unlocks a daemon that was started in locked mode.
 
 Confirms delivery of a live outbound message.
 
-| Field       | Type               | Default  |
-| ----------- | ------------------ | -------- |
-| `msg_id`    | `str`              | Required |
-| `text`      | `Union[str, None]` | `None`   |
-| `timestamp` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `msg_id`     | `str`              | Required |
+| `text`       | `Union[str, None]` | `None`   |
+| `timestamp`  | `Union[str, None]` | `None`   |
 
 **Wire Value:** `ack`
 
@@ -901,9 +1146,10 @@ Confirms delivery of a live outbound message.
 
 Signals that address generation is blocked by a running daemon.
 
-| Field     | Type  | Default  |
-| --------- | ----- | -------- |
-| `profile` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `profile`    | `str`              | Required |
 
 **Wire Value:** `address_cant_generate_running`
 
@@ -922,10 +1168,11 @@ Signals that address generation is blocked by a running daemon.
 
 Returns the current onion address.
 
-| Field     | Type  | Default  |
-| --------- | ----- | -------- |
-| `profile` | `str` | Required |
-| `onion`   | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `profile`    | `str`              | Required |
+| `onion`      | `str`              | Required |
 
 **Wire Value:** `address_current`
 
@@ -945,10 +1192,11 @@ Returns the current onion address.
 
 Returns a newly generated onion address.
 
-| Field     | Type  | Default  |
-| --------- | ----- | -------- |
-| `profile` | `str` | Required |
-| `onion`   | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `profile`    | `str`              | Required |
+| `onion`      | `str`              | Required |
 
 **Wire Value:** `address_generated`
 
@@ -968,9 +1216,10 @@ Returns a newly generated onion address.
 
 Signals that a profile has no generated onion address yet.
 
-| Field     | Type  | Default  |
-| --------- | ----- | -------- |
-| `profile` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `profile`    | `str`              | Required |
 
 **Wire Value:** `address_not_generated`
 
@@ -989,10 +1238,11 @@ Signals that a profile has no generated onion address yet.
 
 Signals that an alias is already in use.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `alias_in_use`
 
@@ -1011,9 +1261,10 @@ Signals that an alias is already in use.
 
 Signals that the requested alias does not exist.
 
-| Field   | Type  | Default  |
-| ------- | ----- | -------- |
-| `alias` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
 
 **Wire Value:** `alias_not_found`
 
@@ -1032,11 +1283,12 @@ Signals that the requested alias does not exist.
 
 Signals that an alias was renamed successfully.
 
-| Field       | Type               | Default  |
-| ----------- | ------------------ | -------- |
-| `old_alias` | `str`              | Required |
-| `new_alias` | `str`              | Required |
-| `onion`     | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `old_alias`  | `str`              | Required |
+| `new_alias`  | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `alias_renamed`
 
@@ -1056,7 +1308,9 @@ Signals that an alias was renamed successfully.
 
 Signals that a rename reused the same alias.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `alias_same`
 
@@ -1074,7 +1328,9 @@ _No additional payload parameters._
 
 Signals that the daemon is already unlocked.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `already_unlocked`
 
@@ -1092,10 +1348,11 @@ _No additional payload parameters._
 
 Signals that the session must authenticate first.
 
-| Field       | Type               | Default |
-| ----------- | ------------------ | ------- |
-| `challenge` | `Union[str, None]` | `None`  |
-| `salt`      | `Union[str, None]` | `None`  |
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `challenge`  | `Union[str, None]` | `None`  |
+| `salt`       | `Union[str, None]` | `None`  |
 
 **Wire Value:** `auth_required`
 
@@ -1109,16 +1366,42 @@ Signals that the session must authenticate first.
 
 ---
 
+### `AutoFallbackQueuedEvent`
+
+Signals that one live-send request was queued directly as a drop.
+
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `msg_id`     | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
+
+**Wire Value:** `auto_fallback_queued`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "auto_fallback_queued",
+  "alias": "string",
+  "msg_id": "string"
+}
+```
+
+---
+
 ### `AutoReconnectScheduledEvent`
 
 Signals that an automatic reconnect was scheduled.
 
-| Field    | Type                        | Default                           |
-| -------- | --------------------------- | --------------------------------- |
-| `alias`  | `str`                       | Required                          |
-| `onion`  | `Union[str, None]`          | `None`                            |
-| `origin` | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.AUTO_RECONNECT` |
-| `actor`  | `<enum 'ConnectionActor'>`  | `ConnectionActor.SYSTEM`          |
+| Field        | Type                        | Default                           |
+| ------------ | --------------------------- | --------------------------------- |
+| `request_id` | `Union[str, None]`          | `None`                            |
+| `alias`      | `str`                       | Required                          |
+| `onion`      | `Union[str, None]`          | `None`                            |
+| `origin`     | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.AUTO_RECONNECT` |
+| `actor`      | `<enum 'ConnectionActor'>`  | `ConnectionActor.SYSTEM`          |
 
 **Wire Value:** `auto_reconnect_scheduled`
 
@@ -1137,7 +1420,9 @@ Signals that an automatic reconnect was scheduled.
 
 Signals that the local onion cannot connect to itself.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `cannot_connect_self`
 
@@ -1155,7 +1440,9 @@ _No additional payload parameters._
 
 Signals that the local onion cannot send drops to itself.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `cannot_drop_self`
 
@@ -1173,7 +1460,9 @@ _No additional payload parameters._
 
 Signals that the UI cannot focus the local onion.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `cannot_switch_self`
 
@@ -1191,10 +1480,11 @@ _No additional payload parameters._
 
 Returns a profile-specific config value.
 
-| Field   | Type  | Default  |
-| ------- | ----- | -------- |
-| `key`   | `str` | Required |
-| `value` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `key`        | `str`              | Required |
+| `value`      | `str`              | Required |
 
 **Wire Value:** `config_data`
 
@@ -1210,11 +1500,44 @@ Returns a profile-specific config value.
 
 ---
 
+### `ConfigListDataEvent`
+
+Returns a structured effective profile-config snapshot.
+
+Attributes:
+scope (str): The snapshot scope such as `ui`, `profile`, or `daemon`.
+profile (str): The active profile name.
+entries (List[SettingSnapshotEntry]): The ordered snapshot rows.
+event_type (EventType): The stable IPC routing code.
+
+| Field        | Type                         | Default     |
+| ------------ | ---------------------------- | ----------- |
+| `request_id` | `Union[str, None]`           | `None`      |
+| `scope`      | `str`                        | Required    |
+| `profile`    | `str`                        | Required    |
+| `entries`    | `List[SettingSnapshotEntry]` | `Factory()` |
+
+**Wire Value:** `config_list_data`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "config_list_data",
+  "scope": "string",
+  "profile": "string"
+}
+```
+
+---
+
 ### `ConfigSyncedEvent`
 
 Signals that profile config overrides were cleared.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `config_synced`
 
@@ -1232,7 +1555,9 @@ _No additional payload parameters._
 
 Signals that a config update failed.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `config_update_failed`
 
@@ -1250,9 +1575,10 @@ _No additional payload parameters._
 
 Signals that a profile-specific config override was updated.
 
-| Field | Type  | Default  |
-| ----- | ----- | -------- |
-| `key` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `key`        | `str`              | Required |
 
 **Wire Value:** `config_updated`
 
@@ -1271,12 +1597,13 @@ Signals that a profile-specific config override was updated.
 
 Announces a connected peer.
 
-| Field    | Type                        | Default                   |
-| -------- | --------------------------- | ------------------------- |
-| `alias`  | `str`                       | Required                  |
-| `onion`  | `str`                       | Required                  |
-| `origin` | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.MANUAL` |
-| `actor`  | `<enum 'ConnectionActor'>`  | `ConnectionActor.REMOTE`  |
+| Field        | Type                        | Default                   |
+| ------------ | --------------------------- | ------------------------- |
+| `request_id` | `Union[str, None]`          | `None`                    |
+| `alias`      | `str`                       | Required                  |
+| `onion`      | `str`                       | Required                  |
+| `origin`     | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.MANUAL` |
+| `actor`      | `<enum 'ConnectionActor'>`  | `ConnectionActor.REMOTE`  |
 
 **Wire Value:** `connected`
 
@@ -1296,12 +1623,13 @@ Announces a connected peer.
 
 Signals that a pending connection was auto-accepted.
 
-| Field    | Type                        | Default                     |
-| -------- | --------------------------- | --------------------------- |
-| `alias`  | `str`                       | Required                    |
-| `onion`  | `Union[str, None]`          | `None`                      |
-| `origin` | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.INCOMING` |
-| `actor`  | `<enum 'ConnectionActor'>`  | `ConnectionActor.SYSTEM`    |
+| Field        | Type                        | Default                     |
+| ------------ | --------------------------- | --------------------------- |
+| `request_id` | `Union[str, None]`          | `None`                      |
+| `alias`      | `str`                       | Required                    |
+| `onion`      | `Union[str, None]`          | `None`                      |
+| `origin`     | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.INCOMING` |
+| `actor`      | `<enum 'ConnectionActor'>`  | `ConnectionActor.SYSTEM`    |
 
 **Wire Value:** `connection_auto_accepted`
 
@@ -1320,12 +1648,13 @@ Signals that a pending connection was auto-accepted.
 
 Signals that an outbound connection attempt has started.
 
-| Field    | Type                        | Default                   |
-| -------- | --------------------------- | ------------------------- |
-| `alias`  | `str`                       | Required                  |
-| `onion`  | `Union[str, None]`          | `None`                    |
-| `origin` | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.MANUAL` |
-| `actor`  | `<enum 'ConnectionActor'>`  | `ConnectionActor.LOCAL`   |
+| Field        | Type                        | Default                   |
+| ------------ | --------------------------- | ------------------------- |
+| `request_id` | `Union[str, None]`          | `None`                    |
+| `alias`      | `str`                       | Required                  |
+| `onion`      | `Union[str, None]`          | `None`                    |
+| `origin`     | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.MANUAL` |
+| `actor`      | `<enum 'ConnectionActor'>`  | `ConnectionActor.LOCAL`   |
 
 **Wire Value:** `connection_connecting`
 
@@ -1346,6 +1675,7 @@ Signals that a connection attempt failed permanently.
 
 | Field         | Type                                         | Default                   |
 | ------------- | -------------------------------------------- | ------------------------- |
+| `request_id`  | `Union[str, None]`                           | `None`                    |
 | `alias`       | `str`                                        | Required                  |
 | `onion`       | `Union[str, None]`                           | `None`                    |
 | `error`       | `Union[str, None]`                           | `None`                    |
@@ -1370,12 +1700,13 @@ Signals that a connection attempt failed permanently.
 
 Signals a pending outbound live connection.
 
-| Field    | Type                        | Default                   |
-| -------- | --------------------------- | ------------------------- |
-| `alias`  | `str`                       | Required                  |
-| `onion`  | `Union[str, None]`          | `None`                    |
-| `origin` | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.MANUAL` |
-| `actor`  | `<enum 'ConnectionActor'>`  | `ConnectionActor.REMOTE`  |
+| Field        | Type                        | Default                   |
+| ------------ | --------------------------- | ------------------------- |
+| `request_id` | `Union[str, None]`          | `None`                    |
+| `alias`      | `str`                       | Required                  |
+| `onion`      | `Union[str, None]`          | `None`                    |
+| `origin`     | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.MANUAL` |
+| `actor`      | `<enum 'ConnectionActor'>`  | `ConnectionActor.REMOTE`  |
 
 **Wire Value:** `connection_pending`
 
@@ -1396,6 +1727,7 @@ Signals that a live connection was rejected.
 
 | Field         | Type                                         | Default                     |
 | ------------- | -------------------------------------------- | --------------------------- |
+| `request_id`  | `Union[str, None]`                           | `None`                      |
 | `alias`       | `str`                                        | Required                    |
 | `onion`       | `Union[str, None]`                           | `None`                      |
 | `origin`      | `<enum 'ConnectionOrigin'>`                  | `ConnectionOrigin.INCOMING` |
@@ -1421,6 +1753,7 @@ Signals a retrying connection attempt.
 
 | Field         | Type                        | Default                   |
 | ------------- | --------------------------- | ------------------------- |
+| `request_id`  | `Union[str, None]`          | `None`                    |
 | `alias`       | `str`                       | Required                  |
 | `attempt`     | `int`                       | Required                  |
 | `max_retries` | `int`                       | Required                  |
@@ -1447,12 +1780,13 @@ Signals a retrying connection attempt.
 
 Broadcasts the current connection-state snapshot.
 
-| Field       | Type        | Default  |
-| ----------- | ----------- | -------- |
-| `active`    | `List[str]` | Required |
-| `pending`   | `List[str]` | Required |
-| `contacts`  | `List[str]` | Required |
-| `is_header` | `bool`      | `False`  |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `active`     | `List[str]`        | Required |
+| `pending`    | `List[str]`        | Required |
+| `contacts`   | `List[str]`        | Required |
+| `is_header`  | `bool`             | `False`  |
 
 **Wire Value:** `connections_state`
 
@@ -1473,11 +1807,12 @@ Broadcasts the current connection-state snapshot.
 
 Signals that a contact was added to the address book.
 
-| Field     | Type               | Default  |
-| --------- | ------------------ | -------- |
-| `alias`   | `str`              | Required |
-| `profile` | `str`              | Required |
-| `onion`   | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `profile`    | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `contact_added`
 
@@ -1497,10 +1832,11 @@ Signals that a contact was added to the address book.
 
 Signals that a discovered peer was already saved.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `contact_already_saved`
 
@@ -1519,10 +1855,11 @@ Signals that a discovered peer was already saved.
 
 Signals that a saved contact was downgraded to unsaved.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `contact_downgraded`
 
@@ -1541,11 +1878,12 @@ Signals that a saved contact was downgraded to unsaved.
 
 Announces that a contact or peer was removed from the profile.
 
-| Field     | Type               | Default  |
-| --------- | ------------------ | -------- |
-| `alias`   | `str`              | Required |
-| `onion`   | `Union[str, None]` | `None`   |
-| `profile` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
+| `profile`    | `Union[str, None]` | `None`   |
 
 **Wire Value:** `contact_removed`
 
@@ -1564,11 +1902,12 @@ Announces that a contact or peer was removed from the profile.
 
 Signals that a removed contact was downgraded to a session peer.
 
-| Field       | Type               | Default  |
-| ----------- | ------------------ | -------- |
-| `alias`     | `str`              | Required |
-| `new_alias` | `str`              | Required |
-| `onion`     | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `new_alias`  | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `contact_removed_downgraded`
 
@@ -1588,7 +1927,9 @@ Signals that a removed contact was downgraded to a session peer.
 
 Signals that clearing the address book failed.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `contacts_clear_failed`
 
@@ -1606,10 +1947,11 @@ _No additional payload parameters._
 
 Signals that the address book was cleared.
 
-| Field             | Type  | Default  |
-| ----------------- | ----- | -------- |
-| `profile`         | `str` | Required |
-| `preserved_peers` | `int` | `0`      |
+| Field             | Type               | Default  |
+| ----------------- | ------------------ | -------- |
+| `request_id`      | `Union[str, None]` | `None`   |
+| `profile`         | `str`              | Required |
+| `preserved_peers` | `int`              | `0`      |
 
 **Wire Value:** `contacts_cleared`
 
@@ -1630,6 +1972,7 @@ Returns the structured address book.
 
 | Field        | Type                 | Default  |
 | ------------ | -------------------- | -------- |
+| `request_id` | `Union[str, None]`   | `None`   |
 | `saved`      | `List[ContactEntry]` | Required |
 | `discovered` | `List[ContactEntry]` | Required |
 | `profile`    | `str`                | Required |
@@ -1653,7 +1996,9 @@ Returns the structured address book.
 
 Signals that a UI-only setting was routed to the daemon.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `daemon_cannot_manage_ui`
 
@@ -1671,7 +2016,9 @@ _No additional payload parameters._
 
 Signals that the daemon is locked.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `daemon_locked`
 
@@ -1689,7 +2036,9 @@ _No additional payload parameters._
 
 Signals that no local daemon is running.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `daemon_offline`
 
@@ -1707,7 +2056,9 @@ _No additional payload parameters._
 
 Signals that the daemon was unlocked successfully.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `daemon_unlocked`
 
@@ -1725,7 +2076,9 @@ _No additional payload parameters._
 
 Signals that clearing the profile database failed.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `db_clear_failed`
 
@@ -1743,10 +2096,11 @@ _No additional payload parameters._
 
 Signals that a profile database was cleared.
 
-| Field             | Type  | Default  |
-| ----------------- | ----- | -------- |
-| `profile`         | `str` | Required |
-| `preserved_peers` | `int` | `0`      |
+| Field             | Type               | Default  |
+| ----------------- | ------------------ | -------- |
+| `request_id`      | `Union[str, None]` | `None`   |
+| `profile`         | `str`              | Required |
+| `preserved_peers` | `int`              | `0`      |
 
 **Wire Value:** `db_cleared`
 
@@ -1765,7 +2119,9 @@ Signals that a profile database was cleared.
 
 Signals that the profile database is corrupted.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `db_corrupted`
 
@@ -1785,6 +2141,7 @@ Announces a disconnected peer.
 
 | Field         | Type                                         | Default                   |
 | ------------- | -------------------------------------------- | ------------------------- |
+| `request_id`  | `Union[str, None]`                           | `None`                    |
 | `alias`       | `str`                                        | Required                  |
 | `onion`       | `Union[str, None]`                           | `None`                    |
 | `actor`       | `<enum 'ConnectionActor'>`                   | `ConnectionActor.LOCAL`   |
@@ -1808,9 +2165,10 @@ Announces a disconnected peer.
 
 Signals that no discovered peer matched a requested promotion target.
 
-| Field    | Type  | Default  |
-| -------- | ----- | -------- |
-| `target` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `target`     | `str`              | Required |
 
 **Wire Value:** `discovered_peer_not_found`
 
@@ -1829,9 +2187,10 @@ Signals that no discovered peer matched a requested promotion target.
 
 Marks an asynchronous drop as failed.
 
-| Field    | Type  | Default  |
-| -------- | ----- | -------- |
-| `msg_id` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `msg_id`     | `str`              | Required |
 
 **Wire Value:** `drop_failed`
 
@@ -1850,10 +2209,11 @@ Marks an asynchronous drop as failed.
 
 Signals that a drop was queued successfully.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `drop_queued`
 
@@ -1872,7 +2232,9 @@ Signals that a drop was queued successfully.
 
 Signals that offline drops are disabled.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `drops_disabled`
 
@@ -1890,12 +2252,13 @@ _No additional payload parameters._
 
 Signals that pending live messages were converted to drops.
 
-| Field     | Type               | Default  |
-| --------- | ------------------ | -------- |
-| `alias`   | `str`              | Required |
-| `count`   | `int`              | Required |
-| `msg_ids` | `List[str]`        | Required |
-| `onion`   | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `count`      | `int`              | Required |
+| `msg_ids`    | `List[str]`        | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `fallback_success`
 
@@ -1916,7 +2279,9 @@ Signals that pending live messages were converted to drops.
 
 Signals that clearing history failed.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `history_clear_failed`
 
@@ -1934,10 +2299,11 @@ _No additional payload parameters._
 
 Signals that a peer-specific history was cleared.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `history_cleared`
 
@@ -1956,9 +2322,10 @@ Signals that a peer-specific history was cleared.
 
 Signals that profile history was cleared.
 
-| Field     | Type  | Default  |
-| --------- | ----- | -------- |
-| `profile` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `profile`    | `str`              | Required |
 
 **Wire Value:** `history_cleared_all`
 
@@ -1979,6 +2346,7 @@ Returns projected user-facing history rows.
 
 | Field        | Type                            | Default  |
 | ------------ | ------------------------------- | -------- |
+| `request_id` | `Union[str, None]`              | `None`   |
 | `entries`    | `Sequence[SummaryHistoryEntry]` | Required |
 | `profile`    | `str`                           | Required |
 | `alias`      | `Union[str, None]`              | `None`   |
@@ -2004,6 +2372,7 @@ Returns raw transport history ledger rows.
 
 | Field        | Type                        | Default  |
 | ------------ | --------------------------- | -------- |
+| `request_id` | `Union[str, None]`          | `None`   |
 | `entries`    | `Sequence[RawHistoryEntry]` | Required |
 | `profile`    | `str`                       | Required |
 | `alias`      | `Union[str, None]`          | `None`   |
@@ -2027,9 +2396,10 @@ Returns raw transport history ledger rows.
 
 Returns unread-message counts grouped by peer.
 
-| Field   | Type             | Default  |
-| ------- | ---------------- | -------- |
-| `inbox` | `Dict[str, int]` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `inbox`      | `Dict[str, int]`   | Required |
 
 **Wire Value:** `inbox_counts`
 
@@ -2052,6 +2422,7 @@ Carries buffered or unread offline messages.
 
 | Field           | Type                       | Default     |
 | --------------- | -------------------------- | ----------- |
+| `request_id`    | `Union[str, None]`         | `None`      |
 | `alias`         | `str`                      | Required    |
 | `onion`         | `Union[str, None]`         | `None`      |
 | `messages`      | `List[UnreadMessageEntry]` | `Factory()` |
@@ -2075,11 +2446,12 @@ Carries buffered or unread offline messages.
 
 Signals new unread offline messages for a peer.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
-| `count` | `int`              | `1`      |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
+| `count`      | `int`              | `1`      |
 
 **Wire Value:** `inbox_notification`
 
@@ -2098,12 +2470,13 @@ Signals new unread offline messages for a peer.
 
 Signals an inbound live connection request.
 
-| Field    | Type                        | Default                     |
-| -------- | --------------------------- | --------------------------- |
-| `alias`  | `str`                       | Required                    |
-| `onion`  | `Union[str, None]`          | `None`                      |
-| `origin` | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.INCOMING` |
-| `actor`  | `<enum 'ConnectionActor'>`  | `ConnectionActor.REMOTE`    |
+| Field        | Type                        | Default                     |
+| ------------ | --------------------------- | --------------------------- |
+| `request_id` | `Union[str, None]`          | `None`                      |
+| `alias`      | `str`                       | Required                    |
+| `onion`      | `Union[str, None]`          | `None`                      |
+| `origin`     | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.INCOMING` |
+| `actor`      | `<enum 'ConnectionActor'>`  | `ConnectionActor.REMOTE`    |
 
 **Wire Value:** `incoming_connection`
 
@@ -2122,9 +2495,10 @@ Signals an inbound live connection request.
 
 Initializes the UI with the local onion address.
 
-| Field   | Type               | Default |
-| ------- | ------------------ | ------- |
-| `onion` | `Union[str, None]` | `None`  |
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `onion`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `init`
 
@@ -2142,7 +2516,9 @@ Initializes the UI with the local onion address.
 
 Signals that the daemon hit an unexpected internal error.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `internal_error`
 
@@ -2160,7 +2536,9 @@ _No additional payload parameters._
 
 Signals that a configuration key was invalid.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `invalid_config_key`
 
@@ -2178,10 +2556,11 @@ _No additional payload parameters._
 
 Signals that the supplied unlock password or session proof was invalid.
 
-| Field       | Type               | Default |
-| ----------- | ------------------ | ------- |
-| `challenge` | `Union[str, None]` | `None`  |
-| `salt`      | `Union[str, None]` | `None`  |
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `challenge`  | `Union[str, None]` | `None`  |
+| `salt`       | `Union[str, None]` | `None`  |
 
 **Wire Value:** `invalid_password`
 
@@ -2199,7 +2578,9 @@ Signals that the supplied unlock password or session proof was invalid.
 
 Signals that a setting key was invalid.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `invalid_setting_key`
 
@@ -2217,9 +2598,10 @@ _No additional payload parameters._
 
 Signals that a user-supplied target could not be resolved.
 
-| Field    | Type  | Default  |
-| -------- | ----- | -------- |
-| `target` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `target`     | `str`              | Required |
 
 **Wire Value:** `invalid_target`
 
@@ -2234,14 +2616,59 @@ Signals that a user-supplied target could not be resolved.
 
 ---
 
+### `IpcClientLimitReachedEvent`
+
+Signals that the daemon rejected a new IPC session due to client saturation.
+
+| Field         | Type               | Default  |
+| ------------- | ------------------ | -------- |
+| `request_id`  | `Union[str, None]` | `None`   |
+| `max_clients` | `int`              | Required |
+
+**Wire Value:** `ipc_client_limit_reached`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "ipc_client_limit_reached",
+  "max_clients": 0
+}
+```
+
+---
+
+### `LocalAuthRateLimitedEvent`
+
+Signals that local daemon auth is temporarily rate-limited.
+
+| Field         | Type               | Default  |
+| ------------- | ------------------ | -------- |
+| `request_id`  | `Union[str, None]` | `None`   |
+| `retry_after` | `int`              | Required |
+
+**Wire Value:** `local_auth_rate_limited`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "local_auth_rate_limited",
+  "retry_after": 0
+}
+```
+
+---
+
 ### `MaxConnectionsReachedEvent`
 
 Signals that the maximum live connection count was reached.
 
-| Field      | Type  | Default  |
-| ---------- | ----- | -------- |
-| `target`   | `str` | Required |
-| `max_conn` | `int` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `target`     | `str`              | Required |
+| `max_conn`   | `int`              | Required |
 
 **Wire Value:** `max_connections_reached`
 
@@ -2261,7 +2688,9 @@ Signals that the maximum live connection count was reached.
 
 Signals that clearing messages failed.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `messages_clear_failed`
 
@@ -2279,10 +2708,11 @@ _No additional payload parameters._
 
 Signals that peer-specific messages were cleared.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `messages_cleared`
 
@@ -2301,9 +2731,10 @@ Signals that peer-specific messages were cleared.
 
 Signals that all profile messages were cleared.
 
-| Field     | Type  | Default  |
-| --------- | ----- | -------- |
-| `profile` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `profile`    | `str`              | Required |
 
 **Wire Value:** `messages_cleared_all`
 
@@ -2322,10 +2753,11 @@ Signals that all profile messages were cleared.
 
 Signals that non-contact messages for a peer were cleared.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `messages_cleared_non_contacts`
 
@@ -2344,9 +2776,10 @@ Signals that non-contact messages for a peer were cleared.
 
 Signals that non-contact messages for a profile were cleared.
 
-| Field     | Type  | Default  |
-| --------- | ----- | -------- |
-| `profile` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `profile`    | `str`              | Required |
 
 **Wire Value:** `messages_cleared_non_contacts_all`
 
@@ -2365,11 +2798,12 @@ Signals that non-contact messages for a profile were cleared.
 
 Returns stored chat messages for a peer.
 
-| Field      | Type                 | Default  |
-| ---------- | -------------------- | -------- |
-| `messages` | `List[MessageEntry]` | Required |
-| `alias`    | `str`                | Required |
-| `onion`    | `Union[str, None]`   | `None`   |
+| Field        | Type                 | Default  |
+| ------------ | -------------------- | -------- |
+| `request_id` | `Union[str, None]`   | `None`   |
+| `messages`   | `List[MessageEntry]` | Required |
+| `alias`      | `str`                | Required |
+| `onion`      | `Union[str, None]`   | `None`   |
 
 **Wire Value:** `messages_data`
 
@@ -2389,10 +2823,11 @@ Returns stored chat messages for a peer.
 
 Signals that there is no connection to disconnect.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `no_connection_to_disconnect`
 
@@ -2411,10 +2846,11 @@ Signals that there is no connection to disconnect.
 
 Signals that there is no connection to reject.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `no_connection_to_reject`
 
@@ -2433,10 +2869,11 @@ Signals that there is no connection to reject.
 
 Signals that there is no pending connection to accept.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `no_pending_connection`
 
@@ -2455,10 +2892,11 @@ Signals that there is no pending connection to accept.
 
 Signals that no pending live messages existed for fallback.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `no_pending_live_msgs`
 
@@ -2477,10 +2915,11 @@ Signals that no pending live messages existed for fallback.
 
 Signals that an onion is already bound to a saved contact.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `onion_in_use`
 
@@ -2499,11 +2938,12 @@ Signals that an onion is already bound to a saved contact.
 
 Signals that a discovered peer was anonymized.
 
-| Field       | Type               | Default  |
-| ----------- | ------------------ | -------- |
-| `alias`     | `str`              | Required |
-| `new_alias` | `str`              | Required |
-| `onion`     | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `new_alias`  | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `peer_anonymized`
 
@@ -2523,10 +2963,11 @@ Signals that a discovered peer was anonymized.
 
 Signals that an active peer cannot be deleted.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `peer_cant_delete_active`
 
@@ -2545,9 +2986,10 @@ Signals that an active peer cannot be deleted.
 
 Signals that a user-supplied peer could not be resolved.
 
-| Field    | Type  | Default  |
-| -------- | ----- | -------- |
-| `target` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `target`     | `str`              | Required |
 
 **Wire Value:** `peer_not_found`
 
@@ -2566,10 +3008,11 @@ Signals that a user-supplied peer could not be resolved.
 
 Signals that a discovered peer was promoted to a contact.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `peer_promoted`
 
@@ -2588,10 +3031,11 @@ Signals that a discovered peer was promoted to a contact.
 
 Signals that a discovered peer was removed.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `peer_removed`
 
@@ -2612,6 +3056,7 @@ Signals that a pending connection existed but its acceptance window expired.
 
 | Field         | Type                            | Default                                           |
 | ------------- | ------------------------------- | ------------------------------------------------- |
+| `request_id`  | `Union[str, None]`              | `None`                                            |
 | `alias`       | `str`                           | Required                                          |
 | `onion`       | `Union[str, None]`              | `None`                                            |
 | `origin`      | `<enum 'ConnectionOrigin'>`     | `ConnectionOrigin.INCOMING`                       |
@@ -2631,13 +3076,46 @@ Signals that a pending connection existed but its acceptance window expired.
 
 ---
 
+### `ProfileOperationResultEvent`
+
+Carries one structured local profile-operation result over IPC.
+
+| Field            | Type                                                                                                         | Default  |
+| ---------------- | ------------------------------------------------------------------------------------------------------------ | -------- |
+| `request_id`     | `Union[str, None]`                                                                                           | `None`   |
+| `success`        | `bool`                                                                                                       | Required |
+| `operation_type` | `<enum 'ProfileOperationCode'>`                                                                              | Required |
+| `params`         | `Dict[str, Union[str, int, float, bool, None, Dict[str, Dict[str, JsonValue]], List[Dict[str, JsonValue]]]]` | Required |
+
+**Wire Value:** `profile_operation_result`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "profile_operation_result",
+  "success": false,
+  "operation_type": "invalid_name",
+  "params": {
+    "key": "string"
+  }
+}
+```
+
+---
+
 ### `ProfilesDataEvent`
 
 Returns the list of available profiles.
 
-| Field      | Type                 | Default  |
-| ---------- | -------------------- | -------- |
-| `profiles` | `List[ProfileEntry]` | Required |
+Attributes:
+profiles (List[ProfileEntry]): Structured profile rows.
+event_type (EventType): The stable IPC routing code.
+
+| Field        | Type                 | Default  |
+| ------------ | -------------------- | -------- |
+| `request_id` | `Union[str, None]`   | `None`   |
+| `profiles`   | `List[ProfileEntry]` | Required |
 
 **Wire Value:** `profiles_data`
 
@@ -2656,12 +3134,13 @@ Returns the list of available profiles.
 
 Carries a live inbound message.
 
-| Field       | Type               | Default  |
-| ----------- | ------------------ | -------- |
-| `alias`     | `str`              | Required |
-| `text`      | `str`              | Required |
-| `onion`     | `Union[str, None]` | `None`   |
-| `timestamp` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `text`       | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
+| `timestamp`  | `Union[str, None]` | `None`   |
 
 **Wire Value:** `remote_msg`
 
@@ -2683,6 +3162,7 @@ Synchronizes a peer alias rename across UIs.
 
 | Field         | Type               | Default  |
 | ------------- | ------------------ | -------- |
+| `request_id`  | `Union[str, None]` | `None`   |
 | `old_alias`   | `str`              | Required |
 | `new_alias`   | `str`              | Required |
 | `onion`       | `Union[str, None]` | `None`   |
@@ -2707,11 +3187,14 @@ Synchronizes a peer alias rename across UIs.
 
 Signals that retunneling failed for a peer.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
-| `error` | `Union[str, None]` | `None`   |
+| Field          | Type                                     | Default  |
+| -------------- | ---------------------------------------- | -------- |
+| `request_id`   | `Union[str, None]`                       | `None`   |
+| `alias`        | `str`                                    | Required |
+| `onion`        | `Union[str, None]`                       | `None`   |
+| `error`        | `Union[str, None]`                       | `None`   |
+| `error_code`   | `Union[<enum 'RuntimeErrorCode'>, None]` | `None`   |
+| `error_detail` | `Union[str, None]`                       | `None`   |
 
 **Wire Value:** `retunnel_failed`
 
@@ -2730,10 +3213,11 @@ Signals that retunneling failed for a peer.
 
 Signals that retunneling has started for a peer.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `retunnel_initiated`
 
@@ -2752,10 +3236,11 @@ Signals that retunneling has started for a peer.
 
 Signals that retunneling succeeded for a peer.
 
-| Field   | Type               | Default  |
-| ------- | ------------------ | -------- |
-| `alias` | `str`              | Required |
-| `onion` | `Union[str, None]` | `None`   |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `retunnel_success`
 
@@ -2774,7 +3259,9 @@ Signals that retunneling succeeded for a peer.
 
 Signals that daemon self-destruction has started.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `self_destruct_initiated`
 
@@ -2792,7 +3279,9 @@ _No additional payload parameters._
 
 Signals that the current session authenticated successfully.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `session_authenticated`
 
@@ -2810,10 +3299,11 @@ _No additional payload parameters._
 
 Returns a global setting value.
 
-| Field   | Type  | Default  |
-| ------- | ----- | -------- |
-| `key`   | `str` | Required |
-| `value` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `key`        | `str`              | Required |
+| `value`      | `str`              | Required |
 
 **Wire Value:** `setting_data`
 
@@ -2833,10 +3323,11 @@ Returns a global setting value.
 
 Signals a type mismatch while applying a setting value.
 
-| Field    | Type               | Default |
-| -------- | ------------------ | ------- |
-| `key`    | `Union[str, None]` | `None`  |
-| `reason` | `Union[str, None]` | `None`  |
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `key`        | `Union[str, None]` | `None`  |
+| `reason`     | `Union[str, None]` | `None`  |
 
 **Wire Value:** `setting_type_error`
 
@@ -2854,7 +3345,9 @@ Signals a type mismatch while applying a setting value.
 
 Signals that a global setting update failed.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `setting_update_failed`
 
@@ -2872,9 +3365,10 @@ _No additional payload parameters._
 
 Signals that a global setting was updated.
 
-| Field | Type  | Default  |
-| ----- | ----- | -------- |
-| `key` | `str` | Required |
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `key`        | `str`              | Required |
 
 **Wire Value:** `setting_updated`
 
@@ -2889,14 +3383,43 @@ Signals that a global setting was updated.
 
 ---
 
+### `SettingsListDataEvent`
+
+Returns a structured global settings snapshot.
+
+Attributes:
+scope (str): The snapshot scope such as `ui` or `daemon`.
+entries (List[SettingSnapshotEntry]): The ordered snapshot rows.
+event_type (EventType): The stable IPC routing code.
+
+| Field        | Type                         | Default     |
+| ------------ | ---------------------------- | ----------- |
+| `request_id` | `Union[str, None]`           | `None`      |
+| `scope`      | `str`                        | Required    |
+| `entries`    | `List[SettingSnapshotEntry]` | `Factory()` |
+
+**Wire Value:** `settings_list_data`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "settings_list_data",
+  "scope": "string"
+}
+```
+
+---
+
 ### `SwitchSuccessEvent`
 
 Confirms a focus switch or focus clear operation.
 
-| Field   | Type               | Default |
-| ------- | ------------------ | ------- |
-| `alias` | `Union[str, None]` | `None`  |
-| `onion` | `Union[str, None]` | `None`  |
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `alias`      | `Union[str, None]` | `None`  |
+| `onion`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `switch_success`
 
@@ -2914,7 +3437,9 @@ Confirms a focus switch or focus clear operation.
 
 Signals that the encrypted Tor runtime key could not be decrypted.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `tor_key_decrypt_failed`
 
@@ -2932,7 +3457,9 @@ _No additional payload parameters._
 
 Signals that the Tor runtime key could not be written to disk.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `tor_key_write_failed`
 
@@ -2950,9 +3477,12 @@ _No additional payload parameters._
 
 Signals that Tor terminated unexpectedly during startup.
 
-| Field   | Type               | Default |
-| ------- | ------------------ | ------- |
-| `error` | `Union[str, None]` | `None`  |
+| Field          | Type                                     | Default |
+| -------------- | ---------------------------------------- | ------- |
+| `request_id`   | `Union[str, None]`                       | `None`  |
+| `error`        | `Union[str, None]`                       | `None`  |
+| `error_code`   | `Union[<enum 'RuntimeErrorCode'>, None]` | `None`  |
+| `error_detail` | `Union[str, None]`                       | `None`  |
 
 **Wire Value:** `tor_process_terminated`
 
@@ -2970,9 +3500,12 @@ Signals that Tor terminated unexpectedly during startup.
 
 Signals that the Tor process could not be started.
 
-| Field   | Type               | Default |
-| ------- | ------------------ | ------- |
-| `error` | `Union[str, None]` | `None`  |
+| Field          | Type                                     | Default |
+| -------------- | ---------------------------------------- | ------- |
+| `request_id`   | `Union[str, None]`                       | `None`  |
+| `error`        | `Union[str, None]`                       | `None`  |
+| `error_code`   | `Union[<enum 'RuntimeErrorCode'>, None]` | `None`  |
+| `error_detail` | `Union[str, None]`                       | `None`  |
 
 **Wire Value:** `tor_start_failed`
 
@@ -2990,7 +3523,9 @@ Signals that the Tor process could not be started.
 
 Signals that the daemon received an unknown command.
 
-_No additional payload parameters._
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `unknown_command`
 
@@ -3008,11 +3543,12 @@ _No additional payload parameters._
 
 Returns unread messages consumed explicitly for a peer.
 
-| Field      | Type                       | Default  |
-| ---------- | -------------------------- | -------- |
-| `messages` | `List[UnreadMessageEntry]` | Required |
-| `alias`    | `str`                      | Required |
-| `onion`    | `Union[str, None]`         | `None`   |
+| Field        | Type                       | Default  |
+| ------------ | -------------------------- | -------- |
+| `request_id` | `Union[str, None]`         | `None`   |
+| `messages`   | `List[UnreadMessageEntry]` | Required |
+| `alias`      | `str`                      | Required |
+| `onion`      | `Union[str, None]`         | `None`   |
 
 **Wire Value:** `unread_messages`
 

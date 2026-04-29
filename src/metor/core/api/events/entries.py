@@ -36,6 +36,7 @@ class MessageEntry:
     timestamp: str
 
     def __post_init__(self) -> None:
+        """Coerces string-backed direction and status fields to their typed enum equivalents."""
         self.direction = _coerce_enum(MessageDirectionCode, self.direction)
         self.status = _coerce_enum(MessageStatusCode, self.status)
 
@@ -57,3 +58,21 @@ class ProfileEntry:
     is_active: bool
     is_remote: bool
     port: Optional[int]
+
+
+@dataclass
+class SettingSnapshotEntry:
+    """
+    Represents one settings/config snapshot row.
+
+    Attributes:
+        key (str): The fully-qualified settings or config key.
+        value (str): The rendered effective value.
+        source (str): The source label for the rendered value.
+        category (str): The presenter grouping label.
+    """
+
+    key: str
+    value: str
+    source: str
+    category: str

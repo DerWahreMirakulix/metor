@@ -5,8 +5,10 @@ It is the canonical reference for supported user-facing settings and structural 
 
 ## Configuration Model
 
-- `metor settings ...` changes global defaults in `settings.json`.
+- `metor settings ...` changes global defaults. `ui.*` keys are stored in the local client `settings.json`, while `daemon.*` keys are resolved on the targeted daemon host.
 - `metor config ...` writes profile-specific overrides in the active profile `config.json`.
+- `metor settings list` shows the current global UI settings plus the current global daemon settings for the targeted runtime.
+- `metor config list` shows the effective values for the active profile, including local UI overrides, daemon-side effective values, and structural profile metadata.
 - UI settings stay local to the client machine. Daemon settings are applied to the owning daemon runtime.
 - Structural profile config keys are special-case profile metadata, not regular cascading settings.
 
@@ -329,6 +331,29 @@ Server-side timeout for daemon IPC sockets.
 
 ---
 
+#### `daemon.max_ipc_clients`
+
+Limits concurrent local IPC client sessions attached to the daemon. Additional clients are rejected immediately.
+
+| Property         | Value                                                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------------------------------- |
+| Type             | `int`                                                                                                         |
+| Default          | `8`                                                                                                           |
+| Category         | `Core Daemon`                                                                                                 |
+| Scope            | `Daemon runtime`                                                                                              |
+| Profile Override | `Yes`                                                                                                         |
+| Constraints      | Integer >= 1.                                                                                                 |
+| Security Note    | Caps localhost IPC fan-out so a local process cannot exhaust daemon threads or file descriptors indefinitely. |
+
+**CLI Examples**
+
+- `metor settings get daemon.max_ipc_clients`
+- `metor settings set daemon.max_ipc_clients 8`
+- `metor -p <profile> config get daemon.max_ipc_clients`
+- `metor -p <profile> config set daemon.max_ipc_clients 8`
+
+---
+
 #### `daemon.enable_tor_logging`
 
 Emits Tor process logs to the terminal.
@@ -425,22 +450,68 @@ Automatically accepts incoming live sessions from saved contacts.
 
 Requires every UI session to authenticate even when the daemon is already running.
 
-| Property         | Value                                                        |
-| ---------------- | ------------------------------------------------------------ |
-| Type             | `bool`                                                       |
-| Default          | `False`                                                      |
-| Category         | `Core Daemon`                                                |
-| Scope            | `Daemon runtime`                                             |
-| Profile Override | `Yes`                                                        |
-| Constraints      | Boolean.                                                     |
-| Security Note    | Recommended for remote, shared, or physically exposed hosts. |
+| Property         | Value                                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| Type             | `bool`                                                                                   |
+| Default          | `True`                                                                                   |
+| Category         | `Core Daemon`                                                                            |
+| Scope            | `Daemon runtime`                                                                         |
+| Profile Override | `Yes`                                                                                    |
+| Constraints      | Boolean.                                                                                 |
+| Security Note    | Enabled by default for encrypted profiles. Disable it only on trusted single-user hosts. |
 
 **CLI Examples**
 
 - `metor settings get daemon.require_local_auth`
-- `metor settings set daemon.require_local_auth false`
+- `metor settings set daemon.require_local_auth true`
 - `metor -p <profile> config get daemon.require_local_auth`
-- `metor -p <profile> config set daemon.require_local_auth false`
+- `metor -p <profile> config set daemon.require_local_auth true`
+
+---
+
+#### `daemon.local_auth_failure_limit`
+
+Maximum invalid local unlock or session-auth attempts before the daemon disconnects the client. `1` disconnects immediately.
+
+| Property         | Value                                                                                                       |
+| ---------------- | ----------------------------------------------------------------------------------------------------------- |
+| Type             | `int`                                                                                                       |
+| Default          | `3`                                                                                                         |
+| Category         | `Core Daemon`                                                                                               |
+| Scope            | `Daemon runtime`                                                                                            |
+| Profile Override | `Yes`                                                                                                       |
+| Constraints      | Integer >= 1.                                                                                               |
+| Security Note    | Caps online local password guessing attempts per auth window before disconnect and optional cooldown apply. |
+
+**CLI Examples**
+
+- `metor settings get daemon.local_auth_failure_limit`
+- `metor settings set daemon.local_auth_failure_limit 3`
+- `metor -p <profile> config get daemon.local_auth_failure_limit`
+- `metor -p <profile> config set daemon.local_auth_failure_limit 3`
+
+---
+
+#### `daemon.local_auth_lockout_timeout`
+
+Temporarily blocks new local unlock or session-auth attempts after too many invalid passwords. `0` disables the cross-connection lockout window.
+
+| Property         | Value                                                                        |
+| ---------------- | ---------------------------------------------------------------------------- |
+| Type             | `float`                                                                      |
+| Default          | `30.0`                                                                       |
+| Category         | `Core Daemon`                                                                |
+| Scope            | `Daemon runtime`                                                             |
+| Profile Override | `Yes`                                                                        |
+| Constraints      | Float >= 0 seconds.                                                          |
+| Security Note    | Slows reconnect-based local password guessing against the daemon IPC socket. |
+
+**CLI Examples**
+
+- `metor settings get daemon.local_auth_lockout_timeout`
+- `metor settings set daemon.local_auth_lockout_timeout 30.0`
+- `metor -p <profile> config get daemon.local_auth_lockout_timeout`
+- `metor -p <profile> config set daemon.local_auth_lockout_timeout 30.0`
 
 ---
 
@@ -554,6 +625,29 @@ Falls back unacknowledged live messages into the offline drop queue when possibl
 - `metor settings set daemon.fallback_to_drop true`
 - `metor -p <profile> config get daemon.fallback_to_drop`
 - `metor -p <profile> config set daemon.fallback_to_drop true`
+
+---
+
+#### `daemon.max_unseen_drop_msgs`
+
+Caps unread crash-safe drop backlog per peer. `0` rejects new unread drops, while `-1` removes the limit entirely.
+
+| Property         | Value                                                                             |
+| ---------------- | --------------------------------------------------------------------------------- |
+| Type             | `int`                                                                             |
+| Default          | `20`                                                                              |
+| Category         | `Core Daemon`                                                                     |
+| Scope            | `Daemon runtime`                                                                  |
+| Profile Override | `Yes`                                                                             |
+| Constraints      | Integer >= -1.                                                                    |
+| Security Note    | Limits authenticated peers from growing local on-disk drop backlog without bound. |
+
+**CLI Examples**
+
+- `metor settings get daemon.max_unseen_drop_msgs`
+- `metor settings set daemon.max_unseen_drop_msgs 20`
+- `metor -p <profile> config get daemon.max_unseen_drop_msgs`
+- `metor -p <profile> config set daemon.max_unseen_drop_msgs 20`
 
 ---
 
@@ -718,7 +812,7 @@ Keeps a locally initiated live socket open briefly after sending `DISCONNECT` so
 | Property         | Value                         |
 | ---------------- | ----------------------------- |
 | Type             | `float`                       |
-| Default          | `1.0`                         |
+| Default          | `2.0`                         |
 | Category         | `Advanced Network Resilience` |
 | Scope            | `Daemon runtime`              |
 | Profile Override | `Yes`                         |
@@ -727,9 +821,9 @@ Keeps a locally initiated live socket open briefly after sending `DISCONNECT` so
 **CLI Examples**
 
 - `metor settings get daemon.live_disconnect_linger_timeout`
-- `metor settings set daemon.live_disconnect_linger_timeout 1.0`
+- `metor settings set daemon.live_disconnect_linger_timeout 2.0`
 - `metor -p <profile> config get daemon.live_disconnect_linger_timeout`
-- `metor -p <profile> config set daemon.live_disconnect_linger_timeout 1.0`
+- `metor -p <profile> config set daemon.live_disconnect_linger_timeout 2.0`
 
 ---
 

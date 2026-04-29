@@ -14,7 +14,21 @@ from metor.utils import Constants
 
 
 class TorPathResolutionTests(unittest.TestCase):
+    """
+    Covers Tor path resolution regression scenarios.
+    """
+
     def test_env_override_wins_on_windows(self) -> None:
+        """
+        Verifies that env override wins on windows.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         with (
             patch('metor.core.tor.os.name', 'nt'),
             patch.object(Constants, 'TOR_PATH', r'C:\Tor\tor.exe'),
@@ -23,6 +37,16 @@ class TorPathResolutionTests(unittest.TestCase):
             self.assertEqual(TorManager._resolve_tor_command(), r'C:\Tor\tor.exe')
 
     def test_windows_uses_path_before_data_dir_fallback(self) -> None:
+        """
+        Verifies that windows uses path before data dir fallback.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         with (
             patch('metor.core.tor.os.name', 'nt'),
             patch.object(Constants, 'TOR_PATH', ''),
@@ -31,6 +55,16 @@ class TorPathResolutionTests(unittest.TestCase):
             self.assertEqual(TorManager._resolve_tor_command(), r'C:\Tor\tor.exe')
 
     def test_windows_falls_back_to_data_dir_tor_exe(self) -> None:
+        """
+        Verifies that windows falls back to data dir Tor exe.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         with (
             patch('metor.core.tor.os.name', 'nt'),
             patch.object(Constants, 'TOR_PATH', ''),

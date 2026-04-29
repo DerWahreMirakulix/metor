@@ -8,9 +8,17 @@ import os
 import socket
 import threading
 import json
-from typing import List, Callable, Dict, Optional
+from typing import List, Callable, Dict, Optional, Iterable
 
-from metor.core.api import IpcCommand, IpcEvent, JsonValue, EventType, create_event
+from metor.core.api import (
+    EventType,
+    IpcCommand,
+    IpcEvent,
+    JsonValue,
+    create_event,
+    request_context,
+    stamp_request_id,
+)
 from metor.data import SettingKey
 from metor.data.profile import ProfileManager
 from metor.utils import Constants
@@ -19,11 +27,45 @@ from metor.utils import Constants
 class IpcServer:
     """Manages the local IPC server socket for UI-Daemon communication."""
 
+    @staticmethod
+    def _extract_request_id(payload: JsonValue) -> Optional[str]:
+        """
+        Extracts one request correlation identifier from a raw JSON payload.
+
+        Args:
+            payload (JsonValue): The decoded JSON payload.
+
+        Returns:
+            Optional[str]: The request identifier when present and well-typed.
+        """
+        if not isinstance(payload, dict):
+            return None
+
+        request_id: JsonValue = payload.get('request_id')
+        return request_id if isinstance(request_id, str) else None
+
+    @staticmethod
+    def _build_client_limit_event(max_clients: int) -> IpcEvent:
+        """
+        Creates one IPC saturation event for a newly rejected client socket.
+
+        Args:
+            max_clients (int): The configured daemon IPC client ceiling.
+
+        Returns:
+            IpcEvent: The typed rejection event.
+        """
+        return create_event(
+            EventType.IPC_CLIENT_LIMIT_REACHED,
+            {'max_clients': max_clients},
+        )
+
     def __init__(
         self,
         pm: ProfileManager,
         command_callback: Callable[[IpcCommand, socket.socket], None],
         disconnect_callback: Optional[Callable[[socket.socket], None]] = None,
+        error_callback: Optional[Callable[[str], None]] = None,
     ) -> None:
         """
         Initializes the IPC Server.
@@ -32,6 +74,8 @@ class IpcServer:
             pm (ProfileManager): To store and retrieve the active daemon port.
             command_callback (Callable): The function to call when a valid command arrives.
             disconnect_callback (Optional[Callable]): Hook to clean up socket states externally.
+            error_callback (Optional[Callable[[str], None]]): Hook to surface
+                unexpected runtime errors without terminating the acceptor.
 
         Returns:
             None
@@ -43,12 +87,31 @@ class IpcServer:
         self._disconnect_callback: Optional[Callable[[socket.socket], None]] = (
             disconnect_callback
         )
+        self._error_callback: Optional[Callable[[str], None]] = error_callback
 
         self._clients: List[socket.socket] = []
         self._lock: threading.Lock = threading.Lock()
         self._stop_flag: threading.Event = threading.Event()
         self.port: Optional[int] = None
         self._server: Optional[socket.socket] = None
+
+    def _report_internal_error(self, message: str) -> None:
+        """
+        Emits one best-effort runtime error callback.
+
+        Args:
+            message (str): The console-safe runtime error message.
+
+        Returns:
+            None
+        """
+        if self._error_callback is None:
+            return
+
+        try:
+            self._error_callback(message)
+        except Exception:
+            pass
 
     def has_active_clients(self) -> bool:
         """
@@ -125,11 +188,33 @@ class IpcServer:
         Returns:
             None
         """
+        self.broadcast_to(event)
+
+    def broadcast_to(
+        self,
+        event: IpcEvent,
+        recipients: Optional[Iterable[socket.socket]] = None,
+    ) -> None:
+        """
+        Sends one event payload to a subset of currently connected UI clients.
+
+        Args:
+            event (IpcEvent): The DTO event to broadcast.
+            recipients (Optional[Iterable[socket.socket]]): Optional recipient subset.
+
+        Returns:
+            None
+        """
+        stamp_request_id(event)
         msg: bytes = (event.to_json() + '\n').encode('utf-8')
         dead_clients: List[socket.socket] = []
 
         with self._lock:
             clients: List[socket.socket] = list(self._clients)
+
+        if recipients is not None:
+            allowed_clients: set[socket.socket] = set(recipients)
+            clients = [client for client in clients if client in allowed_clients]
 
         for client in clients:
             try:
@@ -161,8 +246,26 @@ class IpcServer:
             None
         """
         try:
+            stamp_request_id(event)
             msg: bytes = (event.to_json() + '\n').encode('utf-8')
             conn.sendall(msg)
+        except Exception:
+            pass
+
+    def _reject_client_limit(self, conn: socket.socket, max_clients: int) -> None:
+        """
+        Rejects one freshly accepted IPC socket when the daemon is already saturated.
+
+        Args:
+            conn (socket.socket): The newly accepted socket.
+            max_clients (int): The configured daemon IPC client ceiling.
+
+        Returns:
+            None
+        """
+        self.send_to(conn, self._build_client_limit_event(max_clients))
+        try:
+            conn.close()
         except Exception:
             pass
 
@@ -189,19 +292,53 @@ class IpcServer:
                 server.settimeout(Constants.THREAD_POLL_TIMEOUT)
                 conn, _ = server.accept()
                 conn.settimeout(daemon_ipc_timeout)
+                max_clients: int = self._pm.config.get_int(SettingKey.MAX_IPC_CLIENTS)
+
                 with self._lock:
-                    self._clients.append(conn)
-                threading.Thread(
-                    target=self._handler, args=(conn,), daemon=True
-                ).start()
+                    if len(self._clients) >= max_clients:
+                        reject_conn: Optional[socket.socket] = conn
+                    else:
+                        reject_conn = None
+
+                if reject_conn is not None:
+                    self._reject_client_limit(reject_conn, max_clients)
+                    continue
+
+                try:
+                    handler_thread: threading.Thread = threading.Thread(
+                        target=self._handler,
+                        args=(conn,),
+                        daemon=True,
+                    )
+                    with self._lock:
+                        self._clients.append(conn)
+                    handler_thread.start()
+                except Exception:
+                    with self._lock:
+                        if conn in self._clients:
+                            self._clients.remove(conn)
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    self._report_internal_error(
+                        'IPC acceptor failed to start a client handler thread. Continuing.'
+                    )
+                    continue
             except socket.timeout:
                 continue
             except OSError:
-                if self._stop_flag.is_set():
+                if self._stop_flag.is_set() or self._server is None:
                     break
-                break
+                self._report_internal_error(
+                    'IPC acceptor hit an OS-level runtime error. Continuing.'
+                )
+                continue
             except Exception:
-                break
+                self._report_internal_error(
+                    'IPC acceptor hit an unexpected runtime error. Continuing.'
+                )
+                continue
 
     def _handler(self, conn: socket.socket) -> None:
         """
@@ -234,6 +371,7 @@ class IpcServer:
                     while b'\n' in buffer:
                         line_bytes, _, rest = buffer.partition(b'\n')
                         buffer = bytearray(rest)
+                        request_id: Optional[str] = None
 
                         try:
                             line: str = line_bytes.decode('utf-8').strip()
@@ -245,15 +383,33 @@ class IpcServer:
                             continue
                         try:
                             cmd_dict: Dict[str, JsonValue] = json.loads(line)
+                            request_id = self._extract_request_id(cmd_dict)
                             cmd: IpcCommand = IpcCommand.from_dict(cmd_dict)
                         except Exception:
-                            self.send_to(conn, create_event(EventType.UNKNOWN_COMMAND))
+                            self.send_to(
+                                conn,
+                                create_event(
+                                    EventType.UNKNOWN_COMMAND,
+                                    {'request_id': request_id}
+                                    if request_id is not None
+                                    else None,
+                                ),
+                            )
                             continue
 
                         try:
-                            self._command_callback(cmd, conn)
+                            with request_context(cmd.request_id):
+                                self._command_callback(cmd, conn)
                         except Exception:
-                            self.send_to(conn, create_event(EventType.INTERNAL_ERROR))
+                            self.send_to(
+                                conn,
+                                create_event(
+                                    EventType.INTERNAL_ERROR,
+                                    {'request_id': cmd.request_id}
+                                    if cmd.request_id is not None
+                                    else None,
+                                ),
+                            )
                 except socket.timeout:
                     continue
         except Exception:

@@ -6,7 +6,7 @@ Isolates argparse configuration from the application execution logic.
 import argparse
 from typing import List, Tuple
 
-from metor.data.profile import ProfileManager
+from metor.data import ProfileManager
 
 
 class CliParser:

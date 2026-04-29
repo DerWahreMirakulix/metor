@@ -9,13 +9,35 @@ from dataclasses import dataclass
 import json
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Union, Optional
+from typing import Dict, Optional, Tuple, TypeGuard, TypedDict, Union
 
 from metor.utils import Constants, FileLock, TypeCaster, validate_json_file
 
 
 # Types
 SettingValue = Union[str, int, float, bool]
+
+
+class SettingSnapshotRow(TypedDict):
+    """Represents one normalized snapshot row before IPC/UI adaptation."""
+
+    key: str
+    value: str
+    source: str
+    category: str
+
+
+def is_setting_value(value: object) -> TypeGuard[SettingValue]:
+    """
+    Checks whether one raw JSON value is a supported primitive setting value.
+
+    Args:
+        value (object): The raw candidate value.
+
+    Returns:
+        TypeGuard[SettingValue]: True if the value is one supported primitive.
+    """
+    return isinstance(value, (str, int, float, bool))
 
 
 class SettingKey(str, Enum):
@@ -38,16 +60,20 @@ class SettingKey(str, Enum):
     STREAM_IDLE_TIMEOUT = 'daemon.stream_idle_timeout'
     LATE_ACCEPTANCE_TIMEOUT = 'daemon.late_acceptance_timeout'
     DAEMON_IPC_TIMEOUT = 'daemon.ipc_timeout'
+    MAX_IPC_CLIENTS = 'daemon.max_ipc_clients'
     ENABLE_TOR_LOGGING = 'daemon.enable_tor_logging'
     ENABLE_SQL_LOGGING = 'daemon.enable_sql_logging'
     ENABLE_RUNTIME_DB_MIRROR = 'daemon.enable_runtime_db_mirror'
     AUTO_ACCEPT_CONTACTS = 'daemon.auto_accept_contacts'
     REQUIRE_LOCAL_AUTH = 'daemon.require_local_auth'
+    LOCAL_AUTH_FAILURE_LIMIT = 'daemon.local_auth_failure_limit'
+    LOCAL_AUTH_LOCKOUT_TIMEOUT = 'daemon.local_auth_lockout_timeout'
     ALLOW_DROPS = 'daemon.allow_drops'
     EPHEMERAL_MESSAGES = 'daemon.ephemeral_messages'
     RECORD_LIVE_HISTORY = 'daemon.record_live_history'
     RECORD_DROP_HISTORY = 'daemon.record_drop_history'
     FALLBACK_TO_DROP = 'daemon.fallback_to_drop'
+    MAX_UNSEEN_DROP_MSGS = 'daemon.max_unseen_drop_msgs'
     MAX_UNSEEN_LIVE_MSGS = 'daemon.max_unseen_live_msgs'
 
     # 3. Advanced Network Resilience & Constraints
@@ -106,6 +132,33 @@ class SettingSpec:
     allow_empty_string: bool = True
     min_value: Optional[float] = None
     max_value: Optional[float] = None
+
+
+def build_snapshot_row(
+    *,
+    key: str,
+    value: SettingValue | None,
+    source: str,
+    category: str,
+) -> SettingSnapshotRow:
+    """
+    Builds one normalized snapshot row for list-style settings output.
+
+    Args:
+        key (str): The fully-qualified settings or config key.
+        value (SettingValue | None): The effective primitive value to render.
+        source (str): The source label describing where the value came from.
+        category (str): The grouping label used by the presenter.
+
+    Returns:
+        SettingSnapshotRow: The presenter-ready string snapshot row.
+    """
+    return {
+        'key': key,
+        'value': TypeCaster.to_str(value),
+        'source': source,
+        'category': category,
+    }
 
 
 class Settings:
@@ -229,6 +282,15 @@ class Settings:
             constraints='Float >= 0.1 seconds.',
             min_value=0.1,
         ),
+        SettingKey.MAX_IPC_CLIENTS: SettingSpec(
+            key=SettingKey.MAX_IPC_CLIENTS,
+            default=8,
+            category='Core Daemon',
+            description='Limits concurrent local IPC client sessions attached to the daemon. Additional clients are rejected immediately.',
+            constraints='Integer >= 1.',
+            security_note='Caps localhost IPC fan-out so a local process cannot exhaust daemon threads or file descriptors indefinitely.',
+            min_value=1,
+        ),
         SettingKey.ENABLE_TOR_LOGGING: SettingSpec(
             key=SettingKey.ENABLE_TOR_LOGGING,
             default=False,
@@ -263,11 +325,29 @@ class Settings:
         ),
         SettingKey.REQUIRE_LOCAL_AUTH: SettingSpec(
             key=SettingKey.REQUIRE_LOCAL_AUTH,
-            default=False,
+            default=True,
             category='Core Daemon',
             description='Requires every UI session to authenticate even when the daemon is already running.',
             constraints='Boolean.',
-            security_note='Recommended for remote, shared, or physically exposed hosts.',
+            security_note='Enabled by default for encrypted profiles. Disable it only on trusted single-user hosts.',
+        ),
+        SettingKey.LOCAL_AUTH_FAILURE_LIMIT: SettingSpec(
+            key=SettingKey.LOCAL_AUTH_FAILURE_LIMIT,
+            default=Constants.IPC_AUTH_FAILURE_LIMIT,
+            category='Core Daemon',
+            description='Maximum invalid local unlock or session-auth attempts before the daemon disconnects the client. `1` disconnects immediately.',
+            constraints='Integer >= 1.',
+            security_note='Caps online local password guessing attempts per auth window before disconnect and optional cooldown apply.',
+            min_value=1,
+        ),
+        SettingKey.LOCAL_AUTH_LOCKOUT_TIMEOUT: SettingSpec(
+            key=SettingKey.LOCAL_AUTH_LOCKOUT_TIMEOUT,
+            default=30.0,
+            category='Core Daemon',
+            description='Temporarily blocks new local unlock or session-auth attempts after too many invalid passwords. `0` disables the cross-connection lockout window.',
+            constraints='Float >= 0 seconds.',
+            security_note='Slows reconnect-based local password guessing against the daemon IPC socket.',
+            min_value=0.0,
         ),
         SettingKey.ALLOW_DROPS: SettingSpec(
             key=SettingKey.ALLOW_DROPS,
@@ -306,6 +386,15 @@ class Settings:
             category='Core Daemon',
             description='Falls back unacknowledged live messages into the offline drop queue when possible.',
             constraints='Boolean.',
+        ),
+        SettingKey.MAX_UNSEEN_DROP_MSGS: SettingSpec(
+            key=SettingKey.MAX_UNSEEN_DROP_MSGS,
+            default=20,
+            category='Core Daemon',
+            description='Caps unread crash-safe drop backlog per peer. `0` rejects new unread drops, while `-1` removes the limit entirely.',
+            constraints='Integer >= -1.',
+            security_note='Limits authenticated peers from growing local on-disk drop backlog without bound.',
+            min_value=-1,
         ),
         SettingKey.MAX_UNSEEN_LIVE_MSGS: SettingSpec(
             key=SettingKey.MAX_UNSEEN_LIVE_MSGS,
@@ -364,7 +453,7 @@ class Settings:
         ),
         SettingKey.LIVE_DISCONNECT_LINGER_TIMEOUT: SettingSpec(
             key=SettingKey.LIVE_DISCONNECT_LINGER_TIMEOUT,
-            default=1.0,
+            default=2.0,
             category='Advanced Network Resilience',
             description='Keeps a locally initiated live socket open briefly after sending `DISCONNECT` so the control frame can flush through Tor before shutdown. Higher values improve retunnel reliability on slower routes.',
             constraints='Float >= 0 seconds.',
@@ -520,6 +609,79 @@ class Settings:
         return data_dir / Constants.SETTINGS_FILE
 
     @classmethod
+    def _read_raw_settings_data(cls) -> Dict[str, object]:
+        """
+        Reads the raw settings JSON payload without applying defaults.
+
+        Args:
+            None
+
+        Returns:
+            Dict[str, object]: The decoded top-level settings payload.
+        """
+        path: Path = cls.get_global_settings_path()
+        if not path.exists():
+            return {}
+
+        with path.open('r', encoding='utf-8') as f:
+            data: object = json.load(f)
+
+        if not isinstance(data, dict):
+            raise ValueError(f"'{path.name}' must contain a top-level JSON object.")
+
+        return dict(data)
+
+    @classmethod
+    def get_snapshots(
+        cls,
+        *,
+        domain: Optional[str] = None,
+    ) -> Tuple[SettingSnapshotRow, ...]:
+        """
+        Returns structured snapshots for the current global settings state.
+
+        Args:
+            domain (Optional[str]): Optional `ui` or `daemon` domain filter.
+
+        Returns:
+            Tuple[SettingSnapshotRow, ...]: Ordered snapshot rows for CLI presentation.
+        """
+        raw_data: Dict[str, object] = cls._read_raw_settings_data()
+        snapshots: list[SettingSnapshotRow] = []
+
+        for spec in cls.get_specs():
+            key_domain: str
+            sub_key: str
+            key_domain, sub_key = spec.key.value.split('.', 1)
+            if domain is not None and key_domain != domain:
+                continue
+
+            raw_domain: object = raw_data.get(key_domain, {})
+            raw_value: Optional[SettingValue] = None
+            source: str = 'default'
+
+            if isinstance(raw_domain, dict) and sub_key in raw_domain:
+                candidate: object = raw_domain[sub_key]
+                if is_setting_value(candidate):
+                    try:
+                        raw_value = cls.validate_value(spec.key, candidate)
+                        source = 'global'
+                    except (TypeError, SettingValidationError):
+                        raw_value = None
+
+            value: SettingValue = spec.default if raw_value is None else raw_value
+            snapshots.append(
+                build_snapshot_row(
+                    key=spec.key.value,
+                    value=value,
+                    source=source,
+                    category=spec.category,
+                )
+            )
+
+        return tuple(snapshots)
+
+    @classmethod
     def validate_integrity(cls) -> None:
         """
         Validates the JSON syntax of the global settings file using the generic parser utility.
@@ -536,8 +698,54 @@ class Settings:
         path: Path = cls.get_global_settings_path()
         validate_json_file(path)
 
+        if not path.exists():
+            return
+
+        raw_data: Dict[str, object] = cls._read_raw_settings_data()
+        allowed_domains: set[str] = {'ui', 'daemon'}
+        unknown_domains: list[str] = sorted(
+            key for key in raw_data.keys() if key not in allowed_domains
+        )
+        if unknown_domains:
+            joined: str = ', '.join(unknown_domains)
+            raise ValueError(
+                f"'{path.name}' contains unknown settings domains: {joined}."
+            )
+
+        for domain in allowed_domains:
+            raw_domain: object = raw_data.get(domain, {})
+            if not isinstance(raw_domain, dict):
+                raise ValueError(
+                    f"'{path.name}' contains a non-object '{domain}' section."
+                )
+
+            for sub_key, raw_value in raw_domain.items():
+                key_name: str = f'{domain}.{sub_key}'
+                try:
+                    setting_key: SettingKey = SettingKey(key_name)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"'{path.name}' contains an unknown setting key '{key_name}'."
+                    ) from exc
+
+                if not is_setting_value(raw_value):
+                    raise ValueError(
+                        f"'{path.name}' contains an invalid value for '{key_name}': unsupported JSON type."
+                    )
+
+                try:
+                    cls.validate_value(setting_key, raw_value)
+                except (TypeError, SettingValidationError) as exc:
+                    raise ValueError(
+                        f"'{path.name}' contains an invalid value for '{key_name}': {exc}"
+                    ) from exc
+
     @classmethod
-    def _load_settings(cls) -> Dict[str, Dict[str, SettingValue]]:
+    def _load_settings(
+        cls,
+        *,
+        persist_defaults: bool = True,
+    ) -> Dict[str, Dict[str, SettingValue]]:
         """
         Loads the settings from the JSON file into a nested structure.
         Creates the default structure and writes it to disk if the file is missing.
@@ -570,7 +778,7 @@ class Settings:
             category, sub_key = key_enum.split('.', 1)
             data[category][sub_key] = val
 
-        if not path.exists():
+        if persist_defaults and not path.exists():
             with FileLock(path):
                 with path.open('w', encoding='utf-8') as f:
                     json.dump(data, f, indent=4)
@@ -695,7 +903,9 @@ class Settings:
         path: Path = cls.get_global_settings_path()
 
         with FileLock(path):
-            data: Dict[str, Dict[str, SettingValue]] = cls._load_settings()
+            data: Dict[str, Dict[str, SettingValue]] = cls._load_settings(
+                persist_defaults=False,
+            )
             category: str
             sub_key: str
             category, sub_key = key.value.split('.', 1)

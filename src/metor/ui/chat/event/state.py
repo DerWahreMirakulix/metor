@@ -17,6 +17,23 @@ from metor.ui.chat.models import ChatMessageType
 from metor.ui.chat.presenter import ChatPresenter
 
 
+def _replace_alias_in_list(entries: list[str], old_alias: str, new_alias: str) -> None:
+    """
+    Replaces one alias in-place while preserving the existing list order.
+
+    Args:
+        entries (list[str]): The list to update.
+        old_alias (str): The previous alias.
+        new_alias (str): The new alias.
+
+    Returns:
+        None
+    """
+    for index, value in enumerate(entries):
+        if value == old_alias:
+            entries[index] = new_alias
+
+
 def handle_state_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool:
     """
     Handles alias, contact, and focus state mutation events.
@@ -33,21 +50,40 @@ def handle_state_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool:
             event.old_alias
         )
         handler._remember_peer(event.new_alias, rename_onion)
-        if event.old_alias in handler._session.active_connections:
-            handler._session.active_connections.remove(event.old_alias)
-            handler._session.active_connections.append(event.new_alias)
-        if event.old_alias in handler._session.pending_connections:
-            handler._session.pending_connections.remove(event.old_alias)
-            handler._session.pending_connections.append(event.new_alias)
+        _replace_alias_in_list(
+            handler._session.active_connections,
+            event.old_alias,
+            event.new_alias,
+        )
+        _replace_alias_in_list(
+            handler._session.pending_connections,
+            event.old_alias,
+            event.new_alias,
+        )
+        _replace_alias_in_list(
+            handler._session.header_active,
+            event.old_alias,
+            event.new_alias,
+        )
+        _replace_alias_in_list(
+            handler._session.header_pending,
+            event.old_alias,
+            event.new_alias,
+        )
+        _replace_alias_in_list(
+            handler._session.header_contacts,
+            event.old_alias,
+            event.new_alias,
+        )
         if handler._session.pending_focus_target == event.old_alias:
             handler._session.pending_focus_target = event.new_alias
         if handler._session.pending_accept_focus_target == event.old_alias:
             handler._session.pending_accept_focus_target = event.new_alias
 
-        handler._renderer.refresh_alias_bindings()
-
         if handler._session.focused_alias == event.old_alias:
             handler._switch_focus(event.new_alias, hide_message=True)
+        else:
+            handler._renderer.refresh_alias_bindings()
         return True
 
     if isinstance(event, ContactRemovedEvent):

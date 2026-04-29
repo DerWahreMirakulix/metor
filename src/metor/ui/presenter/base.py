@@ -1,6 +1,7 @@
 """Facade class exposing the modular UI presenter helpers."""
 
 from metor.core.api import (
+    ConfigListDataEvent,
     ContactsDataEvent,
     HistoryDataEvent,
     HistoryRawDataEvent,
@@ -8,16 +9,19 @@ from metor.core.api import (
     IpcEvent,
     MessagesDataEvent,
     ProfilesDataEvent,
+    SettingsListDataEvent,
     UnreadMessagesEvent,
 )
 
 # Local Package Imports
 from metor.ui.presenter.data import (
+    format_config_snapshot,
     format_contacts,
     format_inbox,
     format_messages,
     format_profiles,
     format_read_messages,
+    format_settings_snapshot,
 )
 from metor.ui.presenter.history import format_history, format_raw_history
 from metor.ui.presenter.shared import (
@@ -40,6 +44,8 @@ class UIPresenter:
     get_header_string = staticmethod(get_header_string)
     get_divider_string = staticmethod(get_divider_string)
     format_contacts = staticmethod(format_contacts)
+    format_settings_snapshot = staticmethod(format_settings_snapshot)
+    format_config_snapshot = staticmethod(format_config_snapshot)
     format_history = staticmethod(format_history)
     format_raw_history = staticmethod(format_raw_history)
     format_messages = staticmethod(format_messages)
@@ -61,6 +67,10 @@ class UIPresenter:
         """
         if isinstance(event, ContactsDataEvent):
             return format_contacts(event, chat_mode)
+        if isinstance(event, SettingsListDataEvent):
+            return format_settings_snapshot(event)
+        if isinstance(event, ConfigListDataEvent):
+            return format_config_snapshot(event)
         if isinstance(event, HistoryDataEvent):
             return format_history(event)
         if isinstance(event, HistoryRawDataEvent):

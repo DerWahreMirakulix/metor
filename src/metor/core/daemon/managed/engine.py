@@ -20,6 +20,7 @@ from pathlib import Path
 from metor.core import KeyManager, TorManager
 from metor.core.api import (
     AuthenticateSessionCommand,
+    create_event,
     IpcEvent,
     IpcCommand,
     InitCommand,
@@ -50,15 +51,18 @@ from metor.core.api import (
     ClearProfileDbCommand,
     SetSettingCommand,
     GetSettingCommand,
+    GetSettingsListCommand,
     SetConfigCommand,
     GetConfigCommand,
+    GetConfigListCommand,
     SyncConfigCommand,
     SelfDestructCommand,
     UnlockCommand,
     RetunnelCommand,
     EventType,
     JsonValue,
-    create_event,
+    request_context,
+    stamp_request_id,
 )
 from metor.data.profile import ProfileManager
 from metor.data import (
@@ -110,6 +114,7 @@ class Daemon:
         status_callback: Optional[
             Callable[[Union[EventType, DaemonStatus], Dict[str, JsonValue]], None]
         ] = None,
+        require_session_auth: bool = False,
         start_locked: bool = False,
     ) -> None:
         """
@@ -124,6 +129,7 @@ class Daemon:
             mm (Optional[MessageManager]): Offline messages storage.
             session_auth (Optional[SessionAuthContext]): Optional verifier context for per-session local auth.
             status_callback (Optional[Callable]): Hook for UI-agnostic startup logging.
+            require_session_auth (bool): Whether this daemon runtime should require per-session auth.
             start_locked (bool): Whether to delay runtime startup until an explicit unlock.
 
         Returns:
@@ -141,8 +147,10 @@ class Daemon:
 
         self._stop_flag: threading.Event = threading.Event()
         self._stop_lock: threading.Lock = threading.Lock()
+        self._client_state_lock: threading.Lock = threading.Lock()
         self._is_locked: bool = start_locked
         self._is_stopping: bool = False
+        self._require_session_auth: bool = require_session_auth
         self._authenticated_clients: Set[socket.socket] = set()
         self._live_consumer_clients: Set[socket.socket] = set()
         self._local_auth: LocalAuthTracker = LocalAuthTracker()
@@ -150,7 +158,10 @@ class Daemon:
 
         self._crypto: Optional[Crypto] = None
         self._ipc: IpcServer = IpcServer(
-            pm, self._process_ui_command, self._on_ipc_disconnect
+            pm,
+            self._process_ui_command,
+            self._on_ipc_disconnect,
+            self._on_runtime_internal_error,
         )
         self._outbox: Optional[OutboxWorker] = None
         self._network: Optional[NetworkManager] = None
@@ -182,7 +193,9 @@ class Daemon:
         if os.name != 'nt':
             signal.signal(signal.SIGINT, self._sig_handler)
             signal.signal(signal.SIGTERM, self._sig_handler)
-            signal.signal(signal.SIGHUP, self._sig_handler)
+            sighup_signal = getattr(signal, 'SIGHUP', None)
+            if sighup_signal is not None:
+                signal.signal(sighup_signal, self._sig_handler)
 
     def _install_runtime(self, runtime: DaemonRuntime) -> None:
         """
@@ -209,7 +222,7 @@ class Daemon:
             runtime.hm,
             runtime.mm,
             self._crypto,
-            self._ipc.broadcast,
+            self._broadcast_ipc_event,
             self._ipc.has_active_clients,
             self._has_live_consumers,
             self._stop_flag,
@@ -221,10 +234,11 @@ class Daemon:
             runtime.mm,
             runtime.hm,
             self._crypto,
-            self._ipc.broadcast,
+            self._broadcast_ipc_event,
             self._stop_flag,
             config=self._pm.config,
             state=self._transport_state,
+            error_callback=self._on_runtime_internal_error,
         )
         self._db_handler = DatabaseCommandHandler(
             self._pm,
@@ -232,7 +246,7 @@ class Daemon:
             runtime.hm,
             runtime.mm,
             self._network.get_active_onions,
-            self._ipc.broadcast,
+            self._broadcast_ipc_event,
         )
         self._sys_handler = SystemCommandHandler(self._pm, runtime.tm)
         self._network_handler = NetworkCommandHandler(
@@ -242,11 +256,54 @@ class Daemon:
             runtime.mm,
             self._network,
             self._outbox,
-            self._ipc.broadcast,
+            self._broadcast_ipc_event,
             self._send_to_client,
             self._register_live_consumer,
             config=self._pm.config,
         )
+
+    def _on_runtime_internal_error(self, message: str) -> None:
+        """
+        Surfaces one unexpected daemon runtime error to the daemon console callback.
+
+        Args:
+            message (str): The console-safe runtime error message.
+
+        Returns:
+            None
+        """
+        with self._stop_lock:
+            if self._is_stopping:
+                return
+
+        try:
+            if self._status_cb is not None:
+                self._status_cb(DaemonStatus.RUNTIME_ERROR, {'message': message})
+        except Exception:
+            pass
+
+    def _broadcast_ipc_event(self, event: IpcEvent) -> None:
+        """
+        Broadcasts one IPC event while preserving local-auth session boundaries.
+
+        Args:
+            event (IpcEvent): The event payload to emit.
+
+        Returns:
+            None
+        """
+        stamp_request_id(event)
+        if self._requires_session_auth():
+            with self._client_state_lock:
+                recipients: set[socket.socket] = set(self._authenticated_clients)
+
+            if not recipients:
+                return
+
+            self._ipc.broadcast_to(event, recipients)
+            return
+
+        self._ipc.broadcast(event)
 
     def _has_live_consumers(self) -> bool:
         """
@@ -258,7 +315,8 @@ class Daemon:
         Returns:
             bool: True if at least one live consumer is connected.
         """
-        return bool(self._live_consumer_clients)
+        with self._client_state_lock:
+            return bool(self._live_consumer_clients)
 
     def _register_live_consumer(self, conn: socket.socket) -> None:
         """
@@ -270,8 +328,10 @@ class Daemon:
         Returns:
             None
         """
-        had_consumers: bool = self._has_live_consumers()
-        self._live_consumer_clients.add(conn)
+        with self._client_state_lock:
+            had_consumers: bool = bool(self._live_consumer_clients)
+            self._live_consumer_clients.add(conn)
+
         if not had_consumers and self._network is not None:
             self._network.on_live_consumer_available()
 
@@ -286,6 +346,7 @@ class Daemon:
         Returns:
             None
         """
+        stamp_request_id(event)
         self._ipc.send_to(conn, event)
 
     def _sig_handler(self, signum: int, frame: Optional[types.FrameType]) -> None:
@@ -349,7 +410,12 @@ class Daemon:
             self.stop()
             return False
 
-        self._network.start_listener()
+        try:
+            self._network.start_listener()
+        except RuntimeError as exc:
+            self._on_runtime_internal_error(str(exc))
+            self.stop()
+            return False
 
         if not self._ipc.port:
             self._ipc.start()
@@ -379,9 +445,10 @@ class Daemon:
                 return
             self._is_stopping = True
             self._stop_flag.set()
-            self._authenticated_clients.clear()
-            self._live_consumer_clients.clear()
-            self._local_auth.clear_all()
+            with self._client_state_lock:
+                self._authenticated_clients.clear()
+                self._live_consumer_clients.clear()
+            self._local_auth.install_context(None)
 
         try:
             if self._outbox is not None:
@@ -409,7 +476,12 @@ class Daemon:
         runtime_db_path: Path = (
             self._pm.paths.get_config_dir() / Constants.DB_RUNTIME_FILE
         )
-        secure_shred_file(runtime_db_path)
+        try:
+            secure_shred_file(runtime_db_path)
+        except OSError:
+            self._on_runtime_internal_error(
+                'Failed to shred the runtime database mirror during shutdown.'
+            )
 
         try:
             self._pm.clear_daemon_port(
@@ -422,6 +494,12 @@ class Daemon:
         try:
             if self._tm is not None:
                 self._tm.stop()
+        except Exception:
+            pass
+
+        try:
+            if self._km is not None:
+                self._km.clear_sensitive_state()
         except Exception:
             pass
 
@@ -439,8 +517,16 @@ class Daemon:
         runtime_db_path: Path = (
             self._pm.paths.get_config_dir() / Constants.DB_RUNTIME_FILE
         )
-        secure_shred_file(db_path)
-        secure_shred_file(runtime_db_path)
+        for path, description in (
+            (db_path, 'profile database'),
+            (runtime_db_path, 'runtime database mirror'),
+        ):
+            try:
+                secure_shred_file(path)
+            except OSError:
+                self._on_runtime_internal_error(
+                    f'Failed to shred the {description} during self-destruct.'
+                )
 
         hs_dir: Path = self._pm.paths.get_hidden_service_dir()
         key_files: List[str] = [
@@ -450,7 +536,12 @@ class Daemon:
             Constants.TOR_PUBLIC_KEY,
         ]
         for key_file in key_files:
-            secure_shred_file(hs_dir / key_file)
+            try:
+                secure_shred_file(hs_dir / key_file)
+            except OSError:
+                self._on_runtime_internal_error(
+                    f'Failed to shred key material during self-destruct: {key_file}.'
+                )
 
         self.stop()
 
@@ -464,10 +555,9 @@ class Daemon:
         Returns:
             None
         """
-        if conn in self._authenticated_clients:
-            self._authenticated_clients.remove(conn)
-
-        self._live_consumer_clients.discard(conn)
+        with self._client_state_lock:
+            self._authenticated_clients.discard(conn)
+            self._live_consumer_clients.discard(conn)
         self._local_auth.clear_connection(conn)
 
         if self._network_handler is not None:
@@ -483,9 +573,7 @@ class Daemon:
         Returns:
             bool: True when local auth is enabled and a verifier context exists.
         """
-        return self._pm.config.get_bool(SettingKey.REQUIRE_LOCAL_AUTH) and bool(
-            self._local_auth.is_enabled()
-        )
+        return self._require_session_auth and bool(self._local_auth.is_enabled())
 
     def _build_session_auth_event(
         self,
@@ -506,6 +594,46 @@ class Daemon:
             event_type,
             {'challenge': prompt.challenge, 'salt': prompt.salt},
         )
+
+    @staticmethod
+    def _build_local_auth_rate_limited_event(retry_after: int) -> IpcEvent:
+        """
+        Creates one IPC event describing the active local-auth cooldown window.
+
+        Args:
+            retry_after (int): Remaining whole seconds before retry is allowed.
+
+        Returns:
+            IpcEvent: The typed rate-limit event.
+        """
+        return create_event(
+            EventType.LOCAL_AUTH_RATE_LIMITED,
+            {'retry_after': retry_after},
+        )
+
+    def _get_local_auth_lockout_timeout(self) -> float:
+        """
+        Resolves the configured cross-connection local-auth cooldown window.
+
+        Args:
+            None
+
+        Returns:
+            float: The lockout duration in seconds.
+        """
+        return self._pm.config.get_float(SettingKey.LOCAL_AUTH_LOCKOUT_TIMEOUT)
+
+    def _get_local_auth_failure_limit(self) -> int:
+        """
+        Resolves the configured local-auth failure limit for one auth window.
+
+        Args:
+            None
+
+        Returns:
+            int: The maximum invalid attempts before disconnect.
+        """
+        return max(1, self._pm.config.get_int(SettingKey.LOCAL_AUTH_FAILURE_LIMIT))
 
     @staticmethod
     def _disconnect_ipc_client(conn: socket.socket) -> None:
@@ -535,11 +663,44 @@ class Daemon:
         Returns:
             None
         """
+        with request_context(cmd.request_id):
+            self._process_ui_command_in_context(cmd, conn)
+
+    def _process_ui_command_in_context(
+        self,
+        cmd: IpcCommand,
+        conn: socket.socket,
+    ) -> None:
+        """
+        Routes one request-scoped IPC command after correlation context setup.
+
+        Args:
+            cmd (IpcCommand): The parsed command object.
+            conn (socket.socket): The connection to respond to.
+
+        Returns:
+            None
+        """
+        with self._client_state_lock:
+            is_authenticated: bool = conn in self._authenticated_clients
+
+        local_auth_retry_after: Optional[int] = (
+            self._local_auth.get_retry_after_seconds()
+        )
+        if (
+            not is_authenticated
+            and local_auth_retry_after is not None
+            and (self._is_locked or self._requires_session_auth())
+        ):
+            self._ipc.send_to(
+                conn,
+                self._build_local_auth_rate_limited_event(local_auth_retry_after),
+            )
+            return
+
         if self._requires_session_auth() and not self._is_locked:
-            if not isinstance(
-                cmd, (InitCommand, AuthenticateSessionCommand, UnlockCommand)
-            ):
-                if conn not in self._authenticated_clients:
+            if not isinstance(cmd, AuthenticateSessionCommand):
+                if not is_authenticated:
                     prompt: Optional[SessionAuthPrompt] = (
                         self._local_auth.issue_session_challenge(conn)
                     )
@@ -553,28 +714,24 @@ class Daemon:
                         )
                     return
 
-        if isinstance(cmd, SelfDestructCommand):
-            self._ipc.send_to(
-                conn,
-                create_event(EventType.SELF_DESTRUCT_INITIATED),
-            )
-            threading.Thread(target=self._nuke_data, daemon=True).start()
-            return
-
         if isinstance(cmd, AuthenticateSessionCommand):
             if self._is_locked:
                 self._ipc.send_to(conn, create_event(EventType.DAEMON_LOCKED))
                 return
 
             if not self._requires_session_auth():
-                self._authenticated_clients.add(conn)
+                with self._client_state_lock:
+                    self._authenticated_clients.add(conn)
                 self._ipc.send_to(
                     conn,
                     create_event(EventType.SESSION_AUTHENTICATED),
                 )
                 return
 
-            if conn in self._authenticated_clients:
+            with self._client_state_lock:
+                already_authenticated: bool = conn in self._authenticated_clients
+
+            if already_authenticated:
                 self._ipc.send_to(
                     conn,
                     create_event(EventType.SESSION_AUTHENTICATED),
@@ -584,13 +741,26 @@ class Daemon:
             result: SessionAuthAttemptResult = self._local_auth.verify_session_proof(
                 conn,
                 cmd.proof,
+                self._get_local_auth_lockout_timeout(),
+                self._get_local_auth_failure_limit(),
             )
 
             if result.authenticated:
-                self._authenticated_clients.add(conn)
+                with self._client_state_lock:
+                    self._authenticated_clients.add(conn)
                 self._ipc.send_to(
                     conn,
                     create_event(EventType.SESSION_AUTHENTICATED),
+                )
+                return
+
+            local_auth_retry_after = self._local_auth.get_retry_after_seconds()
+            if local_auth_retry_after is not None:
+                self._ipc.send_to(
+                    conn,
+                    self._build_local_auth_rate_limited_event(
+                        local_auth_retry_after,
+                    ),
                 )
                 return
 
@@ -618,9 +788,26 @@ class Daemon:
                 return
 
             try:
-                runtime = build_runtime(self._pm, cmd.password)
+                runtime = build_runtime(
+                    self._pm,
+                    cmd.password,
+                    enable_session_auth=self._require_session_auth,
+                )
             except InvalidMasterPasswordError:
-                should_disconnect: bool = self._local_auth.register_invalid_unlock(conn)
+                should_disconnect: bool = self._local_auth.register_invalid_unlock(
+                    conn,
+                    self._get_local_auth_lockout_timeout(),
+                    self._get_local_auth_failure_limit(),
+                )
+                local_auth_retry_after = self._local_auth.get_retry_after_seconds()
+                if local_auth_retry_after is not None:
+                    self._ipc.send_to(
+                        conn,
+                        self._build_local_auth_rate_limited_event(
+                            local_auth_retry_after,
+                        ),
+                    )
+                    return
                 self._ipc.send_to(
                     conn,
                     create_event(EventType.INVALID_PASSWORD),
@@ -636,7 +823,8 @@ class Daemon:
 
             self._is_locked = False
             self._local_auth.clear_connection(conn)
-            self._authenticated_clients.add(conn)
+            with self._client_state_lock:
+                self._authenticated_clients.add(conn)
             if not self._start_subsystems():
                 return
             self._ipc.send_to(conn, create_event(EventType.DAEMON_UNLOCKED))
@@ -646,6 +834,14 @@ class Daemon:
             self._ipc.send_to(conn, create_event(EventType.DAEMON_LOCKED))
             return
 
+        if isinstance(cmd, SelfDestructCommand):
+            self._ipc.send_to(
+                conn,
+                create_event(EventType.SELF_DESTRUCT_INITIATED),
+            )
+            threading.Thread(target=self._nuke_data, daemon=True).start()
+            return
+
         # --- DELEGATION TO DEDICATED HANDLERS ---
 
         if isinstance(
@@ -653,8 +849,10 @@ class Daemon:
             (
                 SetSettingCommand,
                 GetSettingCommand,
+                GetSettingsListCommand,
                 SetConfigCommand,
                 GetConfigCommand,
+                GetConfigListCommand,
                 SyncConfigCommand,
             ),
         ):

@@ -1,11 +1,16 @@
 """Base IPC DTO types and strict JSON factory helpers."""
 
-import json
+import contextlib
+import contextvars
 import dataclasses
-from dataclasses import dataclass, asdict
+import json
+import secrets
+from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import (
+    Callable,
     Dict,
+    Iterator,
     Mapping,
     Optional,
     Type,
@@ -17,6 +22,7 @@ from typing import (
     get_origin,
     get_args,
     TypeVar,
+    cast,
 )
 
 # Local Package Imports
@@ -28,6 +34,10 @@ JsonValue = Union[
     str, int, float, bool, None, Dict[str, 'JsonValue'], List['JsonValue']
 ]
 T = TypeVar('T')
+_CURRENT_REQUEST_ID: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    'metor_ipc_request_id',
+    default=None,
+)
 
 
 def _reject_unknown_fields(
@@ -141,6 +151,21 @@ def _coerce_and_validate(
     return coerced
 
 
+def _instantiate_validated_message(cls: Type[T], kwargs: Dict[str, object]) -> T:
+    """
+    Instantiates one validated DTO while keeping the strict runtime validation path.
+
+    Args:
+        cls (Type[T]): The target DTO type.
+        kwargs (Dict[str, object]): The validated constructor payload.
+
+    Returns:
+        T: The instantiated DTO.
+    """
+    constructor: Callable[..., T] = cast(Callable[..., T], cls)
+    return constructor(**kwargs)
+
+
 @dataclass
 class IpcMessage:
     """
@@ -149,6 +174,8 @@ class IpcMessage:
     Attributes:
         None
     """
+
+    request_id: Optional[str] = dataclasses.field(default=None, kw_only=True)
 
     def to_json(self) -> str:
         """
@@ -199,7 +226,7 @@ class IpcCommand(IpcMessage):
         }
 
         coerced_kwargs: Dict[str, object] = _coerce_and_validate(target_cls, kwargs)
-        return target_cls(**coerced_kwargs)
+        return _instantiate_validated_message(target_cls, coerced_kwargs)
 
 
 @dataclass
@@ -235,7 +262,7 @@ class IpcEvent(IpcMessage):
         }
 
         coerced_kwargs: Dict[str, object] = _coerce_and_validate(target_cls, kwargs)
-        return target_cls(**coerced_kwargs)
+        return _instantiate_validated_message(target_cls, coerced_kwargs)
 
 
 def create_event(
@@ -255,4 +282,83 @@ def create_event(
     payload: Dict[str, JsonValue] = {'event_type': event_type.value}
     if params:
         payload.update(dict(params))
-    return IpcEvent.from_dict(payload)
+    return stamp_request_id(IpcEvent.from_dict(payload))
+
+
+def create_request_id() -> str:
+    """
+    Creates one cryptographically strong IPC request correlation identifier.
+
+    Args:
+        None
+
+    Returns:
+        str: The newly generated request identifier.
+    """
+    return secrets.token_hex(16)
+
+
+def ensure_request_id(message: IpcMessage) -> str:
+    """
+    Ensures one IPC DTO carries a stable request identifier.
+
+    Args:
+        message (IpcMessage): The DTO to annotate.
+
+    Returns:
+        str: The existing or newly assigned request identifier.
+    """
+    if message.request_id is None:
+        message.request_id = create_request_id()
+    return message.request_id
+
+
+def get_current_request_id() -> Optional[str]:
+    """
+    Returns the active request correlation identifier for the current execution context.
+
+    Args:
+        None
+
+    Returns:
+        Optional[str]: The current request identifier, if one is active.
+    """
+    return _CURRENT_REQUEST_ID.get()
+
+
+@contextlib.contextmanager
+def request_context(request_id: Optional[str]) -> Iterator[None]:
+    """
+    Installs one request correlation identifier for the current execution context.
+
+    Args:
+        request_id (Optional[str]): The request identifier to expose during the context.
+
+    Returns:
+        None
+    """
+    token = _CURRENT_REQUEST_ID.set(request_id)
+    try:
+        yield
+    finally:
+        _CURRENT_REQUEST_ID.reset(token)
+
+
+def stamp_request_id(
+    message: T,
+    request_id: Optional[str] = None,
+) -> T:
+    """
+    Applies one request identifier to an IPC DTO when it does not already carry one.
+
+    Args:
+        message (T): The DTO to annotate.
+        request_id (Optional[str]): Optional explicit request identifier override.
+
+    Returns:
+        T: The same DTO instance for fluent call sites.
+    """
+    effective_request_id: Optional[str] = request_id or get_current_request_id()
+    if isinstance(message, IpcMessage) and message.request_id is None:
+        message.request_id = effective_request_id
+    return message

@@ -13,7 +13,9 @@ class _HistoryDispatcherProtocol(Protocol):
     _help: type[Help]
     _proxy: CliProxy
 
-    def _parse_optional_limit(self, limit_raw: Optional[str]) -> Optional[int]: ...
+    def _parse_optional_limit(self, limit_raw: Optional[str]) -> Optional[int]:
+        """Parses an optional integer limit token and returns None for invalid input."""
+        ...
 
 
 class HistoryDispatchMixin:
