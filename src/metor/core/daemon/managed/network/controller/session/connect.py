@@ -73,6 +73,9 @@ def connect_to(
         origin is ConnectionOrigin.RETUNNEL and controller._state.is_retunneling(onion)
     )
 
+    if origin is ConnectionOrigin.MANUAL:
+        controller._state.clear_local_recovery_opt_out(onion)
+
     if origin is not ConnectionOrigin.AUTO_RECONNECT:
         controller._state.clear_scheduled_auto_reconnect(onion)
 
@@ -127,6 +130,10 @@ def connect_to(
         for retry_index in range(max_retries + 1):
             if controller._stop_flag.is_set():
                 break
+            if not retunnel_reconnect and controller._state.is_connected_or_pending(
+                onion
+            ):
+                return
             conn: Optional[socket.socket] = None
             try:
                 conn = controller._tm.connect(onion)
@@ -184,6 +191,12 @@ def connect_to(
                 _close_socket(conn)
                 if conn is not None:
                     controller._state.clear_bound_outbound_socket(onion, conn)
+                if not controller._state.has_outbound_attempt(onion):
+                    return
+                if not retunnel_reconnect and controller._state.is_connected_or_pending(
+                    onion
+                ):
+                    return
                 last_error = str(exc).strip() or exc.__class__.__name__
                 if retry_index < max_retries:
                     controller._broadcast(

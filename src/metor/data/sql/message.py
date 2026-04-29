@@ -349,6 +349,77 @@ class MessageRepository:
             for row in rows
         ]
 
+    def get_pending_live_outbox(
+        self,
+        contact_onion: Optional[str] = None,
+    ) -> List[Tuple[int, str, str, str, str]]:
+        """
+        Retrieves the durable pending live outbox queue.
+
+        Args:
+            contact_onion (Optional[str]): Optional peer onion filter.
+
+        Returns:
+            List[Tuple[int, str, str, str, str]]: Pending live rows as receipt id,
+                peer onion, payload, message id, and created timestamp.
+        """
+        filters: list[SqlParam] = [
+            MessageDirection.OUT.value,
+            MessageStatus.PENDING.value,
+            MessageType.LIVE_TEXT.value,
+        ]
+        peer_filter: str = ''
+        if contact_onion is not None:
+            peer_filter = ' AND r.peer_onion = ?'
+            filters.append(clean_onion(contact_onion))
+
+        query = (
+            'SELECT r.id, r.peer_onion, o.payload, r.msg_id, r.created_at '
+            'FROM message_receipts AS r '
+            'INNER JOIN outbox_spool AS o ON o.receipt_id = r.id '
+            'WHERE r.direction = ? AND r.status = ? AND r.transport_kind = ?'
+            f'{peer_filter} '
+            'ORDER BY r.created_at ASC, r.id ASC'
+        )
+        rows = self._sql.fetchall(query, tuple(filters))
+        return [
+            (
+                int(str(row[0])),
+                str(row[1]),
+                str(row[2]),
+                str(row[3]),
+                str(row[4]),
+            )
+            for row in rows
+        ]
+
+    def _apply_message_status_update(
+        self,
+        cursor: SqlCipherCursor,
+        receipt_id: int,
+        new_status: MessageStatus,
+    ) -> None:
+        """
+        Applies one status transition and maintains spool consistency.
+
+        Args:
+            cursor (SqlCipherCursor): The active SQL cursor.
+            receipt_id (int): The durable receipt id.
+            new_status (MessageStatus): The new status.
+
+        Returns:
+            None
+        """
+        cursor.execute(
+            'UPDATE message_receipts SET status = ?, updated_at = ? WHERE id = ?',
+            (new_status.value, self._now(), receipt_id),
+        )
+        if new_status is not MessageStatus.PENDING:
+            cursor.execute(
+                'DELETE FROM outbox_spool WHERE receipt_id = ?',
+                (receipt_id,),
+            )
+
     def update_message_status(self, receipt_id: int, new_status: MessageStatus) -> None:
         """
         Updates one persisted message status.
@@ -361,15 +432,42 @@ class MessageRepository:
             None
         """
         with self._sql.transaction() as cursor:
-            cursor.execute(
-                'UPDATE message_receipts SET status = ?, updated_at = ? WHERE id = ?',
-                (new_status.value, self._now(), receipt_id),
+            self._apply_message_status_update(cursor, receipt_id, new_status)
+
+    def update_outbound_message_status(
+        self,
+        contact_onion: str,
+        msg_id: str,
+        new_status: MessageStatus,
+    ) -> bool:
+        """
+        Updates one outbound logical message status using its stable message id.
+
+        Args:
+            contact_onion (str): The peer onion identity.
+            msg_id (str): The logical message identifier.
+            new_status (MessageStatus): The new status.
+
+        Returns:
+            bool: True if the outbound receipt was found and updated.
+        """
+        normalized_onion: str = clean_onion(contact_onion)
+        with self._sql.transaction() as cursor:
+            receipt: Optional[MessageReceiptRow] = self._get_receipt(
+                normalized_onion,
+                MessageDirection.OUT,
+                msg_id,
+                cursor,
             )
-            if new_status is not MessageStatus.PENDING:
-                cursor.execute(
-                    'DELETE FROM outbox_spool WHERE receipt_id = ?',
-                    (receipt_id,),
-                )
+            if receipt is None:
+                return False
+
+            self._apply_message_status_update(
+                cursor,
+                receipt.receipt_id,
+                new_status,
+            )
+            return True
 
     def get_unread_counts(self) -> Dict[str, int]:
         """

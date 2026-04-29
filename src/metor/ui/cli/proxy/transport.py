@@ -16,10 +16,10 @@ from metor.core.api import (
     SetSettingCommand,
     SyncConfigCommand,
 )
-from metor.data import ProfileManager
-from metor.ui import PromptAbortedError, Theme
+from metor.data import ProfileManager, SettingKey
+from metor.ui import PromptAbortedError, PromptOutputSpacer, Theme
 from metor.ui.cli.errors import format_safe_local_runtime_error
-from metor.ui.cli.ipc import IpcRequestSession
+from metor.ui.cli.ipc import IpcRequestResult, IpcRequestSession
 
 
 CLI_ASYNC_EVENT_TYPES: set[EventType] = {
@@ -50,6 +50,16 @@ CLI_ASYNC_EVENT_TYPES: set[EventType] = {
     EventType.RETUNNEL_SUCCESS,
     EventType.SWITCH_SUCCESS,
 }
+
+HEADLESS_CONFIG_COMMANDS: tuple[type[IpcCommand], ...] = (
+    GetSettingCommand,
+    SetSettingCommand,
+    GetSettingsListCommand,
+    GetConfigCommand,
+    GetConfigListCommand,
+    SetConfigCommand,
+    SyncConfigCommand,
+)
 
 
 class CliProxyTransport:
@@ -86,6 +96,24 @@ class CliProxyTransport:
         self._format_event = format_event
         self._send_socket_command = send_socket_command
 
+    def _should_prompt_headless_password(self, cmd: IpcCommand) -> bool:
+        """
+        Decides whether one offline headless request must prompt for a password.
+
+        Args:
+            cmd (IpcCommand): The offline command about to be routed.
+
+        Returns:
+            bool: True when the current request must collect a password first.
+        """
+        if not self._pm.supports_password_auth():
+            return False
+
+        if not isinstance(cmd, HEADLESS_CONFIG_COMMANDS):
+            return True
+
+        return self._pm.config.get_bool(SettingKey.REQUIRE_LOCAL_AUTH)
+
     def request_ipc(self, cmd: IpcCommand, wait_for_response: bool = True) -> str:
         """
         Routes one command to the active daemon or a temporary headless instance.
@@ -97,49 +125,88 @@ class CliProxyTransport:
         Returns:
             str: The formatted CLI response.
         """
+        result: IpcRequestResult = self.request_ipc_result(cmd, wait_for_response)
+        rendered: str
+        if result.event is not None:
+            rendered = self._format_event(result.event, prefix_remote=True)
+        else:
+            message: str = result.message or 'Command executed successfully.'
+            rendered = self._prefix_remote(message)
+
+        spacer = PromptOutputSpacer(result.insert_leading_blank_line)
+        return spacer.format(rendered)
+
+    def request_ipc_result(
+        self,
+        cmd: IpcCommand,
+        wait_for_response: bool = True,
+    ) -> IpcRequestResult:
+        """
+        Routes one command and returns the raw typed result before CLI formatting.
+
+        Args:
+            cmd (IpcCommand): The outbound command DTO.
+            wait_for_response (bool): Whether to block for one response.
+
+        Returns:
+            IpcRequestResult: The typed raw response payload.
+        """
         try:
             port: Optional[int] = self._pm.get_daemon_port()
 
             if not port:
                 if self._is_remote:
-                    return self._prefix_remote(
-                        f'Cannot reach remote Daemon on port '
-                        f'{Theme.YELLOW}{self._pm.get_static_port()}{Theme.RESET}. '
-                        'Did you forget the SSH tunnel?'
+                    return IpcRequestResult(
+                        message=(
+                            f'Cannot reach remote Daemon on port '
+                            f'{Theme.YELLOW}{self._pm.get_static_port()}{Theme.RESET}. '
+                            'Did you forget the SSH tunnel?'
+                        )
                     )
 
                 password: Optional[str] = None
-                if self._pm.supports_password_auth() and not isinstance(
-                    cmd,
-                    (
-                        GetSettingCommand,
-                        SetSettingCommand,
-                        GetSettingsListCommand,
-                        GetConfigCommand,
-                        GetConfigListCommand,
-                        SetConfigCommand,
-                        SyncConfigCommand,
-                    ),
-                ):
+                prompted_for_password: bool = False
+                if self._should_prompt_headless_password(cmd):
                     password = self._prompt_password()
+                    prompted_for_password = True
                     if password is None:
-                        return 'Master password cannot be empty.'
+                        return IpcRequestResult(
+                            message='Aborted.',
+                            insert_leading_blank_line=True,
+                            auth_incomplete=True,
+                        )
 
-                return run_with_headless_daemon(
+                headless_result: str | IpcRequestResult = run_with_headless_daemon(
                     self._pm,
                     password,
-                    lambda resolved_port: self.send_to_port(
+                    lambda resolved_port: self.send_to_port_result(
                         resolved_port,
                         cmd,
                         wait_for_response,
                     ),
                 )
 
-            return self.send_to_port(port, cmd, wait_for_response)
+                if isinstance(headless_result, IpcRequestResult):
+                    result: IpcRequestResult = headless_result
+                else:
+                    result = IpcRequestResult(message=headless_result)
+
+                return IpcRequestResult(
+                    event=result.event,
+                    message=result.message,
+                    insert_leading_blank_line=(
+                        prompted_for_password or result.insert_leading_blank_line
+                    ),
+                    auth_incomplete=result.auth_incomplete,
+                )
+
+            return self.send_to_port_result(port, cmd, wait_for_response)
         except PromptAbortedError:
-            return self._prefix_remote('Aborted.')
+            return IpcRequestResult(message='Aborted.', auth_incomplete=True)
         except ValueError as exc:
-            return self._prefix_remote(format_safe_local_runtime_error(exc))
+            return IpcRequestResult(
+                message=format_safe_local_runtime_error(exc),
+            )
 
     def request_ipc_event(self, cmd: IpcCommand) -> Optional[IpcEvent]:
         """
@@ -159,18 +226,7 @@ class CliProxyTransport:
                     return None
 
                 password: Optional[str] = None
-                if self._pm.supports_password_auth() and not isinstance(
-                    cmd,
-                    (
-                        GetSettingCommand,
-                        SetSettingCommand,
-                        GetSettingsListCommand,
-                        GetConfigCommand,
-                        GetConfigListCommand,
-                        SetConfigCommand,
-                        SyncConfigCommand,
-                    ),
-                ):
+                if self._should_prompt_headless_password(cmd):
                     password = self._prompt_password()
                     if password is None:
                         return None
@@ -238,33 +294,63 @@ class CliProxyTransport:
         Returns:
             str: The formatted terminal output.
         """
+        result: IpcRequestResult = self.send_to_port_result(
+            port,
+            cmd,
+            wait_for_response,
+        )
+        rendered: str
+        if result.event is not None:
+            rendered = self._format_event(
+                result.event,
+                prefix_remote=prefix_remote,
+            )
+        else:
+            message: str = result.message or 'Command executed successfully.'
+            if prefix_remote:
+                rendered = self._prefix_remote(message)
+            else:
+                rendered = message
+
+        spacer = PromptOutputSpacer(result.insert_leading_blank_line)
+        return spacer.format(rendered)
+
+    def send_to_port_result(
+        self,
+        port: int,
+        cmd: IpcCommand,
+        wait_for_response: bool,
+    ) -> IpcRequestResult:
+        """
+        Executes the TCP transmission and returns the raw typed request result.
+
+        Args:
+            port (int): The target IPC socket port.
+            cmd (IpcCommand): The outbound DTO.
+            wait_for_response (bool): Whether to await one response.
+
+        Returns:
+            IpcRequestResult: The raw terminal response payload.
+        """
         try:
             session = IpcRequestSession(
                 self._pm,
                 async_event_types=CLI_ASYNC_EVENT_TYPES,
                 format_event=lambda event: self._format_event(
                     event,
-                    prefix_remote=prefix_remote,
+                    prefix_remote=True,
                 ),
-                format_message=(
-                    self._prefix_remote if prefix_remote else (lambda text: text)
-                ),
+                format_message=self._prefix_remote,
                 prompt_password=self._prompt_password,
                 send_socket_command=self._send_socket_command,
             )
-            return session.execute(port, cmd, wait_for_response)
+            return session.execute_result(port, cmd, wait_for_response)
         except PromptAbortedError:
-            if prefix_remote:
-                return self._prefix_remote('Aborted.')
-            return 'Aborted.'
+            return IpcRequestResult(message='Aborted.', auth_incomplete=True)
         except ValueError as exc:
-            if prefix_remote:
-                return self._prefix_remote(str(exc))
-            return str(exc)
+            return IpcRequestResult(message=str(exc))
         except Exception:
-            if prefix_remote:
-                return self._prefix_remote('Failed to communicate with the daemon.')
-            return 'Failed to communicate with the daemon.'
+            return IpcRequestResult(message='Failed to communicate with the daemon.')
 
     def send_to_port_event(self, port: int, cmd: IpcCommand) -> Optional[IpcEvent]:
         """

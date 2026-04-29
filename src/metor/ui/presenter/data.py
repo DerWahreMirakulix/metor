@@ -44,12 +44,17 @@ def _format_snapshot_source(source: str) -> str:
     return labels.get(source, source.replace('_', ' '))
 
 
-def _format_snapshot_entries(entries: List[SettingSnapshotEntry]) -> List[str]:
+def _format_snapshot_entries(
+    entries: List[SettingSnapshotEntry],
+    *,
+    show_source_labels: bool = True,
+) -> List[str]:
     """
     Formats grouped snapshot entries with category headings.
 
     Args:
         entries (List[SettingSnapshotEntry]): The snapshot rows.
+        show_source_labels (bool): Whether to render source labels such as `global`.
 
     Returns:
         List[str]: The formatted lines.
@@ -66,11 +71,18 @@ def _format_snapshot_entries(entries: List[SettingSnapshotEntry]) -> List[str]:
             lines.append(f'[{entry.category}]')
             current_category = entry.category
 
+        source_suffix: str = ''
+        if show_source_labels:
+            source_suffix = (
+                ' '
+                f'[{Theme.DARK_GREY}{_format_snapshot_source(entry.source)}{Theme.RESET}]'
+            )
+
         lines.append(
             '  '
             f'{Theme.CYAN}{entry.key}{Theme.RESET} = '
             f'{Theme.YELLOW}{entry.value}{Theme.RESET} '
-            f'[{Theme.DARK_GREY}{_format_snapshot_source(entry.source)}{Theme.RESET}]'
+            f'{source_suffix}'.rstrip()
         )
 
     return lines
@@ -86,11 +98,18 @@ def format_settings_snapshot(event: SettingsListDataEvent) -> str:
     Returns:
         str: The formatted snapshot section.
     """
-    header: str = '\n' + (
+    header: str = (
         'Global UI Settings' if event.scope == 'ui' else 'Global Daemon Settings'
     )
-    return (
-        '\n'.join([header + ':', '\n', *_format_snapshot_entries(event.entries)]) + '\n'
+    return '\n'.join(
+        [
+            header + ':',
+            '',
+            *_format_snapshot_entries(
+                event.entries,
+                show_source_labels=False,
+            ),
+        ]
     )
 
 
@@ -104,17 +123,14 @@ def format_config_snapshot(event: ConfigListDataEvent) -> str:
     Returns:
         str: The formatted snapshot section.
     """
-    header: str = '\n'
     if event.scope == 'ui':
-        header += f"Effective UI Config for profile '{event.profile}'"
+        header = f"Effective UI Config for profile '{event.profile}'"
     elif event.scope == 'daemon':
-        header += f"Effective Daemon Config for profile '{event.profile}'"
+        header = f"Effective Daemon Config for profile '{event.profile}'"
     else:
-        header += f"Structural Profile Config for profile '{event.profile}'"
+        header = f"Structural Profile Config for profile '{event.profile}'"
 
-    return (
-        '\n'.join([header + ':', '\n', *_format_snapshot_entries(event.entries)]) + '\n'
-    )
+    return '\n'.join([header + ':', '', *_format_snapshot_entries(event.entries)])
 
 
 def format_contacts(event: ContactsDataEvent, chat_mode: bool) -> str:

@@ -15,7 +15,11 @@ from metor.core.api import (
     ConnectionPendingEvent,
     RetunnelSuccessEvent,
 )
-from metor.core.daemon.managed.models import TorCommand
+from metor.core.daemon.managed.models import (
+    DisconnectIntent,
+    RejectIntent,
+    TorCommand,
+)
 from metor.data import (
     HistoryActor,
     HistoryManager,
@@ -37,6 +41,22 @@ class StreamReceiver:
     """Manages the background read-loop for fully established Tor sockets."""
 
     @staticmethod
+    def _close_socket_quietly(conn: socket.socket) -> None:
+        """
+        Closes one socket while suppressing transport teardown noise.
+
+        Args:
+            conn (socket.socket): The socket to close.
+
+        Returns:
+            None
+        """
+        try:
+            conn.close()
+        except OSError:
+            pass
+
+    @staticmethod
     def _socket_appears_closed(conn: socket.socket) -> bool:
         """
         Performs one cheap liveness probe after an idle timeout.
@@ -53,6 +73,80 @@ class StreamReceiver:
             return False
         except OSError:
             return True
+
+    @staticmethod
+    def _is_recoverable_disconnect_frame(msg: str) -> bool:
+        """
+        Determines whether one peer disconnect frame signals recoverable replacement.
+
+        Args:
+            msg (str): The raw disconnect frame.
+
+        Returns:
+            bool: True if the frame signals recoverable replacement.
+        """
+        parts: list[str] = msg.strip().split()
+        return len(parts) >= 2 and parts[1] == DisconnectIntent.RECOVER.value
+
+    @staticmethod
+    def _parse_reject_intent(msg: str) -> Optional[RejectIntent]:
+        """
+        Parses one optional reject intent from the raw wire frame.
+
+        Args:
+            msg (str): The raw reject frame.
+
+        Returns:
+            Optional[RejectIntent]: The semantic reject intent, if explicitly encoded.
+        """
+        parts: list[str] = msg.strip().split()
+        if len(parts) < 2:
+            return None
+
+        try:
+            return RejectIntent(parts[1])
+        except ValueError:
+            return None
+
+    def _is_stale_pending_acceptance_socket(
+        self,
+        onion: str,
+        conn: socket.socket,
+        awaiting_acceptance: bool,
+    ) -> bool:
+        """
+        Reports whether one waiting outbound socket lost the race to another accepted flow.
+
+        Args:
+            onion (str): The peer onion identity.
+            conn (socket.socket): The waiting outbound socket.
+            awaiting_acceptance (bool): Whether the socket is still waiting for acceptance.
+
+        Returns:
+            bool: True if the socket is stale and should exit quietly.
+        """
+        if not awaiting_acceptance:
+            return False
+
+        is_current_outbound_socket = getattr(
+            self._state,
+            'is_current_outbound_socket',
+            None,
+        )
+        is_connected_or_pending = getattr(
+            self._state,
+            'is_connected_or_pending',
+            None,
+        )
+        if not callable(is_current_outbound_socket) or not callable(
+            is_connected_or_pending
+        ):
+            return False
+
+        if is_current_outbound_socket(onion, conn):
+            return False
+
+        return bool(is_connected_or_pending(onion))
 
     def __init__(
         self,
@@ -73,7 +167,13 @@ class StreamReceiver:
             None,
         ],
         reject_cb: Callable[
-            [str, bool, Optional[socket.socket], ConnectionOrigin],
+            [
+                str,
+                bool,
+                Optional[socket.socket],
+                ConnectionOrigin,
+                Optional[RejectIntent],
+            ],
             None,
         ],
         config: 'Config',
@@ -113,7 +213,13 @@ class StreamReceiver:
             None,
         ] = disconnect_cb
         self._reject_cb: Callable[
-            [str, bool, Optional[socket.socket], ConnectionOrigin],
+            [
+                str,
+                bool,
+                Optional[socket.socket],
+                ConnectionOrigin,
+                Optional[RejectIntent],
+            ],
             None,
         ] = reject_cb
 
@@ -183,7 +289,9 @@ class StreamReceiver:
             None
         """
         remote_rejected: bool = False
+        remote_reject_intent: Optional[RejectIntent] = None
         remote_disconnected: bool = False
+        remote_disconnect_is_fallback: bool = False
 
         idle_timeout: float = self._config.get_float(SettingKey.STREAM_IDLE_TIMEOUT)
         late_acceptance_timeout: float = self._config.get_float(
@@ -272,11 +380,15 @@ class StreamReceiver:
                     f'{TorCommand.DISCONNECT.value} '
                 ):
                     remote_disconnected = True
+                    remote_disconnect_is_fallback = (
+                        self._is_recoverable_disconnect_frame(msg)
+                    )
                     break
                 elif msg == TorCommand.REJECT.value or msg.startswith(
                     f'{TorCommand.REJECT.value} '
                 ):
                     remote_rejected = True
+                    remote_reject_intent = self._parse_reject_intent(msg)
                     break
                 else:
                     ack_msg_id: Optional[str] = self._parse_ack_msg_id(msg)
@@ -305,13 +417,35 @@ class StreamReceiver:
         except Exception:
             pass
         finally:
+            consume_local_termination = getattr(
+                self._state,
+                'consume_locally_terminated_socket',
+                None,
+            )
+            if callable(consume_local_termination) and consume_local_termination(conn):
+                return
+
+            if self._is_stale_pending_acceptance_socket(
+                onion,
+                conn,
+                awaiting_acceptance,
+            ):
+                self._close_socket_quietly(conn)
+                return
+
             if remote_rejected:
-                self._reject_cb(onion, False, conn, connection_origin)
+                self._reject_cb(
+                    onion,
+                    False,
+                    conn,
+                    connection_origin,
+                    remote_reject_intent,
+                )
             elif remote_disconnected:
                 self._disconnect_cb(
                     onion,
                     False,
-                    False,
+                    remote_disconnect_is_fallback,
                     conn,
                     False,
                     connection_origin,

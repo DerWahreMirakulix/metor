@@ -453,7 +453,7 @@ class Settings:
         ),
         SettingKey.LIVE_DISCONNECT_LINGER_TIMEOUT: SettingSpec(
             key=SettingKey.LIVE_DISCONNECT_LINGER_TIMEOUT,
-            default=1.0,
+            default=2.0,
             category='Advanced Network Resilience',
             description='Keeps a locally initiated live socket open briefly after sending `DISCONNECT` so the control frame can flush through Tor before shutdown. Higher values improve retunnel reliability on slower routes.',
             constraints='Float >= 0 seconds.',

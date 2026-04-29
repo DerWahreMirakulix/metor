@@ -10,6 +10,7 @@ class StateTrackerRetunnelMixin:
 
     _lock: threading.Lock
     _live_reconnect_grace: Dict[str, float]
+    _local_recovery_opt_outs: Dict[str, float]
     _retunnel_reconnects: Set[str]
     _retunnel_in_progress: Set[str]
     _retunnel_recovery_retry_counts: Dict[str, int]
@@ -75,6 +76,58 @@ class StateTrackerRetunnelMixin:
                 return False
 
             return True
+
+    def mark_local_recovery_opt_out(self, onion: str, timeout_sec: float) -> None:
+        """
+        Marks one peer as temporarily opted out of recovery-hint reconnects.
+
+        Args:
+            onion (str): The peer onion identity.
+            timeout_sec (float): The opt-out window duration in seconds.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            if timeout_sec <= 0:
+                self._local_recovery_opt_outs.pop(onion, None)
+                return
+
+            self._local_recovery_opt_outs[onion] = time.time() + timeout_sec
+
+    def has_local_recovery_opt_out(self, onion: str) -> bool:
+        """
+        Checks whether recovery-hint reconnects are still locally opted out.
+
+        Args:
+            onion (str): The peer onion identity.
+
+        Returns:
+            bool: True if the temporary local opt-out is still active.
+        """
+        with self._lock:
+            expires_at: Optional[float] = self._local_recovery_opt_outs.get(onion)
+            if expires_at is None:
+                return False
+
+            if expires_at < time.time():
+                del self._local_recovery_opt_outs[onion]
+                return False
+
+            return True
+
+    def clear_local_recovery_opt_out(self, onion: str) -> None:
+        """
+        Clears one temporary local recovery opt-out marker.
+
+        Args:
+            onion (str): The peer onion identity.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            self._local_recovery_opt_outs.pop(onion, None)
 
     def has_retunnel_recovery_retry_pending(self, onion: str) -> bool:
         """

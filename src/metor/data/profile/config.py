@@ -581,17 +581,20 @@ class Config:
             data[key_str] = normalized_value
             self._write_nested(data)
 
-    def sync_with_global(self) -> None:
+    def sync_with_global(self, *, domain: Optional[str] = None) -> None:
         """
         Wipes all SettingKey overrides from the local config, forcing a fallback to global Settings.
         Retains pure ProfileConfigKey data (like DAEMON_PORT).
 
         Args:
-            None
+            domain (Optional[str]): Optional `ui` or `daemon` domain filter.
 
         Returns:
             None
         """
+        if domain not in (None, 'ui', 'daemon'):
+            raise ValueError("domain must be None, 'ui', or 'daemon'.")
+
         if not self._paths.exists():
             return
 
@@ -605,7 +608,11 @@ class Config:
 
             for k in data.keys():
                 try:
-                    SettingKey(k)
+                    setting_key = SettingKey(k)
+                    if domain == 'ui' and not setting_key.is_ui:
+                        continue
+                    if domain == 'daemon' and not setting_key.is_daemon:
+                        continue
                     keys_to_remove.append(k)
                 except ValueError:
                     pass

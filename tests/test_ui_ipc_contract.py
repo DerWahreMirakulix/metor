@@ -13,15 +13,17 @@ import nacl.pwhash
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
+from metor.application import DaemonStatus
 from metor.core.api import (
     AuthenticateSessionCommand,
     EventType,
+    GetHistoryCommand,
     InitCommand,
     IpcCommand,
     IpcEvent,
     create_event,
 )
-from metor.data import ProfileManager
+from metor.data import ProfileManager, ProfileSecurityMode
 from metor.data.settings import SettingKey
 from metor.ui.cli.ipc.request import IpcRequestSession
 from metor.ui.cli.handlers import CommandHandlers
@@ -512,6 +514,190 @@ class UiIpcContractTests(unittest.TestCase):
         self.assertEqual(fake_socket.connected_to, ('127.0.0.1', 4312))
         self.assertEqual(fake_socket.timeout, 1.5)
 
+    def test_request_session_adds_blank_line_before_output_after_auth(
+        self,
+    ) -> None:
+        """
+        Verifies that output gets one blank line after auth prompts.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        challenge = 'ab' * Constants.SESSION_AUTH_CHALLENGE_BYTES
+        salt = 'cd' * nacl.pwhash.argon2i.SALTBYTES
+        request_id = 'req-history-1'
+        cmd = GetHistoryCommand(request_id=request_id)
+        socket_payload = ''.join(
+            event.to_json() + '\n'
+            for event in (
+                create_event(
+                    EventType.AUTH_REQUIRED,
+                    {
+                        'challenge': challenge,
+                        'salt': salt,
+                        'request_id': request_id,
+                    },
+                ),
+                create_event(
+                    EventType.SESSION_AUTHENTICATED,
+                    {'request_id': request_id},
+                ),
+                create_event(
+                    EventType.DAEMON_OFFLINE,
+                    {'request_id': request_id},
+                ),
+            )
+        ).encode('utf-8')
+        fake_socket = _RequestSessionSocket([socket_payload, b''])
+
+        session = IpcRequestSession(
+            cast(ProfileManager, _RequestSessionProfileManager()),
+            async_event_types=set(),
+            format_event=lambda _event: 'history-output\nline-2',
+            format_message=lambda message: message,
+            prompt_password=lambda _prompt: 'secret',
+            send_socket_command=lambda sock, command: sock.sendall(
+                (command.to_json() + '\n').encode('utf-8')
+            ),
+        )
+
+        with (
+            patch(
+                'metor.ui.cli.ipc.request.session.socket.socket',
+                return_value=fake_socket,
+            ),
+            patch(
+                'metor.ui.cli.ipc.request.session.prompt_session_auth_proof',
+                return_value='proof',
+            ),
+        ):
+            result = session.execute(4312, cmd, wait_for_response=True)
+
+        self.assertEqual(result, '\nhistory-output\nline-2')
+
+    def test_request_session_adds_blank_line_before_single_line_output_after_auth(
+        self,
+    ) -> None:
+        """
+        Verifies that single-line output also gets the extra blank line.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        challenge = 'ab' * Constants.SESSION_AUTH_CHALLENGE_BYTES
+        salt = 'cd' * nacl.pwhash.argon2i.SALTBYTES
+        request_id = 'req-init-2'
+        cmd = InitCommand(request_id=request_id)
+        socket_payload = ''.join(
+            event.to_json() + '\n'
+            for event in (
+                create_event(
+                    EventType.AUTH_REQUIRED,
+                    {
+                        'challenge': challenge,
+                        'salt': salt,
+                        'request_id': request_id,
+                    },
+                ),
+                create_event(
+                    EventType.SESSION_AUTHENTICATED,
+                    {'request_id': request_id},
+                ),
+                create_event(EventType.DAEMON_OFFLINE, {'request_id': request_id}),
+            )
+        ).encode('utf-8')
+        fake_socket = _RequestSessionSocket([socket_payload, b''])
+
+        session = IpcRequestSession(
+            cast(ProfileManager, _RequestSessionProfileManager()),
+            async_event_types=set(),
+            format_event=lambda _event: 'daemon-offline',
+            format_message=lambda message: message,
+            prompt_password=lambda _prompt: 'secret',
+            send_socket_command=lambda sock, command: sock.sendall(
+                (command.to_json() + '\n').encode('utf-8')
+            ),
+        )
+
+        with (
+            patch(
+                'metor.ui.cli.ipc.request.session.socket.socket',
+                return_value=fake_socket,
+            ),
+            patch(
+                'metor.ui.cli.ipc.request.session.prompt_session_auth_proof',
+                return_value='proof',
+            ),
+        ):
+            result = session.execute(4312, cmd, wait_for_response=True)
+
+        self.assertEqual(result, '\ndaemon-offline')
+
+    def test_request_session_marks_empty_auth_prompt_as_incomplete(self) -> None:
+        """
+        Verifies that an empty auth prompt is treated as incomplete auth, not failure.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        challenge = 'ab' * Constants.SESSION_AUTH_CHALLENGE_BYTES
+        salt = 'cd' * nacl.pwhash.argon2i.SALTBYTES
+        request_id = 'req-empty-auth-1'
+        cmd = InitCommand(request_id=request_id)
+        socket_payload = ''.join(
+            event.to_json() + '\n'
+            for event in (
+                create_event(
+                    EventType.AUTH_REQUIRED,
+                    {
+                        'challenge': challenge,
+                        'salt': salt,
+                        'request_id': request_id,
+                    },
+                ),
+            )
+        ).encode('utf-8')
+        fake_socket = _RequestSessionSocket([socket_payload, b''])
+
+        session = IpcRequestSession(
+            cast(ProfileManager, _RequestSessionProfileManager()),
+            async_event_types=set(),
+            format_event=lambda _event: 'unused',
+            format_message=lambda message: message,
+            prompt_password=lambda _prompt: 'secret',
+            send_socket_command=lambda sock, command: sock.sendall(
+                (command.to_json() + '\n').encode('utf-8')
+            ),
+        )
+
+        with (
+            patch(
+                'metor.ui.cli.ipc.request.session.socket.socket',
+                return_value=fake_socket,
+            ),
+            patch(
+                'metor.ui.cli.ipc.request.session.prompt_session_auth_proof',
+                return_value=None,
+            ),
+        ):
+            result = session.execute_result(4312, cmd, wait_for_response=True)
+
+        self.assertEqual(result.message, 'Aborted.')
+        self.assertTrue(result.insert_leading_blank_line)
+        self.assertTrue(result.auth_incomplete)
+
     def test_auth_exchange_returns_terminal_invalid_password_after_limit(self) -> None:
         """
         Verifies that auth exchange returns terminal invalid password after limit.
@@ -664,6 +850,60 @@ class UiIpcContractTests(unittest.TestCase):
             'session-secret',
         )
 
+    def test_handle_daemon_treats_empty_master_password_as_abort(self) -> None:
+        """
+        Verifies that empty daemon startup master password aborts without validation noise.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        pm = cast(
+            ProfileManager,
+            _AuthPromptProfileManager(encrypted=True, require_local_auth=True),
+        )
+
+        with (
+            patch('metor.ui.cli.handlers.prompt_hidden', return_value=''),
+            patch('metor.ui.cli.handlers.configure_daemon_runtime_logging'),
+            patch('metor.ui.cli.handlers.run_managed_daemon') as run_daemon,
+            patch('builtins.print') as print_mock,
+        ):
+            CommandHandlers.handle_daemon(pm)
+
+        run_daemon.assert_not_called()
+        self.assertEqual(print_mock.call_args_list[-1].args[0], '\nAborted.')
+
+    def test_handle_daemon_treats_empty_session_auth_password_as_abort(self) -> None:
+        """
+        Verifies that empty plaintext session-auth input aborts without validation noise.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        pm = cast(
+            ProfileManager,
+            _AuthPromptProfileManager(encrypted=False, require_local_auth=True),
+        )
+
+        with (
+            patch('metor.ui.cli.handlers.prompt_hidden', return_value=''),
+            patch('metor.ui.cli.handlers.configure_daemon_runtime_logging'),
+            patch('metor.ui.cli.handlers.run_managed_daemon') as run_daemon,
+            patch('builtins.print') as print_mock,
+        ):
+            CommandHandlers.handle_daemon(pm)
+
+        run_daemon.assert_not_called()
+        self.assertEqual(print_mock.call_args_list[-1].args[0], '\nAborted.')
+
     def test_handle_daemon_sanitizes_sensitive_value_errors(self) -> None:
         """
         Verifies that daemon startup sanitizes sensitive local runtime validation errors.
@@ -696,8 +936,75 @@ class UiIpcContractTests(unittest.TestCase):
 
         self.assertEqual(
             print_mock.call_args_list[-1].args[0],
-            'Failed to validate local daemon state.',
+            '\nFailed to validate local daemon state.',
         )
+
+    def test_handle_daemon_status_output_has_blank_line_after_prompt(self) -> None:
+        """
+        Verifies that daemon status output is separated from the auth prompt.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        pm = cast(
+            ProfileManager,
+            _AuthPromptProfileManager(encrypted=True, require_local_auth=True),
+        )
+
+        with (
+            patch('metor.ui.cli.handlers.prompt_hidden', return_value='secret'),
+            patch('metor.ui.cli.handlers.configure_daemon_runtime_logging'),
+            patch('metor.ui.cli.handlers.run_managed_daemon') as run_daemon,
+            patch('builtins.print'),
+            patch('sys.stdout.write') as write_mock,
+            patch('sys.stdout.flush'),
+        ):
+            run_daemon.side_effect = lambda *_args, **kwargs: kwargs['status_callback'](
+                DaemonStatus.LOCKED_MODE, {}
+            )
+            CommandHandlers.handle_daemon(pm)
+
+        self.assertTrue(write_mock.call_args_list)
+        self.assertEqual(
+            write_mock.call_args_list[-1].args[0],
+            '\nDaemon running in LOCKED mode... Waiting for IPC unlock.\n',
+        )
+
+    def test_profile_security_migration_prefixes_output_after_password_prompt(
+        self,
+    ) -> None:
+        """
+        Verifies that password-based migration output is separated from the prompt.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        proxy = Mock()
+        proxy.migrate_profile_security.return_value = 'migration-complete'
+        pm = Mock()
+        pm.exists.return_value = True
+        pm.get_security_mode.return_value = ProfileSecurityMode.ENCRYPTED
+
+        with (
+            patch('metor.ui.cli.handlers.ProfileManager', return_value=pm),
+            patch('metor.ui.cli.handlers.prompt_hidden', return_value='secret'),
+            patch('metor.ui.cli.handlers.prompt_text', return_value='yes'),
+        ):
+            result = CommandHandlers.handle_profile_security_migration(
+                proxy,
+                'alpha',
+                ProfileSecurityMode.PLAINTEXT,
+            )
+
+        self.assertEqual(result, '\nmigration-complete')
 
     def test_remote_nuke_requires_typed_self_destruct_success_event(self) -> None:
         """

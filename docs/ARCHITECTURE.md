@@ -93,7 +93,7 @@ History changes should follow these rules:
 ## Security and OPSEC Guardrails
 
 - Passwords must never be accepted through shell arguments or other surfaces that leak into history or process listings.
-- Daemon unlock and per-session authentication are separate concerns. Unlock starts the runtime for a locked encrypted profile; `require_local_auth` authenticates each persistent IPC session independently.
+- Daemon unlock and per-session authentication are separate concerns. Unlock starts the runtime for a locked encrypted profile; `require_local_auth` authenticates each persistent IPC session independently and also gates offline headless daemon-scoped control requests for encrypted local profiles.
 - Plaintext runtime mirrors are opt-in diagnostic tools and must be shredded or removed whenever they are disabled or the daemon stops.
 - Plaintext profiles intentionally opt out of password-based local auth and encrypted runtime-mirror semantics; those features must degrade to disabled behavior instead of pretending to work.
 - Logging of Tor or SQL internals must stay explicit and documented because those logs can leak local operational details.
@@ -181,34 +181,37 @@ The outbox worker and the network stack must both read and write this shared sta
 ## Live Reconnect and Retunnel Recovery Model
 
 This section is the canonical reference for how live-session recovery works.
-It exists to keep reconnect, retunnel, fallback, and UI buffering in one coherent model instead of splitting the behavior across tests, transport code, and prompt translations.
+It exists to keep reconnect, retunnel, fallback, and durable pending-live handling in one coherent model instead of splitting the behavior across tests, transport code, and prompt translations.
 
 ### State Ownership and Sources of Truth
 
-1. The daemon `StateTracker` owns all transport truth.
-   It tracks active live sockets, pending live sockets, outbound attempts, reconnect-grace windows, scheduled auto-reconnect intent, retunnel markers, and per-peer unacknowledged live messages.
+1. The daemon owns transport truth.
+   `StateTracker` tracks active live sockets, pending live sockets, outbound attempts, reconnect-grace windows, scheduled auto-reconnect intent, retunnel markers, and the in-memory mirror of per-peer pending live messages.
 
-2. Live lifecycle state is derived, not stored redundantly.
+2. Durable pending outbound live state is daemon-owned too.
+   The message store retains outbound `LIVE_TEXT` rows with `PENDING` status until ACK, terminal fallback conversion, or explicit manual fallback. That durable spool is the crash-safe source for recoverable live sends.
+
+3. Live lifecycle state is derived, not stored redundantly.
    For each peer the daemon derives one `LiveTransportState`: `DISCONNECTED`, `CONNECTING`, `PENDING`, `CONNECTED`, or `RETUNNELING`.
 
-3. The chat UI owns presentation-only transport state.
+4. The chat UI owns presentation-only transport state.
    The UI may mark one peer as `LIVE`, `SWITCHING`, `RECONNECTING`, or `DROP`, but that state is only a rendering/send-policy mirror driven by typed IPC events.
 
-4. The UI owns one local outgoing buffer that is distinct from daemon transport buffers.
-   Messages typed while the prompt is in `SWITCHING` or `RECONNECTING` remain in the UI session until recovery succeeds or terminal failure forces them to drop.
+5. The UI does not own a recoverable outgoing buffer.
+   When the user types while the chat still routes through live semantics, the UI sends `MsgCommand` immediately and renders a pending self-message. Whether that message is sent now, durably deferred, replayed after recovery, or promoted to drop is daemon logic.
 
-5. The daemon owns one unacknowledged-live buffer that is distinct from the UI buffer.
-   Messages that were already sent over a live socket are kept in `StateTracker` until the peer daemon ACKs them, a terminal failure converts them to drops, or an explicit fallback path consumes them.
+6. `StateTracker` keeps only the fast in-memory replay mirror.
+   The in-memory pending-live map exists to replay over the current process without rereading SQLite for every ACK or replay step, but it is not the sole source of truth.
 
-6. The UI must never infer recovery from time or socket silence.
+7. The UI must never infer recovery from time or socket silence.
    It reacts only to typed IPC transport events, fallback events, and ACK events.
 
 ### Recovery Origins and Their Meaning
 
 - `MANUAL` means the local user explicitly started or stopped the flow.
 - `INCOMING` means the peer initiated a normal incoming live session.
-- `GRACE_RECONNECT` means a generic recovery replacement path was accepted.
-- `RETUNNEL` means the local daemon is executing the user-requested retunnel flow.
+- `GRACE_RECONNECT` means a generic recovery replacement path was accepted. The passive peer must treat it as generic recovery and must not infer whether the remote side used retunnel, reconnect, or another internal recovery trigger.
+- `RETUNNEL` means the local daemon is executing the user-requested retunnel flow. It is a local transport-maintenance semantic, not something the passive peer derives from generic recovery hints.
 - `AUTO_RECONNECT` means the daemon-owned reconnect worker is trying to recover a lost live session.
 - `MUTUAL_CONNECT` means both peers initiated a connection simultaneously and the tie-breaker chose one winner.
 - `AUTO_ACCEPT_CONTACT` means an incoming request was auto-accepted because policy allowed it.
@@ -240,17 +243,25 @@ The UI may translate them differently, but it must not reinterpret them.
 3. If both peers initiated a connection simultaneously, the deterministic tie-breaker decides the winner.
    The loser is rejected with `MUTUAL_CONNECT` semantics instead of appearing as a random failure.
 
-4. If reconnect grace, retunnel recovery, scheduled auto reconnect, or a generic recovery hint is present, the listener may auto-accept the incoming socket as a recovery replacement.
+4. If reconnect grace, retunnel recovery, scheduled auto reconnect, or a generic recovery hint corroborated by current local recovery state is present, the listener may auto-accept the incoming socket as a recovery replacement.
+
+   If the passive peer explicitly opts out during that window by using `/end` or `/reject`, the retunneling side must surface that as one terminal peer-ended outcome, not as a generic `connection lost` transport failure.
 
 5. If the replacement arrives while the old live socket is still tracked as connected, the listener treats that as a seamless recovery replacement.
-   In that special case it preserves peer-visible generic reconnect UX, suppresses duplicate generic connect history, and may force fallback of old-socket unacknowledged messages before swapping sockets because the old route is still ambiguous.
+   In that special case it suppresses duplicate generic connect history, keeps the passive side on generic recovery semantics, and may complete quietly enough that the passive UI only sees the final `ConnectedEvent` instead of a transient `ConnectionConnectingEvent`.
 
-6. A recovery replacement is only auto-accepted when live delivery is allowed now.
+6. A successful seamless recovery replacement is not a terminal fallback point.
+   Retained pending live messages must stay recoverable and replay over the replacement socket. Forcing them into drops on recovery success is a semantic error.
+
+7. A recovery replacement is only auto-accepted when live delivery is allowed now.
    If there is no interactive live consumer and headless live backlog is disabled, the socket remains pending even if its semantic origin is recovery-related.
+   A previously expired or explicitly rejected pending request is not implicit consent for a later recovery hint.
+   A recent explicit local `/end` or `/reject` is likewise a temporary local opt-out: a later incoming socket with a generic recovery hint must be rejected silently instead of reopening an inbound prompt or contact auto-accept path.
 
 ### Remote Disconnect and Deferred Fallback
 
-1. When the daemon loses a live socket that was not locally initiated, it enters a fallback path with `initiated_by_self = False` and `is_fallback = True`.
+1. The daemon only enters deferred remote fallback for recoverable loss.
+   Explicit peer `/end` remains terminal, while raw transport loss or a peer disconnect frame tagged as recoverable replacement enters the fallback path with `initiated_by_self = False` and `is_fallback = True`.
 
 2. If `daemon.live_reconnect_grace_timeout > 0`, the daemon enters deferred remote fallback instead of immediately treating the loss as final.
 
@@ -293,36 +304,42 @@ The UI may translate them differently, but it must not reinterpret them.
 
 4. A successful retunnel completes only when a replacement live route is active.
    On the initiating side that completion is surfaced as `RetunnelSuccessEvent`, not as generic connect noise.
+   The passive peer remains on generic recovery semantics (`GRACE_RECONNECT` or the final generic connected state) and must not infer retunnel from the recovery itself.
 
 5. If the reconnect attempt fails while the old live socket is still active, the daemon emits `RetunnelFailedEvent` but preserves the old live session.
 
 6. If the old live socket is already gone, the daemon may schedule bounded delayed recovery retries using `daemon.retunnel_reconnect_delay` and `daemon.retunnel_recovery_retries` before declaring terminal failure.
+   Explicit peer rejection of the retunnel reconnect is terminal: it clears retunnel state immediately, converts retained pending live messages to drops, and must not hand off into further retunnel retries or generic auto reconnect.
 
 7. If retunnel becomes terminal after the old live path is gone, the daemon emits `DisconnectedEvent(origin = RETUNNEL)` plus `RetunnelFailedEvent` locally.
    If auto reconnect is enabled it schedules `AUTO_RECONNECT`; otherwise it converts retained unacknowledged live messages to drops.
 
 ### Message Retention, Replay, and Drop Conversion
 
-1. There are two different outbound message buffers and they solve different problems.
+1. Recoverable outbound live delivery is daemon-owned.
 
-2. The UI-local outgoing buffer contains messages the user typed while the prompt was `SWITCHING` or `RECONNECTING`.
-   Those messages were never sent over the network yet.
+2. Every outbound live message is persisted as durable pending live state before or instead of transport send.
+   If a live socket is active, the daemon stores the message as pending live and sends it immediately. If no live socket is active but recovery is still plausible, the daemon stores the same pending live row without auto-converting it to drop.
 
-3. The daemon unacknowledged-live buffer contains messages that were already sent over a live socket but not yet acknowledged by the peer daemon.
+3. The UI prompt is not the buffer contract.
+   Prompt tags like `[Reconnecting]` or `[Switching]` are only presentation. Buffering and replay must still work when those tags never become visibly stable because recovery finished inside one seamless socket swap.
 
-4. The UI-local buffer flushes to live when `ConnectedEvent` or `RetunnelSuccessEvent` restores usable live transport.
+4. `StateTracker` mirrors pending live messages in memory for fast replay and ACK removal inside the running daemon.
+   The durable message store remains the crash-safe copy for restart and shutdown scenarios.
 
-5. The UI-local buffer flushes to drop only on terminal recovery failure, such as `ConnectionFailedEvent(origin = AUTO_RECONNECT)` or a retunnel failure path that does not continue into reconnecting.
+5. When a recovered live socket becomes active, the daemon hydrates any durable pending live rows for that peer into `StateTracker` and replays them over the active socket.
 
-6. The daemon unacknowledged-live buffer is populated immediately before a live envelope is sent and is cleared only by ACK, explicit fallback conversion, or terminal failure conversion.
+6. ACK is the only normal success point for outbound live retention.
+   When the peer ACKs one message, the daemon clears the in-memory pending-live entry, marks the durable outbound receipt as `DELIVERED`, and removes it from the live outbox spool.
 
-7. When a recovered live socket becomes active, the daemon replays retained unacknowledged live messages over the new socket.
+7. Terminal conversion to drop is intentionally narrower than generic disconnect handling.
+   Pending live messages should survive recoverable grace, retunnel, and auto-reconnect paths and only become drops when the daemon concludes that the live recovery path is terminal or when the user explicitly forces fallback.
 
-8. Terminal conversion to drop is intentionally narrower than generic disconnect handling.
-   Already-sent unacknowledged live messages should survive recoverable grace, retunnel, and auto-reconnect paths and only become drops when the daemon concludes that the live recovery path is terminal.
+8. Clean daemon shutdown is also a terminal decision point.
+   If `daemon.fallback_to_drop` is enabled, the daemon finalizes any remaining durable pending live rows into `DROP_TEXT` before shutdown. If fallback-to-drop is disabled, those durable pending live rows remain pending for a future live recovery.
 
-9. A seamless replacement over a still-connected old socket is the main special case.
-   The daemon may force fallback of old-socket unacknowledged messages before accepting the replacement because replaying them over the new socket while the old route is still ambiguous would risk duplicate delivery.
+9. A seamless replacement over a still-connected old socket is still a recovery success.
+   It must preserve retained pending live messages and replay them over the replacement socket rather than forcing fallback because the swap happened quickly.
 
 10. ACK remains transport acceptance, not a read receipt.
     A green sender-side message means the peer daemon accepted the logical message durably, not that the peer user read it.
@@ -350,7 +367,7 @@ The UI may translate them differently, but it must not reinterpret them.
    On the non-initiating side, reconnect lifecycle must surface as generic `GRACE_RECONNECT` messaging such as `Reconnecting` and `Reconnected`, not as explicit retunnel disclosure.
 
 3. A generic recovery hint in the authenticated live handshake is acceptable only as a corroborating signal.
-   It may help the listener classify a new socket as a recovery replacement, but it must not override the absence of local recovery evidence such as reconnect grace, scheduled auto reconnect, retunnel state, or a very recent pending expiry.
+   It may help the listener classify a new socket as a recovery replacement, but it must not override the absence of local recovery evidence such as reconnect grace, scheduled auto reconnect, retunnel state, or a recent explicit local opt-out.
 
 4. Local observability is allowed to be richer than peer observability.
    The initiating UI may see `RetunnelInitiatedEvent`, `RetunnelSuccessEvent`, and `RetunnelFailedEvent` because that information never crosses the peer protocol boundary.

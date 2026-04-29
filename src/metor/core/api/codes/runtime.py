@@ -8,6 +8,8 @@ class RuntimeErrorCode(str, Enum):
 
     NO_CACHED_DROP_TUNNEL = 'no_cached_drop_tunnel'
     NO_ACTIVE_CONNECTION_TO_RETUNNEL = 'no_active_connection_to_retunnel'
+    PEER_ENDED_SESSION = 'peer_ended_session'
+    PEER_REJECTED_RECONNECT = 'peer_rejected_reconnect'
     RETUNNEL_RECONNECT_FAILED = 'retunnel_reconnect_failed'
     PENDING_ACCEPTANCE_EXPIRED = 'pending_acceptance_expired'
     TOR_LAUNCH_FAILED = 'tor_launch_failed'

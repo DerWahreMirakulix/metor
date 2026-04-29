@@ -23,6 +23,7 @@ from metor.core.api import (
     PendingConnectionExpiredEvent,
     PeerNotFoundEvent,
     MsgCommand,
+    RuntimeErrorCode,
     RetunnelFailedEvent,
     RetunnelInitiatedEvent,
     RetunnelSuccessEvent,
@@ -446,6 +447,20 @@ def handle_transport_event(handler: EventHandlerProtocol, event: IpcEvent) -> bo
             alias=event.alias,
             onion=event.onion,
         )
+        terminal_peer_opt_out: bool = event.error_code in {
+            RuntimeErrorCode.PEER_ENDED_SESSION,
+            RuntimeErrorCode.PEER_REJECTED_RECONNECT,
+        }
+        if terminal_peer_opt_out:
+            handler._session.set_transport_state(
+                ChatTransportState.DROP,
+                event.alias,
+                event.onion,
+            )
+            _flush_buffered_outgoing_drop(handler, event.alias, event.onion)
+            _refresh_focus_prompt(handler, event.alias)
+            return True
+
         if handler._has_auto_reconnect():
             handler._session.set_transport_state(
                 ChatTransportState.RECONNECTING,
@@ -521,6 +536,13 @@ def handle_transport_event(handler: EventHandlerProtocol, event: IpcEvent) -> bo
         if event.alias in handler._session.pending_connections:
             handler._session.pending_connections.remove(event.alias)
 
+        daemon_retunnel_recovery: bool = (
+            event.actor is ConnectionActor.SYSTEM
+            and event.origin is ConnectionOrigin.RETUNNEL
+            and event.reason_code is not ConnectionReasonCode.OUTBOUND_ATTEMPT_REJECTED
+            and handler._has_auto_reconnect()
+        )
+
         if handler._session.focused_alias == event.alias:
             if event.actor is ConnectionActor.LOCAL:
                 handler._session.clear_retunneling(event.alias, event.onion)
@@ -528,10 +550,7 @@ def handle_transport_event(handler: EventHandlerProtocol, event: IpcEvent) -> bo
                 handler._switch_focus(None, hide_message=True, sync_daemon=True)
             else:
                 handler._session.clear_retunneling(event.alias, event.onion)
-                if (
-                    event.origin is ConnectionOrigin.RETUNNEL
-                    and handler._has_auto_reconnect()
-                ):
+                if daemon_retunnel_recovery:
                     handler._session.set_transport_state(
                         ChatTransportState.RECONNECTING,
                         event.alias,
@@ -546,10 +565,7 @@ def handle_transport_event(handler: EventHandlerProtocol, event: IpcEvent) -> bo
                 _refresh_focus_prompt(handler, event.alias)
         else:
             handler._session.clear_retunneling(event.alias, event.onion)
-            if (
-                event.origin is ConnectionOrigin.RETUNNEL
-                and handler._has_auto_reconnect()
-            ):
+            if daemon_retunnel_recovery:
                 handler._session.set_transport_state(
                     ChatTransportState.RECONNECTING,
                     event.alias,

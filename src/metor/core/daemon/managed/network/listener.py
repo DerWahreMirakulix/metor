@@ -15,7 +15,6 @@ from metor.core import TorManager
 from metor.core.api import (
     AutoReconnectScheduledEvent,
     ConnectionActor,
-    ConnectionConnectingEvent,
     ConnectionOrigin,
     ConnectionReasonCode,
     EventType,
@@ -29,7 +28,11 @@ from metor.core.api import (
     MaxConnectionsReachedEvent,
     create_event,
 )
-from metor.core.daemon.managed.models import LiveTransportState, TorCommand
+from metor.core.daemon.managed.models import (
+    LiveTransportState,
+    RejectIntent,
+    TorCommand,
+)
 from metor.core.daemon.managed.crypto import Crypto
 from metor.data import (
     HistoryActor,
@@ -535,8 +538,22 @@ class InboundListener:
                 grace_reconnect
                 or retunnel_reconnect
                 or scheduled_auto_reconnect
-                or self._state.consume_recent_pending_expiry(onion)
+                or transport_state.live_state is LiveTransportState.CONNECTED
             )
+
+        if has_recovery_hint and self._state.has_local_recovery_opt_out(onion):
+            try:
+                conn.sendall(
+                    (
+                        f'{TorCommand.REJECT.value} '
+                        f'{RejectIntent.MANUAL.value} {self._tm.onion}\n'
+                    ).encode('utf-8')
+                )
+            except Exception:
+                pass
+            conn.close()
+            return
+
         duplicate_reason_code: Optional[HistoryReasonCode] = None
 
         if (
@@ -640,11 +657,12 @@ class InboundListener:
 
         accepted_now: bool = False
         pending_reason: PendingConnectionReason = PendingConnectionReason.USER_ACCEPT
-        if should_auto_accept_now and (
-            self._has_live_consumers() or self._allows_headless_live_backlog()
-        ):
-            if seamless_recovery_replacement:
-                self._router.force_fallback(onion)
+        allow_immediate_accept: bool = (
+            is_mutual_winner
+            or self._has_live_consumers()
+            or self._allows_headless_live_backlog()
+        )
+        if should_auto_accept_now and allow_immediate_accept:
             if grace_reconnect:
                 self._state.consume_live_reconnect_grace(onion)
             self._state.add_active_connection(onion, conn)
@@ -676,16 +694,6 @@ class InboundListener:
                 conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8'))
             except Exception:
                 pass
-
-            if seamless_recovery_replacement:
-                self._broadcast(
-                    ConnectionConnectingEvent(
-                        alias=alias,
-                        onion=onion,
-                        origin=ConnectionOrigin.GRACE_RECONNECT,
-                        actor=ConnectionActor.SYSTEM,
-                    )
-                )
 
             if not seamless_recovery_replacement:
                 self._hm.log_event(

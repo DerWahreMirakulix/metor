@@ -22,6 +22,7 @@ class IpcAuthResult:
     resend_original_command: bool = False
     terminal_event: Optional[IpcEvent] = None
     terminal_message: Optional[str] = None
+    auth_incomplete: bool = False
 
 
 class IpcAuthExchange:
@@ -86,7 +87,8 @@ class IpcAuthExchange:
             if proof is None:
                 return IpcAuthResult(
                     handled=True,
-                    terminal_message='Master password cannot be empty.',
+                    terminal_message='Aborted.',
+                    auth_incomplete=True,
                 )
 
             self._pending_resume_event = EventType.SESSION_AUTHENTICATED
@@ -103,7 +105,8 @@ class IpcAuthExchange:
             if password is None:
                 return IpcAuthResult(
                     handled=True,
-                    terminal_message='Master password cannot be empty.',
+                    terminal_message='Aborted.',
+                    auth_incomplete=True,
                 )
 
             self._pending_resume_event = EventType.DAEMON_UNLOCKED
@@ -131,7 +134,8 @@ class IpcAuthExchange:
                 if proof is None:
                     return IpcAuthResult(
                         handled=True,
-                        terminal_message='Master password cannot be empty.',
+                        terminal_message='Aborted.',
+                        auth_incomplete=True,
                     )
 
                 self._send_command(
@@ -151,7 +155,8 @@ class IpcAuthExchange:
                 if password is None:
                     return IpcAuthResult(
                         handled=True,
-                        terminal_message='Master password cannot be empty.',
+                        terminal_message='Aborted.',
+                        auth_incomplete=True,
                     )
 
                 self._send_command(

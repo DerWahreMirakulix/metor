@@ -8,7 +8,7 @@ import threading
 from typing import Dict, List, Callable, Optional, Tuple, TYPE_CHECKING
 
 from metor.core import TorManager
-from metor.core.api import EventType, IpcEvent, JsonValue
+from metor.core.api import ConnectionOrigin, EventType, IpcEvent, JsonValue
 from metor.core.daemon.managed.crypto import Crypto
 from metor.data import HistoryManager, ContactManager, MessageManager
 
@@ -175,7 +175,11 @@ class NetworkManager:
         Returns:
             None
         """
-        self._controller.disconnect(target, initiated_by_self)
+        self._controller.disconnect(
+            target,
+            initiated_by_self,
+            origin=(ConnectionOrigin.MANUAL if initiated_by_self else None),
+        )
 
     def disconnect_all(self) -> None:
         """
@@ -188,6 +192,7 @@ class NetworkManager:
             None
         """
         self._controller.disconnect_all()
+        self._router.finalize_pending_live_messages()
 
     def retunnel(self, target: str) -> None:
         """

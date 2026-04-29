@@ -3,12 +3,21 @@
 import socket
 from typing import Callable, Optional
 
-from metor.core.api import ensure_request_id, EventType, IpcCommand, IpcEvent
+from metor.core.api import (
+    ensure_request_id,
+    EventType,
+    IpcCommand,
+    IpcEvent,
+)
 from metor.data import ProfileManager, SettingKey
 from metor.ui.ipc import BufferedIpcEventReader, IpcAuthExchange
 
 # Local Package Imports
-from metor.ui import get_session_auth_prompt, prompt_session_auth_proof
+from metor.ui import (
+    PromptOutputSpacer,
+    get_session_auth_prompt,
+    prompt_session_auth_proof,
+)
 from metor.ui.cli.ipc.request.models import IpcRequestResult
 
 
@@ -104,6 +113,7 @@ class IpcRequestSession:
                 request_id,
             )
             send_failed: bool = False
+            auth_prompt_used: bool = False
             try:
                 self._send_socket_command(sock, cmd)
             except OSError:
@@ -126,10 +136,30 @@ class IpcRequestSession:
 
                 auth_result = auth_exchange.handle(event)
                 if auth_result.handled:
+                    if event.event_type in (
+                        EventType.AUTH_REQUIRED,
+                        EventType.DAEMON_LOCKED,
+                    ):
+                        auth_prompt_used = True
+                    elif (
+                        event.event_type is EventType.INVALID_PASSWORD
+                        and auth_result.terminal_message is None
+                        and auth_result.terminal_event is None
+                    ):
+                        auth_prompt_used = True
+
                     if auth_result.terminal_message is not None:
-                        return IpcRequestResult(message=auth_result.terminal_message)
+                        return IpcRequestResult(
+                            message=auth_result.terminal_message,
+                            insert_leading_blank_line=auth_prompt_used,
+                            auth_incomplete=auth_result.auth_incomplete,
+                        )
                     if auth_result.terminal_event is not None:
-                        return IpcRequestResult(event=auth_result.terminal_event)
+                        return IpcRequestResult(
+                            event=auth_result.terminal_event,
+                            insert_leading_blank_line=auth_prompt_used,
+                            auth_incomplete=auth_result.auth_incomplete,
+                        )
                     if auth_result.resend_original_command:
                         self._send_socket_command(sock, cmd)
                     continue
@@ -137,7 +167,10 @@ class IpcRequestSession:
                 if event.event_type in self._async_event_types:
                     continue
 
-                return IpcRequestResult(event=event)
+                return IpcRequestResult(
+                    event=event,
+                    insert_leading_blank_line=auth_prompt_used,
+                )
 
             if send_failed:
                 return IpcRequestResult(
@@ -159,9 +192,16 @@ class IpcRequestSession:
             str: The formatted terminal output.
         """
         result: IpcRequestResult = self.execute_result(port, cmd, wait_for_response)
+        rendered: str
         if result.event is not None:
-            return self._format_event(result.event)
-        return self._format_message(result.message or 'Command executed successfully.')
+            rendered = self._format_event(result.event)
+        else:
+            rendered = self._format_message(
+                result.message or 'Command executed successfully.'
+            )
+
+        spacer = PromptOutputSpacer(result.insert_leading_blank_line)
+        return spacer.format(rendered)
 
     def execute_event(self, port: int, cmd: IpcCommand) -> Optional[IpcEvent]:
         """

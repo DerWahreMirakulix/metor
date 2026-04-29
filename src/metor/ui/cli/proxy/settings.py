@@ -9,6 +9,8 @@ from metor.core.api import (
     GetConfigListCommand,
     GetSettingCommand,
     GetSettingsListCommand,
+    IpcEvent,
+    JsonValue,
     SettingsListDataEvent,
     SetConfigCommand,
     SetSettingCommand,
@@ -23,6 +25,7 @@ from metor.data import (
     SettingSnapshotRow,
 )
 from metor.ui import Theme, UIPresenter
+from metor.ui.cli.ipc.request.models import IpcRequestResult
 from metor.utils import TypeCaster
 
 
@@ -59,7 +62,9 @@ class CliProxySettingsActions:
         pm: ProfileManager,
         *,
         is_remote: bool,
+        prefix_remote: Callable[[str], str],
         request_ipc: Callable[..., str],
+        request_ipc_result: Callable[..., IpcRequestResult],
         translate_event: Callable[..., str],
     ) -> None:
         """
@@ -68,7 +73,9 @@ class CliProxySettingsActions:
         Args:
             pm (ProfileManager): The active profile configuration.
             is_remote (bool): Whether the active profile is remote.
+            prefix_remote (Callable[[str], str]): Remote-prefix renderer callback.
             request_ipc (Callable[..., str]): IPC request callback.
+            request_ipc_result (Callable[..., IpcRequestResult]): Raw IPC request callback.
             translate_event (Callable[[EventType, Optional[Dict[str, JsonValue]]], str]): Event translator callback.
 
         Returns:
@@ -76,8 +83,120 @@ class CliProxySettingsActions:
         """
         self._pm = pm
         self._is_remote = is_remote
+        self._prefix_remote = prefix_remote
         self._request_ipc = request_ipc
+        self._request_ipc_result = request_ipc_result
         self._translate_event = translate_event
+
+    @staticmethod
+    def _merge_snapshot_sections(
+        local_sections: list[str],
+        daemon_section: str,
+        *,
+        insert_leading_blank_line: bool = False,
+    ) -> str:
+        """
+        Combines local and daemon snapshot sections with stable spacing.
+
+        Args:
+            local_sections (list[str]): Locally rendered sections.
+            daemon_section (str): The daemon-rendered section.
+            insert_leading_blank_line (bool): Whether one auth prompt should separate the output from the terminal prompt.
+
+        Returns:
+            str: The normalized combined output.
+        """
+        sections: list[str] = [
+            *(section.rstrip('\n') for section in local_sections if section),
+            daemon_section.rstrip('\n'),
+        ]
+        rendered: str = '\n\n'.join(section for section in sections if section)
+        if not rendered:
+            return rendered
+
+        if insert_leading_blank_line:
+            return f'\n{rendered}\n'
+        return f'{rendered}\n'
+
+    @staticmethod
+    def _extract_event_params(event: IpcEvent) -> dict[str, JsonValue]:
+        """
+        Extracts JSON-safe event fields for local UI translation.
+
+        Args:
+            event (IpcEvent): The source IPC event.
+
+        Returns:
+            dict[str, JsonValue]: The JSON-safe event parameters.
+        """
+        params_raw: dict[str, object] = vars(event)
+        return {
+            key: value
+            for key, value in params_raw.items()
+            if key not in ('event_type', 'request_id')
+            and isinstance(value, (str, int, float, bool, type(None), list, dict))
+        }
+
+    def _render_daemon_snapshot_result(
+        self,
+        result: IpcRequestResult,
+        *,
+        expected_data_event: EventType,
+        unavailable_subject: str,
+    ) -> str:
+        """
+        Formats one daemon snapshot result or a contextual omission notice.
+
+        Args:
+            result (IpcRequestResult): The raw daemon request result.
+            expected_data_event (EventType): The expected successful snapshot event type.
+            unavailable_subject (str): Human-readable label for the omitted daemon section.
+
+        Returns:
+            str: The rendered daemon section or omission message.
+        """
+        if result.event is not None and result.event.event_type is expected_data_event:
+            section: str = UIPresenter.format_response(result.event)
+            if self._is_remote:
+                return self._prefix_remote(section)
+            return section
+
+        if result.auth_incomplete:
+            section = (
+                f'{unavailable_subject} were not shown because local daemon '
+                'authentication did not complete.'
+            )
+            if self._is_remote:
+                return self._prefix_remote(section)
+            return section
+
+        detail: str = ''
+        reason: str = 'because the daemon request failed.'
+        if result.event is not None:
+            detail = self._translate_event(
+                result.event.event_type,
+                self._extract_event_params(result.event),
+            )
+            if result.event.event_type in (
+                EventType.INVALID_PASSWORD,
+                EventType.LOCAL_AUTH_RATE_LIMITED,
+            ):
+                reason = 'because local daemon authentication failed.'
+        else:
+            detail = result.message or ''
+            if result.insert_leading_blank_line:
+                reason = 'because local daemon authentication did not complete.'
+
+        if not detail:
+            return ''
+
+        if '\n' in detail:
+            section = f'{unavailable_subject} were not shown {reason}\n{detail}'
+        else:
+            section = f'{unavailable_subject} were not shown {reason} {detail}'
+        if self._is_remote:
+            return self._prefix_remote(section)
+        return section
 
     def handle_settings_set(self, key: str, value: str) -> str:
         """
@@ -148,7 +267,7 @@ class CliProxySettingsActions:
         Returns:
             str: The formatted snapshot output.
         """
-        sections: list[str] = [
+        local_sections: list[str] = [
             UIPresenter.format_response(
                 SettingsListDataEvent(
                     scope='ui',
@@ -158,8 +277,19 @@ class CliProxySettingsActions:
                 )
             )
         ]
-        sections.append(self._request_ipc(GetSettingsListCommand()))
-        return '\n\n'.join(section for section in sections if section)
+        daemon_result: IpcRequestResult = self._request_ipc_result(
+            GetSettingsListCommand()
+        )
+        daemon_section: str = self._render_daemon_snapshot_result(
+            daemon_result,
+            expected_data_event=EventType.SETTINGS_LIST_DATA,
+            unavailable_subject='Daemon settings',
+        )
+        return self._merge_snapshot_sections(
+            local_sections,
+            daemon_section,
+            insert_leading_blank_line=daemon_result.insert_leading_blank_line,
+        )
 
     def handle_config_set(self, key: str, value: str) -> str:
         """
@@ -242,7 +372,7 @@ class CliProxySettingsActions:
         Returns:
             str: The formatted snapshot output.
         """
-        sections: list[str] = [
+        local_sections: list[str] = [
             UIPresenter.format_response(
                 ConfigListDataEvent(
                     scope='ui',
@@ -262,8 +392,19 @@ class CliProxySettingsActions:
                 )
             ),
         ]
-        sections.append(self._request_ipc(GetConfigListCommand()))
-        return '\n\n'.join(section for section in sections if section)
+        daemon_result: IpcRequestResult = self._request_ipc_result(
+            GetConfigListCommand()
+        )
+        daemon_section: str = self._render_daemon_snapshot_result(
+            daemon_result,
+            expected_data_event=EventType.CONFIG_LIST_DATA,
+            unavailable_subject='Daemon config values',
+        )
+        return self._merge_snapshot_sections(
+            local_sections,
+            daemon_section,
+            insert_leading_blank_line=daemon_result.insert_leading_blank_line,
+        )
 
     def handle_config_sync(self) -> str:
         """
@@ -275,18 +416,21 @@ class CliProxySettingsActions:
         Returns:
             str: The formatted status message.
         """
+        daemon_msg: str = self._request_ipc(SyncConfigCommand())
+        success_msg: str = self._translate_event(EventType.CONFIG_SYNCED)
+
+        if not daemon_msg.endswith(success_msg):
+            return daemon_msg
+
         try:
-            self._pm.config.sync_with_global()
+            self._pm.config.sync_with_global(domain='ui')
             local_msg: str = (
                 'Profile overrides cleared. Config is now synced with global settings.'
             )
         except Exception:
             return 'Failed to update profile config.'
 
-        if self._is_remote or self._pm.is_daemon_running():
-            daemon_msg: str = self._request_ipc(SyncConfigCommand())
-            if self._is_remote:
-                return f'{local_msg}\n{daemon_msg}'
-            return daemon_msg
+        if self._is_remote:
+            return f'{local_msg}\n{daemon_msg}'
 
-        return local_msg
+        return daemon_msg

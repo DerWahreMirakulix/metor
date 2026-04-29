@@ -37,10 +37,26 @@ from metor.core.api import (
     create_event,
 )
 from metor.core.daemon import InvalidMasterPasswordError, verify_master_password
-from metor.data import DatabaseCorruptedError
+from metor.data import DatabaseCorruptedError, SettingKey
 
 # Local Package Imports
 from metor.core.daemon.headless.protocols import HeadlessDaemonProtocol
+
+
+def _requires_headless_config_password(daemon: HeadlessDaemonProtocol) -> bool:
+    """
+    Reports whether daemon-scoped config commands must validate the master password.
+
+    Args:
+        daemon (HeadlessDaemonProtocol): The owning headless daemon instance.
+
+    Returns:
+        bool: True when local auth is enabled for the current encrypted profile.
+    """
+    if not daemon._pm.supports_password_auth():
+        return False
+
+    return daemon._pm.config.get_bool(SettingKey.REQUIRE_LOCAL_AUTH)
 
 
 def validate_password(daemon: HeadlessDaemonProtocol) -> Optional[IpcEvent]:
@@ -95,6 +111,12 @@ def process_command(
             SyncConfigCommand,
         ),
     ):
+        if _requires_headless_config_password(daemon):
+            password_error: Optional[IpcEvent] = validate_password(daemon)
+            if password_error is not None:
+                daemon._send(conn, password_error)
+                return
+
         daemon._send(conn, daemon._config_handler.handle(cmd))
         return
 
@@ -129,7 +151,7 @@ def process_command(
             MarkReadCommand,
         ),
     ):
-        password_error: Optional[IpcEvent] = validate_password(daemon)
+        password_error = validate_password(daemon)
         if password_error is not None:
             daemon._send(conn, password_error)
             return

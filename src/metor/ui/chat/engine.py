@@ -29,6 +29,7 @@ from metor.ui.ipc import IpcAuthExchange
 from metor.ui import (
     Help,
     PromptAbortedError,
+    PromptOutputSpacer,
     Theme,
     Translator,
     get_session_auth_prompt,
@@ -164,6 +165,7 @@ class Chat:
 
         request_id: str = ensure_request_id(cmd)
         self._ipc.send_command(cmd)
+        output_spacer = PromptOutputSpacer()
         auth_exchange = IpcAuthExchange(
             prompt_session_proof=lambda challenge, salt: prompt_session_auth_proof(
                 get_session_auth_prompt(self._pm),
@@ -197,7 +199,9 @@ class Chat:
 
             if event is None:
                 self._print_prechat_message(
-                    f'{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}'
+                    output_spacer.format(
+                        f'{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}'
+                    )
                 )
                 return None
 
@@ -213,11 +217,29 @@ class Chat:
                 return None
 
             if auth_result.handled:
+                if event.event_type in (
+                    EventType.AUTH_REQUIRED,
+                    EventType.DAEMON_LOCKED,
+                ):
+                    output_spacer.mark_prompt()
+                elif (
+                    event.event_type is EventType.INVALID_PASSWORD
+                    and auth_result.terminal_message is None
+                    and auth_result.terminal_event is None
+                ):
+                    output_spacer.mark_prompt()
+
                 if auth_result.terminal_message is not None:
-                    self._print_prechat_message(auth_result.terminal_message)
+                    self._print_prechat_message(
+                        output_spacer.format(auth_result.terminal_message)
+                    )
                     return None
                 if auth_result.terminal_event is not None:
-                    self._print_prechat_event(auth_result.terminal_event)
+                    self._print_prechat_message(
+                        output_spacer.format(
+                            self._format_prechat_event_text(auth_result.terminal_event)
+                        )
+                    )
                     return None
                 if auth_result.resend_original_command:
                     self._ipc.send_command(cmd)
@@ -231,7 +253,9 @@ class Chat:
                 EventType.INTERNAL_ERROR,
                 EventType.UNKNOWN_COMMAND,
             ):
-                self._print_prechat_message(self._format_prechat_event_text(event))
+                self._print_prechat_message(
+                    output_spacer.format(self._format_prechat_event_text(event))
+                )
                 return None
 
     def _handle_daemon_disconnect_exit(self, *, show_divider: bool = False) -> None:
@@ -413,11 +437,12 @@ class Chat:
                 is_drop=False,
             )
         elif should_buffer:
-            self._session.buffer_outgoing_message(
-                alias=target_alias,
-                text=msg_text,
-                msg_id=msg_id,
-                onion=peer_onion,
+            self._ipc.send_command(
+                MsgCommand(
+                    target=target_alias,
+                    text=msg_text,
+                    msg_id=msg_id,
+                )
             )
             self._renderer.print_message(
                 msg_text,

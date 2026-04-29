@@ -160,6 +160,108 @@ class MessageRouter:
         b64_msg: str = base64.b64encode(envelope_str.encode('utf-8')).decode('utf-8')
         conn.sendall(f'{TorCommand.MSG.value} {msg_id} {b64_msg}\n'.encode('utf-8'))
 
+    def _should_defer_live_message(self, onion: str) -> bool:
+        """
+        Checks whether one outbound live message should stay recoverable for now.
+
+        Args:
+            onion (str): The peer onion identity.
+
+        Returns:
+            bool: True if live recovery is still plausible.
+        """
+        has_live_reconnect_grace = getattr(
+            self._state, 'has_live_reconnect_grace', None
+        )
+        is_retunneling = getattr(self._state, 'is_retunneling', None)
+        has_outbound_attempt = getattr(self._state, 'has_outbound_attempt', None)
+        has_scheduled_auto_reconnect = getattr(
+            self._state,
+            'has_scheduled_auto_reconnect',
+            None,
+        )
+        is_connected_or_pending = getattr(
+            self._state,
+            'is_connected_or_pending',
+            None,
+        )
+        return (
+            bool(callable(has_live_reconnect_grace) and has_live_reconnect_grace(onion))
+            or bool(callable(is_retunneling) and is_retunneling(onion))
+            or bool(callable(has_outbound_attempt) and has_outbound_attempt(onion))
+            or bool(
+                callable(has_scheduled_auto_reconnect)
+                and has_scheduled_auto_reconnect(onion)
+            )
+            or bool(
+                callable(is_connected_or_pending) and is_connected_or_pending(onion)
+            )
+        )
+
+    def _queue_pending_live_message(
+        self,
+        onion: str,
+        msg: str,
+        msg_id: str,
+        timestamp: str,
+    ) -> None:
+        """
+        Persists one outbound live message until ACK or terminal fallback.
+
+        Args:
+            onion (str): The peer onion identity.
+            msg (str): The message payload.
+            msg_id (str): The stable logical message identifier.
+            timestamp (str): The authored timestamp.
+
+        Returns:
+            None
+        """
+        self._mm.queue_message(
+            contact_onion=onion,
+            direction=MessageDirection.OUT,
+            msg_type=MessageType.LIVE_TEXT,
+            payload=msg,
+            status=MessageStatus.PENDING,
+            msg_id=msg_id,
+            timestamp=timestamp,
+        )
+        self._state.add_unacked_message(onion, msg_id, msg, timestamp)
+
+    def _get_pending_live_messages(
+        self,
+        onion: str,
+    ) -> list[tuple[str, str, str]]:
+        """
+        Returns ordered pending live messages from durable and in-memory state.
+
+        Args:
+            onion (str): The peer onion identity.
+
+        Returns:
+            list[tuple[str, str, str]]: Message id, payload, and timestamp tuples.
+        """
+        pending_messages: list[tuple[str, str, str]] = []
+        seen_msg_ids: set[str] = set()
+        state_messages: Dict[str, Tuple[str, str]] = self._state.get_unacked_messages(
+            onion
+        )
+
+        for _, _, payload, msg_id, timestamp in self._mm.get_pending_live_outbox(onion):
+            if msg_id not in state_messages:
+                self._state.add_unacked_message(onion, msg_id, payload, timestamp)
+            else:
+                payload, timestamp = state_messages[msg_id]
+            pending_messages.append((msg_id, payload, timestamp))
+            seen_msg_ids.add(msg_id)
+
+        for msg_id, pending_msg in state_messages.items():
+            if msg_id in seen_msg_ids:
+                continue
+            pending_messages.append((msg_id, pending_msg[0], pending_msg[1]))
+
+        return pending_messages
+
     def convert_unacked_messages_to_drop(
         self,
         alias: str,
@@ -186,6 +288,8 @@ class MessageRouter:
             Dict[str, Tuple[str, str]]: The converted unacknowledged messages.
         """
         unacked: Dict[str, Tuple[str, str]] = self._state.pop_unacked_messages(onion)
+        for _, _, payload, msg_id, timestamp in self._mm.get_pending_live_outbox(onion):
+            unacked.setdefault(msg_id, (payload, timestamp))
         if not unacked:
             return {}
 
@@ -222,7 +326,7 @@ class MessageRouter:
 
     def replay_unacked_messages(self, onion: str) -> list[str]:
         """
-        Replays still-unacknowledged live messages over the current active socket.
+        Replays still-pending live messages over the current active socket.
 
         Args:
             onion (str): The peer onion identity.
@@ -235,9 +339,7 @@ class MessageRouter:
             return []
 
         replayed_msg_ids: list[str] = []
-        unacked: Dict[str, Tuple[str, str]] = self._state.get_unacked_messages(onion)
-        for msg_id, pending_msg in unacked.items():
-            content, timestamp = pending_msg
+        for msg_id, content, timestamp in self._get_pending_live_messages(onion):
             try:
                 self._send_live_envelope(conn, msg_id, content, timestamp)
             except Exception:
@@ -293,7 +395,7 @@ class MessageRouter:
 
     def send_message(self, target: str, msg: str, msg_id: str) -> None:
         """
-        Sends a live chat message formatted in JSON and buffers it for ACK verification.
+        Sends one live chat message or durably defers it for recovery.
 
         Args:
             target (str): The target alias or onion.
@@ -309,15 +411,16 @@ class MessageRouter:
         alias, onion = resolved
         request_id: Optional[str] = get_current_request_id()
         self._remember_message_request_id(msg_id, request_id)
-
-        has_reconnect_grace_fn = getattr(self._state, 'has_live_reconnect_grace', None)
-        silent_grace_fallback: bool = bool(
-            callable(has_reconnect_grace_fn) and has_reconnect_grace_fn(onion)
-        )
-
         conn: Optional[socket.socket] = self._state.get_connection(onion)
+        timestamp: str = datetime.now(timezone.utc).isoformat()
 
         if not conn:
+            if self._should_defer_live_message(onion) or not self._config.get_bool(
+                SettingKey.FALLBACK_TO_DROP
+            ):
+                self._queue_pending_live_message(onion, msg, msg_id, timestamp)
+                return
+
             if self._config.get_bool(SettingKey.FALLBACK_TO_DROP):
                 self._mm.queue_message(
                     contact_onion=onion,
@@ -333,25 +436,21 @@ class MessageRouter:
                     actor=HistoryActor.SYSTEM,
                     detail_code=HistoryReasonCode.AUTO_FALLBACK_TO_DROP,
                 )
-                if not silent_grace_fallback:
-                    self._broadcast(
-                        AutoFallbackQueuedEvent(
-                            alias=alias,
-                            onion=onion,
-                            msg_id=msg_id,
-                            request_id=request_id,
-                        )
+                self._broadcast(
+                    AutoFallbackQueuedEvent(
+                        alias=alias,
+                        onion=onion,
+                        msg_id=msg_id,
+                        request_id=request_id,
                     )
-            else:
-                self._clear_message_request_id(msg_id)
+                )
             return
 
         try:
-            timestamp: str = datetime.now(timezone.utc).isoformat()
-            self._state.add_unacked_message(onion, msg_id, msg, timestamp)
+            self._queue_pending_live_message(onion, msg, msg_id, timestamp)
             self._send_live_envelope(conn, msg_id, msg, timestamp)
         except Exception:
-            self._clear_message_request_id(msg_id)
+            pass
 
     def process_incoming_msg(
         self, conn: socket.socket, onion: str, payload_id: str, b64_payload: str
@@ -488,6 +587,11 @@ class MessageRouter:
             onion, msg_id
         )
         timestamp: Optional[str] = acked_msg[1] if acked_msg else None
+        self._mm.update_outbound_message_status(
+            onion,
+            msg_id,
+            MessageStatus.DELIVERED,
+        )
         request_id: Optional[str] = self._pop_message_request_id(msg_id)
         self._broadcast(
             AckEvent(
@@ -496,6 +600,36 @@ class MessageRouter:
                 request_id=request_id,
             )
         )
+
+    def finalize_pending_live_messages(self) -> None:
+        """
+        Converts remaining durable pending live messages into drops on shutdown.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if not self._config.get_bool(SettingKey.FALLBACK_TO_DROP):
+            return
+
+        pending_onions: set[str] = set(self._state.get_unacked_onions())
+        for _, onion, _, _, _ in self._mm.get_pending_live_outbox():
+            pending_onions.add(onion)
+
+        ensure_alias = getattr(self._cm, 'ensure_alias_for_onion', None)
+        for onion in pending_onions:
+            alias: str = onion
+            if callable(ensure_alias):
+                resolved_alias = cast(Optional[str], ensure_alias(onion))
+                if resolved_alias:
+                    alias = resolved_alias
+            self.convert_unacked_messages_to_drop(
+                alias,
+                onion,
+                emit_event=False,
+            )
 
     def _decode_async_drop_payload(
         self,

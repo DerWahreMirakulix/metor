@@ -44,6 +44,7 @@ class StateTrackerConnectionsMixin:
     _expired_pending_connections: Dict[str, float]
     _scheduled_auto_reconnects: Set[str]
     _live_reconnect_grace: Dict[str, float]
+    _local_recovery_opt_outs: Dict[str, float]
     _retunnel_in_progress: Set[str]
 
     def get_active_onions(self) -> List[str]:
@@ -296,6 +297,24 @@ class StateTrackerConnectionsMixin:
 
             self._outbound_sockets.pop(onion, None)
 
+    def pop_outbound_socket(self, onion: str) -> Optional[socket.socket]:
+        """
+        Removes and returns the current outbound-attempt socket while clearing its bookkeeping.
+
+        Args:
+            onion (str): The peer onion identity.
+
+        Returns:
+            Optional[socket.socket]: The bound outbound socket, if present.
+        """
+        with self._lock:
+            conn: Optional[socket.socket] = self._outbound_sockets.pop(onion, None)
+            self._outbound_attempts.discard(onion)
+            self._outbound_attempt_origins.pop(onion, None)
+            self._recent_outbound_attempts.pop(onion, None)
+            self._outbound_connected_origin_overrides.pop(onion, None)
+            return conn
+
     def is_current_outbound_socket(self, onion: str, sock: socket.socket) -> bool:
         """
         Checks whether one socket is the current tracked outbound attempt.
@@ -334,6 +353,7 @@ class StateTrackerConnectionsMixin:
             self._recent_outbound_attempts.pop(onion, None)
             self._scheduled_auto_reconnects.discard(onion)
             self._live_reconnect_grace.pop(onion, None)
+            self._local_recovery_opt_outs.pop(onion, None)
             self._pending_connection_reasons.pop(onion, None)
             self._pending_connection_origins.pop(onion, None)
             self._initial_buffers.pop(onion, None)

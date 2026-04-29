@@ -202,7 +202,7 @@ class ConfigCommandHandler:
 
         if isinstance(cmd, SyncConfigCommand):
             try:
-                self._pm.config.sync_with_global()
+                self._pm.config.sync_with_global(domain='daemon')
                 return create_event(EventType.CONFIG_SYNCED)
             except Exception:
                 return create_event(EventType.CONFIG_UPDATE_FAILED)

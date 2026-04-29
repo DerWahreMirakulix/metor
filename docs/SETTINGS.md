@@ -812,7 +812,7 @@ Keeps a locally initiated live socket open briefly after sending `DISCONNECT` so
 | Property         | Value                         |
 | ---------------- | ----------------------------- |
 | Type             | `float`                       |
-| Default          | `1.0`                         |
+| Default          | `2.0`                         |
 | Category         | `Advanced Network Resilience` |
 | Scope            | `Daemon runtime`              |
 | Profile Override | `Yes`                         |
@@ -821,9 +821,9 @@ Keeps a locally initiated live socket open briefly after sending `DISCONNECT` so
 **CLI Examples**
 
 - `metor settings get daemon.live_disconnect_linger_timeout`
-- `metor settings set daemon.live_disconnect_linger_timeout 1.0`
+- `metor settings set daemon.live_disconnect_linger_timeout 2.0`
 - `metor -p <profile> config get daemon.live_disconnect_linger_timeout`
-- `metor -p <profile> config set daemon.live_disconnect_linger_timeout 1.0`
+- `metor -p <profile> config set daemon.live_disconnect_linger_timeout 2.0`
 
 ---
 

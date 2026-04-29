@@ -120,6 +120,21 @@ class MessageManager:
         """
         return self._messages.get_pending_outbox()
 
+    def get_pending_live_outbox(
+        self,
+        contact_onion: Optional[str] = None,
+    ) -> List[Tuple[int, str, str, str, str]]:
+        """
+        Retrieves all durable outbound live messages waiting for recovery or ACK.
+
+        Args:
+            contact_onion (Optional[str]): Optional peer onion filter.
+
+        Returns:
+            List[Tuple[int, str, str, str, str]]: Pending live rows.
+        """
+        return self._messages.get_pending_live_outbox(contact_onion)
+
     def update_message_status(self, msg_id: int, new_status: MessageStatus) -> None:
         """
         Updates the delivery or read status of a specific durable message receipt.
@@ -132,6 +147,29 @@ class MessageManager:
             None
         """
         self._messages.update_message_status(msg_id, new_status)
+
+    def update_outbound_message_status(
+        self,
+        contact_onion: str,
+        msg_id: str,
+        new_status: MessageStatus,
+    ) -> bool:
+        """
+        Updates the status of one outbound logical message using its stable ID.
+
+        Args:
+            contact_onion (str): The peer onion identity.
+            msg_id (str): The logical message identifier.
+            new_status (MessageStatus): The new status to apply.
+
+        Returns:
+            bool: True if a matching outbound receipt was updated.
+        """
+        return self._messages.update_outbound_message_status(
+            contact_onion,
+            msg_id,
+            new_status,
+        )
 
     def get_unread_counts(self) -> Dict[str, int]:
         """

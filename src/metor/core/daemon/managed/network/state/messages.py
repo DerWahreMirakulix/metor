@@ -18,6 +18,7 @@ class StateTrackerMessagesMixin:
     _message_request_ids: Dict[str, str]
     _recent_live_msg_ids: Dict[str, List[str]]
     _unauthenticated_connections: Set[socket.socket]
+    _locally_terminated_sockets: Set[socket.socket]
 
     def remember_message_request_id(
         self,
@@ -104,6 +105,21 @@ class StateTrackerMessagesMixin:
         """
         with self._lock:
             return bool(self._unacked_messages.get(onion))
+
+    def get_unacked_onions(self) -> List[str]:
+        """
+        Returns the peer onions that still have unacknowledged live messages.
+
+        Args:
+            None
+
+        Returns:
+            List[str]: The peer onions with tracked unacknowledged live messages.
+        """
+        with self._lock:
+            return [
+                onion for onion, messages in self._unacked_messages.items() if messages
+            ]
 
     def add_unacked_message(
         self, onion: str, msg_id: str, msg: str, timestamp: str
@@ -205,6 +221,35 @@ class StateTrackerMessagesMixin:
         """
         with self._lock:
             self._unauthenticated_connections.discard(conn)
+
+    def mark_locally_terminated_socket(self, conn: socket.socket) -> None:
+        """
+        Marks one live socket as intentionally closed by the local daemon.
+
+        Args:
+            conn (socket.socket): The locally terminated socket.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            self._locally_terminated_sockets.add(conn)
+
+    def consume_locally_terminated_socket(self, conn: socket.socket) -> bool:
+        """
+        Consumes one locally terminated socket marker when present.
+
+        Args:
+            conn (socket.socket): The socket instance to inspect.
+
+        Returns:
+            bool: True if the socket had been intentionally closed locally.
+        """
+        with self._lock:
+            if conn not in self._locally_terminated_sockets:
+                return False
+            self._locally_terminated_sockets.discard(conn)
+            return True
 
     def get_unauthenticated_count(self) -> int:
         """

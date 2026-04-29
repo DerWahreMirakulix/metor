@@ -3,7 +3,7 @@
 import socket
 import threading
 import time
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 from metor.core.api import (
     AutoReconnectScheduledEvent,
@@ -17,9 +17,10 @@ from metor.core.api import (
     DisconnectedEvent,
     EventType,
     PeerNotFoundEvent,
+    RuntimeErrorCode,
     create_event,
 )
-from metor.core.daemon.managed.models import TorCommand
+from metor.core.daemon.managed.models import DisconnectIntent, RejectIntent, TorCommand
 from metor.data import (
     HistoryActor,
     HistoryEvent,
@@ -31,6 +32,46 @@ from metor.utils import Constants
 from metor.core.daemon.managed.network.controller.session.protocols import (
     TerminateControllerProtocol,
 )
+
+
+def _get_local_recovery_opt_out_timeout(
+    controller: TerminateControllerProtocol,
+) -> float:
+    """
+    Returns the temporary local opt-out window for recovery-hint reconnects.
+
+    Args:
+        controller (TerminateControllerProtocol): The owning controller instance.
+
+    Returns:
+        float: The opt-out window duration in seconds.
+    """
+    return max(
+        controller._config.get_float(SettingKey.LATE_ACCEPTANCE_TIMEOUT),
+        Constants.PENDING_EXPIRY_FEEDBACK_WINDOW_SEC,
+    )
+
+
+def _mark_local_recovery_opt_out(
+    controller: TerminateControllerProtocol,
+    onion: str,
+) -> None:
+    """
+    Blocks immediate recovery-hint reconnects after one explicit local opt-out.
+
+    Args:
+        controller (TerminateControllerProtocol): The owning controller instance.
+        onion (str): The peer onion identity.
+
+    Returns:
+        None
+    """
+    controller._state.mark_live_reconnect_grace(onion, 0.0)
+    controller._state.clear_local_recovery_opt_out(onion)
+    controller._state.mark_local_recovery_opt_out(
+        onion,
+        _get_local_recovery_opt_out_timeout(controller),
+    )
 
 
 def _close_socket(sock: socket.socket) -> None:
@@ -69,6 +110,46 @@ def _sleep_reconnect_grace(controller: TerminateControllerProtocol) -> None:
         sleep_sec: float = min(Constants.WORKER_SLEEP_SEC, remaining_sec)
         time.sleep(sleep_sec)
         remaining_sec -= sleep_sec
+
+
+def _resolve_disconnect_intent(
+    origin: Optional[ConnectionOrigin],
+) -> DisconnectIntent:
+    """
+    Resolves the semantic disconnect intent to send over the live socket.
+
+    Args:
+        origin (Optional[ConnectionOrigin]): The local disconnect origin.
+
+    Returns:
+        DisconnectIntent: The semantic intent for the disconnect frame.
+    """
+    if origin is ConnectionOrigin.RETUNNEL:
+        return DisconnectIntent.RECOVER
+    return DisconnectIntent.MANUAL
+
+
+def _has_pending_live_messages(
+    controller: TerminateControllerProtocol,
+    onion: str,
+) -> bool:
+    """
+    Reports whether one peer still has pending live messages in memory or durable outbox.
+
+    Args:
+        controller (TerminateControllerProtocol): The owning connection controller instance.
+        onion (str): The peer onion identity.
+
+    Returns:
+        bool: True if any pending live messages still need routing.
+    """
+    if controller._state.has_unacked_messages(onion):
+        return True
+
+    get_pending_live_outbox = getattr(controller._mm, 'get_pending_live_outbox', None)
+    if not callable(get_pending_live_outbox):
+        return False
+    return bool(get_pending_live_outbox(onion))
 
 
 def _finalize_deferred_remote_fallback(
@@ -153,6 +234,7 @@ def reject(
     initiated_by_self: bool = True,
     socket_to_close: Optional[socket.socket] = None,
     origin: ConnectionOrigin = ConnectionOrigin.INCOMING,
+    reject_intent: Optional[RejectIntent] = None,
 ) -> None:
     """
     Rejects one pending or in-flight connection attempt.
@@ -163,6 +245,7 @@ def reject(
         initiated_by_self (bool): Whether the local user initiated the rejection.
         socket_to_close (Optional[socket.socket]): Specific duplicate socket to terminate safely.
         origin (ConnectionOrigin): The machine-readable source of the rejected live flow.
+        reject_intent (Optional[RejectIntent]): Optional semantic reject intent received from the peer.
 
     Returns:
         None
@@ -175,6 +258,7 @@ def reject(
     alias, onion = resolved
 
     if initiated_by_self:
+        _mark_local_recovery_opt_out(controller, onion)
         controller._state.clear_scheduled_auto_reconnect(onion)
         controller._state.discard_outbound_attempt(onion)
 
@@ -188,8 +272,6 @@ def reject(
             socket_to_close,
         )
         if not inflight_outbound:
-            if not initiated_by_self:
-                controller._mark_live_reconnect_grace(onion)
             controller._discard_outbound_attempt_if_idle(onion)
             _close_socket(socket_to_close)
             return
@@ -224,6 +306,32 @@ def reject(
         )
 
         if controller._state.is_retunneling(onion):
+            if reject_intent is RejectIntent.MANUAL:
+                controller._state.mark_live_reconnect_grace(onion, 0.0)
+                controller._state.clear_scheduled_auto_reconnect(onion)
+                controller._state.clear_retunnel_flow(onion)
+                controller._convert_unacked_live_to_drops(alias, onion)
+                controller._broadcast(
+                    DisconnectedEvent(
+                        alias=alias,
+                        onion=onion,
+                        actor=ConnectionActor.REMOTE,
+                        origin=ConnectionOrigin.RETUNNEL,
+                        reason_code=ConnectionReasonCode.PEER_ENDED_SESSION,
+                    )
+                )
+                controller._broadcast(
+                    create_event(
+                        EventType.RETUNNEL_FAILED,
+                        {
+                            'alias': alias,
+                            'onion': onion,
+                            'error_code': RuntimeErrorCode.PEER_ENDED_SESSION,
+                            'error_detail': 'Peer ended the session',
+                        },
+                    )
+                )
+                return
             controller._schedule_retunnel_recovery_retry(
                 alias,
                 onion,
@@ -266,7 +374,10 @@ def reject(
     if conn is not None and initiated_by_self:
         try:
             conn.sendall(
-                f'{TorCommand.REJECT.value} {controller._tm.onion}\n'.encode('utf-8')
+                (
+                    f'{TorCommand.REJECT.value} {RejectIntent.MANUAL.value} '
+                    f'{controller._tm.onion}\n'
+                ).encode('utf-8')
             )
         except OSError:
             pass
@@ -321,11 +432,27 @@ def disconnect(
             controller._broadcast(PeerNotFoundEvent(target=target))
         return
     alias, onion = resolved
+    if initiated_by_self and origin is ConnectionOrigin.MANUAL:
+        _mark_local_recovery_opt_out(controller, onion)
+
     defer_remote_fallback: bool = (
         is_fallback
         and not initiated_by_self
         and controller._config.get_int(SettingKey.LIVE_RECONNECT_GRACE_TIMEOUT) > 0
     )
+    retunnel_was_active: bool = controller._state.is_retunneling(onion)
+    cancel_retunnel_flow: bool = (
+        retunnel_was_active
+        and not is_fallback
+        and (not initiated_by_self or origin is not ConnectionOrigin.RETUNNEL)
+    )
+    outbound_socket_to_close: Optional[socket.socket] = None
+
+    if cancel_retunnel_flow:
+        pop_outbound_socket = getattr(controller._state, 'pop_outbound_socket', None)
+        if callable(pop_outbound_socket):
+            outbound_socket_to_close = pop_outbound_socket(onion)
+        controller._state.clear_retunnel_flow(onion)
 
     if initiated_by_self:
         controller._state.clear_scheduled_auto_reconnect(onion)
@@ -342,7 +469,29 @@ def disconnect(
         )
         if not inflight_outbound:
             if not initiated_by_self:
+                had_reconnect_grace: bool = controller._state.has_live_reconnect_grace(
+                    onion
+                )
                 controller._mark_live_reconnect_grace(onion)
+                if (
+                    defer_remote_fallback
+                    and not controller._state.is_retunneling(onion)
+                    and not had_reconnect_grace
+                    and not controller._state.is_connected_or_pending(onion)
+                ):
+                    controller._broadcast(
+                        ConnectionConnectingEvent(
+                            alias=alias,
+                            onion=onion,
+                            origin=ConnectionOrigin.GRACE_RECONNECT,
+                            actor=ConnectionActor.SYSTEM,
+                        )
+                    )
+                    threading.Thread(
+                        target=_finalize_deferred_remote_fallback,
+                        args=(controller, alias, onion, origin),
+                        daemon=True,
+                    ).start()
             controller._discard_outbound_attempt_if_idle(onion)
             _close_socket(socket_to_close)
             return
@@ -395,25 +544,30 @@ def disconnect(
         return
 
     conn: Optional[socket.socket] = controller._state.pop_any_connection(onion)
-    unacked: Dict[str, Tuple[str, str]] = {}
     retain_unacked_for_recovery: bool = (
         controller._state.is_retunneling(onion)
         or defer_remote_fallback
         or (is_fallback and controller._get_live_reconnect_delay() > 0)
     )
-
-    if (
+    has_pending_live_messages: bool = _has_pending_live_messages(controller, onion)
+    should_convert_pending_live: bool = (
         controller._config.get_bool(SettingKey.FALLBACK_TO_DROP)
         and not retain_unacked_for_recovery
-    ):
-        unacked = controller._state.pop_unacked_messages(onion)
-
-    held_unacked_messages: bool = bool(
-        retain_unacked_for_recovery and controller._state.has_unacked_messages(onion)
+        and has_pending_live_messages
     )
 
-    if not conn and not unacked and not inflight_outbound and not held_unacked_messages:
-        if not initiated_by_self:
+    held_unacked_messages: bool = bool(
+        retain_unacked_for_recovery and has_pending_live_messages
+    )
+
+    if (
+        not conn
+        and not should_convert_pending_live
+        and not inflight_outbound
+        and not held_unacked_messages
+        and not cancel_retunnel_flow
+    ):
+        if not initiated_by_self and is_fallback:
             controller._mark_live_reconnect_grace(onion)
         controller._discard_outbound_attempt_if_idle(onion)
         if initiated_by_self and not suppress_events:
@@ -425,7 +579,7 @@ def disconnect(
             )
         return
 
-    if unacked:
+    if should_convert_pending_live:
         controller._convert_unacked_live_to_drops(
             alias,
             onion,
@@ -434,11 +588,20 @@ def disconnect(
 
     if conn:
         if initiated_by_self:
+            mark_local_termination = getattr(
+                controller._state,
+                'mark_locally_terminated_socket',
+                None,
+            )
+            if callable(mark_local_termination):
+                mark_local_termination(conn)
             try:
+                disconnect_intent: DisconnectIntent = _resolve_disconnect_intent(origin)
                 conn.sendall(
-                    f'{TorCommand.DISCONNECT.value} {controller._tm.onion}\n'.encode(
-                        'utf-8'
-                    )
+                    (
+                        f'{TorCommand.DISCONNECT.value} '
+                        f'{disconnect_intent.value} {controller._tm.onion}\n'
+                    ).encode('utf-8')
                 )
                 try:
                     conn.shutdown(socket.SHUT_WR)
@@ -453,7 +616,10 @@ def disconnect(
                 pass
         _close_socket(conn)
 
-    if defer_remote_fallback:
+    if outbound_socket_to_close is not None and outbound_socket_to_close is not conn:
+        _close_socket(outbound_socket_to_close)
+
+    if defer_remote_fallback and not controller._state.is_retunneling(onion):
         controller._mark_live_reconnect_grace(onion)
         if not suppress_events:
             controller._broadcast(
@@ -469,6 +635,10 @@ def disconnect(
             args=(controller, alias, onion, origin),
             daemon=True,
         ).start()
+        return
+
+    if defer_remote_fallback:
+        controller._mark_live_reconnect_grace(onion)
         return
 
     if is_fallback:
@@ -504,7 +674,7 @@ def disconnect(
             )
         )
 
-    if not initiated_by_self:
+    if not initiated_by_self and is_fallback:
         controller._mark_live_reconnect_grace(onion)
 
     deleted_peers: list[Tuple[str, str]] = controller._cm.cleanup_orphans(

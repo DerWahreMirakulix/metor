@@ -17,11 +17,34 @@ from metor.application import (
     run_managed_daemon,
 )
 from metor.data import ProfileManager, ProfileSecurityMode, SettingKey
-from metor.ui import PromptAbortedError, Theme, Translator, prompt_hidden, prompt_text
+from metor.ui import (
+    PromptAbortedError,
+    PromptOutputSpacer,
+    Theme,
+    Translator,
+    prompt_hidden,
+    prompt_text,
+)
 from metor.ui.chat import Chat
 from metor.ui.cli.errors import format_safe_local_runtime_error
 from metor.utils import Constants, ProcessManager, secure_remove_path
 from metor.ui.cli.proxy import CliProxy
+
+
+def _prompt_hidden_optional(prompt: str) -> Optional[str]:
+    """
+    Prompts for hidden input while keeping module-local prompt patch hooks intact.
+
+    Args:
+        prompt (str): The rendered prompt text.
+
+    Returns:
+        Optional[str]: The entered text, or None when the input is empty.
+    """
+    value: str = prompt_hidden(prompt)
+    if not value:
+        return None
+    return value
 
 
 class CommandHandlers:
@@ -85,28 +108,31 @@ class CommandHandlers:
 
         password: Optional[str] = None
         session_auth_password: Optional[str] = None
+        output_spacer = PromptOutputSpacer()
         require_local_auth: bool = pm.config.get_bool(SettingKey.REQUIRE_LOCAL_AUTH)
         if pm.uses_encrypted_storage() and not start_locked:
             try:
-                password = prompt_hidden(
+                password = _prompt_hidden_optional(
                     f'{Theme.GREEN}Enter Master Password: {Theme.RESET}'
                 )
+                output_spacer.mark_prompt()
             except PromptAbortedError:
                 return
 
-            if not password:
-                print('Master password cannot be empty.')
+            if password is None:
+                print(output_spacer.format('Aborted.'))
                 return
         elif require_local_auth and not start_locked:
             try:
-                session_auth_password = prompt_hidden(
+                session_auth_password = _prompt_hidden_optional(
                     f'{Theme.GREEN}Enter Session Auth Password: {Theme.RESET}'
                 )
+                output_spacer.mark_prompt()
             except PromptAbortedError:
                 return
 
-            if not session_auth_password:
-                print('Session auth password cannot be empty.')
+            if session_auth_password is None:
+                print(output_spacer.format('Aborted.'))
                 return
 
         # Inversion of Control: Define UI printing logic here and inject it into Data and Core layers
@@ -131,7 +157,7 @@ class CommandHandlers:
                 msg, _ = Translator.get(code, params)
             else:
                 msg = CommandHandlers._format_daemon_status(code, params)
-            sys.stdout.write(f'{msg}\n')
+            sys.stdout.write(f'{output_spacer.format(msg)}\n')
             sys.stdout.flush()
 
         configure_daemon_runtime_logging(sql_log_cb, tor_log_cb)
@@ -147,16 +173,22 @@ class CommandHandlers:
                 )
             except InvalidDaemonPasswordError:
                 msg, _ = Translator.get(EventType.INVALID_PASSWORD)
-                print(msg)
+                print(output_spacer.format(msg))
             except CorruptedDaemonStorageError:
                 msg, _ = Translator.get(EventType.DB_CORRUPTED)
                 print(
-                    f"{msg}\nYou need to run 'metor purge' or manually delete the storage.db."
+                    output_spacer.format(
+                        f"{msg}\nYou need to run 'metor purge' or manually delete the storage.db."
+                    )
                 )
             except PlaintextLockedDaemonError:
-                print('Plaintext profiles cannot be started in locked mode.')
+                print(
+                    output_spacer.format(
+                        'Plaintext profiles cannot be started in locked mode.'
+                    )
+                )
             except ValueError as exc:
-                print(format_safe_local_runtime_error(exc))
+                print(output_spacer.format(format_safe_local_runtime_error(exc)))
             return
 
         try:
@@ -169,16 +201,22 @@ class CommandHandlers:
             )
         except InvalidDaemonPasswordError:
             msg, _ = Translator.get(EventType.INVALID_PASSWORD)
-            print(msg)
+            print(output_spacer.format(msg))
         except CorruptedDaemonStorageError:
             msg, _ = Translator.get(EventType.DB_CORRUPTED)
             print(
-                f"{msg}\nYou need to run 'metor purge' or manually delete the storage.db."
+                output_spacer.format(
+                    f"{msg}\nYou need to run 'metor purge' or manually delete the storage.db."
+                )
             )
         except ValueError as exc:
-            print(format_safe_local_runtime_error(exc))
+            print(output_spacer.format(format_safe_local_runtime_error(exc)))
         except PlaintextLockedDaemonError:
-            print('Plaintext profiles cannot be started in locked mode.')
+            print(
+                output_spacer.format(
+                    'Plaintext profiles cannot be started in locked mode.'
+                )
+            )
 
     @staticmethod
     def handle_profile_security_migration(
@@ -218,15 +256,17 @@ class CommandHandlers:
                 return 'Security migration aborted.'
 
         current_password: Optional[str] = None
+        output_spacer = PromptOutputSpacer()
         if current_mode is ProfileSecurityMode.ENCRYPTED:
             try:
                 current_password = prompt_hidden(
                     f'{Theme.GREEN}Enter Current Master Password: {Theme.RESET}'
                 )
+                output_spacer.mark_prompt()
             except PromptAbortedError:
                 return 'Security migration aborted.'
             if not current_password:
-                return 'Current master password cannot be empty.'
+                return output_spacer.format('Current master password cannot be empty.')
 
         new_password: Optional[str] = None
         if target_mode is ProfileSecurityMode.ENCRYPTED:
@@ -234,25 +274,29 @@ class CommandHandlers:
                 new_password = prompt_hidden(
                     f'{Theme.GREEN}Enter New Master Password: {Theme.RESET}'
                 )
+                output_spacer.mark_prompt()
             except PromptAbortedError:
                 return 'Security migration aborted.'
             if not new_password:
-                return 'New master password cannot be empty.'
+                return output_spacer.format('New master password cannot be empty.')
 
             try:
                 confirm_password: str = prompt_hidden(
                     f'{Theme.GREEN}Confirm New Master Password: {Theme.RESET}'
                 )
+                output_spacer.mark_prompt()
             except PromptAbortedError:
                 return 'Security migration aborted.'
             if new_password != confirm_password:
-                return 'New master passwords do not match.'
+                return output_spacer.format('New master passwords do not match.')
 
-        return proxy.migrate_profile_security(
-            name,
-            target_mode,
-            current_password=current_password,
-            new_password=new_password,
+        return output_spacer.format(
+            proxy.migrate_profile_security(
+                name,
+                target_mode,
+                current_password=current_password,
+                new_password=new_password,
+            )
         )
 
     @staticmethod

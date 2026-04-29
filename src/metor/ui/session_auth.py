@@ -7,7 +7,7 @@ from metor.data import ProfileManager
 from metor.utils import build_session_auth_proof
 
 # Local Package Imports
-from metor.ui.prompt import prompt_hidden
+from metor.ui.prompt import prompt_hidden_optional
 from metor.ui.theme import Theme
 
 
@@ -44,8 +44,10 @@ def prompt_session_auth_proof(
     Returns:
         Optional[str]: The derived proof, or None when the password is empty.
     """
-    password: str = prompt_hidden(f'{Theme.GREEN}{prompt}{Theme.RESET}')
-    if not password:
+    password: Optional[str] = prompt_hidden_optional(
+        f'{Theme.GREEN}{prompt}{Theme.RESET}'
+    )
+    if password is None:
         return None
 
     return build_session_auth_proof(password, challenge, salt)

@@ -33,6 +33,8 @@ RUNTIME_ERROR_TEXT: dict[RuntimeErrorCode, str] = {
     RuntimeErrorCode.NO_ACTIVE_CONNECTION_TO_RETUNNEL: (
         'No active connection to retunnel'
     ),
+    RuntimeErrorCode.PEER_ENDED_SESSION: 'Peer ended the session',
+    RuntimeErrorCode.PEER_REJECTED_RECONNECT: 'Peer rejected retunnel reconnect',
     RuntimeErrorCode.RETUNNEL_RECONNECT_FAILED: 'Retunnel reconnect failed',
     RuntimeErrorCode.PENDING_ACCEPTANCE_EXPIRED: 'Pending acceptance expired',
     RuntimeErrorCode.TOR_LAUNCH_FAILED: 'Failed to launch Tor',
@@ -581,7 +583,10 @@ class Translator:
 
         if code is EventType.DISCONNECTED:
             if actor is ConnectionActor.REMOTE:
-                safe_params['disconnect_text'] = "Peer '{alias}' disconnected."
+                if reason_code is ConnectionReasonCode.PEER_ENDED_SESSION:
+                    safe_params['disconnect_text'] = "Peer '{alias}' ended the session."
+                else:
+                    safe_params['disconnect_text'] = "Peer '{alias}' disconnected."
             elif actor is ConnectionActor.SYSTEM or reason_code is not None:
                 safe_params['disconnect_text'] = "Connection to '{alias}' lost."
             else:

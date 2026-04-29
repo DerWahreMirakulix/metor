@@ -34,7 +34,7 @@ from metor.ui import (
     PromptAbortedError,
     Theme,
     Translator,
-    prompt_hidden,
+    prompt_hidden_optional,
 )
 from metor.ui.cli.proxy.profiles import CliProxyProfileActions
 from metor.ui.cli.proxy.rendering import CliProxyEventRenderer
@@ -79,7 +79,9 @@ class CliProxy:
         self._settings: CliProxySettingsActions = CliProxySettingsActions(
             self._pm,
             is_remote=self.is_remote,
+            prefix_remote=self._prefix_remote,
             request_ipc=self._transport.request_ipc,
+            request_ipc_result=self._transport.request_ipc_result,
             translate_event=self._translate_event,
         )
         self._profiles: CliProxyProfileActions = CliProxyProfileActions(
@@ -151,10 +153,7 @@ class CliProxy:
         Returns:
             Optional[str]: The entered password, or None when empty.
         """
-        password: str = prompt_hidden(f'{Theme.GREEN}{prompt}{Theme.RESET}')
-        if not password:
-            return None
-        return password
+        return prompt_hidden_optional(f'{Theme.GREEN}{prompt}{Theme.RESET}')
 
     @staticmethod
     def _send_socket_command(sock: socket.socket, cmd: IpcCommand) -> None:
@@ -206,7 +205,7 @@ class CliProxy:
                 return self._prefix_remote('Aborted.')
 
         if not actual_password:
-            return 'Master password cannot be empty.'
+            return self._prefix_remote('Aborted.')
         return self._request_ipc(UnlockCommand(password=actual_password))
 
     def nuke_daemon(self) -> str:

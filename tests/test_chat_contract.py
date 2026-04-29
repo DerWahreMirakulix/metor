@@ -13,22 +13,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from metor.data.profile import ProfileManager
 from metor.core.api import (
     AcceptCommand,
+    create_event,
     AutoFallbackQueuedEvent,
     AutoReconnectScheduledEvent,
     ConnectionActor,
     ConnectionConnectingEvent,
     ConnectionOrigin,
     ConnectionFailedEvent,
+    ConnectionReasonCode,
     ConnectedEvent,
     ConnectionsStateEvent,
     DisconnectedEvent,
+    EventType,
     InitEvent,
     RenameSuccessEvent,
     RejectCommand,
+    RetunnelFailedEvent,
     RetunnelInitiatedEvent,
     RetunnelSuccessEvent,
+    RuntimeErrorCode,
     SendDropCommand,
     SwitchCommand,
+    MsgCommand,
 )
 from metor.ui import Theme
 from metor.ui.chat.command import CommandDispatcher
@@ -204,6 +210,49 @@ class ChatContractTests(unittest.TestCase):
             flush=True,
         )
 
+    def test_disconnect_during_bootstrap_after_auth_adds_blank_line(self) -> None:
+        """
+        Verifies that prechat bootstrap errors are separated from auth prompts.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        renderer = Mock()
+        chat = self._build_chat(renderer)
+        chat._ipc = Mock()
+        chat._ipc.read_event.side_effect = [
+            create_event(
+                EventType.AUTH_REQUIRED,
+                {
+                    'challenge': 'challenge',
+                    'salt': 'salt',
+                },
+            ),
+            None,
+        ]
+
+        with (
+            patch(
+                'metor.ui.chat.engine.get_session_auth_prompt',
+                return_value='Enter Master Password: ',
+            ),
+            patch(
+                'metor.ui.chat.engine.prompt_session_auth_proof', return_value='proof'
+            ),
+            patch('builtins.print') as print_mock,
+        ):
+            result = chat._bootstrap_ipc_session()
+
+        self.assertFalse(result)
+        print_mock.assert_called_once_with(
+            f'\n{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}',
+            flush=True,
+        )
+
     def test_bootstrap_populates_session_state_before_header(self) -> None:
         """
         Verifies that bootstrap populates session state before header.
@@ -239,7 +288,7 @@ class ChatContractTests(unittest.TestCase):
 
     def test_send_chat_message_buffers_while_retunneling(self) -> None:
         """
-        Verifies that send chat message buffers locally while retunneling.
+        Verifies that send chat message defers via the daemon while retunneling.
 
         Args:
             None
@@ -258,8 +307,65 @@ class ChatContractTests(unittest.TestCase):
 
         chat._send_chat_message('hello during retunnel')
 
-        chat._ipc.send_command.assert_not_called()
-        self.assertTrue(
+        sent_cmd = chat._ipc.send_command.call_args.args[0]
+        self.assertIsInstance(sent_cmd, MsgCommand)
+        self.assertEqual(
+            sent_cmd.msg_id, renderer.print_message.call_args.kwargs['msg_id']
+        )
+        self.assertFalse(
+            chat._session.has_buffered_outgoing_messages(
+                'alice',
+                'aliceonion1234567890',
+            )
+        )
+        renderer.print_message.assert_called_once()
+        self.assertFalse(renderer.print_message.call_args.kwargs['is_drop'])
+        self.assertTrue(renderer.print_message.call_args.kwargs['is_pending'])
+
+    def test_send_chat_message_uses_daemon_buffer_during_grace_reconnect(self) -> None:
+        """
+        Verifies that send chat message defers via the daemon during grace reconnect.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        renderer = Mock()
+        chat = self._build_chat(renderer)
+        chat._ipc = Mock()
+        chat._session.focused_alias = 'alice'
+        chat._session.remember_peer('alice', 'aliceonion1234567890')
+
+        handler = EventHandler(
+            ipc=chat._ipc,
+            session=chat._session,
+            renderer=renderer,
+            init_event=Mock(),
+            conn_event=Mock(),
+            get_notification_buffer_seconds=lambda: 0.0,
+            has_auto_reconnect=lambda: True,
+        )
+        handler.handle(
+            ConnectionConnectingEvent(
+                alias='alice',
+                onion='aliceonion1234567890',
+                origin=ConnectionOrigin.GRACE_RECONNECT,
+                actor=ConnectionActor.SYSTEM,
+            )
+        )
+        renderer.print_message.reset_mock()
+
+        chat._send_chat_message('hello during reconnect grace')
+
+        sent_cmd = chat._ipc.send_command.call_args.args[0]
+        self.assertIsInstance(sent_cmd, MsgCommand)
+        self.assertEqual(
+            sent_cmd.msg_id, renderer.print_message.call_args.kwargs['msg_id']
+        )
+        self.assertFalse(
             chat._session.has_buffered_outgoing_messages(
                 'alice',
                 'aliceonion1234567890',
@@ -663,6 +769,142 @@ class ChatContractTests(unittest.TestCase):
             ChatTransportState.DROP,
         )
         ipc.send_command.assert_not_called()
+
+    def test_remote_disconnect_after_retunnel_stays_drop_and_sends_drop_immediately(
+        self,
+    ) -> None:
+        """
+        Verifies that terminal peer disconnect after a retunneled session stays in drop mode.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        renderer = Mock()
+        ipc = Mock()
+        chat = self._build_chat(renderer)
+        chat._ipc = ipc
+        chat._session.focused_alias = 'alice'
+        chat._session.active_connections = ['alice']
+        chat._session.remember_peer('alice', 'aliceonion1234567890')
+        handler = EventHandler(
+            ipc=ipc,
+            session=chat._session,
+            renderer=renderer,
+            init_event=Mock(),
+            conn_event=Mock(),
+            get_notification_buffer_seconds=lambda: 0.0,
+            has_auto_reconnect=lambda: True,
+        )
+
+        handler.handle(
+            DisconnectedEvent(
+                alias='alice',
+                onion='aliceonion1234567890',
+                actor=ConnectionActor.REMOTE,
+                origin=ConnectionOrigin.RETUNNEL,
+            )
+        )
+
+        self.assertEqual(
+            chat._session.get_transport_state('alice'),
+            ChatTransportState.DROP,
+        )
+        renderer.set_focus.assert_called_once_with(
+            'alice',
+            ChatTransportState.DROP,
+        )
+        ipc.send_command.assert_not_called()
+
+        renderer.print_message.reset_mock()
+        ipc.send_command.reset_mock()
+
+        chat._send_chat_message('hello after peer disconnect')
+
+        sent_cmd = ipc.send_command.call_args.args[0]
+        self.assertIsInstance(sent_cmd, SendDropCommand)
+        self.assertTrue(renderer.print_message.call_args.kwargs['is_drop'])
+        self.assertTrue(renderer.print_message.call_args.kwargs['is_pending'])
+
+    def test_terminal_retunnel_reject_stays_drop_even_with_auto_reconnect(
+        self,
+    ) -> None:
+        """
+        Verifies that an explicit peer reject of a retunnel reconnect stays terminal in chat.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        renderer = Mock()
+        ipc = Mock()
+        chat = self._build_chat(renderer)
+        chat._ipc = ipc
+        chat._session.focused_alias = 'alice'
+        chat._session.active_connections = ['alice']
+        chat._session.remember_peer('alice', 'aliceonion1234567890')
+        chat._session.mark_retunneling('alice', 'aliceonion1234567890')
+        chat._session.buffer_outgoing_message(
+            alias='alice',
+            text='hello after rejected retunnel',
+            msg_id='msg-1',
+            onion='aliceonion1234567890',
+        )
+        handler = EventHandler(
+            ipc=ipc,
+            session=chat._session,
+            renderer=renderer,
+            init_event=Mock(),
+            conn_event=Mock(),
+            get_notification_buffer_seconds=lambda: 0.0,
+            has_auto_reconnect=lambda: True,
+        )
+
+        handler.handle(
+            DisconnectedEvent(
+                alias='alice',
+                onion='aliceonion1234567890',
+                actor=ConnectionActor.REMOTE,
+                origin=ConnectionOrigin.RETUNNEL,
+                reason_code=ConnectionReasonCode.PEER_ENDED_SESSION,
+            )
+        )
+        handler.handle(
+            RetunnelFailedEvent(
+                alias='alice',
+                onion='aliceonion1234567890',
+                error=None,
+                error_code=RuntimeErrorCode.PEER_ENDED_SESSION,
+                error_detail='Peer ended the session',
+            )
+        )
+
+        status_messages = [
+            str(call.args[0]) for call in renderer.print_message.call_args_list
+        ]
+        self.assertTrue(
+            any('ended the session' in message for message in status_messages)
+        )
+        self.assertTrue(
+            any(
+                'Retunnel failed: Peer ended the session.' in message
+                for message in status_messages
+            )
+        )
+
+        self.assertEqual(
+            chat._session.get_transport_state('alice'),
+            ChatTransportState.DROP,
+        )
+        sent_cmd = ipc.send_command.call_args.args[0]
+        self.assertIsInstance(sent_cmd, SendDropCommand)
+        renderer.apply_fallback_to_drop.assert_called_once_with(['msg-1'])
 
     def test_rename_during_reconnect_preserves_focus_and_updates_alias_lists(
         self,

@@ -254,7 +254,27 @@ class ConnectionControllerSupportMixin:
         Returns:
             bool: True if at least one unacknowledged live message was converted.
         """
+        convert_unacked_messages_to_drop = getattr(
+            getattr(self, '_router', None),
+            'convert_unacked_messages_to_drop',
+            None,
+        )
+        if callable(convert_unacked_messages_to_drop):
+            converted = convert_unacked_messages_to_drop(
+                alias,
+                onion,
+                request_id=get_current_request_id(),
+                emit_event=emit_event,
+                history_actor=HistoryActor.SYSTEM,
+                history_reason_code=(HistoryReasonCode.UNACKED_LIVE_CONVERTED_TO_DROP),
+            )
+            return bool(converted)
+
         unacked = self._state.pop_unacked_messages(onion)
+        get_pending_live_outbox = getattr(self._mm, 'get_pending_live_outbox', None)
+        if callable(get_pending_live_outbox):
+            for _, _, payload, msg_id, timestamp in get_pending_live_outbox(onion):
+                unacked.setdefault(msg_id, (payload, timestamp))
         if not unacked:
             return False
 
