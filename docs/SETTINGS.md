@@ -197,6 +197,28 @@ Client-side timeout for CLI and chat IPC requests.
 - `metor -p <profile> config get ui.ipc_timeout`
 - `metor -p <profile> config set ui.ipc_timeout 15.0`
 
+---
+
+#### `ui.chat_daemon_autostart`
+
+Controls whether `metor chat` should refuse, confirm, or automatically perform local daemon startup when no local daemon is running.
+
+| Property         | Value                             |
+| ---------------- | --------------------------------- |
+| Type             | `str`                             |
+| Default          | `ask`                             |
+| Category         | `User Interface`                  |
+| Scope            | `UI client-local`                 |
+| Profile Override | `Yes`                             |
+| Constraints      | One of: `never`, `ask`, `always`. |
+
+**CLI Examples**
+
+- `metor settings get ui.chat_daemon_autostart`
+- `metor settings set ui.chat_daemon_autostart ask`
+- `metor -p <profile> config get ui.chat_daemon_autostart`
+- `metor -p <profile> config set ui.chat_daemon_autostart ask`
+
 ### Core Daemon
 
 #### `daemon.max_tor_retries`

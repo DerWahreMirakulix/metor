@@ -27,6 +27,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [FallbackCommand](#fallbackcommand)
 - [GenerateAddressCommand](#generateaddresscommand)
 - [GetAddressCommand](#getaddresscommand)
+- [GetChatStartupStateCommand](#getchatstartupstatecommand)
 - [GetConfigCommand](#getconfigcommand)
 - [GetConfigListCommand](#getconfiglistcommand)
 - [GetConnectionsCommand](#getconnectionscommand)
@@ -75,6 +76,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [CannotConnectSelfEvent](#cannotconnectselfevent)
 - [CannotDropSelfEvent](#cannotdropselfevent)
 - [CannotSwitchSelfEvent](#cannotswitchselfevent)
+- [ChatStartupStateEvent](#chatstartupstateevent)
 - [ConfigDataEvent](#configdataevent)
 - [ConfigListDataEvent](#configlistdataevent)
 - [ConfigSyncedEvent](#configsyncedevent)
@@ -444,6 +446,26 @@ Requests the current onion address.
 ```json
 {
   "command_type": "get_address"
+}
+```
+
+---
+
+### `GetChatStartupStateCommand`
+
+Requests the chat-specific startup snapshot for first attach rendering.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+
+**Wire Value:** `get_chat_startup_state`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "get_chat_startup_state"
 }
 ```
 
@@ -1471,6 +1493,32 @@ Signals that the UI cannot focus the local onion.
 ```json
 {
   "event_type": "cannot_switch_self"
+}
+```
+
+---
+
+### `ChatStartupStateEvent`
+
+Returns the first-attach chat snapshot with sessions and unread summaries.
+
+| Field        | Type                            | Default     |
+| ------------ | ------------------------------- | ----------- |
+| `request_id` | `Union[str, None]`              | `None`      |
+| `active`     | `List[str]`                     | Required    |
+| `contacts`   | `List[str]`                     | Required    |
+| `pending`    | `List[PendingConnectionEntry]`  | `Factory()` |
+| `unread`     | `List[UnreadInboxSummaryEntry]` | `Factory()` |
+
+**Wire Value:** `chat_startup_state`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "chat_startup_state",
+  "active": ["string"],
+  "contacts": ["string"]
 }
 ```
 
