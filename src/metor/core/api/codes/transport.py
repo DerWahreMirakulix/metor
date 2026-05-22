@@ -39,3 +39,10 @@ class ConnectionReasonCode(str, Enum):
     MUTUAL_TIEBREAKER_LOSER = 'mutual_tiebreaker_loser'
     DUPLICATE_INCOMING_CONNECTED = 'duplicate_incoming_connected'
     DUPLICATE_INCOMING_PENDING = 'duplicate_incoming_pending'
+
+
+class PendingConnectionReasonCode(str, Enum):
+    """Enumeration describing why one inbound live request remains pending."""
+
+    USER_ACCEPT = 'user_accept'
+    CONSUMER_ABSENT = 'consumer_absent'

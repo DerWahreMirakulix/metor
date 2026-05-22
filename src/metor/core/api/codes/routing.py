@@ -7,6 +7,7 @@ class CommandType(str, Enum):
     """Enumeration of commands sent from the UI or CLI to the daemon."""
 
     INIT = 'init'
+    GET_CHAT_STARTUP_STATE = 'get_chat_startup_state'
     GET_CONNECTIONS = 'get_connections'
     GET_CONTACTS_LIST = 'get_contacts_list'
     CONNECT = 'connect'
@@ -54,6 +55,7 @@ class EventType(str, Enum):
     """Enumeration of strict daemon-to-UI events."""
 
     INIT = 'init'
+    CHAT_STARTUP_STATE = 'chat_startup_state'
     TOR_KEY_DECRYPT_FAILED = 'tor_key_decrypt_failed'
     TOR_KEY_WRITE_FAILED = 'tor_key_write_failed'
     TOR_START_FAILED = 'tor_start_failed'

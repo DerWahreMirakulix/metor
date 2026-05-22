@@ -15,8 +15,14 @@ from metor.application import (
     PlaintextLockedDaemonError,
     configure_daemon_runtime_logging,
     run_managed_daemon,
+    start_managed_daemon_process,
 )
-from metor.data import ProfileManager, ProfileSecurityMode, SettingKey
+from metor.data import (
+    ChatDaemonAutostartPolicy,
+    ProfileManager,
+    ProfileSecurityMode,
+    SettingKey,
+)
 from metor.ui import (
     PromptAbortedError,
     PromptOutputSpacer,
@@ -27,7 +33,7 @@ from metor.ui import (
 )
 from metor.ui.chat import Chat
 from metor.ui.cli.errors import format_safe_local_runtime_error
-from metor.utils import Constants, ProcessManager, secure_remove_path
+from metor.utils import Constants, ProcessManager, secure_remove_path, TypeCaster
 from metor.ui.cli.proxy import CliProxy
 
 
@@ -45,6 +51,64 @@ def _prompt_hidden_optional(prompt: str) -> Optional[str]:
     if not value:
         return None
     return value
+
+
+def _read_startup_session_auth_password_from_stdin() -> Optional[str]:
+    """
+    Reads one startup-only session-auth password from a detached parent pipe.
+
+    Args:
+        None
+
+    Returns:
+        Optional[str]: The provided password, or None when absent.
+    """
+    password: str = sys.stdin.readline().rstrip('\r\n')
+    if not password:
+        return None
+    return password
+
+
+def _resolve_chat_daemon_autostart_policy(
+    pm: ProfileManager,
+    start_daemon_override: Optional[bool],
+) -> ChatDaemonAutostartPolicy:
+    """
+    Resolves the effective local chat daemon-start policy for one invocation.
+
+    Args:
+        pm (ProfileManager): The active profile configuration.
+        start_daemon_override (Optional[bool]): Optional one-shot CLI override.
+
+    Returns:
+        ChatDaemonAutostartPolicy: The effective policy.
+    """
+    if start_daemon_override is True:
+        return ChatDaemonAutostartPolicy.ALWAYS
+    if start_daemon_override is False:
+        return ChatDaemonAutostartPolicy.NEVER
+
+    return TypeCaster.to_enum(
+        ChatDaemonAutostartPolicy,
+        pm.config.get_str(SettingKey.CHAT_DAEMON_AUTOSTART),
+        ChatDaemonAutostartPolicy.ASK,
+    )
+
+
+def _format_chat_daemon_offline_hint() -> str:
+    """
+    Builds the local chat guidance shown when no daemon startup should occur.
+
+    Args:
+        None
+
+    Returns:
+        str: The user-facing guidance text.
+    """
+    return (
+        "Daemon is not running! Use 'metor daemon' to start it or rerun with "
+        "'metor chat --start-daemon'."
+    )
 
 
 class CommandHandlers:
@@ -81,7 +145,11 @@ class CommandHandlers:
         )
 
     @staticmethod
-    def handle_daemon(pm: ProfileManager, start_locked: bool = False) -> None:
+    def handle_daemon(
+        pm: ProfileManager,
+        start_locked: bool = False,
+        startup_session_auth_stdin: bool = False,
+    ) -> None:
         """
         Authenticates the user and starts the background Daemon subsystem.
         Injects the UI logger callbacks to enforce UI-Agnostic Core domains.
@@ -89,6 +157,7 @@ class CommandHandlers:
         Args:
             pm (ProfileManager): The active profile configuration.
             start_locked (bool): Whether to expose only the IPC server until unlock.
+            startup_session_auth_stdin (bool): Whether plaintext session-auth input should be read from stdin instead of an interactive prompt.
 
         Returns:
             None
@@ -123,17 +192,23 @@ class CommandHandlers:
                 print(output_spacer.format('Aborted.'))
                 return
         elif require_local_auth and not start_locked:
-            try:
-                session_auth_password = _prompt_hidden_optional(
-                    f'{Theme.GREEN}Enter Session Auth Password: {Theme.RESET}'
-                )
-                output_spacer.mark_prompt()
-            except PromptAbortedError:
-                return
+            if startup_session_auth_stdin:
+                session_auth_password = _read_startup_session_auth_password_from_stdin()
+                if session_auth_password is None:
+                    print('Aborted.')
+                    return
+            else:
+                try:
+                    session_auth_password = _prompt_hidden_optional(
+                        f'{Theme.GREEN}Enter Session Auth Password: {Theme.RESET}'
+                    )
+                    output_spacer.mark_prompt()
+                except PromptAbortedError:
+                    return
 
-            if session_auth_password is None:
-                print(output_spacer.format('Aborted.'))
-                return
+                if session_auth_password is None:
+                    print(output_spacer.format('Aborted.'))
+                    return
 
         # Inversion of Control: Define UI printing logic here and inject it into Data and Core layers
         def sql_log_cb(line: str) -> None:
@@ -300,12 +375,16 @@ class CommandHandlers:
         )
 
     @staticmethod
-    def handle_chat(pm: ProfileManager) -> None:
+    def handle_chat(
+        pm: ProfileManager,
+        start_daemon_override: Optional[bool] = None,
+    ) -> None:
         """
         Validates daemon state and launches the interactive Chat UI.
 
         Args:
             pm (ProfileManager): The active profile configuration.
+            start_daemon_override (Optional[bool]): Optional one-shot CLI override for local daemon autostart.
 
         Returns:
             None
@@ -314,12 +393,80 @@ class CommandHandlers:
             print(f"Profile '{pm.profile_name}' does not exist.")
             return
 
+        startup_session_auth_password: Optional[str] = None
+        output_spacer = PromptOutputSpacer()
         if not pm.is_daemon_running():
-            msg, _ = Translator.get(EventType.DAEMON_OFFLINE)
-            print(msg)
-            return
+            if pm.is_remote():
+                msg, _ = Translator.get(EventType.DAEMON_OFFLINE)
+                print(msg)
+                return
 
-        chat: Chat = Chat(pm)
+            autostart_policy: ChatDaemonAutostartPolicy = (
+                _resolve_chat_daemon_autostart_policy(
+                    pm,
+                    start_daemon_override,
+                )
+            )
+
+            if autostart_policy is ChatDaemonAutostartPolicy.NEVER:
+                print(output_spacer.format(_format_chat_daemon_offline_hint()))
+                return
+
+            if autostart_policy is ChatDaemonAutostartPolicy.ASK:
+                try:
+                    confirmation: str = prompt_text(
+                        "Type 'yes' to start the local daemon: "
+                    )
+                    output_spacer.mark_prompt()
+                except PromptAbortedError:
+                    return
+
+                if confirmation.strip().lower() != 'yes':
+                    print(output_spacer.format(_format_chat_daemon_offline_hint()))
+                    return
+
+            if pm.uses_plaintext_storage() and pm.config.get_bool(
+                SettingKey.REQUIRE_LOCAL_AUTH
+            ):
+                try:
+                    startup_session_auth_password = _prompt_hidden_optional(
+                        f'{Theme.GREEN}Enter Session Auth Password: {Theme.RESET}'
+                    )
+                    output_spacer.mark_prompt()
+                except PromptAbortedError:
+                    return
+
+                if startup_session_auth_password is None:
+                    print(output_spacer.format('Aborted.'))
+                    return
+
+            print(output_spacer.format('Starting local daemon...'))
+
+            try:
+                daemon_started: bool = start_managed_daemon_process(
+                    pm,
+                    start_locked=pm.uses_encrypted_storage(),
+                    session_auth_password=startup_session_auth_password,
+                )
+            except PlaintextLockedDaemonError:
+                print('Plaintext profiles cannot be started in locked mode.')
+                return
+            except ValueError as exc:
+                print(output_spacer.format(format_safe_local_runtime_error(exc)))
+                return
+
+            if not daemon_started:
+                print(
+                    output_spacer.format(
+                        "Could not start the local daemon. Run 'metor daemon' to inspect foreground startup errors."
+                    )
+                )
+                return
+
+        chat: Chat = Chat(
+            pm,
+            prefilled_session_auth_password=startup_session_auth_password,
+        )
         chat.run()
 
     @staticmethod

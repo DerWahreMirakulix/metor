@@ -8,6 +8,7 @@ from metor.application.runtime.daemon import (
     RuntimeStatusCallback,
     configure_daemon_runtime_logging,
     run_managed_daemon,
+    start_managed_daemon_process,
 )
 from metor.application.runtime.headless import run_with_headless_daemon
 from metor.application.runtime.maintenance import (
@@ -23,6 +24,7 @@ __all__ = [
     'RuntimeStatusCallback',
     'configure_daemon_runtime_logging',
     'run_managed_daemon',
+    'start_managed_daemon_process',
     'run_with_headless_daemon',
     'CleanupRuntimeResult',
     'cleanup_local_runtime',

@@ -24,6 +24,7 @@ from metor.core.api.events.data import (
     AddressCurrentEvent,
     AddressGeneratedEvent,
     AddressNotGeneratedEvent,
+    ChatStartupStateEvent,
     ConfigListDataEvent,
     ContactsDataEvent,
     InboxCountsEvent,
@@ -37,8 +38,10 @@ from metor.core.api.events.data import (
 from metor.core.api.events.entries import (
     ContactEntry,
     MessageEntry,
+    PendingConnectionEntry,
     ProfileEntry,
     SettingSnapshotEntry,
+    UnreadInboxSummaryEntry,
     UnreadMessageEntry,
 )
 from metor.core.api.events.history import (
@@ -135,6 +138,8 @@ __all__ = [
     'RawHistoryEntry',
     'MessageEntry',
     'UnreadMessageEntry',
+    'PendingConnectionEntry',
+    'UnreadInboxSummaryEntry',
     'ProfileEntry',
     'SettingSnapshotEntry',
     'InitEvent',
@@ -162,6 +167,7 @@ __all__ = [
     'AutoReconnectScheduledEvent',
     'InboxNotificationEvent',
     'InboxDataEvent',
+    'ChatStartupStateEvent',
     'ContactsDataEvent',
     'HistoryDataEvent',
     'HistoryRawDataEvent',

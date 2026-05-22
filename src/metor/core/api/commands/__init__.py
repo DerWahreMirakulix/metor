@@ -34,6 +34,7 @@ from metor.core.api.commands.session import (
     AuthenticateSessionCommand,
     ConnectCommand,
     DisconnectCommand,
+    GetChatStartupStateCommand,
     GetConnectionsCommand,
     InitCommand,
     RegisterLiveConsumerCommand,
@@ -56,6 +57,7 @@ from metor.core.api.commands.system import ClearProfileDbCommand, SelfDestructCo
 
 __all__ = [
     'InitCommand',
+    'GetChatStartupStateCommand',
     'RegisterLiveConsumerCommand',
     'GetConnectionsCommand',
     'ConnectCommand',

@@ -13,7 +13,10 @@ from metor.core.daemon.managed.crypto import Crypto
 from metor.data import HistoryManager, ContactManager, MessageManager
 
 # Local Package Imports
-from metor.core.daemon.managed.network.state import StateTracker
+from metor.core.daemon.managed.network.state import (
+    PendingConnectionSnapshot,
+    StateTracker,
+)
 from metor.core.daemon.managed.network.router import MessageRouter
 from metor.core.daemon.managed.network.controller.base import ConnectionController
 from metor.core.daemon.managed.network.receiver import StreamReceiver
@@ -335,3 +338,15 @@ class NetworkManager:
             self._cm.require_alias_by_onion(onion)
             for onion in self._state.get_pending_connections_keys()
         ]
+
+    def get_pending_connection_snapshots(self) -> List[PendingConnectionSnapshot]:
+        """
+        Returns startup-oriented pending connection snapshots.
+
+        Args:
+            None
+
+        Returns:
+            List[PendingConnectionSnapshot]: Pending connection snapshots.
+        """
+        return self._state.get_pending_connection_snapshots()

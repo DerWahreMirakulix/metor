@@ -12,6 +12,7 @@ from metor.data.message.models import (
     MessageType,
     QueuedMessageResult,
     StoredMessageRecord,
+    UnreadInboxSummaryRecord,
 )
 
 # Local Package Imports
@@ -488,6 +489,41 @@ class MessageRepository:
             ),
         )
         return {str(row[0]): int(str(row[1])) for row in rows}
+
+    def get_unread_inbox_summaries(self) -> List[UnreadInboxSummaryRecord]:
+        """
+        Returns unread inbound totals and transport breakdown grouped by peer onion.
+
+        Args:
+            None
+
+        Returns:
+            List[UnreadInboxSummaryRecord]: One unread-summary row per peer.
+        """
+        rows = self._sql.fetchall(
+            'SELECT peer_onion, COUNT(*), '
+            'COALESCE(SUM(CASE WHEN transport_kind = ? THEN 1 ELSE 0 END), 0), '
+            'COALESCE(SUM(CASE WHEN transport_kind = ? THEN 1 ELSE 0 END), 0) '
+            'FROM message_receipts '
+            'WHERE direction = ? AND status = ? '
+            'GROUP BY peer_onion '
+            'ORDER BY peer_onion ASC',
+            (
+                MessageType.DROP_TEXT.value,
+                MessageType.LIVE_TEXT.value,
+                MessageDirection.IN.value,
+                MessageStatus.UNREAD.value,
+            ),
+        )
+        return [
+            UnreadInboxSummaryRecord(
+                contact_onion=str(row[0]),
+                total_unread=int(str(row[1])),
+                drop_unread=int(str(row[2])),
+                live_unread=int(str(row[3])),
+            )
+            for row in rows
+        ]
 
     def get_and_read_inbox(
         self,

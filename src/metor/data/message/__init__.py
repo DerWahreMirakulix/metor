@@ -10,6 +10,7 @@ from metor.data.message.models import (
     MessageType,
     QueuedMessageResult,
     StoredMessageRecord,
+    UnreadInboxSummaryRecord,
 )
 
 if TYPE_CHECKING:
@@ -25,6 +26,7 @@ __all__ = [
     'MessageType',
     'QueuedMessageResult',
     'StoredMessageRecord',
+    'UnreadInboxSummaryRecord',
 ]
 
 

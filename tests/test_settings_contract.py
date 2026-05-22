@@ -28,7 +28,12 @@ from metor.core.daemon.headless.dispatch import process_command
 from metor.core.daemon.handlers import ConfigCommandHandler
 from metor.data.profile import ProfileManager
 from metor.data.profile.config import Config
-from metor.data.settings import Settings, SettingKey
+from metor.data.settings import (
+    ChatDaemonAutostartPolicy,
+    Settings,
+    SettingKey,
+    SettingValidationError,
+)
 from metor.ui import Theme, UIPresenter
 from metor.ui.cli.ipc.request.models import IpcRequestResult
 from metor.ui.cli.proxy.settings import CliProxySettingsActions
@@ -589,6 +594,38 @@ class SettingsContractTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(ValueError, 'ui.ipc_timeout'):
                     Settings.validate_integrity()
+
+    def test_chat_daemon_autostart_setting_accepts_known_policies(self) -> None:
+        """
+        Verifies that chat daemon autostart setting accepts supported policies.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        normalized = Settings.validate_value(
+            SettingKey.CHAT_DAEMON_AUTOSTART,
+            ' ALWAYS ',
+        )
+
+        self.assertEqual(normalized, ChatDaemonAutostartPolicy.ALWAYS.value)
+
+    def test_chat_daemon_autostart_setting_rejects_unknown_policy(self) -> None:
+        """
+        Verifies that chat daemon autostart setting rejects unknown policies.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        with self.assertRaises(SettingValidationError):
+            Settings.validate_value(SettingKey.CHAT_DAEMON_AUTOSTART, 'maybe')
 
     def test_profile_config_validate_integrity_rejects_unknown_keys(self) -> None:
         """

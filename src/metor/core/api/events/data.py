@@ -9,8 +9,10 @@ from metor.core.api.codes import EventType
 from metor.core.api.events.entries import (
     ContactEntry,
     MessageEntry,
+    PendingConnectionEntry,
     ProfileEntry,
     SettingSnapshotEntry,
+    UnreadInboxSummaryEntry,
     UnreadMessageEntry,
 )
 from metor.core.api.registry import register_event
@@ -80,6 +82,22 @@ class InboxCountsEvent(IpcEvent):
 
     inbox: Dict[str, int]
     event_type: EventType = field(default=EventType.INBOX_COUNTS, init=False)
+
+
+@register_event(EventType.CHAT_STARTUP_STATE)
+@dataclass
+class ChatStartupStateEvent(NestedEntryCastingMixin, IpcEvent):
+    """Returns the first-attach chat snapshot with sessions and unread summaries."""
+
+    active: List[str]
+    contacts: List[str]
+    pending: List[PendingConnectionEntry] = field(default_factory=list)
+    unread: List[UnreadInboxSummaryEntry] = field(default_factory=list)
+    _nested_entry_types: ClassVar[Dict[str, type[object]]] = {
+        'pending': PendingConnectionEntry,
+        'unread': UnreadInboxSummaryEntry,
+    }
+    event_type: EventType = field(default=EventType.CHAT_STARTUP_STATE, init=False)
 
 
 @register_event(EventType.UNREAD_MESSAGES)

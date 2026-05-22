@@ -10,6 +10,7 @@ from metor.application.runtime import (
     cleanup_local_runtime,
     configure_daemon_runtime_logging,
     run_managed_daemon,
+    start_managed_daemon_process,
     run_with_headless_daemon,
 )
 
@@ -23,5 +24,6 @@ __all__ = [
     'cleanup_local_runtime',
     'configure_daemon_runtime_logging',
     'run_managed_daemon',
+    'start_managed_daemon_process',
     'run_with_headless_daemon',
 ]

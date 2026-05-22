@@ -16,6 +16,7 @@ from metor.core.api.codes.transport import (
     ConnectionActor,
     ConnectionOrigin,
     ConnectionReasonCode,
+    PendingConnectionReasonCode,
 )
 
 
@@ -25,6 +26,7 @@ __all__ = [
     'ConnectionActor',
     'ConnectionOrigin',
     'ConnectionReasonCode',
+    'PendingConnectionReasonCode',
     'HistoryEntryActor',
     'HistoryEntryFamily',
     'HistoryEntryReasonCode',

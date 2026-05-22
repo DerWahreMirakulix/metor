@@ -382,6 +382,40 @@ class ReleaseContractTests(unittest.TestCase):
         handle_settings_list.assert_called_once_with()
         print_mock.assert_called_once_with('settings-list')
 
+    def test_chat_dispatch_passes_start_daemon_override(self) -> None:
+        """
+        Verifies that chat dispatch forwards the one-shot daemon-start override.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        pm = cast(ProfileManager, _DummyProfileManager())
+        dispatcher = CliDispatcher(
+            argparse.Namespace(
+                command='chat',
+                subcommand=None,
+                profile='default',
+                remote=False,
+                port=None,
+                locked=False,
+                plaintext=False,
+                start_daemon=True,
+            ),
+            [],
+            pm,
+        )
+
+        with patch(
+            'metor.ui.cli.dispatcher.base.CommandHandlers.handle_chat'
+        ) as handle_chat:
+            dispatcher.dispatch()
+
+        handle_chat.assert_called_once_with(pm, start_daemon_override=True)
+
     def test_config_defaults_to_list_when_no_subcommand_is_given(self) -> None:
         """
         Verifies that bare config dispatches to the list action.

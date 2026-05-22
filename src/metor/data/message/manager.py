@@ -11,6 +11,7 @@ from metor.data.message.models import (
     MessageType,
     QueuedMessageResult,
     StoredMessageRecord,
+    UnreadInboxSummaryRecord,
 )
 from metor.data.profile import ProfileManager
 from metor.data.settings import SettingKey
@@ -182,6 +183,18 @@ class MessageManager:
             Dict[str, int]: A dictionary mapping onion addresses to unread counts.
         """
         return self._messages.get_unread_counts()
+
+    def get_unread_inbox_summaries(self) -> List[UnreadInboxSummaryRecord]:
+        """
+        Retrieves unread inbox totals and transport breakdown grouped by peer.
+
+        Args:
+            None
+
+        Returns:
+            List[UnreadInboxSummaryRecord]: Typed unread-summary rows.
+        """
+        return self._messages.get_unread_inbox_summaries()
 
     def get_and_read_inbox(self, contact_onion: str) -> List[Tuple[int, str, str, str]]:
         """

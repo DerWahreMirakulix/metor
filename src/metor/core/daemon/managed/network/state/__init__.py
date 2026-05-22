@@ -7,6 +7,7 @@ from typing import Dict, List, Set, Tuple
 from metor.core.api import ConnectionOrigin
 from metor.core.daemon.managed.models import DropTunnelState
 from metor.core.daemon.managed.network.state.connections import (
+    PendingConnectionSnapshot,
     StateTrackerConnectionsMixin,
 )
 from metor.core.daemon.managed.network.state.messages import StateTrackerMessagesMixin
@@ -38,6 +39,7 @@ class StateTracker(
         self._pending_connections: Dict[str, socket.socket] = {}
         self._pending_connection_reasons: Dict[str, PendingConnectionReason] = {}
         self._pending_connection_origins: Dict[str, ConnectionOrigin] = {}
+        self._pending_connection_deadlines: Dict[str, float] = {}
         self._unauthenticated_connections: Set[socket.socket] = set()
         self._outbound_attempts: Set[str] = set()
         self._outbound_attempt_origins: Dict[str, ConnectionOrigin] = {}
@@ -61,4 +63,4 @@ class StateTracker(
         self._ui_focus_counts: Dict[str, int] = {}
 
 
-__all__ = ['PendingConnectionReason', 'StateTracker']
+__all__ = ['PendingConnectionReason', 'PendingConnectionSnapshot', 'StateTracker']

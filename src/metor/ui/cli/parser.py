@@ -43,6 +43,25 @@ class CliParser:
             action='store_true',
             help='Create a local plaintext profile without password protection',
         )
+        parser.add_argument(
+            '--startup-session-auth-stdin',
+            action='store_true',
+            help=argparse.SUPPRESS,
+        )
+        start_daemon_group = parser.add_mutually_exclusive_group()
+        start_daemon_group.add_argument(
+            '--start-daemon',
+            dest='start_daemon',
+            action='store_true',
+            help='Override chat daemon autostart policy and start a missing local daemon.',
+        )
+        start_daemon_group.add_argument(
+            '--no-start-daemon',
+            dest='start_daemon',
+            action='store_false',
+            help='Override chat daemon autostart policy and keep missing daemons explicit.',
+        )
+        parser.set_defaults(start_daemon=None)
 
         parser.add_argument('command', nargs='?', default='quickstart')
         parser.add_argument('subcommand', nargs='?')

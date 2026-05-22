@@ -52,6 +52,7 @@ class SettingKey(str, Enum):
     CHAT_BUFFER_PADDING = 'ui.chat_buffer_padding'
     INBOX_NOTIFICATION_DELAY = 'ui.inbox_notification_delay'
     IPC_TIMEOUT = 'ui.ipc_timeout'
+    CHAT_DAEMON_AUTOSTART = 'ui.chat_daemon_autostart'
 
     # 2. Core Daemon (Server - Network, Persistence & Security)
     MAX_TOR_RETRIES = 'daemon.max_tor_retries'
@@ -116,6 +117,14 @@ class SettingKey(str, Enum):
 
 class SettingValidationError(ValueError):
     """Raised when a setting value violates semantic constraints."""
+
+
+class ChatDaemonAutostartPolicy(str, Enum):
+    """Supported local chat policies for starting a missing local daemon."""
+
+    NEVER = 'never'
+    ASK = 'ask'
+    ALWAYS = 'always'
 
 
 @dataclass(frozen=True)
@@ -229,6 +238,14 @@ class Settings:
             description='Client-side timeout for CLI and chat IPC requests.',
             constraints='Float >= 0.1 seconds.',
             min_value=0.1,
+        ),
+        SettingKey.CHAT_DAEMON_AUTOSTART: SettingSpec(
+            key=SettingKey.CHAT_DAEMON_AUTOSTART,
+            default=ChatDaemonAutostartPolicy.ASK.value,
+            category='User Interface',
+            description='Controls whether `metor chat` should refuse, confirm, or automatically perform local daemon startup when no local daemon is running.',
+            constraints='One of: `never`, `ask`, `always`.',
+            allow_empty_string=False,
         ),
         SettingKey.MAX_TOR_RETRIES: SettingSpec(
             key=SettingKey.MAX_TOR_RETRIES,
@@ -564,7 +581,13 @@ class Settings:
                     f"Invalid type for '{key.value}'. Expected str, got {type(value).__name__}."
                 )
 
-            normalized = value.strip() if key is SettingKey.DEFAULT_PROFILE else value
+            if key is SettingKey.DEFAULT_PROFILE:
+                normalized = value.strip()
+            elif key is SettingKey.CHAT_DAEMON_AUTOSTART:
+                normalized = value.strip().lower()
+            else:
+                normalized = value
+
             if not spec.allow_empty_string and not normalized:
                 raise SettingValidationError(
                     f"Setting '{key.value}' must not be empty."
@@ -578,6 +601,13 @@ class Settings:
                     raise SettingValidationError(
                         f"Setting '{key.value}' must contain only letters, numbers, '-' or '_'."
                     )
+            elif key is SettingKey.CHAT_DAEMON_AUTOSTART:
+                try:
+                    ChatDaemonAutostartPolicy(normalized)
+                except ValueError as exc:
+                    raise SettingValidationError(
+                        f"Setting '{key.value}' must be one of: never, ask, always."
+                    ) from exc
         else:
             normalized = value
 

@@ -13,7 +13,7 @@ import nacl.pwhash
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
-from metor.application import DaemonStatus
+from metor.application import DaemonStatus, start_managed_daemon_process
 from metor.core.api import (
     AuthenticateSessionCommand,
     EventType,
@@ -903,6 +903,307 @@ class UiIpcContractTests(unittest.TestCase):
 
         run_daemon.assert_not_called()
         self.assertEqual(print_mock.call_args_list[-1].args[0], '\nAborted.')
+
+    def test_handle_daemon_reads_plaintext_session_auth_from_startup_stdin(
+        self,
+    ) -> None:
+        """
+        Verifies that daemon startup can read plaintext session auth from stdin.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        pm = cast(
+            ProfileManager,
+            _AuthPromptProfileManager(encrypted=False, require_local_auth=True),
+        )
+
+        with (
+            patch(
+                'metor.ui.cli.handlers.sys.stdin.readline',
+                return_value='session-secret\n',
+            ),
+            patch('metor.ui.cli.handlers.prompt_hidden') as prompt_mock,
+            patch('metor.ui.cli.handlers.configure_daemon_runtime_logging'),
+            patch('metor.ui.cli.handlers.run_managed_daemon') as run_daemon,
+            patch('builtins.print'),
+        ):
+            CommandHandlers.handle_daemon(pm, startup_session_auth_stdin=True)
+
+        prompt_mock.assert_not_called()
+        self.assertEqual(
+            run_daemon.call_args.kwargs['session_auth_password'],
+            'session-secret',
+        )
+
+    def test_start_managed_daemon_process_uses_hidden_stdin_bridge(self) -> None:
+        """
+        Verifies that detached daemon startup sends plaintext auth over stdin.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        pm = Mock(spec=ProfileManager)
+        pm.profile_name = 'default'
+        pm.config = Mock()
+        pm.config.get_float.side_effect = lambda key: {
+            SettingKey.IPC_TIMEOUT: 4.0,
+            SettingKey.TOR_TIMEOUT: 6.0,
+        }[key]
+        pm.validate_integrity.return_value = None
+        pm.is_remote.return_value = False
+        pm.is_daemon_running.return_value = False
+        pm.uses_plaintext_storage.return_value = True
+        pm.get_daemon_port.side_effect = [None, 43111]
+
+        process = Mock()
+        process.stdin = Mock()
+        process.poll.return_value = None
+
+        with (
+            patch('metor.application.runtime.daemon.Settings.validate_integrity'),
+            patch(
+                'metor.application.runtime.daemon.subprocess.Popen',
+                return_value=process,
+            ) as popen_mock,
+            patch('metor.application.runtime.daemon.time.sleep'),
+        ):
+            result = start_managed_daemon_process(
+                cast(ProfileManager, pm),
+                session_auth_password='session-secret',
+            )
+
+        self.assertTrue(result)
+        command = popen_mock.call_args.args[0]
+        self.assertIn('--startup-session-auth-stdin', command)
+        self.assertEqual(command[-1], 'daemon')
+        process.stdin.write.assert_called_once_with(b'session-secret\n')
+        process.stdin.close.assert_called_once_with()
+
+    def test_handle_chat_never_policy_keeps_daemon_explicit(self) -> None:
+        """
+        Verifies that chat keep missing local daemons explicit when policy is never.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        pm = Mock(spec=ProfileManager)
+        pm.profile_name = 'default'
+        pm.exists.return_value = True
+        pm.is_daemon_running.return_value = False
+        pm.is_remote.return_value = False
+        pm.uses_plaintext_storage.return_value = False
+        pm.uses_encrypted_storage.return_value = True
+        pm.config = Mock()
+        pm.config.get_str.return_value = 'never'
+
+        chat_instance = Mock()
+
+        with (
+            patch(
+                'metor.ui.cli.handlers.start_managed_daemon_process',
+                return_value=True,
+            ) as start_mock,
+            patch('metor.ui.cli.handlers.Chat', return_value=chat_instance) as chat_cls,
+            patch('builtins.print') as print_mock,
+        ):
+            CommandHandlers.handle_chat(cast(ProfileManager, pm))
+
+        start_mock.assert_not_called()
+        chat_cls.assert_not_called()
+        chat_instance.run.assert_not_called()
+        self.assertEqual(
+            print_mock.call_args.args[0],
+            "Daemon is not running! Use 'metor daemon' to start it or rerun with 'metor chat --start-daemon'.",
+        )
+
+    def test_handle_chat_ask_policy_prompts_before_autostart(self) -> None:
+        """
+        Verifies that chat asks before autostarting a missing local daemon.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        pm = Mock(spec=ProfileManager)
+        pm.profile_name = 'default'
+        pm.exists.return_value = True
+        pm.is_daemon_running.return_value = False
+        pm.is_remote.return_value = False
+        pm.uses_plaintext_storage.return_value = False
+        pm.uses_encrypted_storage.return_value = True
+        pm.config = Mock()
+        pm.config.get_str.return_value = 'ask'
+
+        chat_instance = Mock()
+
+        with (
+            patch(
+                'metor.ui.cli.handlers.prompt_text', return_value='yes'
+            ) as prompt_mock,
+            patch(
+                'metor.ui.cli.handlers.start_managed_daemon_process',
+                return_value=True,
+            ) as start_mock,
+            patch('metor.ui.cli.handlers.Chat', return_value=chat_instance) as chat_cls,
+            patch('builtins.print') as print_mock,
+        ):
+            CommandHandlers.handle_chat(cast(ProfileManager, pm))
+
+        prompt_mock.assert_called_once_with("Type 'yes' to start the local daemon: ")
+        start_mock.assert_called_once_with(
+            cast(ProfileManager, pm),
+            start_locked=True,
+            session_auth_password=None,
+        )
+        self.assertEqual(
+            print_mock.call_args_list[0].args[0], '\nStarting local daemon...'
+        )
+        chat_cls.assert_called_once_with(
+            cast(ProfileManager, pm),
+            prefilled_session_auth_password=None,
+        )
+        chat_instance.run.assert_called_once_with()
+
+    def test_handle_chat_start_override_beats_never_policy(self) -> None:
+        """
+        Verifies that one-shot start override beats a persistent never policy.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        pm = Mock(spec=ProfileManager)
+        pm.profile_name = 'default'
+        pm.exists.return_value = True
+        pm.is_daemon_running.return_value = False
+        pm.is_remote.return_value = False
+        pm.uses_plaintext_storage.return_value = False
+        pm.uses_encrypted_storage.return_value = True
+        pm.config = Mock()
+        pm.config.get_str.return_value = 'never'
+
+        chat_instance = Mock()
+
+        with (
+            patch(
+                'metor.ui.cli.handlers.start_managed_daemon_process',
+                return_value=True,
+            ) as start_mock,
+            patch('metor.ui.cli.handlers.Chat', return_value=chat_instance),
+            patch('builtins.print'),
+        ):
+            CommandHandlers.handle_chat(
+                cast(ProfileManager, pm),
+                start_daemon_override=True,
+            )
+
+        start_mock.assert_called_once_with(
+            cast(ProfileManager, pm),
+            start_locked=True,
+            session_auth_password=None,
+        )
+
+    def test_handle_chat_no_start_override_beats_always_policy(self) -> None:
+        """
+        Verifies that one-shot no-start override beats a persistent always policy.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        pm = Mock(spec=ProfileManager)
+        pm.profile_name = 'default'
+        pm.exists.return_value = True
+        pm.is_daemon_running.return_value = False
+        pm.is_remote.return_value = False
+        pm.uses_plaintext_storage.return_value = False
+        pm.uses_encrypted_storage.return_value = True
+        pm.config = Mock()
+        pm.config.get_str.return_value = 'always'
+
+        with (
+            patch('metor.ui.cli.handlers.start_managed_daemon_process') as start_mock,
+            patch('builtins.print') as print_mock,
+        ):
+            CommandHandlers.handle_chat(
+                cast(ProfileManager, pm),
+                start_daemon_override=False,
+            )
+
+        start_mock.assert_not_called()
+        self.assertEqual(
+            print_mock.call_args.args[0],
+            "Daemon is not running! Use 'metor daemon' to start it or rerun with 'metor chat --start-daemon'.",
+        )
+
+    def test_handle_chat_reuses_plaintext_startup_auth_for_first_attach(self) -> None:
+        """
+        Verifies that plaintext chat autostart reuses one prompted session-auth password.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        pm = Mock(spec=ProfileManager)
+        pm.profile_name = 'default'
+        pm.exists.return_value = True
+        pm.is_daemon_running.return_value = False
+        pm.is_remote.return_value = False
+        pm.uses_plaintext_storage.return_value = True
+        pm.uses_encrypted_storage.return_value = False
+        pm.config = Mock()
+        pm.config.get_str.return_value = 'always'
+        pm.config.get_bool.side_effect = lambda key: (
+            key is SettingKey.REQUIRE_LOCAL_AUTH
+        )
+
+        chat_instance = Mock()
+
+        with (
+            patch('metor.ui.cli.handlers.prompt_hidden', return_value='session-secret'),
+            patch(
+                'metor.ui.cli.handlers.start_managed_daemon_process',
+                return_value=True,
+            ) as start_mock,
+            patch('metor.ui.cli.handlers.Chat', return_value=chat_instance) as chat_cls,
+        ):
+            CommandHandlers.handle_chat(cast(ProfileManager, pm))
+
+        start_mock.assert_called_once_with(
+            cast(ProfileManager, pm),
+            start_locked=False,
+            session_auth_password='session-secret',
+        )
+        chat_cls.assert_called_once_with(
+            cast(ProfileManager, pm),
+            prefilled_session_auth_password='session-secret',
+        )
+        chat_instance.run.assert_called_once_with()
 
     def test_handle_daemon_sanitizes_sensitive_value_errors(self) -> None:
         """

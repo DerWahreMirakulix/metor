@@ -5,6 +5,7 @@ Exposes core data managers, settings, parsers, and domain enums via a unified Fa
 
 # 1. Base Data Layer
 from metor.data.settings import (
+    ChatDaemonAutostartPolicy,
     Settings,
     SettingKey,
     SettingSpec,
@@ -55,6 +56,7 @@ __all__ = [
     'MessageStatus',
     'MessageDirection',
     'MessageType',
+    'ChatDaemonAutostartPolicy',
     'Settings',
     'SettingKey',
     'SettingSpec',

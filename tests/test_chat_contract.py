@@ -13,19 +13,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from metor.data.profile import ProfileManager
 from metor.core.api import (
     AcceptCommand,
-    create_event,
     AutoFallbackQueuedEvent,
     AutoReconnectScheduledEvent,
+    ChatStartupStateEvent,
     ConnectionActor,
     ConnectionConnectingEvent,
     ConnectionOrigin,
     ConnectionFailedEvent,
     ConnectionReasonCode,
     ConnectedEvent,
-    ConnectionsStateEvent,
+    create_event,
     DisconnectedEvent,
     EventType,
+    InitCommand,
     InitEvent,
+    PendingConnectionEntry,
+    PendingConnectionReasonCode,
     RenameSuccessEvent,
     RejectCommand,
     RetunnelFailedEvent,
@@ -34,6 +37,7 @@ from metor.core.api import (
     RuntimeErrorCode,
     SendDropCommand,
     SwitchCommand,
+    UnreadInboxSummaryEntry,
     MsgCommand,
 )
 from metor.ui import Theme
@@ -269,11 +273,26 @@ class ChatContractTests(unittest.TestCase):
         chat._ipc = Mock()
         chat._ipc.read_event.side_effect = [
             InitEvent(onion='abc123'),
-            ConnectionsStateEvent(
+            ChatStartupStateEvent(
                 active=['alice'],
-                pending=['bob'],
+                pending=[
+                    PendingConnectionEntry(
+                        alias='bob',
+                        onion='b' * 56,
+                        origin=ConnectionOrigin.INCOMING,
+                        reason=PendingConnectionReasonCode.USER_ACCEPT,
+                    )
+                ],
+                unread=[
+                    UnreadInboxSummaryEntry(
+                        alias='carol',
+                        onion='c' * 56,
+                        total_unread=2,
+                        drop_unread=1,
+                        live_unread=1,
+                    )
+                ],
                 contacts=['alice', 'bob', 'carol'],
-                is_header=True,
             ),
         ]
 
@@ -284,7 +303,105 @@ class ChatContractTests(unittest.TestCase):
         self.assertEqual(chat._session.header_active, ['alice'])
         self.assertEqual(chat._session.header_pending, ['bob'])
         self.assertEqual(chat._session.header_contacts, ['alice', 'bob', 'carol'])
+        self.assertEqual(chat._session.pending_connections, ['bob'])
+        self.assertEqual(chat._session.get_peer_onion('bob'), 'b' * 56)
+        self.assertEqual(chat._session.get_peer_onion('carol'), 'c' * 56)
         renderer.print_message.assert_not_called()
+
+    def test_prefilled_startup_session_auth_reuses_password_once(self) -> None:
+        """
+        Verifies that chat bootstrap reuses one autostart session-auth password.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        renderer = Mock()
+        with (
+            patch('metor.ui.chat.engine.Renderer', return_value=renderer),
+            patch('metor.ui.chat.engine.IpcClient'),
+            patch('metor.ui.chat.engine.EventHandler'),
+            patch('metor.ui.chat.engine.CommandDispatcher'),
+        ):
+            chat = Chat(
+                cast(ProfileManager, _DummyProfileManager()),
+                prefilled_session_auth_password='session-secret',
+            )
+
+        chat._ipc = Mock()
+        chat._ipc.read_event.side_effect = [
+            create_event(
+                EventType.AUTH_REQUIRED,
+                {
+                    'challenge': 'challenge',
+                    'salt': 'salt',
+                },
+            ),
+            create_event(EventType.SESSION_AUTHENTICATED),
+            InitEvent(onion='abc123'),
+        ]
+
+        with (
+            patch(
+                'metor.ui.chat.engine.build_session_auth_proof',
+                return_value='proof',
+            ) as build_proof_mock,
+            patch('metor.ui.chat.engine.prompt_session_auth_proof') as prompt_mock,
+        ):
+            result = chat._request_prechat_event(InitCommand(), InitEvent)
+
+        self.assertIsNotNone(result)
+        build_proof_mock.assert_called_once_with(
+            'session-secret',
+            'challenge',
+            'salt',
+        )
+        prompt_mock.assert_not_called()
+
+    def test_startup_recovery_summary_prints_once(self) -> None:
+        """
+        Verifies that the startup recovery summary is rendered only once.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        renderer = Mock()
+        chat = self._build_chat(renderer)
+        chat._startup_state = ChatStartupStateEvent(
+            active=[],
+            pending=[
+                PendingConnectionEntry(
+                    alias='bob',
+                    onion='b' * 56,
+                    origin=ConnectionOrigin.INCOMING,
+                    reason=PendingConnectionReasonCode.USER_ACCEPT,
+                )
+            ],
+            unread=[
+                UnreadInboxSummaryEntry(
+                    alias='carol',
+                    onion='c' * 56,
+                    total_unread=2,
+                    drop_unread=1,
+                    live_unread=1,
+                )
+            ],
+            contacts=['bob', 'carol'],
+        )
+
+        chat._print_startup_recovery_summary()
+        chat._print_startup_recovery_summary()
+
+        renderer.print_message.assert_called_once()
+        self.assertIn('Startup summary:', renderer.print_message.call_args.args[0])
+        self.assertIsNone(chat._startup_state)
 
     def test_send_chat_message_buffers_while_retunneling(self) -> None:
         """

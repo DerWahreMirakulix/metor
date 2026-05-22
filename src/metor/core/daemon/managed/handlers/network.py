@@ -4,13 +4,19 @@ Encapsulates all logic for initiating and managing Tor connections, Drops, and R
 Emits strictly typed Domain Transfer Objects via IPC.
 """
 
+from datetime import datetime, timezone
 import socket
 import threading
-from typing import Callable, Dict, Optional, Tuple, TYPE_CHECKING
+from typing import Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from metor.core import TorManager
 from metor.core.api import (
+    ChatStartupStateEvent,
+    ConnectionOrigin,
     EventType,
+    GetChatStartupStateCommand,
+    PendingConnectionEntry,
+    PendingConnectionReasonCode,
     IpcCommand,
     IpcEvent,
     create_event,
@@ -32,8 +38,10 @@ from metor.core.api import (
     RuntimeErrorCode,
     request_context,
     stamp_request_id,
+    UnreadInboxSummaryEntry,
 )
 from metor.core.daemon.managed.network import NetworkManager
+from metor.core.daemon.managed.network.state import PendingConnectionSnapshot
 from metor.data import (
     HistoryManager,
     HistoryActor,
@@ -262,6 +270,102 @@ class NetworkCommandHandler:
 
         return False
 
+    @staticmethod
+    def _format_pending_expiry(expires_at: Optional[float]) -> Optional[str]:
+        """
+        Converts one pending expiry timestamp to ISO UTC text for IPC transport.
+
+        Args:
+            expires_at (Optional[float]): The UNIX expiry timestamp.
+
+        Returns:
+            Optional[str]: The ISO UTC timestamp, if available.
+        """
+        if expires_at is None:
+            return None
+
+        return datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat()
+
+    def _build_pending_startup_entries(self) -> List[PendingConnectionEntry]:
+        """
+        Builds typed retained pending-request entries for chat startup rendering.
+
+        Args:
+            None
+
+        Returns:
+            List[PendingConnectionEntry]: Pending startup entries.
+        """
+        entries: List[PendingConnectionEntry] = []
+        snapshot: PendingConnectionSnapshot
+        for snapshot in self._network.get_pending_connection_snapshots():
+            alias: Optional[str] = self._cm.ensure_alias_for_onion(snapshot.onion)
+            if alias is None:
+                continue
+
+            entries.append(
+                PendingConnectionEntry(
+                    alias=alias,
+                    onion=snapshot.onion,
+                    origin=(snapshot.origin or ConnectionOrigin.INCOMING),
+                    reason=PendingConnectionReasonCode(
+                        snapshot.reason.value
+                        if snapshot.reason is not None
+                        else PendingConnectionReasonCode.USER_ACCEPT.value
+                    ),
+                    expires_at=self._format_pending_expiry(snapshot.expires_at),
+                )
+            )
+
+        return entries
+
+    def _build_unread_startup_entries(self) -> List[UnreadInboxSummaryEntry]:
+        """
+        Builds typed unread-summary entries for chat startup rendering.
+
+        Args:
+            None
+
+        Returns:
+            List[UnreadInboxSummaryEntry]: Unread startup entries.
+        """
+        entries: List[UnreadInboxSummaryEntry] = []
+        for summary in self._mm.get_unread_inbox_summaries():
+            alias: Optional[str] = self._cm.ensure_alias_for_onion(
+                summary.contact_onion
+            )
+            if alias is None:
+                continue
+
+            entries.append(
+                UnreadInboxSummaryEntry(
+                    alias=alias,
+                    onion=summary.contact_onion,
+                    total_unread=summary.total_unread,
+                    drop_unread=summary.drop_unread,
+                    live_unread=summary.live_unread,
+                )
+            )
+
+        return entries
+
+    def _build_chat_startup_state(self) -> ChatStartupStateEvent:
+        """
+        Builds the typed first-attach chat startup snapshot.
+
+        Args:
+            None
+
+        Returns:
+            ChatStartupStateEvent: The startup snapshot event.
+        """
+        return ChatStartupStateEvent(
+            active=self._network.get_active_aliases(),
+            contacts=self._cm.get_all_contacts(),
+            pending=self._build_pending_startup_entries(),
+            unread=self._build_unread_startup_entries(),
+        )
+
     def handle(self, cmd: IpcCommand, conn: socket.socket) -> None:
         """
         Routes the network command to the NetworkManager or MessageManager and returns DTOs.
@@ -277,6 +381,9 @@ class NetworkCommandHandler:
 
         if isinstance(cmd, InitCommand):
             self._send_event(conn, InitEvent(onion=self._tm.onion))
+
+        elif isinstance(cmd, GetChatStartupStateCommand):
+            self._send_event(conn, self._build_chat_startup_state())
 
         elif isinstance(cmd, RegisterLiveConsumerCommand):
             self._register_live_consumer(conn)

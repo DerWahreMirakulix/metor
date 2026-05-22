@@ -122,6 +122,11 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                 CommandHandlers.handle_daemon(
                     self._pm,
                     start_locked=getattr(self._args, 'locked', False),
+                    startup_session_auth_stdin=getattr(
+                        self._args,
+                        'startup_session_auth_stdin',
+                        False,
+                    ),
                 )
 
         elif cmd == 'unlock':
@@ -153,7 +158,10 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                 print(self._help.show_command_help(cmd))
 
         elif cmd == 'chat':
-            CommandHandlers.handle_chat(self._pm)
+            CommandHandlers.handle_chat(
+                self._pm,
+                start_daemon_override=getattr(self._args, 'start_daemon', None),
+            )
 
         elif cmd == 'cleanup':
             cleanup_tokens: List[str] = []

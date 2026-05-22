@@ -4,7 +4,12 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, TypeVar
 
-from metor.core.api.codes import MessageDirectionCode, MessageStatusCode
+from metor.core.api.codes import (
+    ConnectionOrigin,
+    MessageDirectionCode,
+    MessageStatusCode,
+    PendingConnectionReasonCode,
+)
 
 
 EnumT = TypeVar('EnumT', bound=Enum)
@@ -48,6 +53,33 @@ class UnreadMessageEntry:
     timestamp: str
     payload: str
     is_drop: bool
+
+
+@dataclass
+class PendingConnectionEntry:
+    """Represents one retained inbound live request in the startup snapshot."""
+
+    alias: str
+    onion: Optional[str]
+    origin: ConnectionOrigin
+    reason: PendingConnectionReasonCode
+    expires_at: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        """Coerces string-backed origin and reason values to typed enums."""
+        self.origin = _coerce_enum(ConnectionOrigin, self.origin)
+        self.reason = _coerce_enum(PendingConnectionReasonCode, self.reason)
+
+
+@dataclass
+class UnreadInboxSummaryEntry:
+    """Represents one peer unread summary in the chat startup snapshot."""
+
+    alias: str
+    onion: Optional[str]
+    total_unread: int
+    drop_unread: int
+    live_unread: int
 
 
 @dataclass

@@ -10,9 +10,10 @@ from datetime import datetime, timezone
 from typing import Dict, Optional, TypeVar
 
 from metor.core.api import (
-    ConnectionsStateEvent,
+    ChatStartupStateEvent,
     ensure_request_id,
     EventType,
+    GetChatStartupStateCommand,
     IpcEvent,
     InitCommand,
     InitEvent,
@@ -37,7 +38,7 @@ from metor.ui import (
     prompt_session_auth_proof,
 )
 from metor.ui.models import AliasPolicy, StatusTone
-from metor.utils import clean_onion, Constants
+from metor.utils import build_session_auth_proof, clean_onion, Constants
 
 # Local Package Imports
 from metor.ui.chat.models import ChatMessageType
@@ -55,12 +56,17 @@ BootstrapEventT = TypeVar('BootstrapEventT', bound=IpcEvent)
 class Chat:
     """The UI Engine. Orchestrates input handling and Daemon IPC communication."""
 
-    def __init__(self, pm: ProfileManager) -> None:
+    def __init__(
+        self,
+        pm: ProfileManager,
+        prefilled_session_auth_password: Optional[str] = None,
+    ) -> None:
         """
         Initializes the Chat UI orchestrator.
 
         Args:
             pm (ProfileManager): The manager handling the profile's daemon connection state.
+            prefilled_session_auth_password (Optional[str]): Optional one-time plaintext session-auth password collected during local daemon autostart.
 
         Returns:
             None
@@ -74,9 +80,39 @@ class Chat:
         self._init_event: threading.Event = threading.Event()
         self._conn_event: threading.Event = threading.Event()
         self._disconnect_event: threading.Event = threading.Event()
+        self._startup_state: Optional[ChatStartupStateEvent] = None
+        self._prefilled_session_auth_password: Optional[str] = (
+            prefilled_session_auth_password
+        )
 
         self._handler: Optional[EventHandler] = None
         self._dispatcher: Optional[CommandDispatcher] = None
+
+    def _prompt_prechat_session_auth_proof(
+        self,
+        challenge: str,
+        salt: str,
+    ) -> Optional[str]:
+        """
+        Resolves one pre-chat session-auth proof, reusing autostart input once.
+
+        Args:
+            challenge (str): The daemon-issued challenge.
+            salt (str): The daemon-issued salt.
+
+        Returns:
+            Optional[str]: The derived proof, or None when the user aborted.
+        """
+        if self._prefilled_session_auth_password is not None:
+            password: str = self._prefilled_session_auth_password
+            self._prefilled_session_auth_password = None
+            return build_session_auth_proof(password, challenge, salt)
+
+        return prompt_session_auth_proof(
+            get_session_auth_prompt(self._pm),
+            challenge,
+            salt,
+        )
 
     @staticmethod
     def _build_prechat_event_params(event: IpcEvent) -> Dict[str, JsonValue]:
@@ -167,11 +203,7 @@ class Chat:
         self._ipc.send_command(cmd)
         output_spacer = PromptOutputSpacer()
         auth_exchange = IpcAuthExchange(
-            prompt_session_proof=lambda challenge, salt: prompt_session_auth_proof(
-                get_session_auth_prompt(self._pm),
-                challenge,
-                salt,
-            ),
+            prompt_session_proof=self._prompt_prechat_session_auth_proof,
             prompt_unlock_password=lambda: (
                 prompt_hidden(
                     f'{Theme.GREEN}Enter Master Password to unlock daemon: {Theme.RESET}'
@@ -328,11 +360,14 @@ class Chat:
         )
         self._dispatcher = CommandDispatcher(self._ipc, self._session, self._renderer)
 
-        self._ipc.start_listener()
+        self._print_header(refresh_state=False, show_prompt=False)
+        self._print_startup_recovery_summary()
 
+        self._ipc.start_listener()
         self._ipc.send_command(RegisterLiveConsumerCommand())
 
-        self._print_header(refresh_state=False)
+        self._renderer.print_empty_line()
+        self._renderer.print_prompt()
 
         try:
             while True:
@@ -524,26 +559,33 @@ class Chat:
         self._session.my_onion = init_event.onion or 'unknown'
         self._init_event.set()
 
-        connections_event: Optional[ConnectionsStateEvent] = (
-            self._request_prechat_event(
-                GetConnectionsCommand(is_header=True),
-                ConnectionsStateEvent,
-            )
+        startup_state: Optional[ChatStartupStateEvent] = self._request_prechat_event(
+            GetChatStartupStateCommand(),
+            ChatStartupStateEvent,
         )
-        if connections_event is None:
+        if startup_state is None:
             return False
 
-        self._session.active_connections = connections_event.active
-        self._session.pending_connections = connections_event.pending
-        self._session.header_active = connections_event.active
-        self._session.header_pending = connections_event.pending
-        self._session.header_contacts = connections_event.contacts
+        self._startup_state = startup_state
+        self._session.active_connections = startup_state.active
+        self._session.pending_connections = [
+            entry.alias for entry in startup_state.pending
+        ]
+        self._session.header_active = startup_state.active
+        self._session.header_pending = [entry.alias for entry in startup_state.pending]
+        self._session.header_contacts = startup_state.contacts
+
+        for pending_entry in startup_state.pending:
+            self._session.remember_peer(pending_entry.alias, pending_entry.onion)
+        for unread_entry in startup_state.unread:
+            self._session.remember_peer(unread_entry.alias, unread_entry.onion)
         return True
 
     def _print_header(
         self,
         clear_screen: bool = False,
         refresh_state: bool = True,
+        show_prompt: bool = True,
     ) -> None:
         """
         Prints the application welcome header, help info, and connection status.
@@ -551,6 +593,7 @@ class Chat:
         Args:
             clear_screen (bool): Whether to wipe the terminal display before printing.
             refresh_state (bool): Whether to refresh daemon session-state before rendering.
+            show_prompt (bool): Whether to print the interactive prompt at the end.
 
         Returns:
             None
@@ -582,8 +625,34 @@ class Chat:
             )
             self._renderer.print_message(formatted_state, msg_type=ChatMessageType.RAW)
 
+        if show_prompt:
+            self._renderer.print_empty_line()
+            self._renderer.print_prompt()
+
+    def _print_startup_recovery_summary(self) -> None:
+        """
+        Prints the first-attach recovery summary exactly once after bootstrap.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if self._startup_state is None:
+            return
+
+        summary: str = ChatPresenter.format_startup_recovery(
+            self._startup_state.pending,
+            self._startup_state.unread,
+        )
+        self._startup_state = None
+
+        if not summary:
+            return
+
         self._renderer.print_empty_line()
-        self._renderer.print_prompt()
+        self._renderer.print_message(summary, msg_type=ChatMessageType.RAW)
 
     def _refresh_header_state(self) -> bool:
         """

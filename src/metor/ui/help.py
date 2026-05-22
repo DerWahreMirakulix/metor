@@ -95,8 +95,8 @@ class Help:
         ),
         'chat': CommandDef(
             name='chat',
-            usage='metor chat',
-            description='Enter the interactive multi-chat UI.',
+            usage='metor chat [--start-daemon|--no-start-daemon]',
+            description='Enter the interactive multi-chat UI and optionally override local daemon autostart for this invocation.',
             category='Core Operations',
         ),
         'send': CommandDef(

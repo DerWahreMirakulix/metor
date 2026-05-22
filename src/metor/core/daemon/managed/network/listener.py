@@ -674,12 +674,16 @@ class InboundListener:
                 pass
             if should_auto_accept_now:
                 pending_reason = PendingConnectionReason.CONSUMER_ABSENT
+            pending_deadline: float = time.time() + self._config.get_float(
+                SettingKey.LATE_ACCEPTANCE_TIMEOUT
+            )
             pending_registered: bool = self._state.add_pending_connection(
                 onion,
                 conn,
                 stream.get_buffer(),
                 reason=pending_reason,
                 origin=incoming_origin,
+                expiry_deadline=pending_deadline,
             )
             if not pending_registered:
                 return
