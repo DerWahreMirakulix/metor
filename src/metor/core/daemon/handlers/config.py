@@ -4,25 +4,58 @@ Encapsulates operations routing global settings and profile configurations.
 Enforces the Zero-Text Policy by eliminating raw string errors from DTOs.
 """
 
-from typing import Union
+from typing import Iterable, Union
 
 from metor.core.api import (
     EventType,
     IpcCommand,
     IpcEvent,
+    JsonValue,
     create_event,
     SetSettingCommand,
     GetSettingCommand,
+    GetSettingsListCommand,
     SetConfigCommand,
     GetConfigCommand,
+    GetConfigListCommand,
     SyncConfigCommand,
 )
-from metor.data import Settings, SettingKey, SettingValidationError
+from metor.data import (
+    Settings,
+    SettingKey,
+    SettingSnapshotRow,
+    SettingValidationError,
+)
 from metor.data.profile import (
     ProfileManager,
     ProfileConfigKey,
     ProfileConfigValidationError,
 )
+
+
+def _snapshot_rows_to_json(
+    rows: Iterable[SettingSnapshotRow],
+) -> list[JsonValue]:
+    """
+    Converts internal snapshot rows into strict JSON payload values.
+
+    Args:
+        rows (Iterable[SettingSnapshotRow]): The snapshot rows.
+
+    Returns:
+        list[JsonValue]: JSON-safe dictionaries for IPC event payloads.
+    """
+    json_rows: list[JsonValue] = []
+    for row in rows:
+        payload_row: dict[str, JsonValue] = {
+            'key': row['key'],
+            'value': row['value'],
+            'source': row['source'],
+            'category': row['category'],
+        }
+        json_rows.append(payload_row)
+
+    return json_rows
 
 
 class ConfigCommandHandler:
@@ -91,6 +124,17 @@ class ConfigCommandHandler:
             except ValueError:
                 return create_event(EventType.INVALID_SETTING_KEY)
 
+        if isinstance(cmd, GetSettingsListCommand):
+            return create_event(
+                EventType.SETTINGS_LIST_DATA,
+                {
+                    'scope': 'daemon',
+                    'entries': _snapshot_rows_to_json(
+                        Settings.get_snapshots(domain='daemon')
+                    ),
+                },
+            )
+
         if isinstance(cmd, SetConfigCommand):
             set_config_key: Union[SettingKey, ProfileConfigKey]
             try:
@@ -144,9 +188,21 @@ class ConfigCommandHandler:
             except ValueError:
                 return create_event(EventType.INVALID_CONFIG_KEY)
 
+        if isinstance(cmd, GetConfigListCommand):
+            return create_event(
+                EventType.CONFIG_LIST_DATA,
+                {
+                    'scope': 'daemon',
+                    'profile': self._pm.profile_name,
+                    'entries': _snapshot_rows_to_json(
+                        self._pm.config.get_setting_snapshots(domain='daemon')
+                    ),
+                },
+            )
+
         if isinstance(cmd, SyncConfigCommand):
             try:
-                self._pm.config.sync_with_global()
+                self._pm.config.sync_with_global(domain='daemon')
                 return create_event(EventType.CONFIG_SYNCED)
             except Exception:
                 return create_event(EventType.CONFIG_UPDATE_FAILED)

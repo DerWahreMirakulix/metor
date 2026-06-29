@@ -15,7 +15,11 @@ from metor.core.api import (
     ConnectionPendingEvent,
     RetunnelSuccessEvent,
 )
-from metor.core.daemon.managed.models import TorCommand
+from metor.core.daemon.managed.models import (
+    DisconnectIntent,
+    RejectIntent,
+    TorCommand,
+)
 from metor.data import (
     HistoryActor,
     HistoryManager,
@@ -30,11 +34,119 @@ from metor.core.daemon.managed.network.stream import TcpStreamReader
 from metor.core.daemon.managed.network.router import MessageRouter
 
 if TYPE_CHECKING:
-    from metor.data.profile.config import Config
+    from metor.data.profile import Config
 
 
 class StreamReceiver:
     """Manages the background read-loop for fully established Tor sockets."""
+
+    @staticmethod
+    def _close_socket_quietly(conn: socket.socket) -> None:
+        """
+        Closes one socket while suppressing transport teardown noise.
+
+        Args:
+            conn (socket.socket): The socket to close.
+
+        Returns:
+            None
+        """
+        try:
+            conn.close()
+        except OSError:
+            pass
+
+    @staticmethod
+    def _socket_appears_closed(conn: socket.socket) -> bool:
+        """
+        Performs one cheap liveness probe after an idle timeout.
+
+        Args:
+            conn (socket.socket): The tracked live socket.
+
+        Returns:
+            bool: True if the socket already looks closed locally.
+        """
+        try:
+            return conn.recv(1, socket.MSG_PEEK) == b''
+        except (AttributeError, BlockingIOError, InterruptedError, socket.timeout):
+            return False
+        except OSError:
+            return True
+
+    @staticmethod
+    def _is_recoverable_disconnect_frame(msg: str) -> bool:
+        """
+        Determines whether one peer disconnect frame signals recoverable replacement.
+
+        Args:
+            msg (str): The raw disconnect frame.
+
+        Returns:
+            bool: True if the frame signals recoverable replacement.
+        """
+        parts: list[str] = msg.strip().split()
+        return len(parts) >= 2 and parts[1] == DisconnectIntent.RECOVER.value
+
+    @staticmethod
+    def _parse_reject_intent(msg: str) -> Optional[RejectIntent]:
+        """
+        Parses one optional reject intent from the raw wire frame.
+
+        Args:
+            msg (str): The raw reject frame.
+
+        Returns:
+            Optional[RejectIntent]: The semantic reject intent, if explicitly encoded.
+        """
+        parts: list[str] = msg.strip().split()
+        if len(parts) < 2:
+            return None
+
+        try:
+            return RejectIntent(parts[1])
+        except ValueError:
+            return None
+
+    def _is_stale_pending_acceptance_socket(
+        self,
+        onion: str,
+        conn: socket.socket,
+        awaiting_acceptance: bool,
+    ) -> bool:
+        """
+        Reports whether one waiting outbound socket lost the race to another accepted flow.
+
+        Args:
+            onion (str): The peer onion identity.
+            conn (socket.socket): The waiting outbound socket.
+            awaiting_acceptance (bool): Whether the socket is still waiting for acceptance.
+
+        Returns:
+            bool: True if the socket is stale and should exit quietly.
+        """
+        if not awaiting_acceptance:
+            return False
+
+        is_current_outbound_socket = getattr(
+            self._state,
+            'is_current_outbound_socket',
+            None,
+        )
+        is_connected_or_pending = getattr(
+            self._state,
+            'is_connected_or_pending',
+            None,
+        )
+        if not callable(is_current_outbound_socket) or not callable(
+            is_connected_or_pending
+        ):
+            return False
+
+        if is_current_outbound_socket(onion, conn):
+            return False
+
+        return bool(is_connected_or_pending(onion))
 
     def __init__(
         self,
@@ -43,7 +155,6 @@ class StreamReceiver:
         state: StateTracker,
         router: MessageRouter,
         broadcast_callback: Callable[[IpcEvent], None],
-        has_clients_callback: Callable[[], bool],
         disconnect_cb: Callable[
             [
                 str,
@@ -56,7 +167,13 @@ class StreamReceiver:
             None,
         ],
         reject_cb: Callable[
-            [str, bool, Optional[socket.socket], ConnectionOrigin],
+            [
+                str,
+                bool,
+                Optional[socket.socket],
+                ConnectionOrigin,
+                Optional[RejectIntent],
+            ],
             None,
         ],
         config: 'Config',
@@ -70,7 +187,6 @@ class StreamReceiver:
             state (StateTracker): The thread-safe state container.
             router (MessageRouter): The application-layer message router.
             broadcast_callback (Callable): IPC broadcaster.
-            has_clients_callback (Callable): Checks for active UI clients.
             disconnect_cb (Callable): Controller callback to handle safe disconnections.
             reject_cb (Callable): Controller callback to handle safe rejections.
             config (Config): The profile configuration instance.
@@ -83,7 +199,6 @@ class StreamReceiver:
         self._state: StateTracker = state
         self._router: MessageRouter = router
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
-        self._has_clients_callback: Callable[[], bool] = has_clients_callback
         self._config: 'Config' = config
 
         self._disconnect_cb: Callable[
@@ -98,9 +213,32 @@ class StreamReceiver:
             None,
         ] = disconnect_cb
         self._reject_cb: Callable[
-            [str, bool, Optional[socket.socket], ConnectionOrigin],
+            [
+                str,
+                bool,
+                Optional[socket.socket],
+                ConnectionOrigin,
+                Optional[RejectIntent],
+            ],
             None,
         ] = reject_cb
+
+    @staticmethod
+    def _parse_ack_msg_id(msg: str) -> Optional[str]:
+        """
+        Validates one live ACK frame and returns its message identifier.
+
+        Args:
+            msg (str): The raw newline-delimited frame.
+
+        Returns:
+            Optional[str]: The acknowledged message ID, or None if the frame is malformed.
+        """
+        parts: list[str] = msg.split()
+        if len(parts) != 2 or parts[0] != TorCommand.ACK.value:
+            return None
+
+        return parts[1]
 
     def start_receiving(
         self,
@@ -151,7 +289,9 @@ class StreamReceiver:
             None
         """
         remote_rejected: bool = False
+        remote_reject_intent: Optional[RejectIntent] = None
         remote_disconnected: bool = False
+        remote_disconnect_is_fallback: bool = False
 
         idle_timeout: float = self._config.get_float(SettingKey.STREAM_IDLE_TIMEOUT)
         late_acceptance_timeout: float = self._config.get_float(
@@ -169,6 +309,10 @@ class StreamReceiver:
                     msg: Optional[str] = stream.read_line()
                 except socket.timeout:
                     if awaiting_acceptance:
+                        break
+                    if not self._state.is_known_socket(onion, conn):
+                        break
+                    if self._socket_appears_closed(conn):
                         break
                     continue
 
@@ -217,6 +361,8 @@ class StreamReceiver:
                             )
                         )
 
+                    self._router.replay_unacked_messages(onion)
+
                 elif msg == TorCommand.PENDING.value:
                     awaiting_acceptance = True
                     conn.settimeout(late_acceptance_timeout)
@@ -234,45 +380,72 @@ class StreamReceiver:
                     f'{TorCommand.DISCONNECT.value} '
                 ):
                     remote_disconnected = True
+                    remote_disconnect_is_fallback = (
+                        self._is_recoverable_disconnect_frame(msg)
+                    )
                     break
                 elif msg == TorCommand.REJECT.value or msg.startswith(
                     f'{TorCommand.REJECT.value} '
                 ):
                     remote_rejected = True
+                    remote_reject_intent = self._parse_reject_intent(msg)
                     break
-                elif msg.startswith(f'{TorCommand.ACK.value} '):
-                    msg_id: str = msg.split(' ')[1]
-                    self._router.process_incoming_ack(onion, msg_id)
+                else:
+                    ack_msg_id: Optional[str] = self._parse_ack_msg_id(msg)
+                    if ack_msg_id is not None:
+                        self._router.process_incoming_ack(onion, ack_msg_id)
 
-                elif msg.startswith(f'{TorCommand.MSG.value} '):
-                    parts: List[str] = msg.split(' ', 2)
-                    if len(parts) == 3:
-                        msg_id = parts[1]
-                        content: str = parts[2]
+                    elif msg.startswith(f'{TorCommand.MSG.value} '):
+                        parts: List[str] = msg.split(' ', 2)
+                        if len(parts) == 3:
+                            msg_id = parts[1]
+                            content: str = parts[2]
 
-                        should_disconnect: bool = self._router.process_incoming_msg(
-                            conn, onion, msg_id, content
-                        )
-                        if should_disconnect:
-                            self._disconnect_cb(
-                                onion,
-                                True,
-                                False,
-                                None,
-                                False,
-                                connection_origin,
+                            should_disconnect: bool = self._router.process_incoming_msg(
+                                conn, onion, msg_id, content
                             )
-                            break
+                            if should_disconnect:
+                                self._disconnect_cb(
+                                    onion,
+                                    True,
+                                    False,
+                                    None,
+                                    False,
+                                    connection_origin,
+                                )
+                                break
         except Exception:
             pass
         finally:
+            consume_local_termination = getattr(
+                self._state,
+                'consume_locally_terminated_socket',
+                None,
+            )
+            if callable(consume_local_termination) and consume_local_termination(conn):
+                return
+
+            if self._is_stale_pending_acceptance_socket(
+                onion,
+                conn,
+                awaiting_acceptance,
+            ):
+                self._close_socket_quietly(conn)
+                return
+
             if remote_rejected:
-                self._reject_cb(onion, False, conn, connection_origin)
+                self._reject_cb(
+                    onion,
+                    False,
+                    conn,
+                    connection_origin,
+                    remote_reject_intent,
+                )
             elif remote_disconnected:
                 self._disconnect_cb(
                     onion,
                     False,
-                    False,
+                    remote_disconnect_is_fallback,
                     conn,
                     False,
                     connection_origin,

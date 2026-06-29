@@ -22,6 +22,19 @@ class TorCommand(str, Enum):
     DROP = '/drop'
 
 
+class DisconnectIntent(str, Enum):
+    """Enumeration of semantic live-disconnect intents."""
+
+    MANUAL = 'manual'
+    RECOVER = 'recover'
+
+
+class RejectIntent(str, Enum):
+    """Enumeration of semantic live-reject intents."""
+
+    MANUAL = 'manual'
+
+
 class PrimaryTransport(str, Enum):
     """Enumeration of the daemon-level primary transport per peer."""
 

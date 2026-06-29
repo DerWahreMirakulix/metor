@@ -12,7 +12,14 @@ from metor.core.api.registry import register_command
 @register_command(CommandType.SET_SETTING)
 @dataclass
 class SetSettingCommand(IpcCommand):
-    """Updates a global setting."""
+    """
+    Requests one global settings update.
+
+    Attributes:
+        setting_key (str): The fully-qualified settings key to update.
+        setting_value (Union[str, int, float, bool]): The new primitive value.
+        command_type (CommandType): The stable IPC routing code.
+    """
 
     setting_key: str
     setting_value: Union[str, int, float, bool]
@@ -22,16 +29,45 @@ class SetSettingCommand(IpcCommand):
 @register_command(CommandType.GET_SETTING)
 @dataclass
 class GetSettingCommand(IpcCommand):
-    """Requests a global setting value."""
+    """
+    Requests one global settings value.
+
+    Attributes:
+        setting_key (str): The fully-qualified settings key to fetch.
+        command_type (CommandType): The stable IPC routing code.
+    """
 
     setting_key: str
     command_type: CommandType = field(default=CommandType.GET_SETTING, init=False)
 
 
+@register_command(CommandType.GET_SETTINGS_LIST)
+@dataclass
+class GetSettingsListCommand(IpcCommand):
+    """
+    Requests the daemon-side global settings snapshot.
+
+    Attributes:
+        command_type (CommandType): The stable IPC routing code.
+    """
+
+    command_type: CommandType = field(
+        default=CommandType.GET_SETTINGS_LIST,
+        init=False,
+    )
+
+
 @register_command(CommandType.SET_CONFIG)
 @dataclass
 class SetConfigCommand(IpcCommand):
-    """Updates a profile-specific configuration override."""
+    """
+    Requests one profile-local config override update.
+
+    Attributes:
+        setting_key (str): The fully-qualified config key to update.
+        setting_value (Union[str, int, float, bool]): The new primitive value.
+        command_type (CommandType): The stable IPC routing code.
+    """
 
     setting_key: str
     setting_value: Union[str, int, float, bool]
@@ -41,15 +77,39 @@ class SetConfigCommand(IpcCommand):
 @register_command(CommandType.GET_CONFIG)
 @dataclass
 class GetConfigCommand(IpcCommand):
-    """Requests a profile-specific configuration value."""
+    """
+    Requests one effective profile config value.
+
+    Attributes:
+        setting_key (str): The fully-qualified config key to fetch.
+        command_type (CommandType): The stable IPC routing code.
+    """
 
     setting_key: str
     command_type: CommandType = field(default=CommandType.GET_CONFIG, init=False)
 
 
+@register_command(CommandType.GET_CONFIG_LIST)
+@dataclass
+class GetConfigListCommand(IpcCommand):
+    """
+    Requests the daemon-side effective profile-config snapshot.
+
+    Attributes:
+        command_type (CommandType): The stable IPC routing code.
+    """
+
+    command_type: CommandType = field(default=CommandType.GET_CONFIG_LIST, init=False)
+
+
 @register_command(CommandType.SYNC_CONFIG)
 @dataclass
 class SyncConfigCommand(IpcCommand):
-    """Syncs profile configuration overrides with global settings."""
+    """
+    Requests a profile-config sync against global settings.
+
+    Attributes:
+        command_type (CommandType): The stable IPC routing code.
+    """
 
     command_type: CommandType = field(default=CommandType.SYNC_CONFIG, init=False)

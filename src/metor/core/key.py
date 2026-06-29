@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from metor.data.profile import ProfileManager
-from metor.utils import Constants
+from metor.utils import Constants, secure_clear_buffer
 
 
 class KeyManager:
@@ -32,7 +32,9 @@ class KeyManager:
         """
         self._pm: ProfileManager = pm
         self._hs_dir: Path = self._pm.paths.get_hidden_service_dir()
-        self._password: Optional[str] = password
+        self._password: Optional[bytearray] = None
+        if password is not None:
+            self._password = bytearray(password.encode('utf-8'))
         self._salt_file: Path = self._hs_dir / 'crypto.salt'
 
     def get_or_create_password_salt(self) -> bytes:
@@ -70,14 +72,35 @@ class KeyManager:
 
         salt: bytes = self.get_or_create_password_salt()
 
-        key: bytes = nacl.pwhash.argon2i.kdf(
-            nacl.secret.SecretBox.KEY_SIZE,
-            self._password.encode('utf-8'),
-            salt,
-            opslimit=nacl.pwhash.argon2i.OPSLIMIT_SENSITIVE,
-            memlimit=nacl.pwhash.argon2i.MEMLIMIT_SENSITIVE,
+        derived_key: bytearray = bytearray(
+            nacl.pwhash.argon2i.kdf(
+                nacl.secret.SecretBox.KEY_SIZE,
+                bytes(self._password),
+                salt,
+                opslimit=nacl.pwhash.argon2i.OPSLIMIT_SENSITIVE,
+                memlimit=nacl.pwhash.argon2i.MEMLIMIT_SENSITIVE,
+            )
         )
-        return nacl.secret.SecretBox(key)
+        try:
+            return nacl.secret.SecretBox(bytes(derived_key))
+        finally:
+            secure_clear_buffer(derived_key)
+
+    def clear_sensitive_state(self) -> None:
+        """
+        Overwrites any retained password-derived runtime state before release.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if self._password is None:
+            return
+
+        secure_clear_buffer(self._password)
+        self._password = None
 
     def generate_keys(self) -> None:
         """
@@ -252,6 +275,10 @@ class KeyManager:
         with tor_pub_path.open('wb') as handle:
             handle.write(tor_public)
         tor_pub_path.chmod(0o600)
+
+        self.clear_sensitive_state()
+        if new_password is not None:
+            self._password = bytearray(new_password.encode('utf-8'))
 
         if new_password is None:
             self._salt_file.unlink(missing_ok=True)

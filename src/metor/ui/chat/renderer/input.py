@@ -55,7 +55,11 @@ class InputHandler:
         """
         if os.name != 'nt':
             fd: int = sys.stdin.fileno()
-            old_term_settings = termios.tcgetattr(fd)
+            tcgetattr = getattr(termios, 'tcgetattr')
+            tcsetattr = getattr(termios, 'tcsetattr')
+            tcsa_drain = getattr(termios, 'TCSADRAIN')
+            setcbreak = getattr(tty, 'setcbreak')
+            old_term_settings = tcgetattr(fd)
 
             def _reset_terminal() -> None:
                 """
@@ -67,9 +71,9 @@ class InputHandler:
                 Returns:
                     None
                 """
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_term_settings)
+                tcsetattr(fd, tcsa_drain, old_term_settings)
 
-            tty.setcbreak(fd)
+            setcbreak(fd)
             atexit.register(_reset_terminal)
 
     def get_char(self) -> Optional[str]:

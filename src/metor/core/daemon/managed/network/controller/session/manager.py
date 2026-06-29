@@ -4,6 +4,7 @@ import socket
 from typing import TYPE_CHECKING, Optional
 
 from metor.core.api import ConnectionOrigin
+from metor.core.daemon.managed.models import RejectIntent
 
 # Local Package Imports
 from metor.core.daemon.managed.network.controller.session.accept import accept
@@ -96,6 +97,7 @@ class ConnectionControllerSessionMixin(ConnectionControllerSupportMixin):
         initiated_by_self: bool = True,
         socket_to_close: Optional[socket.socket] = None,
         origin: ConnectionOrigin = ConnectionOrigin.INCOMING,
+        reject_intent: Optional[RejectIntent] = None,
     ) -> None:
         """
         Delegates connection rejection to the focused termination helper.
@@ -105,6 +107,7 @@ class ConnectionControllerSessionMixin(ConnectionControllerSupportMixin):
             initiated_by_self (bool): Whether the local user initiated the rejection.
             socket_to_close (Optional[socket.socket]): Specific duplicate socket to terminate safely.
             origin (ConnectionOrigin): The machine-readable source of the rejected live flow.
+            reject_intent (Optional[RejectIntent]): Optional semantic reject intent received from the peer.
 
         Returns:
             None
@@ -115,6 +118,7 @@ class ConnectionControllerSessionMixin(ConnectionControllerSupportMixin):
             initiated_by_self=initiated_by_self,
             socket_to_close=socket_to_close,
             origin=origin,
+            reject_intent=reject_intent,
         )
 
     def disconnect(

@@ -9,7 +9,10 @@ from metor.core.api.codes import EventType
 from metor.core.api.events.entries import (
     ContactEntry,
     MessageEntry,
+    PendingConnectionEntry,
     ProfileEntry,
+    SettingSnapshotEntry,
+    UnreadInboxSummaryEntry,
     UnreadMessageEntry,
 )
 from metor.core.api.registry import register_event
@@ -81,6 +84,22 @@ class InboxCountsEvent(IpcEvent):
     event_type: EventType = field(default=EventType.INBOX_COUNTS, init=False)
 
 
+@register_event(EventType.CHAT_STARTUP_STATE)
+@dataclass
+class ChatStartupStateEvent(NestedEntryCastingMixin, IpcEvent):
+    """Returns the first-attach chat snapshot with sessions and unread summaries."""
+
+    active: List[str]
+    contacts: List[str]
+    pending: List[PendingConnectionEntry] = field(default_factory=list)
+    unread: List[UnreadInboxSummaryEntry] = field(default_factory=list)
+    _nested_entry_types: ClassVar[Dict[str, type[object]]] = {
+        'pending': PendingConnectionEntry,
+        'unread': UnreadInboxSummaryEntry,
+    }
+    event_type: EventType = field(default=EventType.CHAT_STARTUP_STATE, init=False)
+
+
 @register_event(EventType.UNREAD_MESSAGES)
 @dataclass
 class UnreadMessagesEvent(NestedEntryCastingMixin, IpcEvent):
@@ -142,10 +161,58 @@ class AddressNotGeneratedEvent(IpcEvent):
 @register_event(EventType.PROFILES_DATA)
 @dataclass
 class ProfilesDataEvent(NestedEntryCastingMixin, IpcEvent):
-    """Returns the list of available profiles."""
+    """
+    Returns the list of available profiles.
+
+    Attributes:
+        profiles (List[ProfileEntry]): Structured profile rows.
+        event_type (EventType): The stable IPC routing code.
+    """
 
     profiles: List[ProfileEntry]
     _nested_entry_types: ClassVar[Dict[str, type[object]]] = {
         'profiles': ProfileEntry,
     }
     event_type: EventType = field(default=EventType.PROFILES_DATA, init=False)
+
+
+@register_event(EventType.SETTINGS_LIST_DATA)
+@dataclass
+class SettingsListDataEvent(NestedEntryCastingMixin, IpcEvent):
+    """
+    Returns a structured global settings snapshot.
+
+    Attributes:
+        scope (str): The snapshot scope such as `ui` or `daemon`.
+        entries (List[SettingSnapshotEntry]): The ordered snapshot rows.
+        event_type (EventType): The stable IPC routing code.
+    """
+
+    scope: str
+    entries: List[SettingSnapshotEntry] = field(default_factory=list)
+    _nested_entry_types: ClassVar[Dict[str, type[object]]] = {
+        'entries': SettingSnapshotEntry,
+    }
+    event_type: EventType = field(default=EventType.SETTINGS_LIST_DATA, init=False)
+
+
+@register_event(EventType.CONFIG_LIST_DATA)
+@dataclass
+class ConfigListDataEvent(NestedEntryCastingMixin, IpcEvent):
+    """
+    Returns a structured effective profile-config snapshot.
+
+    Attributes:
+        scope (str): The snapshot scope such as `ui`, `profile`, or `daemon`.
+        profile (str): The active profile name.
+        entries (List[SettingSnapshotEntry]): The ordered snapshot rows.
+        event_type (EventType): The stable IPC routing code.
+    """
+
+    scope: str
+    profile: str
+    entries: List[SettingSnapshotEntry] = field(default_factory=list)
+    _nested_entry_types: ClassVar[Dict[str, type[object]]] = {
+        'entries': SettingSnapshotEntry,
+    }
+    event_type: EventType = field(default=EventType.CONFIG_LIST_DATA, init=False)

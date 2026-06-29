@@ -9,11 +9,14 @@ from metor.core.api.codes.history import (
     HistorySummaryEventCode,
 )
 from metor.core.api.codes.messages import MessageDirectionCode, MessageStatusCode
+from metor.core.api.codes.profile import ProfileOperationCode
+from metor.core.api.codes.runtime import RuntimeErrorCode
 from metor.core.api.codes.routing import CommandType, EventType
 from metor.core.api.codes.transport import (
     ConnectionActor,
     ConnectionOrigin,
     ConnectionReasonCode,
+    PendingConnectionReasonCode,
 )
 
 
@@ -23,6 +26,7 @@ __all__ = [
     'ConnectionActor',
     'ConnectionOrigin',
     'ConnectionReasonCode',
+    'PendingConnectionReasonCode',
     'HistoryEntryActor',
     'HistoryEntryFamily',
     'HistoryEntryReasonCode',
@@ -31,4 +35,6 @@ __all__ = [
     'HistorySummaryEventCode',
     'MessageDirectionCode',
     'MessageStatusCode',
+    'ProfileOperationCode',
+    'RuntimeErrorCode',
 ]

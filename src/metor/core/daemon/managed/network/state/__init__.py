@@ -7,6 +7,7 @@ from typing import Dict, List, Set, Tuple
 from metor.core.api import ConnectionOrigin
 from metor.core.daemon.managed.models import DropTunnelState
 from metor.core.daemon.managed.network.state.connections import (
+    PendingConnectionSnapshot,
     StateTrackerConnectionsMixin,
 )
 from metor.core.daemon.managed.network.state.messages import StateTrackerMessagesMixin
@@ -38,6 +39,7 @@ class StateTracker(
         self._pending_connections: Dict[str, socket.socket] = {}
         self._pending_connection_reasons: Dict[str, PendingConnectionReason] = {}
         self._pending_connection_origins: Dict[str, ConnectionOrigin] = {}
+        self._pending_connection_deadlines: Dict[str, float] = {}
         self._unauthenticated_connections: Set[socket.socket] = set()
         self._outbound_attempts: Set[str] = set()
         self._outbound_attempt_origins: Dict[str, ConnectionOrigin] = {}
@@ -48,9 +50,12 @@ class StateTracker(
         self._expired_pending_connections: Dict[str, float] = {}
         self._scheduled_auto_reconnects: Set[str] = set()
         self._unacked_messages: Dict[str, Dict[str, Tuple[str, str]]] = {}
+        self._message_request_ids: Dict[str, str] = {}
         self._recent_live_msg_ids: Dict[str, List[str]] = {}
+        self._locally_terminated_sockets: Set[socket.socket] = set()
         self._drop_tunnels: Dict[str, DropTunnelState] = {}
         self._live_reconnect_grace: Dict[str, float] = {}
+        self._local_recovery_opt_outs: Dict[str, float] = {}
         self._retunnel_reconnects: Set[str] = set()
         self._retunnel_in_progress: Set[str] = set()
         self._retunnel_recovery_retry_counts: Dict[str, int] = {}
@@ -58,4 +63,4 @@ class StateTracker(
         self._ui_focus_counts: Dict[str, int] = {}
 
 
-__all__ = ['PendingConnectionReason', 'StateTracker']
+__all__ = ['PendingConnectionReason', 'PendingConnectionSnapshot', 'StateTracker']

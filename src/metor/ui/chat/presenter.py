@@ -4,6 +4,12 @@ Module providing stateless text formatting and ANSI color logic for the interact
 
 from typing import Optional, List
 
+from metor.core.api import (
+    ConnectionOrigin,
+    PendingConnectionEntry,
+    PendingConnectionReasonCode,
+    UnreadInboxSummaryEntry,
+)
 from metor.ui import Theme, UIPresenter
 from metor.ui.models import StatusTone
 
@@ -52,6 +58,98 @@ class ChatPresenter:
             lines.append('Pending session:')
             for p in pending:
                 lines.append(f'   {Theme.DARK_GREY}{p}{Theme.RESET}')
+
+        return '\n'.join(lines)
+
+    @staticmethod
+    def _format_pending_startup_entry(entry: PendingConnectionEntry) -> str:
+        """
+        Formats one retained pending-request startup entry.
+
+        Args:
+            entry (PendingConnectionEntry): The retained pending request.
+
+        Returns:
+            str: The formatted startup summary line.
+        """
+        line: str
+        if entry.reason is PendingConnectionReasonCode.CONSUMER_ABSENT:
+            if entry.origin in (
+                ConnectionOrigin.AUTO_RECONNECT,
+                ConnectionOrigin.GRACE_RECONNECT,
+                ConnectionOrigin.RETUNNEL,
+            ):
+                line = f'{entry.alias}: recovery reconnect waiting for chat attach'
+            else:
+                line = (
+                    f'{entry.alias}: incoming live request retained until chat attach'
+                )
+        else:
+            line = f'{entry.alias}: incoming live request waiting for /accept'
+
+        expiry_label: str = UIPresenter.format_timestamp_label(entry.expires_at)
+        if expiry_label:
+            line += f' until {expiry_label}'
+        return line
+
+    @staticmethod
+    def _format_unread_startup_entry(entry: UnreadInboxSummaryEntry) -> str:
+        """
+        Formats one unread-summary startup entry.
+
+        Args:
+            entry (UnreadInboxSummaryEntry): The unread summary entry.
+
+        Returns:
+            str: The formatted startup summary line.
+        """
+        message_word: str = 'message' if entry.total_unread == 1 else 'messages'
+        detail_parts: List[str] = []
+        if entry.drop_unread > 0:
+            detail_parts.append(f'{entry.drop_unread} drop')
+        if entry.live_unread > 0:
+            detail_parts.append(f'{entry.live_unread} live')
+
+        detail_suffix: str = ''
+        if detail_parts:
+            detail_suffix = f' ({", ".join(detail_parts)})'
+
+        return (
+            f'{entry.alias}: {entry.total_unread} unread {message_word}{detail_suffix}'
+        )
+
+    @staticmethod
+    def format_startup_recovery(
+        pending: List[PendingConnectionEntry],
+        unread: List[UnreadInboxSummaryEntry],
+    ) -> str:
+        """
+        Formats the first-attach recovery summary for chat bootstrap.
+
+        Args:
+            pending (List[PendingConnectionEntry]): Retained pending live requests.
+            unread (List[UnreadInboxSummaryEntry]): Unread inbox summaries.
+
+        Returns:
+            str: The formatted recovery summary, or an empty string.
+        """
+        if not pending and not unread:
+            return ''
+
+        lines: List[str] = ['Startup summary:']
+        if pending:
+            lines.append('Retained requests:')
+            for entry in pending:
+                lines.append(f'  {ChatPresenter._format_pending_startup_entry(entry)}')
+
+        if unread:
+            if pending:
+                lines.append('')
+            lines.append('Unread inbox:')
+            for unread_entry in unread:
+                lines.append(
+                    f'  {ChatPresenter._format_unread_startup_entry(unread_entry)}'
+                )
 
         return '\n'.join(lines)
 

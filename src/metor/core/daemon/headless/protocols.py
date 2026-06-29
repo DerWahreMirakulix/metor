@@ -9,6 +9,7 @@ from metor.core.api import IpcCommand, IpcEvent
 from metor.core.daemon.handlers import (
     ConfigCommandHandler,
     DatabaseCommandHandler,
+    ProfileCommandHandler,
     SystemCommandHandler,
 )
 from metor.data.profile import ProfileManager
@@ -71,6 +72,19 @@ class HeadlessDaemonProtocol(Protocol):
 
         Returns:
             SystemCommandHandler: The active system handler.
+        """
+        ...
+
+    @property
+    def _profile_handler(self) -> ProfileCommandHandler:
+        """
+        Returns the profile handler used for local lifecycle operations.
+
+        Args:
+            None
+
+        Returns:
+            ProfileCommandHandler: The active profile handler.
         """
         ...
 

@@ -1,13 +1,15 @@
 """Helpers for chat transport and connection lifecycle event handling."""
 
-from typing import Dict
+from typing import Dict, List
 
 from metor.core.api import (
     AutoReconnectScheduledEvent,
     ConnectedEvent,
+    ConnectionActor,
     ConnectionAutoAcceptedEvent,
     ConnectionConnectingEvent,
     ConnectionFailedEvent,
+    ConnectionOrigin,
     ConnectionPendingEvent,
     ConnectionReasonCode,
     ConnectionRejectedEvent,
@@ -20,9 +22,122 @@ from metor.core.api import (
     NoPendingConnectionEvent,
     PendingConnectionExpiredEvent,
     PeerNotFoundEvent,
+    MsgCommand,
+    RuntimeErrorCode,
+    RetunnelFailedEvent,
+    RetunnelInitiatedEvent,
+    RetunnelSuccessEvent,
+    SendDropCommand,
 )
 
+from metor.ui.chat.models import ChatTransportState
 from metor.ui.chat.event.protocols import EventHandlerProtocol
+
+
+def _refresh_focus_prompt(handler: EventHandlerProtocol, alias: str) -> None:
+    """
+    Re-renders the focused prompt when one peer transport state changes.
+
+    Args:
+        handler (EventHandlerProtocol): The owning EventHandler instance.
+        alias (str): The affected peer alias.
+
+    Returns:
+        None
+    """
+    if handler._session.focused_alias != alias:
+        return
+
+    handler._renderer.set_focus(alias, handler._session.get_transport_state(alias))
+
+
+def _resolve_outgoing_target(
+    handler: EventHandlerProtocol,
+    alias: str,
+    onion: str | None,
+) -> str:
+    """
+    Resolves the freshest alias to use for one buffered outgoing send.
+
+    Args:
+        handler (EventHandlerProtocol): The owning EventHandler instance.
+        alias (str): The buffered alias fallback.
+        onion (str | None): The stable peer onion identity.
+
+    Returns:
+        str: The current alias to address.
+    """
+    resolved_alias: str | None = handler._session.get_peer_alias(onion, alias)
+    return resolved_alias or alias
+
+
+def _flush_buffered_outgoing_live(
+    handler: EventHandlerProtocol,
+    alias: str,
+    onion: str | None,
+) -> None:
+    """
+    Sends locally buffered outgoing messages over live transport.
+
+    Args:
+        handler (EventHandlerProtocol): The owning EventHandler instance.
+        alias (str): The peer alias.
+        onion (str | None): The stable peer onion identity.
+
+    Returns:
+        None
+    """
+    buffered_messages = handler._session.pop_buffered_outgoing_messages(alias, onion)
+    for buffered_message in buffered_messages:
+        handler._ipc.send_command(
+            MsgCommand(
+                target=_resolve_outgoing_target(
+                    handler,
+                    buffered_message.alias,
+                    buffered_message.onion,
+                ),
+                text=buffered_message.text,
+                msg_id=buffered_message.msg_id,
+            )
+        )
+
+
+def _flush_buffered_outgoing_drop(
+    handler: EventHandlerProtocol,
+    alias: str,
+    onion: str | None,
+) -> None:
+    """
+    Converts locally buffered outgoing messages into drops.
+
+    Args:
+        handler (EventHandlerProtocol): The owning EventHandler instance.
+        alias (str): The peer alias.
+        onion (str | None): The stable peer onion identity.
+
+    Returns:
+        None
+    """
+    buffered_messages = handler._session.pop_buffered_outgoing_messages(alias, onion)
+    if not buffered_messages:
+        return
+
+    buffered_msg_ids: List[str] = []
+    for buffered_message in buffered_messages:
+        buffered_msg_ids.append(buffered_message.msg_id)
+        handler._ipc.send_command(
+            SendDropCommand(
+                target=_resolve_outgoing_target(
+                    handler,
+                    buffered_message.alias,
+                    buffered_message.onion,
+                ),
+                text=buffered_message.text,
+                msg_id=buffered_message.msg_id,
+            )
+        )
+
+    handler._renderer.apply_fallback_to_drop(buffered_msg_ids)
 
 
 def handle_transport_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool:
@@ -52,22 +167,54 @@ def handle_transport_event(handler: EventHandlerProtocol, event: IpcEvent) -> bo
         handler._remember_peer(event.alias, event.onion)
         if event.alias not in handler._session.pending_connections:
             handler._session.pending_connections.append(event.alias)
+        if event.origin in (
+            ConnectionOrigin.AUTO_RECONNECT,
+            ConnectionOrigin.GRACE_RECONNECT,
+        ):
+            handler._session.set_transport_state(
+                ChatTransportState.RECONNECTING,
+                event.alias,
+                event.onion,
+            )
+        elif event.origin is ConnectionOrigin.RETUNNEL:
+            handler._session.set_transport_state(
+                ChatTransportState.SWITCHING,
+                event.alias,
+                event.onion,
+            )
         handler._print_translated(
             event.event_type,
             {'origin': event.origin, 'actor': event.actor},
             alias=event.alias,
             onion=event.onion,
         )
+        _refresh_focus_prompt(handler, event.alias)
         return True
 
     if isinstance(event, ConnectionConnectingEvent):
         handler._remember_peer(event.alias, event.onion)
+        if event.origin in (
+            ConnectionOrigin.AUTO_RECONNECT,
+            ConnectionOrigin.GRACE_RECONNECT,
+        ):
+            handler._session.set_transport_state(
+                ChatTransportState.RECONNECTING,
+                event.alias,
+                event.onion,
+            )
+        elif event.origin is ConnectionOrigin.RETUNNEL:
+            handler._session.set_transport_state(
+                ChatTransportState.SWITCHING,
+                event.alias,
+                event.onion,
+            )
         handler._print_translated(
             event.event_type,
             {'origin': event.origin, 'actor': event.actor},
             alias=event.alias,
             onion=event.onion,
         )
+        _refresh_focus_prompt(handler, event.alias)
         return True
 
     if isinstance(event, ConnectionAutoAcceptedEvent):
@@ -84,6 +231,21 @@ def handle_transport_event(handler: EventHandlerProtocol, event: IpcEvent) -> bo
 
     if isinstance(event, ConnectionRetryEvent):
         handler._remember_peer(event.alias, event.onion)
+        if event.origin in (
+            ConnectionOrigin.AUTO_RECONNECT,
+            ConnectionOrigin.GRACE_RECONNECT,
+        ):
+            handler._session.set_transport_state(
+                ChatTransportState.RECONNECTING,
+                event.alias,
+                event.onion,
+            )
+        elif event.origin is ConnectionOrigin.RETUNNEL:
+            handler._session.set_transport_state(
+                ChatTransportState.SWITCHING,
+                event.alias,
+                event.onion,
+            )
         handler._print_translated(
             event.event_type,
             {
@@ -95,6 +257,7 @@ def handle_transport_event(handler: EventHandlerProtocol, event: IpcEvent) -> bo
             alias=event.alias,
             onion=event.onion,
         )
+        _refresh_focus_prompt(handler, event.alias)
         return True
 
     if isinstance(event, NoPendingConnectionEvent):
@@ -185,6 +348,14 @@ def handle_transport_event(handler: EventHandlerProtocol, event: IpcEvent) -> bo
             alias=event.alias,
             onion=event.onion,
         )
+        if event.origin is ConnectionOrigin.AUTO_RECONNECT:
+            handler._session.set_transport_state(
+                ChatTransportState.DROP,
+                event.alias,
+                event.onion,
+            )
+            _flush_buffered_outgoing_drop(handler, event.alias, event.onion)
+        _refresh_focus_prompt(handler, event.alias)
         return True
 
     if isinstance(event, ConnectionRejectedEvent):
@@ -221,20 +392,99 @@ def handle_transport_event(handler: EventHandlerProtocol, event: IpcEvent) -> bo
 
     if isinstance(event, AutoReconnectScheduledEvent):
         handler._remember_peer(event.alias, event.onion)
+        handler._session.set_transport_state(
+            ChatTransportState.RECONNECTING,
+            event.alias,
+            event.onion,
+        )
         handler._print_translated(
             event.event_type,
             {'origin': event.origin, 'actor': event.actor},
             alias=event.alias,
             onion=event.onion,
         )
+        _refresh_focus_prompt(handler, event.alias)
         return True
 
-    if isinstance(event, ConnectedEvent):
+    if isinstance(event, RetunnelInitiatedEvent):
         handler._remember_peer(event.alias, event.onion)
+        handler._session.mark_retunneling(event.alias, event.onion)
+        handler._print_translated(
+            event.event_type,
+            alias=event.alias,
+            onion=event.onion,
+        )
+        _refresh_focus_prompt(handler, event.alias)
+        return True
+
+    if isinstance(event, RetunnelSuccessEvent):
+        handler._remember_peer(event.alias, event.onion)
+        handler._session.clear_retunneling(event.alias, event.onion)
         if event.alias not in handler._session.active_connections:
             handler._session.active_connections.append(event.alias)
         if event.alias in handler._session.pending_connections:
             handler._session.pending_connections.remove(event.alias)
+        handler._session.clear_transport_state(event.alias, event.onion)
+        handler._print_translated(
+            event.event_type,
+            alias=event.alias,
+            onion=event.onion,
+        )
+        _flush_buffered_outgoing_live(handler, event.alias, event.onion)
+        _refresh_focus_prompt(handler, event.alias)
+        return True
+
+    if isinstance(event, RetunnelFailedEvent):
+        handler._remember_peer(event.alias, event.onion)
+        handler._session.clear_retunneling(event.alias, event.onion)
+        handler._print_translated(
+            event.event_type,
+            {
+                'error': event.error,
+                'error_code': event.error_code,
+                'error_detail': event.error_detail,
+            },
+            alias=event.alias,
+            onion=event.onion,
+        )
+        terminal_peer_opt_out: bool = event.error_code in {
+            RuntimeErrorCode.PEER_ENDED_SESSION,
+            RuntimeErrorCode.PEER_REJECTED_RECONNECT,
+        }
+        if terminal_peer_opt_out:
+            handler._session.set_transport_state(
+                ChatTransportState.DROP,
+                event.alias,
+                event.onion,
+            )
+            _flush_buffered_outgoing_drop(handler, event.alias, event.onion)
+            _refresh_focus_prompt(handler, event.alias)
+            return True
+
+        if handler._has_auto_reconnect():
+            handler._session.set_transport_state(
+                ChatTransportState.RECONNECTING,
+                event.alias,
+                event.onion,
+            )
+        else:
+            handler._session.set_transport_state(
+                ChatTransportState.DROP,
+                event.alias,
+                event.onion,
+            )
+            _flush_buffered_outgoing_drop(handler, event.alias, event.onion)
+        _refresh_focus_prompt(handler, event.alias)
+        return True
+
+    if isinstance(event, ConnectedEvent):
+        handler._remember_peer(event.alias, event.onion)
+        handler._session.clear_retunneling(event.alias, event.onion)
+        if event.alias not in handler._session.active_connections:
+            handler._session.active_connections.append(event.alias)
+        if event.alias in handler._session.pending_connections:
+            handler._session.pending_connections.remove(event.alias)
+        handler._session.clear_transport_state(event.alias, event.onion)
 
         handler._print_translated(
             event.event_type,
@@ -243,8 +493,9 @@ def handle_transport_event(handler: EventHandlerProtocol, event: IpcEvent) -> bo
             onion=event.onion,
         )
 
-        if handler._session.focused_alias == event.alias:
-            handler._renderer.set_focus(event.alias, is_live=True)
+        _flush_buffered_outgoing_live(handler, event.alias, event.onion)
+
+        _refresh_focus_prompt(handler, event.alias)
 
         should_auto_focus: bool = False
         if handler._matches_focus_target(
@@ -285,8 +536,47 @@ def handle_transport_event(handler: EventHandlerProtocol, event: IpcEvent) -> bo
         if event.alias in handler._session.pending_connections:
             handler._session.pending_connections.remove(event.alias)
 
+        daemon_retunnel_recovery: bool = (
+            event.actor is ConnectionActor.SYSTEM
+            and event.origin is ConnectionOrigin.RETUNNEL
+            and event.reason_code is not ConnectionReasonCode.OUTBOUND_ATTEMPT_REJECTED
+            and handler._has_auto_reconnect()
+        )
+
         if handler._session.focused_alias == event.alias:
-            handler._renderer.set_focus(event.alias, is_live=False)
+            if event.actor is ConnectionActor.LOCAL:
+                handler._session.clear_retunneling(event.alias, event.onion)
+                handler._session.clear_transport_state(event.alias, event.onion)
+                handler._switch_focus(None, hide_message=True, sync_daemon=True)
+            else:
+                handler._session.clear_retunneling(event.alias, event.onion)
+                if daemon_retunnel_recovery:
+                    handler._session.set_transport_state(
+                        ChatTransportState.RECONNECTING,
+                        event.alias,
+                        event.onion,
+                    )
+                else:
+                    handler._session.set_transport_state(
+                        ChatTransportState.DROP,
+                        event.alias,
+                        event.onion,
+                    )
+                _refresh_focus_prompt(handler, event.alias)
+        else:
+            handler._session.clear_retunneling(event.alias, event.onion)
+            if daemon_retunnel_recovery:
+                handler._session.set_transport_state(
+                    ChatTransportState.RECONNECTING,
+                    event.alias,
+                    event.onion,
+                )
+            else:
+                handler._session.set_transport_state(
+                    ChatTransportState.DROP,
+                    event.alias,
+                    event.onion,
+                )
         return True
 
     return False

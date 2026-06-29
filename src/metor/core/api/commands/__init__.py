@@ -22,11 +22,19 @@ from metor.core.api.commands.messages import (
     MsgCommand,
     SendDropCommand,
 )
+from metor.core.api.commands.profile import (
+    AddProfileCommand,
+    MigrateProfileSecurityCommand,
+    RemoveProfileCommand,
+    RenameProfileCommand,
+    SetDefaultProfileCommand,
+)
 from metor.core.api.commands.session import (
     AcceptCommand,
     AuthenticateSessionCommand,
     ConnectCommand,
     DisconnectCommand,
+    GetChatStartupStateCommand,
     GetConnectionsCommand,
     InitCommand,
     RegisterLiveConsumerCommand,
@@ -37,7 +45,9 @@ from metor.core.api.commands.session import (
 )
 from metor.core.api.commands.settings import (
     GetConfigCommand,
+    GetConfigListCommand,
     GetSettingCommand,
+    GetSettingsListCommand,
     SetConfigCommand,
     SetSettingCommand,
     SyncConfigCommand,
@@ -47,6 +57,7 @@ from metor.core.api.commands.system import ClearProfileDbCommand, SelfDestructCo
 
 __all__ = [
     'InitCommand',
+    'GetChatStartupStateCommand',
     'RegisterLiveConsumerCommand',
     'GetConnectionsCommand',
     'ConnectCommand',
@@ -62,6 +73,11 @@ __all__ = [
     'RemoveContactCommand',
     'RenameContactCommand',
     'ClearContactsCommand',
+    'AddProfileCommand',
+    'MigrateProfileSecurityCommand',
+    'RemoveProfileCommand',
+    'RenameProfileCommand',
+    'SetDefaultProfileCommand',
     'MsgCommand',
     'SendDropCommand',
     'GetInboxCommand',
@@ -76,8 +92,10 @@ __all__ = [
     'GenerateAddressCommand',
     'SetSettingCommand',
     'GetSettingCommand',
+    'GetSettingsListCommand',
     'SetConfigCommand',
     'GetConfigCommand',
+    'GetConfigListCommand',
     'SyncConfigCommand',
     'ClearProfileDbCommand',
     'SelfDestructCommand',

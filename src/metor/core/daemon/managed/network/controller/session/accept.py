@@ -55,11 +55,18 @@ def accept(
                 trigger=origin,
                 detail_code=HistoryReasonCode.RETUNNEL_PENDING_CONNECTION_MISSING,
             )
-            controller._broadcast_retunnel_failure(
-                alias,
-                onion,
-                'Retunnel pending connection missing',
-            )
+            if controller._state.is_live_active(onion):
+                controller._broadcast_retunnel_preserved_failure(
+                    alias,
+                    onion,
+                    'Retunnel pending connection missing',
+                )
+            else:
+                controller._broadcast_retunnel_failure(
+                    alias,
+                    onion,
+                    'Retunnel pending connection missing',
+                )
             return
         if controller._state.consume_recent_pending_expiry(onion):
             controller._broadcast(
@@ -91,11 +98,18 @@ def accept(
             detail_code=HistoryReasonCode.LATE_ACCEPTANCE_TIMEOUT,
         )
         if controller._state.is_retunneling(onion):
-            controller._broadcast_retunnel_failure(
-                alias,
-                onion,
-                'Late acceptance timeout',
-            )
+            if controller._state.is_live_active(onion):
+                controller._broadcast_retunnel_preserved_failure(
+                    alias,
+                    onion,
+                    'Late acceptance timeout',
+                )
+            else:
+                controller._broadcast_retunnel_failure(
+                    alias,
+                    onion,
+                    'Late acceptance timeout',
+                )
         else:
             controller._broadcast(
                 PendingConnectionExpiredEvent(

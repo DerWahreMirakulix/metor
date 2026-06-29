@@ -6,14 +6,19 @@ import importlib
 import sys
 import unittest
 from pathlib import Path
-from typing import Callable
+from typing import Callable, cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.core.api import (
+    EventType,
+    IpcEvent,
     MessageDirectionCode,
+    MessageEntry,
     MessageStatusCode,
     MessagesDataEvent,
+    ProfileOperationCode,
+    ProfileOperationResultEvent,
 )
 from metor.ui import UIPresenter
 
@@ -70,13 +75,7 @@ def _is_ui_core_violation(line: str) -> bool:
 def _is_ui_data_violation(line: str) -> bool:
     """Determines whether one UI import crosses into forbidden data-layer modules."""
 
-    allowed_prefixes: tuple[str, ...] = (
-        'from metor.data.profile',
-        'import metor.data.profile',
-        'from metor.data.settings',
-        'import metor.data.settings',
-    )
-    if line.startswith(allowed_prefixes):
+    if _is_package_facade_import(line, 'metor.data'):
         return False
 
     return line.startswith('from metor.data') or line.startswith('import metor.data')
@@ -86,6 +85,22 @@ def _is_ui_application_violation(line: str) -> bool:
     """Determines whether one application-layer file imports UI code."""
 
     return line.startswith('from metor.ui') or line.startswith('import metor.ui')
+
+
+def _is_ui_profile_mutation_violation(line: str) -> bool:
+    """Determines whether one UI line bypasses the local profile orchestration boundary."""
+
+    forbidden_fragments: tuple[str, ...] = (
+        'ProfileManager.add_profile_folder(',
+        'ProfileManager.migrate_profile_security(',
+        'ProfileManager.remove_profile_folder(',
+        'ProfileManager.rename_profile_folder(',
+        'ProfileManager.set_default_profile(',
+        '.clear_daemon_port(',
+        '.paths.get_daemon_port_file(',
+        '.paths.get_daemon_pid_file(',
+    )
+    return any(fragment in line for fragment in forbidden_fragments)
 
 
 def _is_lower_layer_application_violation(line: str) -> bool:
@@ -113,7 +128,21 @@ def _is_application_daemon_implementation_violation(line: str) -> bool:
 
 
 class UiBoundaryTests(unittest.TestCase):
+    """
+    Covers UI boundary regression scenarios.
+    """
+
     def test_ui_imports_only_ipc_contracts_from_core(self) -> None:
+        """
+        Verifies that UI imports only IPC contracts from core.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         violations: list[str] = _collect_import_violations(
             UI_ROOT,
             _is_ui_core_violation,
@@ -122,6 +151,16 @@ class UiBoundaryTests(unittest.TestCase):
         self.assertEqual(violations, [])
 
     def test_ui_imports_only_profile_and_settings_from_data(self) -> None:
+        """
+        Verifies that UI imports only profile and settings from data.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         violations: list[str] = _collect_import_violations(
             UI_ROOT,
             _is_ui_data_violation,
@@ -130,6 +169,16 @@ class UiBoundaryTests(unittest.TestCase):
         self.assertEqual(violations, [])
 
     def test_application_layer_does_not_import_ui(self) -> None:
+        """
+        Verifies that application layer does not import UI.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         violations: list[str] = _collect_import_violations(
             APPLICATION_ROOT,
             _is_ui_application_violation,
@@ -137,7 +186,35 @@ class UiBoundaryTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_ui_avoids_direct_profile_mutation_and_runtime_state_paths(self) -> None:
+        """
+        Verifies that UI avoids direct profile mutation and runtime state paths.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        violations: list[str] = _collect_import_violations(
+            UI_ROOT,
+            _is_ui_profile_mutation_violation,
+        )
+
+        self.assertEqual(violations, [])
+
     def test_application_imports_daemon_only_via_package_facades(self) -> None:
+        """
+        Verifies that application imports daemon only via package facades.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         violations: list[str] = _collect_import_violations(
             APPLICATION_ROOT,
             _is_application_daemon_implementation_violation,
@@ -146,6 +223,16 @@ class UiBoundaryTests(unittest.TestCase):
         self.assertEqual(violations, [])
 
     def test_lower_layers_do_not_import_application(self) -> None:
+        """
+        Verifies that lower layers do not import application.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         violations: list[str] = []
 
         for root in LOWER_LAYER_ROOTS:
@@ -159,6 +246,16 @@ class UiBoundaryTests(unittest.TestCase):
         self.assertEqual(violations, [])
 
     def test_core_daemon_root_facade_exports_only_shared_bootstrap(self) -> None:
+        """
+        Verifies that core daemon root facade exports only shared bootstrap.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         daemon_package = importlib.import_module('metor.core.daemon')
 
         self.assertTrue(hasattr(daemon_package, 'verify_master_password'))
@@ -172,6 +269,16 @@ class UiBoundaryTests(unittest.TestCase):
         self.assertFalse(hasattr(daemon_package, 'CorruptedStorageError'))
 
     def test_managed_daemon_package_exports_managed_runtime_facade(self) -> None:
+        """
+        Verifies that managed daemon package exports managed runtime facade.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         managed_package = importlib.import_module('metor.core.daemon.managed')
 
         self.assertTrue(hasattr(managed_package, 'create_managed_daemon'))
@@ -182,6 +289,16 @@ class UiBoundaryTests(unittest.TestCase):
         self.assertFalse(hasattr(managed_package, 'build_runtime'))
 
     def test_shared_handlers_facade_excludes_managed_network_handler(self) -> None:
+        """
+        Verifies that shared handlers facade excludes managed network handler.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         handlers_package = importlib.import_module('metor.core.daemon.handlers')
 
         self.assertTrue(hasattr(handlers_package, 'DatabaseCommandHandler'))
@@ -190,20 +307,43 @@ class UiBoundaryTests(unittest.TestCase):
         self.assertFalse(hasattr(handlers_package, 'NetworkCommandHandler'))
 
     def test_managed_handlers_facade_exports_network_handler(self) -> None:
+        """
+        Verifies that managed handlers facade exports network handler.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         handlers_package = importlib.import_module('metor.core.daemon.managed.handlers')
 
         self.assertTrue(hasattr(handlers_package, 'NetworkCommandHandler'))
 
     def test_messages_data_event_casts_entries_to_api_message_enums(self) -> None:
+        """
+        Verifies that messages data event casts entries to api message enums.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         event = MessagesDataEvent(
-            messages=[
-                {
-                    'direction': 'out',
-                    'status': 'delivered',
-                    'payload': 'hello',
-                    'timestamp': '2026-04-04T18:30:00+00:00',
-                }
-            ],
+            messages=cast(
+                list[MessageEntry],
+                [
+                    {
+                        'direction': 'out',
+                        'status': 'delivered',
+                        'payload': 'hello',
+                        'timestamp': '2026-04-04T18:30:00+00:00',
+                    }
+                ],
+            ),
             alias='peer',
             onion='peer.onion',
         )
@@ -216,6 +356,29 @@ class UiBoundaryTests(unittest.TestCase):
         rendered: str = UIPresenter.format_messages(event)
 
         self.assertIn('To peer:', rendered)
+
+    def test_profile_operation_result_event_casts_operation_code(self) -> None:
+        """
+        Verifies that profile operation result event casts operation code.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        event = IpcEvent.from_dict(
+            {
+                'event_type': EventType.PROFILE_OPERATION_RESULT.value,
+                'success': True,
+                'operation_type': ProfileOperationCode.PROFILE_REMOVED.value,
+                'params': {'profile': 'alice'},
+            }
+        )
+
+        typed_event = cast(ProfileOperationResultEvent, event)
+        self.assertIs(typed_event.operation_type, ProfileOperationCode.PROFILE_REMOVED)
 
 
 if __name__ == '__main__':

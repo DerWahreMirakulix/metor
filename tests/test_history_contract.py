@@ -5,6 +5,7 @@
 import sys
 import unittest
 from pathlib import Path
+from typing import cast
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
@@ -13,6 +14,7 @@ from metor.core.api import (
     HistoryEntryActor,
     HistoryEntryFamily,
     HistoryEntryReasonCode,
+    HistoryEntryTrigger,
     HistoryRawDataEvent,
     HistoryRawEventCode,
     HistorySummaryEventCode,
@@ -33,12 +35,36 @@ from metor.ui import UIPresenter
 
 
 class HistoryContractTests(unittest.TestCase):
+    """
+    Covers history contract regression scenarios.
+    """
+
     def test_history_event_family_mapping_is_explicit(self) -> None:
+        """
+        Verifies that history event family mapping is explicit.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         self.assertIs(HistoryEvent.REQUESTED.family, HistoryFamily.LIVE)
         self.assertIs(HistoryEvent.QUEUED.family, HistoryFamily.DROP)
         self.assertIs(HistoryEvent.TUNNEL_CLOSED.family, HistoryFamily.DROP)
 
     def test_history_projector_uses_typed_raw_entries(self) -> None:
+        """
+        Verifies that history projector uses typed raw entries.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         entries = [
             HistoryLedgerEntry(
                 timestamp='2026-04-05T10:00:00+00:00',
@@ -89,38 +115,54 @@ class HistoryContractTests(unittest.TestCase):
         self.assertIs(projected[1].family, HistoryFamily.DROP)
 
     def test_history_events_cast_nested_entries_to_typed_codes(self) -> None:
+        """
+        Verifies that history events cast nested entries to typed codes.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
         history_event = HistoryDataEvent(
-            entries=[
-                {
-                    'timestamp': '2026-04-05T10:03:00+00:00',
-                    'family': 'live',
-                    'event_code': 'connection_failed',
-                    'peer_onion': 'peer.onion',
-                    'actor': 'system',
-                    'trigger': 'auto_reconnect',
-                    'detail_code': 'retry_exhausted',
-                    'detail_text': '',
-                    'flow_id': 'flow-summary',
-                    'alias': 'peer',
-                }
-            ],
+            entries=cast(
+                list[SummaryHistoryEntry],
+                [
+                    {
+                        'timestamp': '2026-04-05T10:03:00+00:00',
+                        'family': 'live',
+                        'event_code': 'connection_failed',
+                        'peer_onion': 'peer.onion',
+                        'actor': 'system',
+                        'trigger': HistoryEntryTrigger.AUTO_RECONNECT.value,
+                        'detail_code': 'retry_exhausted',
+                        'detail_text': '',
+                        'flow_id': 'flow-summary',
+                        'alias': 'peer',
+                    }
+                ],
+            ),
             profile='default',
         )
         raw_event = HistoryRawDataEvent(
-            entries=[
-                {
-                    'timestamp': '2026-04-05T10:04:00+00:00',
-                    'family': 'drop',
-                    'event_code': 'queued',
-                    'peer_onion': 'peer.onion',
-                    'actor': 'system',
-                    'trigger': 'manual',
-                    'detail_code': 'manual_fallback_to_drop',
-                    'detail_text': '',
-                    'flow_id': 'flow-raw',
-                    'alias': 'peer',
-                }
-            ],
+            entries=cast(
+                list[RawHistoryEntry],
+                [
+                    {
+                        'timestamp': '2026-04-05T10:04:00+00:00',
+                        'family': 'drop',
+                        'event_code': 'queued',
+                        'peer_onion': 'peer.onion',
+                        'actor': 'system',
+                        'trigger': HistoryEntryTrigger.MANUAL.value,
+                        'detail_code': 'manual_fallback_to_drop',
+                        'detail_text': '',
+                        'flow_id': 'flow-raw',
+                        'alias': 'peer',
+                    }
+                ],
+            ),
             profile='default',
         )
 

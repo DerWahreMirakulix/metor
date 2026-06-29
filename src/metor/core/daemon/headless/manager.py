@@ -16,6 +16,7 @@ from metor.utils import Constants
 from metor.core.daemon.handlers import (
     ConfigCommandHandler,
     DatabaseCommandHandler,
+    ProfileCommandHandler,
     SystemCommandHandler,
 )
 from metor.core.daemon.headless.dispatch import process_command, validate_password
@@ -155,6 +156,19 @@ class HeadlessDaemon:
             SystemCommandHandler: The active instance.
         """
         return SystemCommandHandler(self._pm, self._tm)
+
+    @cached_property
+    def _profile_handler(self) -> ProfileCommandHandler:
+        """
+        Lazily loads the ProfileCommandHandler.
+
+        Args:
+            None
+
+        Returns:
+            ProfileCommandHandler: The active instance.
+        """
+        return ProfileCommandHandler()
 
     def __enter__(self) -> 'HeadlessDaemon':
         """

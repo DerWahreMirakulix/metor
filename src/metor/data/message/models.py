@@ -47,6 +47,16 @@ class StoredMessageRecord:
     timestamp: str
 
 
+@dataclass(frozen=True)
+class UnreadInboxSummaryRecord:
+    """Represents one peer unread-summary row for chat startup rendering."""
+
+    contact_onion: str
+    total_unread: int
+    drop_unread: int
+    live_unread: int
+
+
 class MessageClearOperationType(str, Enum):
     """Enumeration of message-clear outcomes independent from IPC events."""
 

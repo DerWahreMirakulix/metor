@@ -26,6 +26,7 @@ class ConnectionActor(str, Enum):
 class ConnectionReasonCode(str, Enum):
     """Enumeration of machine-readable live lifecycle subreasons shared across the IPC boundary."""
 
+    PEER_ENDED_SESSION = 'peer_ended_session'
     RETRY_EXHAUSTED = 'retry_exhausted'
     MAX_CONNECTIONS_REACHED = 'max_connections_reached'
     RETUNNEL_PENDING_CONNECTION_MISSING = 'retunnel_pending_connection_missing'
@@ -38,3 +39,10 @@ class ConnectionReasonCode(str, Enum):
     MUTUAL_TIEBREAKER_LOSER = 'mutual_tiebreaker_loser'
     DUPLICATE_INCOMING_CONNECTED = 'duplicate_incoming_connected'
     DUPLICATE_INCOMING_PENDING = 'duplicate_incoming_pending'
+
+
+class PendingConnectionReasonCode(str, Enum):
+    """Enumeration describing why one inbound live request remains pending."""
+
+    USER_ACCEPT = 'user_accept'
+    CONSUMER_ABSENT = 'consumer_absent'

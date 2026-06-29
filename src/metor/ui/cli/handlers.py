@@ -4,28 +4,111 @@ Isolates interactive prompts and subsystem orchestration from the generic router
 """
 
 import sys
-import shutil
 from typing import List, Dict, Optional, Union
 
 from metor.core.api import EventType, JsonValue
 from metor.application import (
+    cleanup_local_runtime,
     CorruptedDaemonStorageError,
     DaemonStatus,
     InvalidDaemonPasswordError,
+    PlaintextLockedDaemonError,
     configure_daemon_runtime_logging,
     run_managed_daemon,
+    start_managed_daemon_process,
 )
-from metor.data.profile import ProfileManager
-from metor.ui import PromptAbortedError, Theme, Translator, prompt_hidden, prompt_text
-from metor.ui.chat import Chat
-from metor.utils import Constants, ProcessManager
-
-from metor.data.profile import (
-    ProfileOperationResult,
-    ProfileOperationType,
+from metor.data import (
+    ChatDaemonAutostartPolicy,
+    ProfileManager,
     ProfileSecurityMode,
+    SettingKey,
 )
+from metor.ui import (
+    PromptAbortedError,
+    PromptOutputSpacer,
+    Theme,
+    Translator,
+    prompt_hidden,
+    prompt_text,
+)
+from metor.ui.chat import Chat
+from metor.ui.cli.errors import format_safe_local_runtime_error
+from metor.utils import Constants, ProcessManager, secure_remove_path, TypeCaster
 from metor.ui.cli.proxy import CliProxy
+
+
+def _prompt_hidden_optional(prompt: str) -> Optional[str]:
+    """
+    Prompts for hidden input while keeping module-local prompt patch hooks intact.
+
+    Args:
+        prompt (str): The rendered prompt text.
+
+    Returns:
+        Optional[str]: The entered text, or None when the input is empty.
+    """
+    value: str = prompt_hidden(prompt)
+    if not value:
+        return None
+    return value
+
+
+def _read_startup_session_auth_password_from_stdin() -> Optional[str]:
+    """
+    Reads one startup-only session-auth password from a detached parent pipe.
+
+    Args:
+        None
+
+    Returns:
+        Optional[str]: The provided password, or None when absent.
+    """
+    password: str = sys.stdin.readline().rstrip('\r\n')
+    if not password:
+        return None
+    return password
+
+
+def _resolve_chat_daemon_autostart_policy(
+    pm: ProfileManager,
+    start_daemon_override: Optional[bool],
+) -> ChatDaemonAutostartPolicy:
+    """
+    Resolves the effective local chat daemon-start policy for one invocation.
+
+    Args:
+        pm (ProfileManager): The active profile configuration.
+        start_daemon_override (Optional[bool]): Optional one-shot CLI override.
+
+    Returns:
+        ChatDaemonAutostartPolicy: The effective policy.
+    """
+    if start_daemon_override is True:
+        return ChatDaemonAutostartPolicy.ALWAYS
+    if start_daemon_override is False:
+        return ChatDaemonAutostartPolicy.NEVER
+
+    return TypeCaster.to_enum(
+        ChatDaemonAutostartPolicy,
+        pm.config.get_str(SettingKey.CHAT_DAEMON_AUTOSTART),
+        ChatDaemonAutostartPolicy.ASK,
+    )
+
+
+def _format_chat_daemon_offline_hint() -> str:
+    """
+    Builds the local chat guidance shown when no daemon startup should occur.
+
+    Args:
+        None
+
+    Returns:
+        str: The user-facing guidance text.
+    """
+    return (
+        "Daemon is not running! Use 'metor daemon' to start it or rerun with "
+        "'metor chat --start-daemon'."
+    )
 
 
 class CommandHandlers:
@@ -48,6 +131,12 @@ class CommandHandlers:
         if status is DaemonStatus.LOCKED_MODE:
             return 'Daemon running in LOCKED mode... Waiting for IPC unlock.'
 
+        if status is DaemonStatus.RUNTIME_ERROR:
+            message: str = str(
+                params.get('message') or 'Unexpected daemon runtime error.'
+            )
+            return f'{Theme.CYAN}[DAEMON-LOG]{Theme.RESET} {message}'
+
         onion: str = str(params.get('onion', ''))
         port: str = str(params.get('port', 'unknown'))
         return (
@@ -56,7 +145,11 @@ class CommandHandlers:
         )
 
     @staticmethod
-    def handle_daemon(pm: ProfileManager, start_locked: bool = False) -> None:
+    def handle_daemon(
+        pm: ProfileManager,
+        start_locked: bool = False,
+        startup_session_auth_stdin: bool = False,
+    ) -> None:
         """
         Authenticates the user and starts the background Daemon subsystem.
         Injects the UI logger callbacks to enforce UI-Agnostic Core domains.
@@ -64,6 +157,7 @@ class CommandHandlers:
         Args:
             pm (ProfileManager): The active profile configuration.
             start_locked (bool): Whether to expose only the IPC server until unlock.
+            startup_session_auth_stdin (bool): Whether plaintext session-auth input should be read from stdin instead of an interactive prompt.
 
         Returns:
             None
@@ -82,24 +176,48 @@ class CommandHandlers:
             return
 
         password: Optional[str] = None
+        session_auth_password: Optional[str] = None
+        output_spacer = PromptOutputSpacer()
+        require_local_auth: bool = pm.config.get_bool(SettingKey.REQUIRE_LOCAL_AUTH)
         if pm.uses_encrypted_storage() and not start_locked:
             try:
-                password = prompt_hidden(
+                password = _prompt_hidden_optional(
                     f'{Theme.GREEN}Enter Master Password: {Theme.RESET}'
                 )
+                output_spacer.mark_prompt()
             except PromptAbortedError:
                 return
 
-            if not password:
-                print('Master password cannot be empty.')
+            if password is None:
+                print(output_spacer.format('Aborted.'))
                 return
+        elif require_local_auth and not start_locked:
+            if startup_session_auth_stdin:
+                session_auth_password = _read_startup_session_auth_password_from_stdin()
+                if session_auth_password is None:
+                    print('Aborted.')
+                    return
+            else:
+                try:
+                    session_auth_password = _prompt_hidden_optional(
+                        f'{Theme.GREEN}Enter Session Auth Password: {Theme.RESET}'
+                    )
+                    output_spacer.mark_prompt()
+                except PromptAbortedError:
+                    return
+
+                if session_auth_password is None:
+                    print(output_spacer.format('Aborted.'))
+                    return
 
         # Inversion of Control: Define UI printing logic here and inject it into Data and Core layers
         def sql_log_cb(line: str) -> None:
+            """Writes one SQLCipher diagnostic line to stdout with its log tag."""
             sys.stdout.write(f'\r\033[K{Theme.CYAN}[SQL-LOG]{Theme.RESET} {line}\n')
             sys.stdout.flush()
 
         def tor_log_cb(line: str) -> None:
+            """Writes one Tor process diagnostic line to stdout with its log tag."""
             sys.stdout.write(f'\r\033[K{Theme.CYAN}[TOR-LOG]{Theme.RESET} {line}\n')
             sys.stdout.flush()
 
@@ -107,13 +225,14 @@ class CommandHandlers:
             code: Union[EventType, DaemonStatus],
             params: Optional[Dict[str, JsonValue]] = None,
         ) -> None:
+            """Translates and prints one daemon startup status event to stdout."""
             if params is None:
                 params = {}
             if isinstance(code, EventType):
                 msg, _ = Translator.get(code, params)
             else:
                 msg = CommandHandlers._format_daemon_status(code, params)
-            sys.stdout.write(f'{msg}\n')
+            sys.stdout.write(f'{output_spacer.format(msg)}\n')
             sys.stdout.flush()
 
         configure_daemon_runtime_logging(sql_log_cb, tor_log_cb)
@@ -123,57 +242,81 @@ class CommandHandlers:
                 run_managed_daemon(
                     pm,
                     password=password,
+                    session_auth_password=session_auth_password,
                     start_locked=True,
                     status_callback=status_cb,
                 )
             except InvalidDaemonPasswordError:
                 msg, _ = Translator.get(EventType.INVALID_PASSWORD)
-                print(msg)
+                print(output_spacer.format(msg))
             except CorruptedDaemonStorageError:
                 msg, _ = Translator.get(EventType.DB_CORRUPTED)
                 print(
-                    f"{msg}\nYou need to run 'metor purge' or manually delete the storage.db."
+                    output_spacer.format(
+                        f"{msg}\nYou need to run 'metor purge' or manually delete the storage.db."
+                    )
                 )
+            except PlaintextLockedDaemonError:
+                print(
+                    output_spacer.format(
+                        'Plaintext profiles cannot be started in locked mode.'
+                    )
+                )
+            except ValueError as exc:
+                print(output_spacer.format(format_safe_local_runtime_error(exc)))
             return
 
         try:
             run_managed_daemon(
                 pm,
                 password=password,
+                session_auth_password=session_auth_password,
                 start_locked=False,
                 status_callback=status_cb,
             )
         except InvalidDaemonPasswordError:
             msg, _ = Translator.get(EventType.INVALID_PASSWORD)
-            print(msg)
+            print(output_spacer.format(msg))
         except CorruptedDaemonStorageError:
             msg, _ = Translator.get(EventType.DB_CORRUPTED)
             print(
-                f"{msg}\nYou need to run 'metor purge' or manually delete the storage.db."
+                output_spacer.format(
+                    f"{msg}\nYou need to run 'metor purge' or manually delete the storage.db."
+                )
+            )
+        except ValueError as exc:
+            print(output_spacer.format(format_safe_local_runtime_error(exc)))
+        except PlaintextLockedDaemonError:
+            print(
+                output_spacer.format(
+                    'Plaintext profiles cannot be started in locked mode.'
+                )
             )
 
     @staticmethod
     def handle_profile_security_migration(
+        proxy: CliProxy,
         name: str,
         target_mode: ProfileSecurityMode,
-    ) -> ProfileOperationResult:
+    ) -> str:
         """
         Interactively migrates one local profile between encrypted and plaintext storage.
 
         Args:
+            proxy (CliProxy): The active CLI proxy used for local headless routing.
             name (str): Target profile name.
             target_mode (ProfileSecurityMode): The requested storage mode.
 
         Returns:
-            ProfileOperationResult: Structured local outcome for the CLI layer.
+            str: The formatted CLI outcome.
         """
         pm: ProfileManager = ProfileManager(name)
         if not pm.exists():
-            return ProfileManager.migrate_profile_security(name, target_mode)
+            return proxy.migrate_profile_security(name, target_mode)
 
         current_mode: ProfileSecurityMode = pm.get_security_mode()
         if current_mode is target_mode:
-            return ProfileManager.migrate_profile_security(name, target_mode)
+            return proxy.migrate_profile_security(name, target_mode)
 
         if target_mode is ProfileSecurityMode.PLAINTEXT:
             print(
@@ -183,39 +326,22 @@ class CommandHandlers:
             try:
                 confirm: str = prompt_text("Type 'yes' to continue: ")
             except PromptAbortedError:
-                return ProfileOperationResult(
-                    False,
-                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                    {'profile': name, 'reason': 'Security migration aborted.'},
-                )
+                return 'Security migration aborted.'
             if confirm.strip().lower() != 'yes':
-                return ProfileOperationResult(
-                    False,
-                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                    {'profile': name, 'reason': 'Security migration aborted.'},
-                )
+                return 'Security migration aborted.'
 
         current_password: Optional[str] = None
+        output_spacer = PromptOutputSpacer()
         if current_mode is ProfileSecurityMode.ENCRYPTED:
             try:
                 current_password = prompt_hidden(
                     f'{Theme.GREEN}Enter Current Master Password: {Theme.RESET}'
                 )
+                output_spacer.mark_prompt()
             except PromptAbortedError:
-                return ProfileOperationResult(
-                    False,
-                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                    {'profile': name, 'reason': 'Security migration aborted.'},
-                )
+                return 'Security migration aborted.'
             if not current_password:
-                return ProfileOperationResult(
-                    False,
-                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                    {
-                        'profile': name,
-                        'reason': 'Current master password cannot be empty.',
-                    },
-                )
+                return output_spacer.format('Current master password cannot be empty.')
 
         new_password: Optional[str] = None
         if target_mode is ProfileSecurityMode.ENCRYPTED:
@@ -223,53 +349,42 @@ class CommandHandlers:
                 new_password = prompt_hidden(
                     f'{Theme.GREEN}Enter New Master Password: {Theme.RESET}'
                 )
+                output_spacer.mark_prompt()
             except PromptAbortedError:
-                return ProfileOperationResult(
-                    False,
-                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                    {'profile': name, 'reason': 'Security migration aborted.'},
-                )
+                return 'Security migration aborted.'
             if not new_password:
-                return ProfileOperationResult(
-                    False,
-                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                    {
-                        'profile': name,
-                        'reason': 'New master password cannot be empty.',
-                    },
-                )
+                return output_spacer.format('New master password cannot be empty.')
 
             try:
                 confirm_password: str = prompt_hidden(
                     f'{Theme.GREEN}Confirm New Master Password: {Theme.RESET}'
                 )
+                output_spacer.mark_prompt()
             except PromptAbortedError:
-                return ProfileOperationResult(
-                    False,
-                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                    {'profile': name, 'reason': 'Security migration aborted.'},
-                )
+                return 'Security migration aborted.'
             if new_password != confirm_password:
-                return ProfileOperationResult(
-                    False,
-                    ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                    {'profile': name, 'reason': 'New master passwords do not match.'},
-                )
+                return output_spacer.format('New master passwords do not match.')
 
-        return ProfileManager.migrate_profile_security(
-            name,
-            target_mode,
-            current_password=current_password,
-            new_password=new_password,
+        return output_spacer.format(
+            proxy.migrate_profile_security(
+                name,
+                target_mode,
+                current_password=current_password,
+                new_password=new_password,
+            )
         )
 
     @staticmethod
-    def handle_chat(pm: ProfileManager) -> None:
+    def handle_chat(
+        pm: ProfileManager,
+        start_daemon_override: Optional[bool] = None,
+    ) -> None:
         """
         Validates daemon state and launches the interactive Chat UI.
 
         Args:
             pm (ProfileManager): The active profile configuration.
+            start_daemon_override (Optional[bool]): Optional one-shot CLI override for local daemon autostart.
 
         Returns:
             None
@@ -278,12 +393,80 @@ class CommandHandlers:
             print(f"Profile '{pm.profile_name}' does not exist.")
             return
 
+        startup_session_auth_password: Optional[str] = None
+        output_spacer = PromptOutputSpacer()
         if not pm.is_daemon_running():
-            msg, _ = Translator.get(EventType.DAEMON_OFFLINE)
-            print(msg)
-            return
+            if pm.is_remote():
+                msg, _ = Translator.get(EventType.DAEMON_OFFLINE)
+                print(msg)
+                return
 
-        chat: Chat = Chat(pm)
+            autostart_policy: ChatDaemonAutostartPolicy = (
+                _resolve_chat_daemon_autostart_policy(
+                    pm,
+                    start_daemon_override,
+                )
+            )
+
+            if autostart_policy is ChatDaemonAutostartPolicy.NEVER:
+                print(output_spacer.format(_format_chat_daemon_offline_hint()))
+                return
+
+            if autostart_policy is ChatDaemonAutostartPolicy.ASK:
+                try:
+                    confirmation: str = prompt_text(
+                        "Type 'yes' to start the local daemon: "
+                    )
+                    output_spacer.mark_prompt()
+                except PromptAbortedError:
+                    return
+
+                if confirmation.strip().lower() != 'yes':
+                    print(output_spacer.format(_format_chat_daemon_offline_hint()))
+                    return
+
+            if pm.uses_plaintext_storage() and pm.config.get_bool(
+                SettingKey.REQUIRE_LOCAL_AUTH
+            ):
+                try:
+                    startup_session_auth_password = _prompt_hidden_optional(
+                        f'{Theme.GREEN}Enter Session Auth Password: {Theme.RESET}'
+                    )
+                    output_spacer.mark_prompt()
+                except PromptAbortedError:
+                    return
+
+                if startup_session_auth_password is None:
+                    print(output_spacer.format('Aborted.'))
+                    return
+
+            print(output_spacer.format('Starting local daemon...'))
+
+            try:
+                daemon_started: bool = start_managed_daemon_process(
+                    pm,
+                    start_locked=pm.uses_encrypted_storage(),
+                    session_auth_password=startup_session_auth_password,
+                )
+            except PlaintextLockedDaemonError:
+                print('Plaintext profiles cannot be started in locked mode.')
+                return
+            except ValueError as exc:
+                print(output_spacer.format(format_safe_local_runtime_error(exc)))
+                return
+
+            if not daemon_started:
+                print(
+                    output_spacer.format(
+                        "Could not start the local daemon. Run 'metor daemon' to inspect foreground startup errors."
+                    )
+                )
+                return
+
+        chat: Chat = Chat(
+            pm,
+            prefilled_session_auth_password=startup_session_auth_password,
+        )
         chat.run()
 
     @staticmethod
@@ -303,27 +486,15 @@ class CommandHandlers:
         else:
             print('Cleaning up Metor processes and daemon state...')
 
-        killed: int = ProcessManager.cleanup_processes(force=force)
-        cleared_runtime_state: int = 0
+        result = cleanup_local_runtime(force=force)
 
-        for profile_name in ProfileManager.get_all_profiles():
-            temp_pm: ProfileManager = ProfileManager(profile_name)
-            if not temp_pm.is_remote():
-                had_runtime_state: bool = (
-                    temp_pm.paths.get_daemon_port_file().exists()
-                    or temp_pm.paths.get_daemon_pid_file().exists()
-                )
-                temp_pm.clear_daemon_port()
-                if had_runtime_state:
-                    cleared_runtime_state += 1
-
-        if killed > 0:
+        if result.killed_processes > 0:
             print(
                 'Cleanup completed. Managed processes were terminated and daemon state was cleared.'
             )
             return
 
-        if cleared_runtime_state > 0:
+        if result.cleared_runtime_state > 0:
             print('Cleanup completed. Daemon state was cleared.')
             return
 
@@ -377,7 +548,7 @@ class CommandHandlers:
 
             ProcessManager.cleanup_processes()
             if Constants.DATA.exists():
-                shutil.rmtree(str(Constants.DATA))
+                secure_remove_path(Constants.DATA)
                 print(f'{Theme.GREEN}Purge complete. All data destroyed.{Theme.RESET}')
         else:
             print(f'{Theme.YELLOW}Purge aborted.{Theme.RESET}')
@@ -409,8 +580,11 @@ class CommandHandlers:
                 continue
 
             proxy: CliProxy = CliProxy(pm)
-            res: str = proxy.nuke_daemon()
-            if 'Error' in res or 'Failed' in res:
+            event = proxy.nuke_daemon_event()
+            if (
+                event is None
+                or event.event_type is not EventType.SELF_DESTRUCT_INITIATED
+            ):
                 failed_remotes.append(r)
             else:
                 print(f"Remote daemon for profile '{r}' nuked successfully.")

@@ -1,14 +1,13 @@
-"""
-Module managing the outbound IPC socket connection to the local Daemon.
-Isolates all raw TCP byte parsing from the Chat Engine logic and thwarts UTF-8 DoS attacks.
-"""
+"""Module managing the outbound IPC socket connection to the local Daemon."""
 
 import socket
 import threading
-import json
-from typing import Callable, Dict, Optional
+from typing import Callable, Optional
 
-from metor.core.api import IpcCommand, IpcEvent, JsonValue
+from metor.core.api import ensure_request_id, IpcCommand, IpcEvent
+from metor.ui.ipc import BufferedIpcEventReader
+
+# Local Package Imports
 from metor.utils import Constants
 
 
@@ -18,6 +17,7 @@ class IpcClient:
     def __init__(
         self,
         port: int,
+        timeout: float,
         on_event: Callable[[IpcEvent], None],
         on_disconnect: Callable[[], None],
     ) -> None:
@@ -26,6 +26,7 @@ class IpcClient:
 
         Args:
             port (int): The local localhost port the Daemon is listening on.
+            timeout (float): Socket timeout used for connect and recv operations.
             on_event (Callable[[IpcEvent], None]): Callback fired when a valid event arrives.
             on_disconnect (Callable[[], None]): Callback fired if the connection drops.
 
@@ -33,6 +34,7 @@ class IpcClient:
             None
         """
         self._port: int = port
+        self._timeout: float = timeout
         self._on_event: Callable[[IpcEvent], None] = on_event
         self._on_disconnect: Callable[[], None] = on_disconnect
 
@@ -41,13 +43,14 @@ class IpcClient:
         self._listener_thread: Optional[threading.Thread] = None
         self._disconnect_lock: threading.Lock = threading.Lock()
         self._disconnect_notified: bool = False
+        self._reader: BufferedIpcEventReader = BufferedIpcEventReader()
 
-    def connect(self) -> bool:
+    def connect(self, *, start_listener: bool = True) -> bool:
         """
         Attempts to establish a connection to the Daemon.
 
         Args:
-            None
+            start_listener (bool): Whether to start the background listener immediately.
 
         Returns:
             bool: True if connection is successful, False otherwise.
@@ -58,15 +61,37 @@ class IpcClient:
                 self._disconnect_notified = False
 
             self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._socket.settimeout(self._timeout)
             self._socket.connect((Constants.LOCALHOST, self._port))
-            self._listener_thread = threading.Thread(
-                target=self._listener_thread_main, daemon=True
-            )
-            self._listener_thread.start()
+            self._reader.reset()
+            if start_listener:
+                self.start_listener()
             return True
         except Exception:
             self.stop()
             return False
+
+    def start_listener(self) -> None:
+        """
+        Starts the background listener after any synchronous bootstrap finished.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if self._socket is None:
+            return
+
+        if self._listener_thread is not None and self._listener_thread.is_alive():
+            return
+
+        self._listener_thread = threading.Thread(
+            target=self._listener_thread_main,
+            daemon=True,
+        )
+        self._listener_thread.start()
 
     def stop(self) -> None:
         """
@@ -113,10 +138,26 @@ class IpcClient:
             return
 
         try:
+            ensure_request_id(cmd)
             payload: bytes = (cmd.to_json() + '\n').encode('utf-8')
             self._socket.sendall(payload)
         except Exception:
             pass
+
+    def read_event(self) -> Optional[IpcEvent]:
+        """
+        Reads one IPC event synchronously from the connected socket.
+
+        Args:
+            None
+
+        Returns:
+            Optional[IpcEvent]: The decoded event, or None when the stream ends.
+        """
+        if self._socket is None:
+            return None
+
+        return self._reader.read_from_socket(self._socket)
 
     def _notify_disconnect(self) -> None:
         """
@@ -149,36 +190,33 @@ class IpcClient:
         Returns:
             None
         """
-        buffer: bytearray = bytearray()
         try:
             while not self._stop_flag.is_set():
                 if not self._socket:
                     break
 
-                data: bytes = self._socket.recv(Constants.TCP_BUFFER_SIZE)
+                try:
+                    buffered_event: Optional[IpcEvent] = self._reader.pop_event()
+                except Exception:
+                    continue
+
+                if buffered_event is not None:
+                    self._on_event(buffered_event)
+                    continue
+
+                try:
+                    data: bytes = self._socket.recv(Constants.TCP_BUFFER_SIZE)
+                except socket.timeout:
+                    continue
+
                 if not data:
                     self._notify_disconnect()
                     break
 
-                buffer.extend(data)
-
-                if len(buffer) > Constants.MAX_IPC_BYTES:
+                try:
+                    self._reader.append_bytes(data)
+                except ValueError:
                     self._notify_disconnect()
                     break
-
-                while b'\n' in buffer:
-                    line_bytes, _, rest = buffer.partition(b'\n')
-                    buffer = bytearray(rest)
-
-                    line: str = line_bytes.decode('utf-8', errors='ignore').strip()
-                    if not line:
-                        continue
-
-                    try:
-                        event_dict: Dict[str, JsonValue] = json.loads(line)
-                        event: IpcEvent = IpcEvent.from_dict(event_dict)
-                        self._on_event(event)
-                    except Exception:
-                        pass
         except Exception:
             self._notify_disconnect()

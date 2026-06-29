@@ -17,6 +17,17 @@ class InitCommand(IpcCommand):
     command_type: CommandType = field(default=CommandType.INIT, init=False)
 
 
+@register_command(CommandType.GET_CHAT_STARTUP_STATE)
+@dataclass
+class GetChatStartupStateCommand(IpcCommand):
+    """Requests the chat-specific startup snapshot for first attach rendering."""
+
+    command_type: CommandType = field(
+        default=CommandType.GET_CHAT_STARTUP_STATE,
+        init=False,
+    )
+
+
 @register_command(CommandType.REGISTER_LIVE_CONSUMER)
 @dataclass
 class RegisterLiveConsumerCommand(IpcCommand):

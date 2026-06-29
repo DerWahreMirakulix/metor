@@ -9,14 +9,14 @@ import socket
 import subprocess
 import threading
 import time
-import socks  # type: ignore
-import stem.process  # type: ignore
-import stem.control  # type: ignore
+import socks
+import stem.process
+import stem.control
 import nacl.exceptions
 from pathlib import Path
 from typing import Tuple, Optional, Dict, Callable
 
-from metor.core.api import EventType, JsonValue
+from metor.core.api import EventType, JsonValue, RuntimeErrorCode
 from metor.data import SettingKey
 from metor.data.profile import ProfileManager
 from metor.utils import Constants, clean_onion, secure_shred_file, ensure_onion_format
@@ -353,7 +353,10 @@ class TorManager:
                 return (
                     False,
                     EventType.TOR_START_FAILED,
-                    {'error': f'Failed to launch Tor: {last_error}'},
+                    {
+                        'error_code': RuntimeErrorCode.TOR_LAUNCH_FAILED,
+                        'error_detail': last_error,
+                    },
                 )
 
         self._load_onion_address(hs_dir)
@@ -362,7 +365,7 @@ class TorManager:
             return (
                 False,
                 EventType.TOR_START_FAILED,
-                {'error': 'Failed to launch the Tor binary'},
+                {'error_code': RuntimeErrorCode.TOR_BINARY_LAUNCH_FAILED},
             )
 
         if not self._wait_for_proxy_listener():
@@ -370,7 +373,7 @@ class TorManager:
             return (
                 False,
                 EventType.TOR_PROCESS_TERMINATED,
-                {'error': 'Tor SOCKS proxy did not become ready'},
+                {'error_code': RuntimeErrorCode.TOR_PROXY_NOT_READY},
             )
 
         return True, None, {}
@@ -412,8 +415,17 @@ class TorManager:
         if success:
             return True, None, {}
 
-        error: str = str(params.get('error') or fallback_error)
-        return False, EventType.RETUNNEL_FAILED, {'error': error}
+        if params:
+            return False, EventType.RETUNNEL_FAILED, params
+
+        return (
+            False,
+            EventType.RETUNNEL_FAILED,
+            {
+                'error_code': RuntimeErrorCode.RETUNNEL_RECONNECT_FAILED,
+                'error_detail': fallback_error,
+            },
+        )
 
     def _shred_runtime_keys(self) -> None:
         """
@@ -427,7 +439,14 @@ class TorManager:
             None
         """
         hs_dir: Path = self._pm.paths.get_hidden_service_dir()
-        secure_shred_file(hs_dir / Constants.TOR_SECRET_KEY)
+        try:
+            secure_shred_file(hs_dir / Constants.TOR_SECRET_KEY)
+        except OSError:
+            if TorManager._log_callback is not None:
+                try:
+                    TorManager._log_callback('Failed to shred Tor runtime key.')
+                except Exception:
+                    pass
 
     def start(self) -> Tuple[bool, Optional[EventType], Dict[str, JsonValue]]:
         """
