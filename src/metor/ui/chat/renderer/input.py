@@ -68,7 +68,7 @@ class InputHandler:
             setcbreak = getattr(tty, 'setcbreak')
             try:
                 old_term_settings = tcgetattr(fd)
-            except (termios.error, OSError) as exc:
+            except (getattr(termios, 'error'), OSError) as exc:
                 print(
                     f'Error: interactive chat requires a TTY (termios failed: {exc}). '
                     'Run "metor chat" from a terminal.',
@@ -90,7 +90,7 @@ class InputHandler:
 
             try:
                 setcbreak(fd)
-            except (termios.error, OSError) as exc:
+            except (getattr(termios, 'error'), OSError) as exc:
                 print(
                     f'Error: interactive chat requires a TTY (setcbreak failed: {exc}). '
                     'Run "metor chat" from a terminal.',
