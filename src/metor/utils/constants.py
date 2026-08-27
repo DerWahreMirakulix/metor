@@ -41,13 +41,9 @@ class Constants:
 
     # Protocol Versions
     IPC_PROTOCOL_VERSION: int = 1  # Current IPC wire protocol version
-    IPC_PROTOCOL_MIN_SUPPORTED: int = (
-        1  # Oldest accepted IPC wire protocol version
-    )
+    IPC_PROTOCOL_MIN_SUPPORTED: int = 1  # Oldest accepted IPC wire protocol version
     PEER_PROTOCOL_VERSION: int = 1  # Current peer-wire handshake version
-    PEER_PROTOCOL_MIN_SUPPORTED: int = (
-        1  # Oldest accepted peer-wire handshake version
-    )
+    PEER_PROTOCOL_MIN_SUPPORTED: int = 1  # Oldest accepted peer-wire handshake version
 
     # Tor Bootstrapping
     UNIX_TOR_TIMEOUT: int = 45  # Process launch timeout for Unix Tor binaries
@@ -90,8 +86,12 @@ class Constants:
     INPUT_SELECT_TIMEOUT_SEC: float = 0.0  # Non-blocking POSIX stdin poll
 
     # Request Defaults
-    DEFAULT_HISTORY_LIMIT: int = 50  # History rows per request when no explicit limit is sent
-    DEFAULT_MESSAGES_LIMIT: int = 50  # Stored messages per request when no explicit limit is sent
+    DEFAULT_HISTORY_LIMIT: int = (
+        50  # History rows per request when no explicit limit is sent
+    )
+    DEFAULT_MESSAGES_LIMIT: int = (
+        50  # Stored messages per request when no explicit limit is sent
+    )
 
     # Thread Constraints & Timing
     THREAD_POLL_TIMEOUT: float = 1.0  # Timeout for non-blocking accept/recv loops

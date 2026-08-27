@@ -169,7 +169,9 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
 
         elif cmd == 'settings':
             if sub == 'set' and len(self._extra) >= 2:
-                self._emit(self._proxy.handle_settings_set(self._extra[0], self._extra[1]))
+                self._emit(
+                    self._proxy.handle_settings_set(self._extra[0], self._extra[1])
+                )
             elif sub == 'get' and len(self._extra) >= 1:
                 self._emit(self._proxy.handle_settings_get(self._extra[0]))
             elif sub == 'list' or (sub is None and not self._extra):
@@ -179,7 +181,9 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
 
         elif cmd == 'config':
             if sub == 'set' and len(self._extra) >= 2:
-                self._emit(self._proxy.handle_config_set(self._extra[0], self._extra[1]))
+                self._emit(
+                    self._proxy.handle_config_set(self._extra[0], self._extra[1])
+                )
             elif sub == 'get' and len(self._extra) >= 1:
                 self._emit(self._proxy.handle_config_get(self._extra[0]))
             elif sub == 'list' or (sub is None and not self._extra):
@@ -238,9 +242,7 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
             if len(transport_tokens) > 1:
                 self._print_usage('transport')
             else:
-                peer: Optional[str] = (
-                    transport_tokens[0] if transport_tokens else None
-                )
+                peer: Optional[str] = transport_tokens[0] if transport_tokens else None
                 self._emit(self._proxy.handle_transport(peer))
 
         elif cmd == 'address':
@@ -267,7 +269,9 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                 if len(self._extra) < 2:
                     self._print_usage(cmd)
                 else:
-                    self._emit(self._proxy.contacts_rename(self._extra[0], self._extra[1]))
+                    self._emit(
+                        self._proxy.contacts_rename(self._extra[0], self._extra[1])
+                    )
             elif sub == 'clear':
                 self._emit(self._proxy.contacts_clear())
             elif sub in ('list', None):

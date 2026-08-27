@@ -221,7 +221,9 @@ class MessageManager:
         """
         return self._messages.get_unread_inbox_summaries()
 
-    def get_and_read_inbox(self, contact_onion: str) -> List[Tuple[int, str, str, str, Optional[str]]]:
+    def get_and_read_inbox(
+        self, contact_onion: str
+    ) -> List[Tuple[int, str, str, str, Optional[str]]]:
         """
         Retrieves unread inbox rows for one contact and executes the consume policy.
 
@@ -252,9 +254,7 @@ class MessageManager:
             List[StoredMessageRecord]: Typed persisted message rows.
         """
         actual_limit: int = (
-            limit
-            if limit is not None
-            else Constants.DEFAULT_MESSAGES_LIMIT
+            limit if limit is not None else Constants.DEFAULT_MESSAGES_LIMIT
         )
         return self._messages.get_chat_history(contact_onion, actual_limit)
 

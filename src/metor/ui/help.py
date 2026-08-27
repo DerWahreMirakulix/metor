@@ -9,7 +9,6 @@ from typing import Dict, List, Optional
 
 # Local Package Imports
 from metor.ui.theme import Theme
-from metor.ui.presenter import UIPresenter
 
 
 @dataclass

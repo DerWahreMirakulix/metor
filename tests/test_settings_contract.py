@@ -548,7 +548,9 @@ class SettingsContractTests(unittest.TestCase):
                 result = actions.handle_settings_set('ui.terminal.prompt_sign', '!')
 
                 self.assertIn('updated successfully', result)
-                self.assertEqual(Settings.get_namespace_str('ui.terminal.prompt_sign'), '!')
+                self.assertEqual(
+                    Settings.get_namespace_str('ui.terminal.prompt_sign'), '!'
+                )
                 self.assertFalse(pm.config._paths.get_config_file().exists())
 
     def test_ui_default_profile_can_be_set_globally_via_settings_command(self) -> None:
@@ -1234,7 +1236,9 @@ class SettingsContractTests(unittest.TestCase):
                 result = actions.handle_config_sync()
 
                 self.assertEqual(result, 'Invalid master password.')
-                self.assertEqual(pm.config.get_namespace_str('ui.terminal.prompt_sign'), '!')
+                self.assertEqual(
+                    pm.config.get_namespace_str('ui.terminal.prompt_sign'), '!'
+                )
                 self.assertEqual(
                     pm.config.get_str(SettingKey.DAEMON_IPC_TIMEOUT), '21.0'
                 )
@@ -1265,7 +1269,9 @@ class SettingsContractTests(unittest.TestCase):
                 result = actions.handle_config_sync()
 
                 self.assertEqual(result, success_msg)
-                self.assertEqual(pm.config.get_namespace_str('ui.terminal.prompt_sign'), '$')
+                self.assertEqual(
+                    pm.config.get_namespace_str('ui.terminal.prompt_sign'), '$'
+                )
 
     def test_config_list_combines_ui_structural_and_daemon_sections(self) -> None:
         """
@@ -1359,11 +1365,12 @@ class SettingsContractTests(unittest.TestCase):
                 )
 
                 self.assertIs(event.event_type, EventType.CONFIG_SYNCED)
-                self.assertEqual(pm.config.get_namespace_str('ui.terminal.prompt_sign'), '!')
+                self.assertEqual(
+                    pm.config.get_namespace_str('ui.terminal.prompt_sign'), '!'
+                )
                 self.assertEqual(
                     pm.config.get_str(SettingKey.DAEMON_IPC_TIMEOUT), '15.0'
                 )
-
 
     def test_ui_chat_limit_rejects_value_below_minimum(self) -> None:
         """
@@ -1383,7 +1390,6 @@ class SettingsContractTests(unittest.TestCase):
         with self.assertRaises(SettingValidationError):
             validate_ui_setting_value(spec, 0)
         self.assertEqual(validate_ui_setting_value(spec, 1), 1)
-
 
 
 if __name__ == '__main__':

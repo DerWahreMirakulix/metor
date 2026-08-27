@@ -6635,8 +6635,6 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertTrue(conn.closed)
 
-
-
     def test_chat_startup_state_command_is_routed_to_network_handler(self) -> None:
         """
         Verifies that GetChatStartupStateCommand reaches the network handler.

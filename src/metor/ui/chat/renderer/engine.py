@@ -14,7 +14,6 @@ from typing import Callable, List, Dict, Optional, TYPE_CHECKING
 
 from metor.core.api import JsonValue
 from metor.ui.models import AliasPolicy, StatusTone
-from metor.ui import UIPresenter
 from metor.ui.chat.models import ChatLine, ChatMessageType, ChatTransportState
 from metor.ui.chat.presenter import ChatPresenter
 from metor.utils import Constants
@@ -55,7 +54,9 @@ class Renderer:
             None
         """
         self._config: 'Config' = config
-        self._initial_prompt: str = f'{self._config.get_namespace_str(UI_PROMPT_SIGN_KEY)} '
+        self._initial_prompt: str = (
+            f'{self._config.get_namespace_str(UI_PROMPT_SIGN_KEY)} '
+        )
         self._prompt: str = self._initial_prompt
         self._alias_resolver: Callable[
             [Optional[str], Optional[str]], Optional[str]

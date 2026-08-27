@@ -787,7 +787,9 @@ class Settings:
                         candidate = raw_domain[full_sub_key]
                         if is_setting_value(candidate):
                             try:
-                                raw_value = validate_ui_setting_value(ui_spec, candidate)
+                                raw_value = validate_ui_setting_value(
+                                    ui_spec, candidate
+                                )
                                 source = 'global'
                             except (TypeError, SettingValidationError):
                                 raw_value = None

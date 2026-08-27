@@ -208,9 +208,7 @@ class HistoryManager:
             List[HistoryLedgerEntry]: Raw history rows ordered newest-first.
         """
         actual_limit: int = (
-            limit
-            if limit is not None
-            else Constants.DEFAULT_HISTORY_LIMIT
+            limit if limit is not None else Constants.DEFAULT_HISTORY_LIMIT
         )
         return self._history.get_entries(filter_onion, actual_limit)
 
@@ -230,9 +228,7 @@ class HistoryManager:
             List[HistorySummaryEntry]: Projected summary rows ordered newest-first.
         """
         actual_limit: int = (
-            limit
-            if limit is not None
-            else Constants.DEFAULT_HISTORY_LIMIT
+            limit if limit is not None else Constants.DEFAULT_HISTORY_LIMIT
         )
         raw_entries: List[HistoryLedgerEntry] = self._history.get_entries(
             filter_onion,

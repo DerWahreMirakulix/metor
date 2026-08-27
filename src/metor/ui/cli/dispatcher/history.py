@@ -22,7 +22,6 @@ class _HistoryDispatcherProtocol(Protocol):
         """Prints one proxy result and flags a nonzero exit on rendered errors."""
         ...
 
-
     def _parse_optional_limit(self, limit_raw: Optional[str]) -> Optional[int]:
         """Parses an optional integer limit token and returns None for invalid input."""
         ...

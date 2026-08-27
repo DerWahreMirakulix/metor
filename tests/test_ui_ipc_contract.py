@@ -1366,8 +1366,6 @@ class UiIpcContractTests(unittest.TestCase):
         proxy.nuke_daemon_event.assert_called_once()
         prompt_mock.assert_not_called()
 
-
-
     def test_async_event_with_matching_request_id_is_terminal(self) -> None:
         """
         Verifies that an async-typed event carrying the command request_id is

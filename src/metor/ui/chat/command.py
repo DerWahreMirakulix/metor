@@ -31,7 +31,9 @@ from metor.ui.chat.session import Session
 class CommandDispatcher:
     """Parses raw text input and dispatches corresponding IPC commands."""
 
-    def __init__(self, ipc: IpcClient, session: Session, renderer: ChatRenderer) -> None:
+    def __init__(
+        self, ipc: IpcClient, session: Session, renderer: ChatRenderer
+    ) -> None:
         """Initializes the dispatcher with required dependencies.
 
         Args:

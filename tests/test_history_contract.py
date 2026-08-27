@@ -190,7 +190,6 @@ class HistoryContractTests(unittest.TestCase):
         self.assertIn('Connection to', rendered)
         self.assertIn('retry limit exhausted', rendered)
 
-
     def test_raw_history_presenter_renders_transport_field(self) -> None:
         """
         Verifies that format_raw_history renders the ledger transport field.
@@ -229,9 +228,6 @@ class HistoryContractTests(unittest.TestCase):
         clean_rendered = re.sub(r'\x1b\[[0-9;]*m', '', rendered)
         self.assertIn('transport: session', clean_rendered)
 
-
-
-
     def test_transport_state_formatting_has_no_decorative_header(self) -> None:
         """
         Verifies the terminal transport-state formatting convention.
@@ -262,7 +258,9 @@ class HistoryContractTests(unittest.TestCase):
         self.assertFalse(clean_peer.startswith('\n'))
         self.assertNotIn('---', clean_peer)
         self.assertTrue(clean_peer.startswith('Transport state for k4i7sr'))
-        self.assertIn('Transport state for k4i7sr\n\nsession_state: connected', clean_peer)
+        self.assertIn(
+            'Transport state for k4i7sr\n\nsession_state: connected', clean_peer
+        )
 
         no_peer_output = format_transport_state(
             TransportStateEvent(

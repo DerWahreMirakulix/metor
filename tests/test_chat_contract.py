@@ -52,7 +52,6 @@ from metor.ui.chat.event.content import handle_content_event
 from metor.ui.chat.event.handler import EventHandler
 from metor.ui.chat.models import ChatMessageType, ChatTransportState
 from metor.ui import Help
-from unittest.mock import patch
 
 
 class _DummyConfig:
@@ -1178,7 +1177,9 @@ class LivePushContentTests(unittest.TestCase):
             has_auto_reconnect=lambda: False,
         )
 
-    def test_remote_msg_for_unfocused_peer_buffers_without_rendering_or_consume(self) -> None:
+    def test_remote_msg_for_unfocused_peer_buffers_without_rendering_or_consume(
+        self,
+    ) -> None:
         """
         Verifies that pushed live messages for unfocused peers are buffered.
 
@@ -1330,7 +1331,6 @@ class LivePushContentTests(unittest.TestCase):
         self.assertTrue(handle_content_event(handler, consume_response))
         handler._renderer.print_messages_batch.assert_called_once()
 
-
     def test_chat_help_lists_slash_help_command(self) -> None:
         """
         Verifies that the chat help overview documents the /help command.
@@ -1347,8 +1347,6 @@ class LivePushContentTests(unittest.TestCase):
         rendered = Help.show_chat_help()
         self.assertIn('/help', rendered)
         self.assertIn('Show the chat command overview.', rendered)
-
-
 
     def test_input_handler_non_tty_stdin_exits_cleanly(self) -> None:
         """
@@ -1370,7 +1368,6 @@ class LivePushContentTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as ctx:
                 InputHandler()
             self.assertEqual(ctx.exception.code, 1)
-
 
 
 if __name__ == '__main__':

@@ -162,9 +162,7 @@ class Daemon:
 
         self._crypto: Optional[Crypto] = None
         self._notification_service: NotificationService = NotificationService(
-            config_getter=lambda: self._pm.config.get_str(
-                SettingKey.NOTIFICATION_SINK
-            ),
+            config_getter=lambda: self._pm.config.get_str(SettingKey.NOTIFICATION_SINK),
             error_callback=self._on_runtime_internal_error,
         )
         self._ipc: IpcServer = IpcServer(
@@ -384,9 +382,7 @@ class Daemon:
 
         try:
             for msg_id in msg_ids:
-                conn.sendall(
-                    f'{TorCommand.READ.value} {msg_id}\n'.encode('utf-8')
-                )
+                conn.sendall(f'{TorCommand.READ.value} {msg_id}\n'.encode('utf-8'))
         except Exception:
             pass
 

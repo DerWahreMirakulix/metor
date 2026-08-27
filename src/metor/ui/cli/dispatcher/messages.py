@@ -22,7 +22,6 @@ class _MessagesDispatcherProtocol(Protocol):
         """Prints one proxy result and flags a nonzero exit on rendered errors."""
         ...
 
-
     def _collect_command_args(
         self,
         sub: Optional[str],

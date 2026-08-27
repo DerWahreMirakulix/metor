@@ -5,7 +5,7 @@ Parses incoming data streams and delegates payloads to the Application Layer (Ro
 
 import socket
 import threading
-from typing import Optional, Callable, List, cast, TYPE_CHECKING
+from typing import Optional, Callable, cast, TYPE_CHECKING
 
 from metor.core.api import (
     ConnectionActor,

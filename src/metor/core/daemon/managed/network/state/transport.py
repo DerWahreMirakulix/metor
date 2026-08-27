@@ -269,7 +269,9 @@ class StateTrackerTransportMixin:
                 PrimaryTransport.SESSION
                 if live_state is not SessionState.DISCONNECTED
                 else (
-                    PrimaryTransport.TUNNEL if has_drop_tunnel else PrimaryTransport.NONE
+                    PrimaryTransport.TUNNEL
+                    if has_drop_tunnel
+                    else PrimaryTransport.NONE
                 )
             )
             return PeerTransportState(

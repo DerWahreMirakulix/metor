@@ -436,8 +436,8 @@ class NetworkCommandHandler:
         """
         live_state: SessionState = self._network.get_live_state(onion)
 
-        drop_tunnel_state: Optional[TunnelState] = (
-            self._network.get_drop_tunnel_state(onion)
+        drop_tunnel_state: Optional[TunnelState] = self._network.get_drop_tunnel_state(
+            onion
         )
         drop_tunnel: Optional[Dict[str, JsonValue]] = None
         if drop_tunnel_state is not None:

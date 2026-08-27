@@ -567,8 +567,7 @@ class InboundListener:
         duplicate_reason_code: Optional[HistoryReasonCode] = None
 
         if (
-            transport_state.live_state
-            in (SessionState.CONNECTED, SessionState.PENDING)
+            transport_state.live_state in (SessionState.CONNECTED, SessionState.PENDING)
             and not grace_reconnect
             and not retunnel_reconnect
             and not scheduled_auto_reconnect

@@ -436,15 +436,11 @@ class ApiSchemaGenerator:
 
         for command_type, cmd_cls in sorted_commands:
             definitions[cmd_cls.__name__] = self._dto_schema(cmd_cls)
-            commands[command_type.value] = {
-                '$ref': f'#/definitions/{cmd_cls.__name__}'
-            }
+            commands[command_type.value] = {'$ref': f'#/definitions/{cmd_cls.__name__}'}
 
         for event_type, event_cls in sorted_events:
             definitions[event_cls.__name__] = self._dto_schema(event_cls)
-            events[event_type.value] = {
-                '$ref': f'#/definitions/{event_cls.__name__}'
-            }
+            events[event_type.value] = {'$ref': f'#/definitions/{event_cls.__name__}'}
 
         document: Dict[str, Any] = {
             '$schema': 'https://json-schema.org/draft/2020-12/schema',

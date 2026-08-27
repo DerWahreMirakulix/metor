@@ -82,7 +82,9 @@ class WebhookSink:
             None
         """
         try:
-            body: bytes = json.dumps(asdict(payload), ensure_ascii=False).encode('utf-8')
+            body: bytes = json.dumps(asdict(payload), ensure_ascii=False).encode(
+                'utf-8'
+            )
             request = Request(
                 self._url,
                 data=body,

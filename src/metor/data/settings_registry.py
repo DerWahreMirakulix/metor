@@ -56,7 +56,9 @@ def register_ui_settings(frontend_id: str, specs: Sequence[UiSettingSpec]) -> No
     registered: Dict[str, UiSettingSpec] = {}
     for spec in specs:
         if not spec.key:
-            raise ValueError(f'UI setting key must not be empty for frontend {frontend_id!r}.')
+            raise ValueError(
+                f'UI setting key must not be empty for frontend {frontend_id!r}.'
+            )
         if '.' in spec.key:
             raise ValueError(
                 f"UI setting key '{spec.key}' must not contain '.' for frontend {frontend_id!r}."

@@ -298,7 +298,6 @@ class DataPersistenceContractTests(unittest.TestCase):
         self.assertEqual(str(rows[0][2]), 'hello e2e')
         self.assertEqual(str(rows[0][1]), MessageType.DROP_TEXT.value)
 
-
     def test_add_contact_rejects_invalid_onion_format(self) -> None:
         """
         Verifies that add_contact rejects malformed onion identities.
@@ -333,7 +332,6 @@ class DataPersistenceContractTests(unittest.TestCase):
         )
         self.assertTrue(result.success)
         self.assertIs(result.operation_type, ContactOperationType.CONTACT_ADDED)
-
 
 
 if __name__ == '__main__':

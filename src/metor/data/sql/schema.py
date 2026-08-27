@@ -98,9 +98,7 @@ def ensure_core_schema(cursor: SqlCipherCursor) -> None:
     # tables untouched, so the column is added explicitly. The table_info check
     # prevents a duplicate-column error on freshly created databases.
     cursor.execute('PRAGMA table_info(history_ledger)')
-    has_transport_column: bool = any(
-        row[1] == 'transport' for row in cursor.fetchall()
-    )
+    has_transport_column: bool = any(row[1] == 'transport' for row in cursor.fetchall())
     if not has_transport_column:
         cursor.execute('ALTER TABLE history_ledger ADD COLUMN transport TEXT')
 

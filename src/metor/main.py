@@ -34,7 +34,7 @@ def _extract_ui_argument(argv: List[str]) -> Tuple[Optional[str], List[str]]:
             index += 1
             continue
         if token.startswith('--ui='):
-            ui_id = token[len('--ui='):]
+            ui_id = token[len('--ui=') :]
             index += 1
             continue
         filtered.append(token)

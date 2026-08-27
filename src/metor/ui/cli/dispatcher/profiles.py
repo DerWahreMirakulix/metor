@@ -28,7 +28,6 @@ class _ProfilesDispatcherProtocol(Protocol):
         ...
 
 
-
 class ProfilesDispatchMixin:
     """Adds `profiles` command routing to the CLI dispatcher."""
 
@@ -55,9 +54,8 @@ class ProfilesDispatchMixin:
                 else ProfileSecurityMode.ENCRYPTED
             )
             master_password: Optional[str] = None
-            if (
-                security_mode is ProfileSecurityMode.ENCRYPTED
-                and not getattr(self._args, 'remote', False)
+            if security_mode is ProfileSecurityMode.ENCRYPTED and not getattr(
+                self._args, 'remote', False
             ):
                 import getpass
 

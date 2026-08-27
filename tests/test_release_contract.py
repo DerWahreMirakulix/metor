@@ -217,7 +217,6 @@ class _RecordingCursor:
         return []
 
 
-
 def _raise_system_exit(code: int) -> None:
     """
     Raises SystemExit like the real sys.exit for patched exit points.
@@ -944,7 +943,6 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn('sqlcipher3 on Windows', message)
         self.assertIn('pysqlcipher3', message)
 
-
     def test_unknown_command_exits_nonzero(self) -> None:
         """
         Verifies that an unknown CLI command exits with code 1.
@@ -992,9 +990,6 @@ class ReleaseContractTests(unittest.TestCase):
             exit_code = dispatcher.dispatch()
         self.assertEqual(exit_code, 1)
 
-
-
-
     def test_unknown_frontend_flag_exits_with_code_2(self) -> None:
         """
         Verifies that an unknown --ui frontend id exits with code 2.
@@ -1010,7 +1005,7 @@ class ReleaseContractTests(unittest.TestCase):
         with (
             patch('sys.argv', ['metor', '--ui', 'unbekannt', 'help']),
             patch('sys.stderr'),
-            patch('sys.exit', side_effect=_raise_system_exit) as exit_mock,
+            patch('sys.exit', side_effect=_raise_system_exit),
         ):
             with self.assertRaises(SystemExit) as ctx:
                 frontend_main()
@@ -1032,7 +1027,7 @@ class ReleaseContractTests(unittest.TestCase):
         with (
             patch('sys.argv', ['metor-daemon', 'unlock']),
             patch('sys.stderr'),
-            patch('sys.exit', side_effect=_raise_system_exit) as exit_mock,
+            patch('sys.exit', side_effect=_raise_system_exit),
         ):
             with self.assertRaises(SystemExit) as ctx:
                 daemon_main.main()
@@ -1061,7 +1056,7 @@ class ReleaseContractTests(unittest.TestCase):
             ),
             patch('sys.argv', ['metor-daemon', '-p', 'existiert-nicht', 'daemon']),
             patch('builtins.print') as print_mock,
-            patch('sys.exit', side_effect=_raise_system_exit) as exit_mock,
+            patch('sys.exit', side_effect=_raise_system_exit),
         ):
             with self.assertRaises(SystemExit) as ctx:
                 daemon_main.main()
@@ -1069,8 +1064,6 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 1)
         printed = ' '.join(str(call) for call in print_mock.call_args_list)
         self.assertIn('does not exist', printed)
-
-
 
     def test_messages_show_error_rendering_exits_nonzero(self) -> None:
         """

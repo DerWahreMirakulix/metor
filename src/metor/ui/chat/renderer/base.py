@@ -92,7 +92,6 @@ class ChatRenderer(Protocol):
         """Prints an empty spacer line."""
         ...
 
-
     def clear_input_area(self) -> None:
         """Clears the current input line securely."""
         ...

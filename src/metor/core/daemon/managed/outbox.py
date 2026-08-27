@@ -682,9 +682,7 @@ class OutboxWorker:
                 challenge_line
             )
             if peer_version < Constants.PEER_PROTOCOL_MIN_SUPPORTED:
-                raise ValueError(
-                    f'Peer protocol version {peer_version} is too old'
-                )
+                raise ValueError(f'Peer protocol version {peer_version} is too old')
             signature: Optional[str] = self._crypto.sign_challenge(challenge)
 
             if not signature:
