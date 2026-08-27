@@ -2,6 +2,7 @@
 
 # ruff: noqa: E402
 
+import os
 import sys
 import threading
 import unittest
@@ -1364,7 +1365,7 @@ class LivePushContentTests(unittest.TestCase):
         """
         from metor.ui.chat.renderer.input import InputHandler
 
-        with patch('sys.stdin', open('/dev/null', 'r')):
+        with patch('sys.stdin', open(os.devnull, 'r')):
             with self.assertRaises(SystemExit) as ctx:
                 InputHandler()
             self.assertEqual(ctx.exception.code, 1)
