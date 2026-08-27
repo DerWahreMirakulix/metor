@@ -123,6 +123,20 @@ class UnknownCommandEvent(IpcEvent):
     event_type: EventType = field(default=EventType.UNKNOWN_COMMAND, init=False)
 
 
+@register_event(EventType.PROTOCOL_MISMATCH)
+@dataclass
+class ProtocolMismatchEvent(IpcEvent):
+    """Signals that the client IPC protocol version is too old."""
+
+    daemon_version: int
+    min_supported: int
+    client_version: Optional[int] = None
+    event_type: EventType = field(
+        default=EventType.PROTOCOL_MISMATCH,
+        init=False,
+    )
+
+
 @register_event(EventType.INTERNAL_ERROR)
 @dataclass
 class InternalErrorEvent(IpcEvent):
@@ -147,13 +161,15 @@ class InvalidConfigKeyEvent(IpcEvent):
     event_type: EventType = field(default=EventType.INVALID_CONFIG_KEY, init=False)
 
 
-@register_event(EventType.DAEMON_CANNOT_MANAGE_UI)
+@register_event(EventType.CLIENT_SCOPE_KEY_REJECTED)
 @dataclass
-class DaemonCannotManageUiEvent(IpcEvent):
-    """Signals that a UI-only setting was routed to the daemon."""
+class ClientScopeKeyRejectedEvent(IpcEvent):
+    """Signals that a client-scope setting or config key was routed to the daemon."""
+
+    key: str = ''
 
     event_type: EventType = field(
-        default=EventType.DAEMON_CANNOT_MANAGE_UI,
+        default=EventType.CLIENT_SCOPE_KEY_REJECTED,
         init=False,
     )
 

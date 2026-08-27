@@ -27,6 +27,7 @@ class HistoryLedgerEntry:
     detail_code: Optional[HistoryReasonCode]
     detail_text: str
     flow_id: str
+    transport: Optional[str] = None
 
 
 @dataclass(frozen=True)

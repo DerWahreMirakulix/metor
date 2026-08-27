@@ -41,18 +41,14 @@ def is_setting_value(value: object) -> TypeGuard[SettingValue]:
 
 
 class SettingKey(str, Enum):
-    """Available global configuration keys strictly isolated by Client (ui) and Server (daemon) domains."""
+    """Available global configuration keys strictly isolated by paradigm-neutral Client (client) and Server (daemon) domains."""
 
-    # 1. User Interface (Client)
-    DEFAULT_PROFILE = 'ui.default_profile'
-    PROMPT_SIGN = 'ui.prompt_sign'
-    CHAT_LIMIT = 'ui.chat_limit'
-    HISTORY_LIMIT = 'ui.history_limit'
-    MESSAGES_LIMIT = 'ui.messages_limit'
-    CHAT_BUFFER_PADDING = 'ui.chat_buffer_padding'
-    INBOX_NOTIFICATION_DELAY = 'ui.inbox_notification_delay'
-    IPC_TIMEOUT = 'ui.ipc_timeout'
-    CHAT_DAEMON_AUTOSTART = 'ui.chat_daemon_autostart'
+    # 1. Client (paradigm-neutral)
+    DEFAULT_PROFILE = 'client.default_profile'
+    IPC_TIMEOUT = 'client.ipc_timeout'
+    CHAT_DAEMON_AUTOSTART = 'client.chat_daemon_autostart'
+    HISTORY_LIMIT = 'client.history_limit'
+    MESSAGES_LIMIT = 'client.messages_limit'
 
     # 2. Core Daemon (Server - Network, Persistence & Security)
     MAX_TOR_RETRIES = 'daemon.max_tor_retries'
@@ -76,6 +72,8 @@ class SettingKey(str, Enum):
     FALLBACK_TO_DROP = 'daemon.fallback_to_drop'
     MAX_UNSEEN_DROP_MSGS = 'daemon.max_unseen_drop_msgs'
     MAX_UNSEEN_LIVE_MSGS = 'daemon.max_unseen_live_msgs'
+    EXPOSE_DROP_REJECTION = 'daemon.expose_drop_rejection'
+    NOTIFICATION_SINK = 'daemon.notification_sink'
 
     # 3. Advanced Network Resilience & Constraints
     MAX_CONCURRENT_CONNECTIONS = 'daemon.max_concurrent_connections'
@@ -87,19 +85,21 @@ class SettingKey(str, Enum):
     LIVE_DISCONNECT_LINGER_TIMEOUT = 'daemon.live_disconnect_linger_timeout'
     RETUNNEL_RECONNECT_DELAY = 'daemon.retunnel_reconnect_delay'
     RETUNNEL_RECOVERY_RETRIES = 'daemon.retunnel_recovery_retries'
+    REUSE_LIVE_FOR_DROPS = 'daemon.reuse_live_for_drops'
+    LIVE_IDLE_TIMEOUT = 'daemon.live_idle_timeout'
 
     @property
     def is_ui(self) -> bool:
         """
-        Determines if the setting belongs to the User Interface domain.
+        Determines if the setting belongs to the Client (paradigm-neutral) domain.
 
         Args:
             None
 
         Returns:
-            bool: True if it is a UI setting.
+            bool: True if it is a Client setting.
         """
-        return self.value.startswith('ui.')
+        return self.value.startswith('client.')
 
     @property
     def is_daemon(self) -> bool:
@@ -113,6 +113,54 @@ class SettingKey(str, Enum):
             bool: True if it is a Daemon setting.
         """
         return self.value.startswith('daemon.')
+
+
+# All daemon.* member values, derived from the enum for set-based lookups.
+DAEMON_SETTING_KEYS: frozenset[str] = frozenset(
+    member.value for member in SettingKey if member.is_daemon
+)
+
+
+def split_namespace_key(key: str) -> Tuple[str, str]:
+    """
+    Splits one `ui.<frontend>.<key>` namespace key into its parts.
+
+    Args:
+        key (str): The fully-qualified namespace key.
+
+    Raises:
+        ValueError: If the key does not follow the `ui.<frontend>.<key>` shape.
+
+    Returns:
+        Tuple[str, str]: The frontend id and the unqualified setting key.
+    """
+    parts: list[str] = key.split('.')
+    if len(parts) != 3 or parts[0] != 'ui' or not parts[1] or not parts[2]:
+        raise ValueError(
+            f"Invalid namespace key '{key}'. Expected format 'ui.<frontend>.<key>'."
+        )
+    return parts[1], parts[2]
+
+
+def matches_setting_domain(key_domain: str, domain: Optional[str]) -> bool:
+    """
+    Determines whether one setting scope prefix matches an optional domain filter.
+
+    The `ui` domain covers both paradigm-neutral `client.*` keys and registered
+    frontend namespace keys.
+
+    Args:
+        key_domain (str): The scope prefix of a setting key (`client`, `daemon`, or `ui`).
+        domain (Optional[str]): The requested filter domain, or None for all.
+
+    Returns:
+        bool: True if the key scope belongs to the requested domain.
+    """
+    if domain is None:
+        return True
+    if domain == 'ui':
+        return key_domain in ('client', 'ui')
+    return key_domain == domain
 
 
 class SettingValidationError(ValueError):
@@ -177,64 +225,16 @@ class Settings:
         SettingKey.DEFAULT_PROFILE: SettingSpec(
             key=SettingKey.DEFAULT_PROFILE,
             default='default',
-            category='User Interface',
+            category='Client',
             description='Selects the profile used when the CLI is started without `-p`.',
             constraints='Non-empty profile name using letters, numbers, `-`, or `_`.',
             allow_profile_override=False,
             allow_empty_string=False,
         ),
-        SettingKey.PROMPT_SIGN: SettingSpec(
-            key=SettingKey.PROMPT_SIGN,
-            default='$',
-            category='User Interface',
-            description='Sets the prompt prefix shown in the interactive chat UI.',
-            constraints='Non-empty string.',
-            allow_empty_string=False,
-        ),
-        SettingKey.CHAT_LIMIT: SettingSpec(
-            key=SettingKey.CHAT_LIMIT,
-            default=50,
-            category='User Interface',
-            description='Limits the number of rendered chat lines kept in volatile UI memory.',
-            constraints='Integer >= 1.',
-            min_value=1,
-        ),
-        SettingKey.HISTORY_LIMIT: SettingSpec(
-            key=SettingKey.HISTORY_LIMIT,
-            default=50,
-            category='User Interface',
-            description='Default number of history events shown per request.',
-            constraints='Integer >= 1.',
-            min_value=1,
-        ),
-        SettingKey.MESSAGES_LIMIT: SettingSpec(
-            key=SettingKey.MESSAGES_LIMIT,
-            default=50,
-            category='User Interface',
-            description='Default number of stored messages shown per request.',
-            constraints='Integer >= 1.',
-            min_value=1,
-        ),
-        SettingKey.CHAT_BUFFER_PADDING: SettingSpec(
-            key=SettingKey.CHAT_BUFFER_PADDING,
-            default=20,
-            category='User Interface',
-            description='Keeps extra renderer lines around the viewport to reduce redraw churn.',
-            constraints='Integer >= 0.',
-            min_value=0,
-        ),
-        SettingKey.INBOX_NOTIFICATION_DELAY: SettingSpec(
-            key=SettingKey.INBOX_NOTIFICATION_DELAY,
-            default=10.0,
-            category='User Interface',
-            description='Delays and aggregates unread-message notifications while the peer is unfocused. `0` disables buffering.',
-            constraints='Float >= 0 seconds.',
-            min_value=0.0,
-        ),
         SettingKey.IPC_TIMEOUT: SettingSpec(
             key=SettingKey.IPC_TIMEOUT,
             default=15.0,
-            category='User Interface',
+            category='Client',
             description='Client-side timeout for CLI and chat IPC requests.',
             constraints='Float >= 0.1 seconds.',
             min_value=0.1,
@@ -242,10 +242,26 @@ class Settings:
         SettingKey.CHAT_DAEMON_AUTOSTART: SettingSpec(
             key=SettingKey.CHAT_DAEMON_AUTOSTART,
             default=ChatDaemonAutostartPolicy.ASK.value,
-            category='User Interface',
+            category='Client',
             description='Controls whether `metor chat` should refuse, confirm, or automatically perform local daemon startup when no local daemon is running.',
             constraints='One of: `never`, `ask`, `always`.',
             allow_empty_string=False,
+        ),
+        SettingKey.HISTORY_LIMIT: SettingSpec(
+            key=SettingKey.HISTORY_LIMIT,
+            default=50,
+            category='Client',
+            description='Default number of history events shown per request.',
+            constraints='Integer >= 1.',
+            min_value=1,
+        ),
+        SettingKey.MESSAGES_LIMIT: SettingSpec(
+            key=SettingKey.MESSAGES_LIMIT,
+            default=50,
+            category='Client',
+            description='Default number of stored messages shown per request.',
+            constraints='Integer >= 1.',
+            min_value=1,
         ),
         SettingKey.MAX_TOR_RETRIES: SettingSpec(
             key=SettingKey.MAX_TOR_RETRIES,
@@ -421,6 +437,21 @@ class Settings:
             constraints='Integer >= -1.',
             min_value=-1,
         ),
+        SettingKey.EXPOSE_DROP_REJECTION: SettingSpec(
+            key=SettingKey.EXPOSE_DROP_REJECTION,
+            default=False,
+            category='Core Daemon',
+            description='Sends a typed rejection reason when inbound drops are refused, instead of closing the socket silently. Disabled by default to avoid disclosing local policy to peers.',
+            constraints='Boolean.',
+        ),
+        SettingKey.NOTIFICATION_SINK: SettingSpec(
+            key=SettingKey.NOTIFICATION_SINK,
+            default='',
+            category='Core Daemon',
+            description='JSON sink configuration for detached notifications, e.g. `{"type": "file", "path": "/tmp/metor-notify.jsonl"}` or `{"type": "webhook", "url": "https://..."}`. Empty disables the notification sink.',
+            constraints='JSON string or empty.',
+            allow_profile_override=True,
+        ),
         SettingKey.MAX_CONCURRENT_CONNECTIONS: SettingSpec(
             key=SettingKey.MAX_CONCURRENT_CONNECTIONS,
             default=50,
@@ -491,6 +522,22 @@ class Settings:
             description='Additional delayed retunnel recovery retries after a transient reject or early close.',
             constraints='Integer >= 0.',
             min_value=0,
+        ),
+        SettingKey.REUSE_LIVE_FOR_DROPS: SettingSpec(
+            key=SettingKey.REUSE_LIVE_FOR_DROPS,
+            default=True,
+            category='Advanced Network Resilience',
+            description='Routes queued drop messages over an existing live session channel when available, avoiding a second circuit.',
+            constraints='Boolean.',
+        ),
+        SettingKey.LIVE_IDLE_TIMEOUT: SettingSpec(
+            key=SettingKey.LIVE_IDLE_TIMEOUT,
+            default=0.0,
+            category='Advanced Network Resilience',
+            description='Closes a live session automatically after it stays unfocused and idle for this many seconds. `0` disables idle closing.',
+            constraints='Float >= 0 seconds.',
+            min_value=0.0,
+            allow_profile_override=True,
         ),
     }
 
@@ -585,6 +632,8 @@ class Settings:
                 normalized = value.strip()
             elif key is SettingKey.CHAT_DAEMON_AUTOSTART:
                 normalized = value.strip().lower()
+            elif key is SettingKey.NOTIFICATION_SINK:
+                normalized = value.strip()
             else:
                 normalized = value
 
@@ -592,6 +641,14 @@ class Settings:
                 raise SettingValidationError(
                     f"Setting '{key.value}' must not be empty."
                 )
+
+            if key is SettingKey.NOTIFICATION_SINK and normalized:
+                try:
+                    json.loads(normalized)
+                except ValueError as exc:
+                    raise SettingValidationError(
+                        f"Setting '{key.value}' must be a valid JSON string or empty."
+                    ) from exc
 
             if key is SettingKey.DEFAULT_PROFILE:
                 safe_name: str = ''.join(
@@ -671,11 +728,18 @@ class Settings:
         Returns structured snapshots for the current global settings state.
 
         Args:
-            domain (Optional[str]): Optional `ui` or `daemon` domain filter.
+            domain (Optional[str]): Optional `ui` or `daemon` domain filter. The
+                `ui` domain covers paradigm-neutral `client.*` keys and all
+                registered frontend namespace keys.
 
         Returns:
             Tuple[SettingSnapshotRow, ...]: Ordered snapshot rows for CLI presentation.
         """
+        from metor.data.settings_registry import (
+            get_registered_ui_settings,
+            validate_ui_setting_value,
+        )
+
         raw_data: Dict[str, object] = cls._read_raw_settings_data()
         snapshots: list[SettingSnapshotRow] = []
 
@@ -683,7 +747,7 @@ class Settings:
             key_domain: str
             sub_key: str
             key_domain, sub_key = spec.key.value.split('.', 1)
-            if domain is not None and key_domain != domain:
+            if not matches_setting_domain(key_domain, domain):
                 continue
 
             raw_domain: object = raw_data.get(key_domain, {})
@@ -700,14 +764,43 @@ class Settings:
                         raw_value = None
 
             value: SettingValue = spec.default if raw_value is None else raw_value
+            category: str = 'client' if key_domain == 'client' else spec.category
             snapshots.append(
                 build_snapshot_row(
                     key=spec.key.value,
                     value=value,
                     source=source,
-                    category=spec.category,
+                    category=category,
                 )
             )
+
+        if domain in (None, 'ui'):
+            for frontend_id, registered_specs in get_registered_ui_settings().items():
+                for ui_spec in registered_specs.values():
+                    full_key: str = f'ui.{frontend_id}.{ui_spec.key}'
+                    full_sub_key: str = f'{frontend_id}.{ui_spec.key}'
+                    raw_domain = raw_data.get('ui', {})
+                    raw_value = None
+                    source = 'default'
+
+                    if isinstance(raw_domain, dict) and full_sub_key in raw_domain:
+                        candidate = raw_domain[full_sub_key]
+                        if is_setting_value(candidate):
+                            try:
+                                raw_value = validate_ui_setting_value(ui_spec, candidate)
+                                source = 'global'
+                            except (TypeError, SettingValidationError):
+                                raw_value = None
+
+                    value = ui_spec.default if raw_value is None else raw_value
+                    snapshots.append(
+                        build_snapshot_row(
+                            key=full_key,
+                            value=value,
+                            source=source,
+                            category=f'ui.{frontend_id}',
+                        )
+                    )
 
         return tuple(snapshots)
 
@@ -732,7 +825,7 @@ class Settings:
             return
 
         raw_data: Dict[str, object] = cls._read_raw_settings_data()
-        allowed_domains: set[str] = {'ui', 'daemon'}
+        allowed_domains: set[str] = {'ui', 'client', 'daemon'}
         unknown_domains: list[str] = sorted(
             key for key in raw_data.keys() if key not in allowed_domains
         )
@@ -749,8 +842,38 @@ class Settings:
                     f"'{path.name}' contains a non-object '{domain}' section."
                 )
 
+            if domain == 'ui':
+                from metor.data.settings_registry import (
+                    get_ui_setting_spec,
+                    validate_ui_setting_value,
+                )
+
+                for sub_key, raw_value in raw_domain.items():
+                    key_name: str = f'{domain}.{sub_key}'
+                    frontend_id: str
+                    spec_key: str
+                    frontend_id, _, spec_key = sub_key.partition('.')
+                    spec = get_ui_setting_spec(frontend_id, spec_key)
+                    if spec is None:
+                        raise ValueError(
+                            f"'{path.name}' contains an unknown setting key '{key_name}'."
+                        )
+
+                    if not is_setting_value(raw_value):
+                        raise ValueError(
+                            f"'{path.name}' contains an invalid value for '{key_name}': unsupported JSON type."
+                        )
+
+                    try:
+                        validate_ui_setting_value(spec, raw_value)
+                    except (TypeError, SettingValidationError) as exc:
+                        raise ValueError(
+                            f"'{path.name}' contains an invalid value for '{key_name}': {exc}"
+                        ) from exc
+                continue
+
             for sub_key, raw_value in raw_domain.items():
-                key_name: str = f'{domain}.{sub_key}'
+                key_name = f'{domain}.{sub_key}'
                 try:
                     setting_key: SettingKey = SettingKey(key_name)
                 except ValueError as exc:
@@ -793,7 +916,7 @@ class Settings:
                 with path.open('r', encoding='utf-8') as f:
                     data: Dict[str, Dict[str, SettingValue]] = json.load(f)
 
-                    for domain in ('ui', 'daemon'):
+                    for domain in ('ui', 'client', 'daemon'):
                         if domain not in data:
                             data[domain] = {}
 
@@ -801,7 +924,7 @@ class Settings:
             except (json.JSONDecodeError, IOError):
                 pass
 
-        data = {'ui': {}, 'daemon': {}}
+        data = {'ui': {}, 'client': {}, 'daemon': {}}
         for key_enum, val in cls._DEFAULTS.items():
             category: str
             sub_key: str
@@ -944,3 +1067,143 @@ class Settings:
 
             with path.open('w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4)
+
+    @classmethod
+    def set_namespace(cls, key: str, value: SettingValue) -> None:
+        """
+        Validates and persists one registered frontend namespace setting.
+
+        Namespace keys follow the `ui.<frontend>.<key>` shape and are validated
+        against the registry owned by the data layer.
+
+        Args:
+            key (str): The `ui.<frontend>.<key>` namespace key.
+            value (SettingValue): The new value for the setting.
+
+        Raises:
+            ValueError: If the key is not a registered namespace key.
+            TypeError: If the value type does not match the registered spec.
+
+        Returns:
+            None
+        """
+        from metor.data.settings_registry import (
+            get_ui_setting_spec,
+            validate_ui_setting_value,
+        )
+
+        frontend_id: str
+        setting_key: str
+        frontend_id, setting_key = split_namespace_key(key)
+        spec = get_ui_setting_spec(frontend_id, setting_key)
+        if spec is None:
+            raise ValueError(f"Unknown namespace setting '{key}'.")
+
+        normalized: SettingValue = validate_ui_setting_value(spec, value)
+
+        path: Path = cls.get_global_settings_path()
+
+        with FileLock(path):
+            data: Dict[str, Dict[str, SettingValue]] = cls._load_settings(
+                persist_defaults=False,
+            )
+            category: str
+            sub_key: str
+            category, sub_key = key.split('.', 1)
+
+            data[category][sub_key] = normalized
+
+            with path.open('w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4)
+
+    @classmethod
+    def get_namespace_value(cls, key: str) -> SettingValue:
+        """
+        Retrieves a registered frontend namespace setting, falling back to its spec default.
+
+        Args:
+            key (str): The `ui.<frontend>.<key>` namespace key.
+
+        Raises:
+            ValueError: If the key is not a registered namespace key.
+
+        Returns:
+            SettingValue: The effective setting value.
+        """
+        from metor.data.settings_registry import (
+            get_ui_setting_spec,
+            validate_ui_setting_value,
+        )
+
+        frontend_id: str
+        setting_key: str
+        frontend_id, setting_key = split_namespace_key(key)
+        spec = get_ui_setting_spec(frontend_id, setting_key)
+        if spec is None:
+            raise ValueError(f"Unknown namespace setting '{key}'.")
+
+        data: Dict[str, Dict[str, SettingValue]] = cls._load_settings()
+        category: str
+        sub_key: str
+        category, sub_key = key.split('.', 1)
+
+        if category in data and sub_key in data[category]:
+            candidate: SettingValue = data[category][sub_key]
+            try:
+                return validate_ui_setting_value(spec, candidate)
+            except (TypeError, SettingValidationError):
+                return spec.default
+
+        return spec.default
+
+    @classmethod
+    def get_namespace_str(cls, key: str) -> str:
+        """
+        Retrieves a namespace setting and guarantees a string return type.
+
+        Args:
+            key (str): The `ui.<frontend>.<key>` namespace key.
+
+        Returns:
+            str: The configuration value as a string.
+        """
+        return TypeCaster.to_str(cls.get_namespace_value(key))
+
+    @classmethod
+    def get_namespace_int(cls, key: str) -> int:
+        """
+        Retrieves a namespace setting and safely coerces it into an integer.
+
+        Args:
+            key (str): The `ui.<frontend>.<key>` namespace key.
+
+        Returns:
+            int: The configuration value as an integer.
+        """
+        return TypeCaster.to_int(cls.get_namespace_value(key))
+
+    @classmethod
+    def get_namespace_float(cls, key: str) -> float:
+        """
+        Retrieves a namespace setting and safely coerces it into a float.
+
+        Args:
+            key (str): The `ui.<frontend>.<key>` namespace key.
+
+        Returns:
+            float: The configuration value as a float.
+        """
+        return TypeCaster.to_float(cls.get_namespace_value(key))
+
+    @classmethod
+    def get_namespace_bool(cls, key: str) -> bool:
+        """
+        Retrieves a namespace setting and safely coerces it into a boolean.
+
+        Args:
+            key (str): The `ui.<frontend>.<key>` namespace key.
+
+        Returns:
+            bool: The configuration value as a boolean.
+        """
+        return TypeCaster.to_bool(cls.get_namespace_value(key))

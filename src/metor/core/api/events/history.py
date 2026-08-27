@@ -96,6 +96,7 @@ class RawHistoryEntry(_HistoryEntryCastingMixin):
     detail_text: str
     flow_id: str
     alias: Optional[str] = None
+    transport: Optional[str] = None
 
     def __post_init__(self) -> None:
         """Coerces the common history fields and the raw event_code to their typed enums."""

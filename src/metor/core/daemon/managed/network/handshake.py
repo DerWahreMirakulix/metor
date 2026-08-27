@@ -50,9 +50,9 @@ class HandshakeProtocol:
         return ' '.join(parts) + '\n'
 
     @staticmethod
-    def parse_challenge_line(line: str) -> str:
+    def parse_challenge_line(line: str) -> Tuple[str, int]:
         """
-        Validates one peer-auth challenge frame and returns its nonce.
+        Validates one peer-auth challenge frame and returns its nonce and version.
 
         Args:
             line (str): The raw line received from the peer.
@@ -61,10 +61,12 @@ class HandshakeProtocol:
             ValueError: If the frame is malformed or the nonce is invalid.
 
         Returns:
-            str: The validated hexadecimal challenge string.
+            Tuple[str, int]: The validated hexadecimal challenge string and the
+                peer's announced peer-wire protocol version (legacy frames without
+                a version token default to version 1).
         """
         parts: list[str] = line.strip().split()
-        if len(parts) != 2 or parts[0] != TorCommand.CHALLENGE.value:
+        if len(parts) not in (2, 3) or parts[0] != TorCommand.CHALLENGE.value:
             raise ValueError('Invalid handshake challenge frame.')
 
         challenge_hex: str = parts[1]
@@ -76,7 +78,30 @@ class HandshakeProtocol:
         if len(challenge) != Constants.TOR_HANDSHAKE_CHALLENGE_BYTES:
             raise ValueError('Invalid handshake challenge length.')
 
-        return challenge_hex
+        peer_version: int = 1
+        if len(parts) == 3:
+            try:
+                peer_version = int(parts[2])
+            except ValueError as exc:
+                raise ValueError('Invalid handshake challenge version.') from exc
+
+        return challenge_hex, peer_version
+
+    @staticmethod
+    def build_challenge_line(challenge_hex: str) -> str:
+        """
+        Builds one outbound CHALLENGE frame carrying the local peer protocol version.
+
+        Args:
+            challenge_hex (str): The random hexadecimal challenge nonce.
+
+        Returns:
+            str: The newline-delimited CHALLENGE frame.
+        """
+        return (
+            f'{TorCommand.CHALLENGE.value} {challenge_hex} '
+            f'{Constants.PEER_PROTOCOL_VERSION}\n'
+        )
 
     @staticmethod
     def parse_auth_line(

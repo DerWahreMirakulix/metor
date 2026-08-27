@@ -14,6 +14,7 @@ from metor.core.api.registry import register_command
 class InitCommand(IpcCommand):
     """Requests daemon-session initialization."""
 
+    protocol_version: Optional[int] = None
     command_type: CommandType = field(default=CommandType.INIT, init=False)
 
 

@@ -350,6 +350,14 @@ class CliProxyTransport:
         except ValueError as exc:
             return IpcRequestResult(message=str(exc))
         except Exception:
+            if self._is_remote:
+                return IpcRequestResult(
+                    message=(
+                        f'Cannot reach remote Daemon on port '
+                        f'{Theme.YELLOW}{self._pm.get_static_port()}{Theme.RESET}. '
+                        'Did you forget the SSH tunnel?'
+                    )
+                )
             return IpcRequestResult(message='Failed to communicate with the daemon.')
 
     def send_to_port_event(self, port: int, cmd: IpcCommand) -> Optional[IpcEvent]:

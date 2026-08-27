@@ -249,6 +249,43 @@ class SettingsDocGenerator:
         lines.append('')
         return '\n'.join(lines)
 
+    def _preserve_manual_sections(self) -> str:
+        """
+        Extracts manually maintained reference sections from the existing file.
+
+        Sections delimited by `<!-- manual: ... -->` and `<!-- /manual -->`
+        markers survive regeneration and are appended after the generated body.
+
+        Args:
+            None
+
+        Returns:
+            str: The concatenated manual sections, or an empty string.
+        """
+        if not self._output_path.exists():
+            return ''
+
+        existing: str = self._output_path.read_text(encoding='utf-8')
+        blocks: List[str] = []
+        current: List[str] = []
+        capture: bool = False
+
+        for line in existing.splitlines():
+            if line.startswith('<!-- manual:'):
+                capture = True
+                current = [line]
+            elif capture:
+                current.append(line)
+                if line.startswith('<!-- /manual'):
+                    blocks.append('\n'.join(current))
+                    current = []
+                    capture = False
+
+        if capture and current:
+            blocks.append('\n'.join(current))
+
+        return '\n\n'.join(blocks)
+
     def generate(self) -> None:
         """
         Builds and writes the Markdown settings reference.
@@ -315,8 +352,13 @@ class SettingsDocGenerator:
                 lines.append('---')
                 lines.append('')
 
+        manual_sections: str = self._preserve_manual_sections()
+        content: str = '\n'.join(lines)
+        if manual_sections:
+            content += '\n\n' + manual_sections + '\n'
+
         with self._output_path.open('w', encoding='utf-8') as handle:
-            handle.write('\n'.join(lines))
+            handle.write(content)
 
 
 def main() -> None:

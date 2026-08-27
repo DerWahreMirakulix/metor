@@ -10,6 +10,7 @@ from typing import Dict, List, Callable, Optional, Tuple, TYPE_CHECKING
 from metor.core import TorManager
 from metor.core.api import ConnectionOrigin, EventType, IpcEvent, JsonValue
 from metor.core.daemon.managed.crypto import Crypto
+from metor.core.daemon.managed.models import TunnelState, SessionState
 from metor.data import HistoryManager, ContactManager, MessageManager
 
 # Local Package Imports
@@ -21,6 +22,7 @@ from metor.core.daemon.managed.network.router import MessageRouter
 from metor.core.daemon.managed.network.controller.base import ConnectionController
 from metor.core.daemon.managed.network.receiver import StreamReceiver
 from metor.core.daemon.managed.network.listener import InboundListener
+from metor.core.daemon.managed.notify import NotificationPayload
 
 if TYPE_CHECKING:
     from metor.data.profile import Config
@@ -39,6 +41,7 @@ class NetworkManager:
         broadcast_callback: Callable[[IpcEvent], None],
         has_clients_callback: Callable[[], bool],
         has_live_consumers_callback: Callable[[], bool],
+        notify_callback: Callable[[NotificationPayload], None],
         stop_flag: threading.Event,
         config: 'Config',
         state: Optional[StateTracker] = None,
@@ -55,6 +58,7 @@ class NetworkManager:
             broadcast_callback (Callable[[IpcEvent], None]): Callback to broadcast IPC events.
             has_clients_callback (Callable[[], bool]): Callback to check for active UI clients.
             has_live_consumers_callback (Callable[[], bool]): Callback to check for interactive live consumers.
+            notify_callback (Callable[[NotificationPayload], None]): Callback delivering detached notifications.
             stop_flag (threading.Event): Global daemon termination flag.
             config (Config): The profile configuration instance.
             state (Optional[StateTracker]): Optional shared transport state.
@@ -73,6 +77,7 @@ class NetworkManager:
             broadcast_callback=broadcast_callback,
             has_clients_callback=has_clients_callback,
             has_live_consumers_callback=has_live_consumers_callback,
+            notify_callback=notify_callback,
             config=config,
         )
 
@@ -112,7 +117,9 @@ class NetworkManager:
             router=self._router,
             receiver=self._receiver,
             broadcast_callback=broadcast_callback,
+            has_clients_callback=has_clients_callback,
             has_live_consumers_callback=has_live_consumers_callback,
+            notify_callback=notify_callback,
             enqueue_live_reconnect_callback=self._controller._enqueue_live_reconnect,
             stop_flag=stop_flag,
             config=config,
@@ -350,3 +357,39 @@ class NetworkManager:
             List[PendingConnectionSnapshot]: Pending connection snapshots.
         """
         return self._state.get_pending_connection_snapshots()
+
+    def get_live_state(self, onion: str) -> SessionState:
+        """
+        Returns the derived live transport lifecycle state for one peer.
+
+        Args:
+            onion (str): The strict onion identity.
+
+        Returns:
+            SessionState: The derived live transport lifecycle state.
+        """
+        return self._state.get_live_state(onion)
+
+    def get_drop_tunnel_state(self, onion: str) -> Optional[TunnelState]:
+        """
+        Returns the cached drop-tunnel metadata for one peer.
+
+        Args:
+            onion (str): The strict onion identity.
+
+        Returns:
+            Optional[TunnelState]: The cached tunnel metadata, if present.
+        """
+        return self._state.get_drop_tunnel_state(onion)
+
+    def get_focus_count(self, onion: str) -> int:
+        """
+        Returns the current UI focus reference count for one peer.
+
+        Args:
+            onion (str): The strict onion identity.
+
+        Returns:
+            int: The number of UI focus references for the peer.
+        """
+        return self._state.get_focus_count(onion)

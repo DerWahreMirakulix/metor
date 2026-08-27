@@ -1,5 +1,6 @@
 """
-Script for auto-generating Markdown API documentation from the Metor IPC registries.
+Script for auto-generating Markdown API documentation and the JSON Schema
+wire contract from the Metor IPC registries.
 Enforces the DRY principle by dynamically introspecting dataclasses and Enums.
 Automatically resolves project paths for the src-layout architecture and applies
 Prettier formatting to the final output.
@@ -14,7 +15,18 @@ import subprocess
 import dataclasses
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Type, Any, get_args, get_origin
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    List,
+    Type,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
+from types import UnionType
 
 
 # Dynamically resolve paths to support execution from any directory
@@ -302,6 +314,151 @@ class ApiDocGenerator:
             f.write('\n'.join(lines))
 
 
+class ApiSchemaGenerator:
+    """Generates a JSON Schema document describing the registered IPC DTOs."""
+
+    def __init__(self, output_path: str | Path) -> None:
+        """
+        Initializes the schema generator.
+
+        Args:
+            output_path (str | Path): The absolute or relative path for the generated JSON Schema file.
+
+        Returns:
+            None
+        """
+        self._output_path: Path = Path(output_path)
+
+    def _field_schema(self, field_type: object) -> Dict[str, Any]:
+        """
+        Maps one dataclass field annotation to a JSON Schema fragment.
+
+        Unknown or unresolvable type information degrades to an empty schema
+        fragment so a single exotic annotation can never crash the generator.
+
+        Args:
+            field_type (object): The type annotation from the dataclass field.
+
+        Returns:
+            Dict[str, Any]: The JSON Schema fragment for the annotation.
+        """
+        origin: Any = get_origin(field_type)
+        args: tuple[Any, ...] = get_args(field_type)
+
+        if origin is Union or origin is UnionType:
+            member_schemas: List[Dict[str, Any]] = [
+                self._field_schema(arg) for arg in args if arg is not type(None)
+            ]
+            if type(None) in args:
+                member_schemas.append({'type': 'null'})
+            if not member_schemas:
+                return {}
+            return {'anyOf': member_schemas}
+        if origin in (list, List):
+            items: Dict[str, Any] = self._field_schema(args[0]) if args else {}
+            return {'type': 'array', 'items': items}
+        if origin in (dict, Dict):
+            return {'type': 'object'}
+        if isinstance(field_type, type) and issubclass(field_type, Enum):
+            enum_values: List[Any] = [member.value for member in field_type]
+            schema: Dict[str, Any] = {'enum': enum_values}
+            if all(isinstance(value, str) for value in enum_values):
+                schema['type'] = 'string'
+            return schema
+        if field_type is str:
+            return {'type': 'string'}
+        if field_type is int:
+            return {'type': 'integer'}
+        if field_type is float:
+            return {'type': 'number'}
+        if field_type is bool:
+            return {'type': 'boolean'}
+        return {}
+
+    def _dto_schema(self, cls: Type['IpcMessage']) -> Dict[str, Any]:
+        """
+        Builds one JSON Schema object schema for a command or event DTO.
+
+        Routing constants (`command_type` / `event_type`) are excluded from the
+        payload schema because they are envelope-level values. Fields without a
+        default are listed as required.
+
+        Args:
+            cls (Type[IpcMessage]): The dataclass type to introspect.
+
+        Returns:
+            Dict[str, Any]: The JSON Schema object schema for the DTO.
+        """
+        try:
+            hints: Dict[str, object] = get_type_hints(cls)
+        except Exception:
+            hints = {}
+
+        properties: Dict[str, Any] = {}
+        required: List[str] = []
+
+        for f in dataclasses.fields(cls):
+            if f.name in ('command_type', 'event_type'):
+                continue
+            properties[f.name] = self._field_schema(hints.get(f.name, f.type))
+            if (
+                f.default is dataclasses.MISSING
+                and f.default_factory is dataclasses.MISSING
+            ):
+                required.append(f.name)
+
+        schema: Dict[str, Any] = {
+            'title': cls.__name__,
+            'type': 'object',
+            'properties': properties,
+        }
+        if required:
+            schema['required'] = required
+        return schema
+
+    def generate(self) -> None:
+        """
+        Iterates over the command and event registries, builds the JSON Schema
+        document, and writes it to the designated file.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        sorted_commands = sorted(CMD_MAP.items(), key=lambda item: item[0].value)
+        sorted_events = sorted(EVENT_MAP.items(), key=lambda item: item[0].value)
+
+        definitions: Dict[str, Any] = {}
+        commands: Dict[str, Any] = {}
+        events: Dict[str, Any] = {}
+
+        for command_type, cmd_cls in sorted_commands:
+            definitions[cmd_cls.__name__] = self._dto_schema(cmd_cls)
+            commands[command_type.value] = {
+                '$ref': f'#/definitions/{cmd_cls.__name__}'
+            }
+
+        for event_type, event_cls in sorted_events:
+            definitions[event_cls.__name__] = self._dto_schema(event_cls)
+            events[event_type.value] = {
+                '$ref': f'#/definitions/{event_cls.__name__}'
+            }
+
+        document: Dict[str, Any] = {
+            '$schema': 'https://json-schema.org/draft/2020-12/schema',
+            'title': 'Metor IPC Contract',
+            'definitions': definitions,
+            'commands': commands,
+            'events': events,
+        }
+
+        with self._output_path.open('w', encoding='utf-8') as f:
+            f.write(json.dumps(document, indent=2))
+            f.write('\n')
+
+
 def main() -> None:
     """
     Entry point for the API doc generation script.
@@ -318,6 +475,13 @@ def main() -> None:
     generator.generate()
     sys.stdout.write(
         f'API documentation successfully generated at: {output_file.absolute()}\n'
+    )
+
+    schema_file: Path = PROJECT_ROOT / 'docs' / 'api.schema.json'
+    schema_generator: ApiSchemaGenerator = ApiSchemaGenerator(schema_file)
+    schema_generator.generate()
+    sys.stdout.write(
+        f'IPC schema documentation successfully generated at: {schema_file.absolute()}\n'
     )
 
     sys.stdout.write('Running Prettier on the generated file...\n')

@@ -26,11 +26,11 @@ class PrimaryTransport(str, Enum):
     """Enumeration of the daemon-level primary transport per peer."""
 
     NONE = 'none'
-    LIVE = 'live'
-    DROP = 'drop'
+    SESSION = 'session'
+    TUNNEL = 'tunnel'
 
 
-class LiveTransportState(str, Enum):
+class SessionState(str, Enum):
     """Enumeration of the live transport lifecycle for one peer."""
 
     DISCONNECTED = 'disconnected'
@@ -41,7 +41,7 @@ class LiveTransportState(str, Enum):
 
 
 @dataclass(frozen=True)
-class DropTunnelState:
+class TunnelState:
     """Snapshot describing one cached drop tunnel."""
 
     opened_at: float
@@ -53,7 +53,7 @@ class PeerTransportState:
     """Snapshot describing the derived transport state for one peer."""
 
     onion: str
-    live_state: LiveTransportState
+    live_state: SessionState
     primary_transport: PrimaryTransport
     has_drop_tunnel: bool
     focus_count: int

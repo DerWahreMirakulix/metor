@@ -20,8 +20,10 @@ from metor.core.api import (
     IpcCommand,
     IpcEvent,
     create_event,
+    JsonValue,
     InitCommand,
     InitEvent,
+    ProtocolMismatchEvent,
     GetConnectionsCommand,
     ConnectionsStateEvent,
     ConnectCommand,
@@ -39,6 +41,12 @@ from metor.core.api import (
     request_context,
     stamp_request_id,
     UnreadInboxSummaryEntry,
+    GetTransportStateCommand,
+    TransportStateEvent,
+)
+from metor.core.daemon.managed.models import (
+    TunnelState,
+    SessionState,
 )
 from metor.core.daemon.managed.network import NetworkManager
 from metor.core.daemon.managed.network.state import PendingConnectionSnapshot
@@ -53,7 +61,7 @@ from metor.data import (
     MessageStatus,
     SettingKey,
 )
-from metor.utils import clean_onion
+from metor.utils import Constants, clean_onion
 
 # Local Package Imports
 from metor.core.daemon.managed.outbox import OutboxWorker
@@ -95,7 +103,7 @@ class NetworkCommandHandler:
         outbox: OutboxWorker,
         broadcast_cb: Callable[[IpcEvent], None],
         send_to_cb: Callable[[socket.socket, IpcEvent], None],
-        register_live_consumer_cb: Callable[[socket.socket], None],
+        register_session_consumer_cb: Callable[[socket.socket], None],
         config: 'Config',
     ) -> None:
         """
@@ -110,7 +118,7 @@ class NetworkCommandHandler:
             outbox (OutboxWorker): The offline drop tunnel worker.
             broadcast_cb (Callable[[IpcEvent], None]): Hook to broadcast IPC events.
             send_to_cb (Callable[[socket.socket, IpcEvent], None]): Hook to send an IPC event to a specific client.
-            register_live_consumer_cb (Callable[[socket.socket], None]): Hook to mark one IPC session as an interactive live consumer.
+            register_session_consumer_cb (Callable[[socket.socket], None]): Hook to mark one IPC session as an interactive live consumer.
             config (Config): The profile configuration instance.
 
         Returns:
@@ -124,8 +132,8 @@ class NetworkCommandHandler:
         self._outbox: OutboxWorker = outbox
         self._broadcast: Callable[[IpcEvent], None] = broadcast_cb
         self._send_to: Callable[[socket.socket, IpcEvent], None] = send_to_cb
-        self._register_live_consumer: Callable[[socket.socket], None] = (
-            register_live_consumer_cb
+        self._register_session_consumer: Callable[[socket.socket], None] = (
+            register_session_consumer_cb
         )
         self._config: 'Config' = config
         self._client_focuses: Dict[socket.socket, str] = {}
@@ -366,6 +374,103 @@ class NetworkCommandHandler:
             unread=self._build_unread_startup_entries(),
         )
 
+    def _build_transport_state_events(
+        self,
+        peer: Optional[str],
+    ) -> List[TransportStateEvent]:
+        """
+        Builds typed transport-state events for one requested peer or all active sessions.
+
+        Args:
+            peer (Optional[str]): The requested alias or onion, or None for every
+                active session.
+
+        Returns:
+            List[TransportStateEvent]: One event per resolved peer; a single
+                empty event when no peer was resolved or no session is active.
+        """
+        if peer:
+            resolved: Optional[Tuple[str, str]] = (
+                self._cm.resolve_target_for_interaction(peer)
+            )
+            if not resolved:
+                return [
+                    TransportStateEvent(
+                        peer=peer,
+                        session_state=SessionState.DISCONNECTED.value,
+                    )
+                ]
+
+            alias, onion = resolved
+            return [self._build_transport_state_event(alias, onion)]
+
+        active_onions: List[str] = self._network.get_active_onions()
+        if not active_onions:
+            return [
+                TransportStateEvent(
+                    peer='',
+                    session_state=SessionState.DISCONNECTED.value,
+                )
+            ]
+
+        events: List[TransportStateEvent] = []
+        for onion in active_onions:
+            alias = self._cm.ensure_alias_for_onion(onion) or onion
+            events.append(self._build_transport_state_event(alias, onion))
+        return events
+
+    def _build_transport_state_event(
+        self,
+        peer: str,
+        onion: str,
+    ) -> TransportStateEvent:
+        """
+        Builds one typed transport-state event for a resolved peer.
+
+        Args:
+            peer (str): The display alias for the peer.
+            onion (str): The strict peer onion identity.
+
+        Returns:
+            TransportStateEvent: The typed transport-state DTO.
+        """
+        live_state: SessionState = self._network.get_live_state(onion)
+
+        drop_tunnel_state: Optional[TunnelState] = (
+            self._network.get_drop_tunnel_state(onion)
+        )
+        drop_tunnel: Optional[Dict[str, JsonValue]] = None
+        if drop_tunnel_state is not None:
+            drop_tunnel = {
+                'cached': True,
+                'opened_at': datetime.fromtimestamp(
+                    drop_tunnel_state.opened_at,
+                    tz=timezone.utc,
+                ).isoformat(),
+                'last_used_at': datetime.fromtimestamp(
+                    drop_tunnel_state.last_used_at,
+                    tz=timezone.utc,
+                ).isoformat(),
+                'idle_timeout': self._config.get_float(
+                    SettingKey.DROP_TUNNEL_IDLE_TIMEOUT
+                ),
+            }
+
+        auto_accept: bool = (
+            peer in self._cm.get_all_contacts()
+            and self._config.get_bool(SettingKey.AUTO_ACCEPT_CONTACTS)
+        )
+
+        return TransportStateEvent(
+            peer=peer,
+            session_state=live_state.value,
+            onion=onion,
+            drop_tunnel=drop_tunnel,
+            focus_count=self._network.get_focus_count(onion),
+            pending_live_count=len(self._mm.get_pending_live_outbox(onion)),
+            auto_accept=auto_accept,
+        )
+
     def handle(self, cmd: IpcCommand, conn: socket.socket) -> None:
         """
         Routes the network command to the NetworkManager or MessageManager and returns DTOs.
@@ -380,13 +485,38 @@ class NetworkCommandHandler:
         resolved: Optional[Tuple[str, str]]
 
         if isinstance(cmd, InitCommand):
-            self._send_event(conn, InitEvent(onion=self._tm.onion))
+            if (
+                cmd.protocol_version is not None
+                and cmd.protocol_version < Constants.IPC_PROTOCOL_MIN_SUPPORTED
+            ):
+                self._send_event(
+                    conn,
+                    ProtocolMismatchEvent(
+                        daemon_version=Constants.IPC_PROTOCOL_VERSION,
+                        min_supported=Constants.IPC_PROTOCOL_MIN_SUPPORTED,
+                        client_version=cmd.protocol_version,
+                    ),
+                )
+            else:
+                self._send_event(
+                    conn,
+                    InitEvent(
+                        onion=self._tm.onion,
+                        version=Constants.IPC_PROTOCOL_VERSION,
+                        min_supported=Constants.IPC_PROTOCOL_MIN_SUPPORTED,
+                        profile=self._config._paths.profile_name,
+                    ),
+                )
 
         elif isinstance(cmd, GetChatStartupStateCommand):
             self._send_event(conn, self._build_chat_startup_state())
 
         elif isinstance(cmd, RegisterLiveConsumerCommand):
-            self._register_live_consumer(conn)
+            self._register_session_consumer(conn)
+
+        elif isinstance(cmd, GetTransportStateCommand):
+            for event in self._build_transport_state_events(cmd.peer):
+                self._send_event(conn, event)
 
         elif isinstance(cmd, GetConnectionsCommand):
             self._send_event(

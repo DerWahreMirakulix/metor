@@ -54,12 +54,27 @@ class InputHandler:
             None
         """
         if os.name != 'nt':
-            fd: int = sys.stdin.fileno()
+            try:
+                fd: int = sys.stdin.fileno()
+            except (AttributeError, OSError, ValueError):
+                print(
+                    'Error: interactive chat requires a terminal (stdin has no file descriptor).',
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             tcgetattr = getattr(termios, 'tcgetattr')
             tcsetattr = getattr(termios, 'tcsetattr')
             tcsa_drain = getattr(termios, 'TCSADRAIN')
             setcbreak = getattr(tty, 'setcbreak')
-            old_term_settings = tcgetattr(fd)
+            try:
+                old_term_settings = tcgetattr(fd)
+            except (termios.error, OSError) as exc:
+                print(
+                    f'Error: interactive chat requires a TTY (termios failed: {exc}). '
+                    'Run "metor chat" from a terminal.',
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
             def _reset_terminal() -> None:
                 """
@@ -73,7 +88,15 @@ class InputHandler:
                 """
                 tcsetattr(fd, tcsa_drain, old_term_settings)
 
-            setcbreak(fd)
+            try:
+                setcbreak(fd)
+            except (termios.error, OSError) as exc:
+                print(
+                    f'Error: interactive chat requires a TTY (setcbreak failed: {exc}). '
+                    'Run "metor chat" from a terminal.',
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             atexit.register(_reset_terminal)
 
     def get_char(self) -> Optional[str]:

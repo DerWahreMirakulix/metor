@@ -9,6 +9,7 @@ import socket
 import threading
 import secrets
 import time
+from datetime import datetime, timezone
 from typing import Optional, Callable, TYPE_CHECKING
 
 from metor.core import TorManager
@@ -29,7 +30,7 @@ from metor.core.api import (
     create_event,
 )
 from metor.core.daemon.managed.models import (
-    LiveTransportState,
+    SessionState,
     RejectIntent,
     TorCommand,
 )
@@ -52,6 +53,7 @@ from metor.core.daemon.managed.network.state import (
 from metor.core.daemon.managed.network.stream import TcpStreamReader
 from metor.core.daemon.managed.network.handshake import HandshakeProtocol
 from metor.core.daemon.managed.network.router import MessageRouter
+from metor.core.daemon.managed.notify import NotificationPayload
 
 if TYPE_CHECKING:
     from metor.core.daemon.managed.network.receiver import StreamReceiver
@@ -71,7 +73,9 @@ class InboundListener:
         router: MessageRouter,
         receiver: 'StreamReceiver',
         broadcast_callback: Callable[[IpcEvent], None],
+        has_clients_callback: Callable[[], bool],
         has_live_consumers_callback: Callable[[], bool],
+        notify_callback: Callable[[NotificationPayload], None],
         enqueue_live_reconnect_callback: Callable[[str], bool],
         stop_flag: threading.Event,
         config: 'Config',
@@ -88,7 +92,9 @@ class InboundListener:
             router (MessageRouter): The application-layer message router.
             receiver (StreamReceiver): The stream receiver to instantiate upon acceptance.
             broadcast_callback (Callable): IPC broadcaster.
+            has_clients_callback (Callable[[], bool]): Callback to check for active UI clients.
             has_live_consumers_callback (Callable[[], bool]): Callback to check whether an interactive live consumer is attached.
+            notify_callback (Callable[[NotificationPayload], None]): Callback delivering detached notifications.
             enqueue_live_reconnect_callback (Callable[[str], bool]): Callback to queue one delayed automatic reconnect attempt.
             stop_flag (threading.Event): Global daemon termination flag.
             config (Config): The profile configuration instance.
@@ -104,7 +110,9 @@ class InboundListener:
         self._router: MessageRouter = router
         self._receiver: 'StreamReceiver' = receiver
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
+        self._has_clients: Callable[[], bool] = has_clients_callback
         self._has_live_consumers: Callable[[], bool] = has_live_consumers_callback
+        self._notify_callback: Callable[[NotificationPayload], None] = notify_callback
         self._enqueue_live_reconnect: Callable[[str], bool] = (
             enqueue_live_reconnect_callback
         )
@@ -358,7 +366,9 @@ class InboundListener:
             tor_timeout: float = self._config.get_float(SettingKey.TOR_TIMEOUT)
             conn.settimeout(tor_timeout)
             challenge: str = secrets.token_hex(Constants.TOR_HANDSHAKE_CHALLENGE_BYTES)
-            conn.sendall(f'{TorCommand.CHALLENGE.value} {challenge}\n'.encode('utf-8'))
+            conn.sendall(
+                HandshakeProtocol.build_challenge_line(challenge).encode('utf-8')
+            )
 
             stream = TcpStreamReader(conn)
             line: Optional[str] = stream.read_line()
@@ -538,7 +548,7 @@ class InboundListener:
                 grace_reconnect
                 or retunnel_reconnect
                 or scheduled_auto_reconnect
-                or transport_state.live_state is LiveTransportState.CONNECTED
+                or transport_state.live_state is SessionState.CONNECTED
             )
 
         if has_recovery_hint and self._state.has_local_recovery_opt_out(onion):
@@ -558,7 +568,7 @@ class InboundListener:
 
         if (
             transport_state.live_state
-            in (LiveTransportState.CONNECTED, LiveTransportState.PENDING)
+            in (SessionState.CONNECTED, SessionState.PENDING)
             and not grace_reconnect
             and not retunnel_reconnect
             and not scheduled_auto_reconnect
@@ -566,7 +576,7 @@ class InboundListener:
         ):
             duplicate_reason_code = (
                 HistoryReasonCode.DUPLICATE_INCOMING_CONNECTED
-                if transport_state.live_state is LiveTransportState.CONNECTED
+                if transport_state.live_state is SessionState.CONNECTED
                 else HistoryReasonCode.DUPLICATE_INCOMING_PENDING
             )
             should_reject = True
@@ -642,7 +652,7 @@ class InboundListener:
             incoming_origin = ConnectionOrigin.AUTO_ACCEPT_CONTACT
 
         seamless_recovery_replacement: bool = (
-            transport_state.live_state is LiveTransportState.CONNECTED
+            transport_state.live_state is SessionState.CONNECTED
             and incoming_origin is ConnectionOrigin.GRACE_RECONNECT
         )
 
@@ -752,3 +762,12 @@ class InboundListener:
                         actor=ConnectionActor.REMOTE,
                     )
                 )
+                if not self._has_clients():
+                    self._notify_callback(
+                        NotificationPayload(
+                            kind='incoming_connection',
+                            peer_alias=alias,
+                            peer_onion=onion,
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                        )
+                    )

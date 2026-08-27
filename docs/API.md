@@ -38,6 +38,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [GetRawHistoryCommand](#getrawhistorycommand)
 - [GetSettingCommand](#getsettingcommand)
 - [GetSettingsListCommand](#getsettingslistcommand)
+- [GetTransportStateCommand](#gettransportstatecommand)
 - [InitCommand](#initcommand)
 - [MarkReadCommand](#markreadcommand)
 - [MigrateProfileSecurityCommand](#migrateprofilesecuritycommand)
@@ -77,6 +78,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [CannotDropSelfEvent](#cannotdropselfevent)
 - [CannotSwitchSelfEvent](#cannotswitchselfevent)
 - [ChatStartupStateEvent](#chatstartupstateevent)
+- [ClientScopeKeyRejectedEvent](#clientscopekeyrejectedevent)
 - [ConfigDataEvent](#configdataevent)
 - [ConfigListDataEvent](#configlistdataevent)
 - [ConfigSyncedEvent](#configsyncedevent)
@@ -98,7 +100,6 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [ContactsClearFailedEvent](#contactsclearfailedevent)
 - [ContactsClearedEvent](#contactsclearedevent)
 - [ContactsDataEvent](#contactsdataevent)
-- [DaemonCannotManageUiEvent](#daemoncannotmanageuievent)
 - [DaemonLockedEvent](#daemonlockedevent)
 - [DaemonOfflineEvent](#daemonofflineevent)
 - [DaemonUnlockedEvent](#daemonunlockedevent)
@@ -148,6 +149,8 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [PendingConnectionExpiredEvent](#pendingconnectionexpiredevent)
 - [ProfileOperationResultEvent](#profileoperationresultevent)
 - [ProfilesDataEvent](#profilesdataevent)
+- [ProtocolMismatchEvent](#protocolmismatchevent)
+- [ReadReceiptEvent](#readreceiptevent)
 - [RemoteMsgEvent](#remotemsgevent)
 - [RenameSuccessEvent](#renamesuccessevent)
 - [RetunnelFailedEvent](#retunnelfailedevent)
@@ -165,6 +168,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [TorKeyWriteFailedEvent](#torkeywritefailedevent)
 - [TorProcessTerminatedEvent](#torprocessterminatedevent)
 - [TorStartFailedEvent](#torstartfailedevent)
+- [TransportStateEvent](#transportstateevent)
 - [UnknownCommandEvent](#unknowncommandevent)
 - [UnreadMessagesEvent](#unreadmessagesevent)
 
@@ -219,13 +223,14 @@ Adds a new contact or promotes a discovered peer.
 
 Requests creation of one local or remote profile entry.
 
-| Field           | Type               | Default     |
-| --------------- | ------------------ | ----------- |
-| `request_id`    | `Union[str, None]` | `None`      |
-| `name`          | `str`              | Required    |
-| `is_remote`     | `bool`             | `False`     |
-| `port`          | `Union[int, None]` | `None`      |
-| `security_mode` | `str`              | `encrypted` |
+| Field             | Type               | Default     |
+| ----------------- | ------------------ | ----------- |
+| `request_id`      | `Union[str, None]` | `None`      |
+| `name`            | `str`              | Required    |
+| `is_remote`       | `bool`             | `False`     |
+| `port`            | `Union[int, None]` | `None`      |
+| `security_mode`   | `str`              | `encrypted` |
+| `master_password` | `Union[str, None]` | `None`      |
 
 **Wire Value:** `add_profile`
 
@@ -697,13 +702,35 @@ command_type (CommandType): The stable IPC routing code.
 
 ---
 
-### `InitCommand`
+### `GetTransportStateCommand`
 
-Requests daemon-session initialization.
+Requests the current transport state for one peer or the whole daemon.
 
 | Field        | Type               | Default |
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
+| `peer`       | `Union[str, None]` | `None`  |
+
+**Wire Value:** `get_transport_state`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "get_transport_state"
+}
+```
+
+---
+
+### `InitCommand`
+
+Requests daemon-session initialization.
+
+| Field              | Type               | Default |
+| ------------------ | ------------------ | ------- |
+| `request_id`       | `Union[str, None]` | `None`  |
+| `protocol_version` | `Union[int, None]` | `None`  |
 
 **Wire Value:** `init`
 
@@ -1524,6 +1551,27 @@ Returns the first-attach chat snapshot with sessions and unread summaries.
 
 ---
 
+### `ClientScopeKeyRejectedEvent`
+
+Signals that a client-scope setting or config key was routed to the daemon.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `key`        | `str`              | ``      |
+
+**Wire Value:** `client_scope_key_rejected`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "client_scope_key_rejected"
+}
+```
+
+---
+
 ### `ConfigDataEvent`
 
 Returns a profile-specific config value.
@@ -2040,26 +2088,6 @@ Returns the structured address book.
 
 ---
 
-### `DaemonCannotManageUiEvent`
-
-Signals that a UI-only setting was routed to the daemon.
-
-| Field        | Type               | Default |
-| ------------ | ------------------ | ------- |
-| `request_id` | `Union[str, None]` | `None`  |
-
-**Wire Value:** `daemon_cannot_manage_ui`
-
-**Example JSON**
-
-```json
-{
-  "event_type": "daemon_cannot_manage_ui"
-}
-```
-
----
-
 ### `DaemonLockedEvent`
 
 Signals that the daemon is locked.
@@ -2239,6 +2267,7 @@ Marks an asynchronous drop as failed.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `msg_id`     | `str`              | Required |
+| `reason`     | `Union[str, None]` | `None`   |
 
 **Wire Value:** `drop_failed`
 
@@ -2541,12 +2570,15 @@ Signals an inbound live connection request.
 
 ### `InitEvent`
 
-Initializes the UI with the local onion address.
+Initializes the UI with the local onion address and protocol versions.
 
-| Field        | Type               | Default |
-| ------------ | ------------------ | ------- |
-| `request_id` | `Union[str, None]` | `None`  |
-| `onion`      | `Union[str, None]` | `None`  |
+| Field           | Type               | Default |
+| --------------- | ------------------ | ------- |
+| `request_id`    | `Union[str, None]` | `None`  |
+| `onion`         | `Union[str, None]` | `None`  |
+| `version`       | `Union[int, None]` | `None`  |
+| `min_supported` | `Union[int, None]` | `None`  |
+| `profile`       | `Union[str, None]` | `None`  |
 
 **Wire Value:** `init`
 
@@ -3178,6 +3210,56 @@ event_type (EventType): The stable IPC routing code.
 
 ---
 
+### `ProtocolMismatchEvent`
+
+Signals that the client IPC protocol version is too old.
+
+| Field            | Type               | Default  |
+| ---------------- | ------------------ | -------- |
+| `request_id`     | `Union[str, None]` | `None`   |
+| `daemon_version` | `int`              | Required |
+| `min_supported`  | `int`              | Required |
+| `client_version` | `Union[int, None]` | `None`   |
+
+**Wire Value:** `protocol_mismatch`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "protocol_mismatch",
+  "daemon_version": 0,
+  "min_supported": 0
+}
+```
+
+---
+
+### `ReadReceiptEvent`
+
+Signals that the peer consumed one message and acknowledges it as read.
+
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `msg_id`     | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
+
+**Wire Value:** `read_receipt`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "read_receipt",
+  "alias": "string",
+  "msg_id": "string"
+}
+```
+
+---
+
 ### `RemoteMsgEvent`
 
 Carries a live inbound message.
@@ -3189,6 +3271,7 @@ Carries a live inbound message.
 | `text`       | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 | `timestamp`  | `Union[str, None]` | `None`   |
+| `msg_id`     | `Union[str, None]` | `None`   |
 
 **Wire Value:** `remote_msg`
 
@@ -3562,6 +3645,35 @@ Signals that the Tor process could not be started.
 ```json
 {
   "event_type": "tor_start_failed"
+}
+```
+
+---
+
+### `TransportStateEvent`
+
+Broadcasts the current transport state for one peer or the whole daemon.
+
+| Field                | Type                                                                                                                      | Default  |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------- |
+| `request_id`         | `Union[str, None]`                                                                                                        | `None`   |
+| `peer`               | `str`                                                                                                                     | Required |
+| `session_state`      | `str`                                                                                                                     | Required |
+| `onion`              | `Union[str, None]`                                                                                                        | `None`   |
+| `drop_tunnel`        | `Union[Dict[str, Union[str, int, float, bool, None, Dict[str, Dict[str, JsonValue]], List[Dict[str, JsonValue]]]], None]` | `None`   |
+| `focus_count`        | `int`                                                                                                                     | `0`      |
+| `pending_live_count` | `int`                                                                                                                     | `0`      |
+| `auto_accept`        | `bool`                                                                                                                    | `False`  |
+
+**Wire Value:** `transport_state`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "transport_state",
+  "peer": "string",
+  "session_state": "string"
 }
 ```
 

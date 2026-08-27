@@ -10,6 +10,7 @@ from metor.core.api import (
     MessagesDataEvent,
     ProfilesDataEvent,
     SettingsListDataEvent,
+    TransportStateEvent,
     UnreadMessagesEvent,
 )
 
@@ -28,10 +29,10 @@ from metor.ui.presenter.shared import (
     build_timestamp_prefix,
     format_prefixed_message,
     format_timestamp_label,
-    get_divider_string,
     get_header_string,
     indent_multiline_text,
 )
+from metor.ui.presenter.transport import format_transport_state
 
 
 class UIPresenter:
@@ -42,7 +43,6 @@ class UIPresenter:
     indent_multiline_text = staticmethod(indent_multiline_text)
     format_prefixed_message = staticmethod(format_prefixed_message)
     get_header_string = staticmethod(get_header_string)
-    get_divider_string = staticmethod(get_divider_string)
     format_contacts = staticmethod(format_contacts)
     format_settings_snapshot = staticmethod(format_settings_snapshot)
     format_config_snapshot = staticmethod(format_config_snapshot)
@@ -52,6 +52,7 @@ class UIPresenter:
     format_inbox = staticmethod(format_inbox)
     format_read_messages = staticmethod(format_read_messages)
     format_profiles = staticmethod(format_profiles)
+    format_transport_state = staticmethod(format_transport_state)
 
     @staticmethod
     def format_response(event: IpcEvent, chat_mode: bool = False) -> str:
@@ -83,5 +84,7 @@ class UIPresenter:
             return format_read_messages(event)
         if isinstance(event, ProfilesDataEvent):
             return format_profiles(event)
+        if isinstance(event, TransportStateEvent):
+            return format_transport_state(event)
 
         return 'No formatter available for this data.'

@@ -18,6 +18,13 @@ from metor.data.settings import (
     SettingValue,
     SettingValidationError,
     build_snapshot_row,
+    matches_setting_domain,
+    split_namespace_key,
+)
+from metor.data.settings_registry import (
+    get_registered_ui_settings,
+    get_ui_setting_spec,
+    validate_ui_setting_value,
 )
 from metor.utils import FileLock, TypeCaster, validate_json_file
 
@@ -77,6 +84,33 @@ class Config:
         raw_data: Dict[str, ProfileConfigValue] = self._load_raw_data()
 
         for key_str, raw_value in raw_data.items():
+            if key_str.startswith('ui.'):
+                try:
+                    frontend_id: str
+                    spec_key: str
+                    frontend_id, spec_key = split_namespace_key(key_str)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"'{config_file.name}' contains an unknown config key '{key_str}'."
+                    ) from exc
+
+                spec = get_ui_setting_spec(frontend_id, spec_key)
+                if spec is None:
+                    raise ValueError(
+                        f"'{config_file.name}' contains an unknown config key '{key_str}'."
+                    )
+
+                try:
+                    validate_ui_setting_value(
+                        spec,
+                        cast(SettingValue, raw_value),
+                    )
+                except (SettingValidationError, TypeError) as exc:
+                    raise ValueError(
+                        f"'{config_file.name}' contains an invalid value for '{key_str}': {exc}"
+                    ) from exc
+                continue
+
             try:
                 setting_key: SettingKey = SettingKey(key_str)
             except ValueError:
@@ -161,7 +195,9 @@ class Config:
         Returns structured snapshots for effective cascading settings.
 
         Args:
-            domain (Optional[str]): Optional `ui` or `daemon` domain filter.
+            domain (Optional[str]): Optional `ui` or `daemon` domain filter. The
+                `ui` domain covers paradigm-neutral `client.*` keys and all
+                registered frontend namespace keys.
 
         Returns:
             Tuple[SettingSnapshotRow, ...]: Ordered snapshot rows for CLI presentation.
@@ -174,7 +210,7 @@ class Config:
             key_domain: str
             _sub_key: str
             key_domain, _sub_key = spec.key.value.split('.', 1)
-            if domain is not None and key_domain != domain:
+            if not matches_setting_domain(key_domain, domain):
                 continue
 
             source: str = 'global'
@@ -201,14 +237,38 @@ class Config:
             ):
                 source = 'plaintext_forced'
 
+            category: str = 'client' if key_domain == 'client' else spec.category
             snapshots.append(
                 build_snapshot_row(
                     key=spec.key.value,
                     value=effective_value,
                     source=source,
-                    category=spec.category,
+                    category=category,
                 )
             )
+
+        if domain in (None, 'ui'):
+            for frontend_id, registered_specs in get_registered_ui_settings().items():
+                for ui_spec in registered_specs.values():
+                    full_key: str = f'ui.{frontend_id}.{ui_spec.key}'
+                    source = 'global'
+                    if full_key in raw_data:
+                        normalized_value = validate_ui_setting_value(
+                            ui_spec,
+                            cast(SettingValue, raw_data[full_key]),
+                        )
+                        source = 'profile_override'
+                    else:
+                        normalized_value = Settings.get_namespace_value(full_key)
+
+                    snapshots.append(
+                        build_snapshot_row(
+                            key=full_key,
+                            value=normalized_value,
+                            source=source,
+                            category=f'ui.{frontend_id}',
+                        )
+                    )
 
         return tuple(snapshots)
 
@@ -581,13 +641,131 @@ class Config:
             data[key_str] = normalized_value
             self._write_nested(data)
 
+    def set_namespace(self, key: str, value: SettingValue) -> None:
+        """
+        Validates and persists one registered frontend namespace override.
+
+        Namespace keys follow the `ui.<frontend>.<key>` shape and are validated
+        against the registry owned by the data layer.
+
+        Args:
+            key (str): The `ui.<frontend>.<key>` namespace key.
+            value (SettingValue): The new value for the override.
+
+        Raises:
+            ValueError: If the key is not a registered namespace key.
+
+        Returns:
+            None
+        """
+        frontend_id: str
+        setting_key: str
+        frontend_id, setting_key = split_namespace_key(key)
+        spec = get_ui_setting_spec(frontend_id, setting_key)
+        if spec is None:
+            raise ValueError(f"Unknown namespace setting '{key}'.")
+
+        normalized_value: SettingValue = validate_ui_setting_value(spec, value)
+
+        if not self._paths.exists():
+            self._paths.create_directories()
+
+        config_file: Path = self._paths.get_config_file()
+
+        with FileLock(config_file):
+            data = self._load(persist_defaults=False)
+            data[key] = normalized_value
+            self._write_nested(data)
+
+    def get_namespace_value(self, key: str) -> SettingValue:
+        """
+        Retrieves a registered frontend namespace override with global fallback.
+
+        Args:
+            key (str): The `ui.<frontend>.<key>` namespace key.
+
+        Raises:
+            ValueError: If the key is not a registered namespace key.
+
+        Returns:
+            SettingValue: The effective cascading value.
+        """
+        frontend_id: str
+        setting_key: str
+        frontend_id, setting_key = split_namespace_key(key)
+        spec = get_ui_setting_spec(frontend_id, setting_key)
+        if spec is None:
+            raise ValueError(f"Unknown namespace setting '{key}'.")
+
+        data: Dict[str, ProfileConfigValue] = self._load()
+        if key in data:
+            local_value: ProfileConfigValue = data[key]
+            try:
+                return validate_ui_setting_value(
+                    spec,
+                    cast(SettingValue, local_value),
+                )
+            except (TypeError, SettingValidationError):
+                return spec.default
+
+        return Settings.get_namespace_value(key)
+
+    def get_namespace_str(self, key: str) -> str:
+        """
+        Retrieves a namespace override and guarantees a string return type.
+
+        Args:
+            key (str): The `ui.<frontend>.<key>` namespace key.
+
+        Returns:
+            str: The resolved namespace value as a string.
+        """
+        return TypeCaster.to_str(self.get_namespace_value(key))
+
+    def get_namespace_int(self, key: str) -> int:
+        """
+        Retrieves a namespace override and safely coerces it into an integer.
+
+        Args:
+            key (str): The `ui.<frontend>.<key>` namespace key.
+
+        Returns:
+            int: The resolved namespace value as an integer.
+        """
+        return TypeCaster.to_int(self.get_namespace_value(key))
+
+    def get_namespace_float(self, key: str) -> float:
+        """
+        Retrieves a namespace override and safely coerces it into a float.
+
+        Args:
+            key (str): The `ui.<frontend>.<key>` namespace key.
+
+        Returns:
+            float: The resolved namespace value as a float.
+        """
+        return TypeCaster.to_float(self.get_namespace_value(key))
+
+    def get_namespace_bool(self, key: str) -> bool:
+        """
+        Retrieves a namespace override and safely coerces it into a boolean.
+
+        Args:
+            key (str): The `ui.<frontend>.<key>` namespace key.
+
+        Returns:
+            bool: The resolved namespace value as a boolean.
+        """
+        return TypeCaster.to_bool(self.get_namespace_value(key))
+
     def sync_with_global(self, *, domain: Optional[str] = None) -> None:
         """
         Wipes all SettingKey overrides from the local config, forcing a fallback to global Settings.
         Retains pure ProfileConfigKey data (like DAEMON_PORT).
 
         Args:
-            domain (Optional[str]): Optional `ui` or `daemon` domain filter.
+            domain (Optional[str]): Optional `ui` or `daemon` domain filter. The
+                `ui` domain wipes `client.`- and `ui.`-prefixed keys.
 
         Returns:
             None
@@ -607,15 +785,17 @@ class Config:
             keys_to_remove: List[str] = []
 
             for k in data.keys():
-                try:
-                    setting_key = SettingKey(k)
-                    if domain == 'ui' and not setting_key.is_ui:
+                key_domain: str = k.split('.', 1)[0]
+                if domain == 'ui':
+                    if key_domain not in ('client', 'ui'):
                         continue
-                    if domain == 'daemon' and not setting_key.is_daemon:
+                elif domain == 'daemon':
+                    if key_domain != 'daemon':
                         continue
-                    keys_to_remove.append(k)
-                except ValueError:
-                    pass
+                else:
+                    if key_domain not in ('client', 'ui', 'daemon'):
+                        continue
+                keys_to_remove.append(k)
 
             for k in keys_to_remove:
                 del data[k]

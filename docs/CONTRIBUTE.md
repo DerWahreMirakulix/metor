@@ -43,3 +43,14 @@ When contributing to this repository, you MUST strictly adhere to the following 
 - **Imports First:** All `import` statements MUST (unless a runtime import is absolutely necessary) be located at the very top of the file (immediately following the module docstring).
 - **Import Delimiters:** Standard library and external domain imports MUST be separated from same-domain internal imports using exactly the `# Local Package Imports` comment. This comment MUST NOT be placed above imports from higher-level Metor domains.
 - **Single Quotes:** Always use single quotes (`'`) for strings unless the string itself contains a single quote. Double quotes are strictly for docstrings (`"""`).
+
+## 7. IPC Contract Evolution & Glossary
+
+The IPC contract is versioned and additive-only within a major version. Follow these rules whenever the wire contract changes:
+
+- **Additive-Only Within a Major Version:** New commands, events, and payload fields are allowed, but every new field MUST have a default so writers from older versions stay valid. Removing or renaming a field, event, or command is a major-version bump.
+- **No Aliases:** Renamed symbols are never kept as aliases or compatibility shims; every caller migrates in the same release.
+- **Version Bumps:** When the wire contract changes incompatibly, bump `Constants.IPC_PROTOCOL_VERSION` (IPC socket) or `Constants.PEER_PROTOCOL_VERSION` (Tor peer handshake) and keep the matching `*_MIN_SUPPORTED` constant honest. Never reuse a retired wire value.
+- **Unknown Fields Stay Strict:** Payloads with unknown fields are rejected, never silently ignored. Drift is surfaced as the typed `ProtocolMismatchEvent` via the `InitCommand`/`InitEvent` handshake.
+- **Generated References:** Every command/event DTO must be registered through `register_command` / `register_event` so `scripts/generate_api_docs.py` picks it up. Never hand-edit the generated [API.md](./API.md) or [api.schema.json](./api.schema.json).
+- **Glossary Obligation:** New or renamed symbols (settings keys, events, enums, fields, IPC payloads) MUST follow the canonical terminology in [GLOSSARY.md](./GLOSSARY.md). When in doubt, extend that file instead of inventing a parallel term. Settings keys MUST use one of the three namespaces (`client.*`, `daemon.*`, `ui.<frontend>.*`) documented there.

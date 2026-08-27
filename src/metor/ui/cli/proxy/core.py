@@ -18,6 +18,7 @@ from metor.core.api import (
     GetInboxCommand,
     GetMessagesCommand,
     GetRawHistoryCommand,
+    GetTransportStateCommand,
     ensure_request_id,
     IpcCommand,
     IpcEvent,
@@ -29,9 +30,10 @@ from metor.core.api import (
     SelfDestructCommand,
     UnlockCommand,
 )
-from metor.data import ProfileManager, ProfileSecurityMode
+from metor.data import ProfileManager, ProfileSecurityMode, SettingKey
 from metor.ui import (
     PromptAbortedError,
+    StatusTone,
     Theme,
     Translator,
     prompt_hidden_optional,
@@ -58,10 +60,12 @@ class CliProxy:
         """
         self._pm: ProfileManager = pm
         self.is_remote: bool = self._pm.is_remote()
+        self._last_error: bool = False
 
         self._renderer: CliProxyEventRenderer = CliProxyEventRenderer(
             translate_event=self._translate_event,
             prefix_remote=self._prefix_remote,
+            mark_error=self._mark_error,
         )
         self._transport: CliProxyTransport = CliProxyTransport(
             self._pm,
@@ -99,6 +103,7 @@ class CliProxy:
             Optional[str]: Error message if profile doesn't exist, None otherwise.
         """
         if not self._pm.exists():
+            self._last_error = True
             return f"Profile '{self._pm.profile_name}' does not exist."
         return None
 
@@ -117,7 +122,9 @@ class CliProxy:
         Returns:
             str: The translated CLI string.
         """
-        text, _ = Translator.get(code, params)
+        text, tone = Translator.get(code, params)
+        if tone is StatusTone.ERROR:
+            self._last_error = True
 
         if params and 'alias' in params and '{alias}' in text:
             text = text.replace('{alias}', str(params['alias']))
@@ -125,6 +132,35 @@ class CliProxy:
             text = text.replace('{alias}', 'unknown')
 
         return text
+
+    def consume_error_flag(self) -> bool:
+        """
+        Reports and clears whether the last rendered result was an error.
+
+        Args:
+            None
+
+        Returns:
+            bool: True when the previous render translated an error event.
+        """
+        flag: bool = self._last_error
+        self._last_error = False
+        return flag
+
+    def _mark_error(self) -> None:
+        """
+        Flags the current CLI invocation as an error outcome.
+
+        Called by the event renderer when a rendered result carries a failure
+        outcome, so the process exits nonzero for scripts.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self._last_error = True
 
     def _prefix_remote(self, text: str) -> str:
         """
@@ -389,6 +425,9 @@ class CliProxy:
         if err:
             return err
 
+        if limit is None:
+            limit = self._pm.config.get_int(SettingKey.HISTORY_LIMIT)
+
         history_cmd = (
             GetRawHistoryCommand(target=target, limit=limit)
             if raw
@@ -430,6 +469,9 @@ class CliProxy:
         err: Optional[str] = self._ensure_profile_exists()
         if err:
             return err
+
+        if limit is None:
+            limit = self._pm.config.get_int(SettingKey.MESSAGES_LIMIT)
 
         return self._request_ipc(GetMessagesCommand(target=target, limit=limit))
 
@@ -474,6 +516,22 @@ class CliProxy:
             MarkReadCommand(target=target) if target else GetInboxCommand()
         )
         return self._request_ipc(cmd)
+
+    def handle_transport(self, peer: Optional[str] = None) -> str:
+        """
+        Views the current transport state for one peer or the whole daemon.
+
+        Args:
+            peer (Optional[str]): The specific alias or onion to inspect, if any.
+
+        Returns:
+            str: The formatted transport state output.
+        """
+        err: Optional[str] = self._ensure_profile_exists()
+        if err:
+            return err
+
+        return self._request_ipc(GetTransportStateCommand(peer=peer))
 
     def contacts_list(self) -> str:
         """
@@ -592,6 +650,7 @@ class CliProxy:
         is_remote: bool,
         port: Optional[int],
         security_mode: ProfileSecurityMode,
+        master_password: Optional[str] = None,
     ) -> str:
         """
         Creates one local or remote profile via the local headless command path.
@@ -601,6 +660,8 @@ class CliProxy:
             is_remote (bool): Whether the profile is remote.
             port (Optional[int]): Optional static remote port.
             security_mode (ProfileSecurityMode): The requested storage mode.
+            master_password (Optional[str]): The master password protecting the
+                newly created encrypted profile keys.
 
         Returns:
             str: The formatted operation result.
@@ -610,6 +671,7 @@ class CliProxy:
             is_remote=is_remote,
             port=port,
             security_mode=security_mode,
+            master_password=master_password,
         )
 
     def migrate_profile_security(

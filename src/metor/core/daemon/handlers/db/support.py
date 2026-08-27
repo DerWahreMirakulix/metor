@@ -67,6 +67,7 @@ class DatabaseCommandHandlerSupportMixin:
             detail_text=entry.detail_text,
             flow_id=entry.flow_id,
             alias=self._cm.require_alias_by_onion(peer_onion) if peer_onion else None,
+            transport=entry.transport,
         )
 
     def _build_summary_history_entry(

@@ -16,6 +16,7 @@ from metor.core.api import (
 )
 
 # Local Package Imports
+from metor.data import UiSettingSpec, get_registered_ui_settings
 from metor.ui.presenter.shared import (
     build_timestamp_prefix,
     format_prefixed_message,
@@ -44,6 +45,38 @@ def _format_snapshot_source(source: str) -> str:
     return labels.get(source, source.replace('_', ' '))
 
 
+def _format_snapshot_category(category: str) -> str:
+    """
+    Derives a human-readable section label from one internal snapshot category.
+
+    Frontend namespace categories (`ui.<frontend>`) are resolved to the
+    registered spec's display category, falling back to a readable frontend id.
+
+    Args:
+        category (str): The internal snapshot category identifier.
+
+    Returns:
+        str: The display label for the category section.
+    """
+    labels: dict[str, str] = {
+        'client': 'Client',
+        'daemon': 'Daemon',
+    }
+    if category in labels:
+        return labels[category]
+
+    if category.startswith('ui.'):
+        frontend_id: str = category.split('.', 1)[1]
+        registered: dict[str, UiSettingSpec] = get_registered_ui_settings().get(
+            frontend_id, {}
+        )
+        if registered:
+            return next(iter(registered.values())).category
+        return frontend_id.replace('_', ' ').title()
+
+    return category
+
+
 def _format_snapshot_entries(
     entries: List[SettingSnapshotEntry],
     *,
@@ -68,7 +101,7 @@ def _format_snapshot_entries(
         if entry.category != current_category:
             if lines:
                 lines.append('')
-            lines.append(f'[{entry.category}]')
+            lines.append(f'[{_format_snapshot_category(entry.category)}]')
             current_category = entry.category
 
         source_suffix: str = ''
@@ -98,9 +131,12 @@ def format_settings_snapshot(event: SettingsListDataEvent) -> str:
     Returns:
         str: The formatted snapshot section.
     """
-    header: str = (
-        'Global UI Settings' if event.scope == 'ui' else 'Global Daemon Settings'
-    )
+    if event.scope == 'client':
+        header: str = 'Global Client Settings'
+    elif event.scope == 'daemon':
+        header = 'Global Daemon Settings'
+    else:
+        header = f'Global {event.scope} Settings'
     return '\n'.join(
         [
             header + ':',
@@ -123,8 +159,8 @@ def format_config_snapshot(event: ConfigListDataEvent) -> str:
     Returns:
         str: The formatted snapshot section.
     """
-    if event.scope == 'ui':
-        header = f"Effective UI Config for profile '{event.profile}'"
+    if event.scope == 'client':
+        header = f"Effective Client Config for profile '{event.profile}'"
     elif event.scope == 'daemon':
         header = f"Effective Daemon Config for profile '{event.profile}'"
     else:
@@ -181,7 +217,7 @@ def format_messages(event: MessagesDataEvent) -> str:
         f'Chat History with {Theme.CYAN}{event.alias}{Theme.RESET} '
         f'(Last {len(event.messages)})'
     )
-    out: str = f'{get_header_string(header_text)}\n'
+    out: str = f'{get_header_string(header_text)}'
     for msg in event.messages:
         if msg.direction is MessageDirectionCode.OUT:
             prefix_text: str = f'To {event.alias}: '
@@ -244,7 +280,7 @@ def format_read_messages(event: UnreadMessagesEvent) -> str:
         return f"No unread messages from '{event.alias}'."
 
     header_text: str = f'Unread messages from {Theme.PURPLE}{event.alias}{Theme.RESET}'
-    out: str = f'{get_header_string(header_text)}\n'
+    out: str = f'{get_header_string(header_text)}'
     for msg in event.messages:
         prefix_text: str = f'From {event.alias}: '
         rendered_prefix_text: str = f'{Theme.PURPLE}{prefix_text}{Theme.RESET}'

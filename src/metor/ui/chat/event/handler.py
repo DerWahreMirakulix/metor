@@ -1,7 +1,7 @@
 """Central event handler for incoming daemon IPC events in chat mode."""
 
 import threading
-from typing import Callable, Dict, Optional, Type
+from typing import Callable, Dict, Iterable, Optional, Set, Type
 
 from metor.core.api import (
     EventType,
@@ -20,7 +20,7 @@ from metor.ui.chat.event.state import handle_state_event
 from metor.ui.chat.event.transport import handle_transport_event
 from metor.ui.chat.ipc import IpcClient
 from metor.ui.chat.models import ChatMessageType
-from metor.ui.chat.renderer import Renderer
+from metor.ui.chat.renderer import ChatRenderer
 from metor.ui.chat.session import Session
 
 
@@ -33,7 +33,7 @@ class EventHandler:
         self,
         ipc: IpcClient,
         session: Session,
-        renderer: Renderer,
+        renderer: ChatRenderer,
         init_event: threading.Event,
         conn_event: threading.Event,
         get_notification_buffer_seconds: Callable[[], float],
@@ -45,7 +45,7 @@ class EventHandler:
         Args:
             ipc (IpcClient): The IPC client.
             session (Session): The current chat session state.
-            renderer (Renderer): The terminal UI renderer.
+            renderer (ChatRenderer): The chat UI renderer.
             init_event (threading.Event): Event to signal successful initialization.
             conn_event (threading.Event): Event to signal connection state updates.
             get_notification_buffer_seconds (Callable[[], float]): Lazy accessor for the local inbox-notification buffer window.
@@ -56,7 +56,7 @@ class EventHandler:
         """
         self._ipc: IpcClient = ipc
         self._session: Session = session
-        self._renderer: Renderer = renderer
+        self._renderer: ChatRenderer = renderer
         self._init_event: threading.Event = init_event
         self._conn_event: threading.Event = conn_event
         self._get_notification_buffer_seconds: Callable[[], float] = (
@@ -65,6 +65,47 @@ class EventHandler:
         self._has_auto_reconnect: Callable[[], bool] = has_auto_reconnect
         self._notification_lock: threading.Lock = threading.Lock()
         self._buffered_inbox_notifications: Dict[str, BufferedInboxNotification] = {}
+        self._pushed_live_msg_ids: Set[str] = set()
+
+    def _remember_pushed_live_msg_id(self, msg_id: str) -> None:
+        """
+        Records one live message id that was pushed to this UI and rendered.
+
+        Args:
+            msg_id (str): The pushed live message id.
+
+        Returns:
+            None
+        """
+        with self._notification_lock:
+            self._pushed_live_msg_ids.add(msg_id)
+
+    def _was_pushed_live_msg_id(self, msg_id: str) -> bool:
+        """
+        Reports whether one live message id was already pushed to this UI.
+
+        Args:
+            msg_id (str): The candidate message id.
+
+        Returns:
+            bool: True if the message was already pushed.
+        """
+        with self._notification_lock:
+            return msg_id in self._pushed_live_msg_ids
+
+    def _consume_pushed_live_msg_ids(self, msg_ids: Iterable[str]) -> None:
+        """
+        Forgets pushed message ids that were confirmed by an inbox consume.
+
+        Args:
+            msg_ids (Iterable[str]): The message ids observed in a consume response.
+
+        Returns:
+            None
+        """
+        with self._notification_lock:
+            for msg_id in msg_ids:
+                self._pushed_live_msg_ids.discard(msg_id)
 
     @staticmethod
     def _notification_key(alias: Optional[str], onion: Optional[str]) -> Optional[str]:

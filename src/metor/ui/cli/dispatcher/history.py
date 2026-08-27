@@ -12,6 +12,16 @@ class _HistoryDispatcherProtocol(Protocol):
     _extra: List[str]
     _help: type[Help]
     _proxy: CliProxy
+    _exit_code: int
+
+    def _print_usage(self, cmd: str, sub: Optional[str] = None) -> None:
+        """Prints command usage help and flags a nonzero exit code."""
+        ...
+
+    def _emit(self, text: str) -> None:
+        """Prints one proxy result and flags a nonzero exit on rendered errors."""
+        ...
+
 
     def _parse_optional_limit(self, limit_raw: Optional[str]) -> Optional[int]:
         """Parses an optional integer limit token and returns None for invalid input."""
@@ -45,11 +55,11 @@ class HistoryDispatchMixin:
         if clean_tokens and clean_tokens[0] == 'clear':
             clear_args: List[str] = clean_tokens[1:]
             if raw_requested or len(clear_args) > 1:
-                print(self._help.show_command_help('history'))
+                self._print_usage('history')
                 return
 
             clear_target: Optional[str] = clear_args[0] if clear_args else None
-            print(self._proxy.clear_history(clear_target))
+            self._emit(self._proxy.clear_history(clear_target))
             return
 
         history_args: List[str]
@@ -59,7 +69,7 @@ class HistoryDispatchMixin:
             history_args = clean_tokens
 
         if len(history_args) > 2:
-            print(self._help.show_command_help('history'))
+            self._print_usage('history')
             return
 
         target: Optional[str] = history_args[0] if history_args else None
@@ -67,7 +77,7 @@ class HistoryDispatchMixin:
         if len(history_args) == 2:
             limit = self._parse_optional_limit(history_args[1])
             if limit is None:
-                print(self._help.show_command_help('history'))
+                self._print_usage('history')
                 return
 
-        print(self._proxy.get_history(target, limit, raw=raw_requested))
+        self._emit(self._proxy.get_history(target, limit, raw=raw_requested))

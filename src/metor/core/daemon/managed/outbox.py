@@ -16,6 +16,7 @@ from metor.core import TorManager
 from metor.core.api import (
     IpcEvent,
     AckEvent,
+    DropFailedEvent,
     EventType,
     JsonValue,
     RetunnelInitiatedEvent,
@@ -89,6 +90,26 @@ class OutboxWorker:
         if callable(pop):
             return cast(Optional[str], pop(msg_id))
         return None
+
+    @staticmethod
+    def _parse_reject_reason(reject_line: Optional[str]) -> Optional[str]:
+        """
+        Extracts one optional rejection reason from a raw REJECT frame.
+
+        Args:
+            reject_line (Optional[str]): The raw newline-delimited REJECT frame.
+
+        Returns:
+            Optional[str]: The machine-readable rejection reason, if present.
+        """
+        if reject_line is None:
+            return None
+
+        parts: list[str] = reject_line.strip().split()
+        if len(parts) < 2:
+            return None
+
+        return parts[1]
 
     @staticmethod
     def _is_expected_ack_line(msg_id: str, ack_line: Optional[str]) -> bool:
@@ -331,6 +352,14 @@ class OutboxWorker:
         Returns:
             None
         """
+        if (
+            self._state is not None
+            and self._config.get_bool(SettingKey.REUSE_LIVE_FOR_DROPS)
+            and self._state.is_live_active(onion)
+        ):
+            self._send_drops_over_session(onion, messages)
+            return
+
         idle_timeout: float = self._config.get_float(
             SettingKey.DROP_TUNNEL_IDLE_TIMEOUT
         )
@@ -408,6 +437,24 @@ class OutboxWorker:
                         self._state.touch_drop_tunnel(onion)
 
                     ack_line: Optional[str] = stream.read_line()
+                    if ack_line is not None and ack_line.strip().startswith(
+                        f'{TorCommand.REJECT.value}'
+                    ):
+                        reason: Optional[str] = self._parse_reject_reason(ack_line)
+                        self._broadcast(DropFailedEvent(msg_id=msg_id, reason=reason))
+                        self._hm.log_event(
+                            HistoryEvent.FAILED,
+                            onion,
+                            actor=HistoryActor.SYSTEM,
+                            detail_text=(
+                                'Drop rejected by peer: ' + reason
+                                if reason
+                                else 'Drop rejected by peer.'
+                            ),
+                        )
+                        self._close_tunnel(onion)
+                        break
+
                     if not self._is_expected_ack_line(msg_id, ack_line):
                         raise ConnectionError('Tunnel dropped or invalid ACK received.')
 
@@ -416,6 +463,7 @@ class OutboxWorker:
                         HistoryEvent.SENT,
                         onion,
                         actor=HistoryActor.LOCAL,
+                        transport='tunnel',
                     )
                     self._broadcast(
                         AckEvent(
@@ -440,7 +488,7 @@ class OutboxWorker:
                     onion,
                     standby_drop_allowed=self._is_drop_standby_allowed(),
                 )
-                is PrimaryTransport.LIVE
+                is PrimaryTransport.SESSION
                 and not self._is_drop_standby_allowed()
             ):
                 self._close_tunnel(onion)
@@ -466,6 +514,14 @@ class OutboxWorker:
         Returns:
             None
         """
+        if (
+            self._state is not None
+            and self._config.get_bool(SettingKey.REUSE_LIVE_FOR_DROPS)
+            and self._state.is_live_active(onion)
+        ):
+            self._send_drops_over_session(onion, [row])
+            return
+
         tunnel_data: Optional[Tuple[socket.socket, TcpStreamReader]] = (
             self._establish_tunnel(onion)
         )
@@ -487,6 +543,23 @@ class OutboxWorker:
             conn.sendall(drop_msg.encode('utf-8'))
 
             ack_line: Optional[str] = stream.read_line()
+            if ack_line is not None and ack_line.strip().startswith(
+                f'{TorCommand.REJECT.value}'
+            ):
+                reason: Optional[str] = self._parse_reject_reason(ack_line)
+                self._broadcast(DropFailedEvent(msg_id=msg_id, reason=reason))
+                self._hm.log_event(
+                    HistoryEvent.FAILED,
+                    onion,
+                    actor=HistoryActor.SYSTEM,
+                    detail_text=(
+                        'Drop rejected by peer: ' + reason
+                        if reason
+                        else 'Drop rejected by peer.'
+                    ),
+                )
+                return
+
             if not self._is_expected_ack_line(msg_id, ack_line):
                 raise ConnectionError('Tunnel dropped or invalid ACK received.')
 
@@ -495,6 +568,7 @@ class OutboxWorker:
                 HistoryEvent.SENT,
                 onion,
                 actor=HistoryActor.LOCAL,
+                transport='direct',
             )
             self._broadcast(
                 AckEvent(
@@ -515,6 +589,46 @@ class OutboxWorker:
                 conn.close()
             except Exception:
                 pass
+
+    def _send_drops_over_session(
+        self,
+        onion: str,
+        messages: List[Tuple[int, str, str, str, str, str]],
+    ) -> None:
+        """
+        Transmits a batch of queued drops over the established live session.
+
+        Reuses the active session channel instead of opening a second Tor
+        circuit. Rows stay durably PENDING; the session receiver thread observes
+        the peer's ACK and finalizes them as DELIVERED. On a send failure the
+        rows also stay PENDING, so the tunnel path retries them on the next
+        tick. The session read loop owns the socket reads while this worker is
+        the only writer, so sendall needs no additional locking.
+
+        Args:
+            onion (str): The target onion identity.
+            messages (List[Tuple[int, str, str, str, str, str]]): The grouped outbox rows.
+
+        Returns:
+            None
+        """
+        conn: Optional[socket.socket] = (
+            self._state.get_connection(onion) if self._state else None
+        )
+        if conn is None:
+            return
+
+        for row in messages:
+            if self._stop_flag.is_set():
+                return
+
+            _, _, _, payload, msg_id, timestamp = row
+            try:
+                drop_msg: str = self._build_drop_message(payload, msg_id, timestamp)
+                conn.sendall(drop_msg.encode('utf-8'))
+            except Exception:
+                # Row remains PENDING; the tunnel path retries it next tick.
+                return
 
     def _build_drop_message(self, payload: str, msg_id: str, timestamp: str) -> str:
         """
@@ -564,7 +678,13 @@ class OutboxWorker:
                 conn.close()
                 return None
 
-            challenge: str = HandshakeProtocol.parse_challenge_line(challenge_line)
+            challenge, peer_version = HandshakeProtocol.parse_challenge_line(
+                challenge_line
+            )
+            if peer_version < Constants.PEER_PROTOCOL_MIN_SUPPORTED:
+                raise ValueError(
+                    f'Peer protocol version {peer_version} is too old'
+                )
             signature: Optional[str] = self._crypto.sign_challenge(challenge)
 
             if not signature:
@@ -614,6 +734,11 @@ class OutboxWorker:
                 Tuple[str, Tuple[socket.socket, TcpStreamReader, float]]
             ] = list(self._tunnels.items())
 
+        # Transport policy group (REUSE_LIVE_FOR_DROPS / ALLOW_DROP_STANDBY_ON_LIVE):
+        # with live reuse enabled the outbox routes queued drops over the existing
+        # live session channel, so a cached drop tunnel is closed while live exists;
+        # with reuse disabled and standby allowed the tunnel stays warm as the
+        # fallback transport for when the live session is gone.
         for onion, (_, _, last_used) in tunnel_items:
             is_focused: bool = (
                 self._state.is_focused_by_ui(onion) if self._state else False
@@ -625,7 +750,7 @@ class OutboxWorker:
                     onion,
                     standby_drop_allowed=self._is_drop_standby_allowed(),
                 )
-                is PrimaryTransport.LIVE
+                is PrimaryTransport.SESSION
                 and not self._is_drop_standby_allowed()
             ):
                 expired_onions.append(onion)

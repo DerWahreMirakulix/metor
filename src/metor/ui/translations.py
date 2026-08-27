@@ -99,8 +99,9 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
     EventType.INVALID_CONFIG_KEY: TranslationDef(
         'Invalid profile config key provided.', StatusTone.ERROR
     ),
-    EventType.DAEMON_CANNOT_MANAGE_UI: TranslationDef(
-        'The Daemon cannot manage UI-specific settings.', StatusTone.ERROR
+    EventType.CLIENT_SCOPE_KEY_REJECTED: TranslationDef(
+        'Client-scope settings and config keys cannot be managed by the daemon.',
+        StatusTone.ERROR,
     ),
     EventType.SETTING_DATA: TranslationDef(
         f"Global Setting '{Theme.YELLOW}{{key}}{Theme.RESET}': {Theme.CYAN}{{value}}{Theme.RESET}",

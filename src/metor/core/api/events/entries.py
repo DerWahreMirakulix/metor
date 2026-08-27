@@ -53,6 +53,7 @@ class UnreadMessageEntry:
     timestamp: str
     payload: str
     is_drop: bool
+    msg_id: Optional[str] = None
 
 
 @dataclass

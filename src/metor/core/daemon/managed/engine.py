@@ -24,6 +24,7 @@ from metor.core.api import (
     IpcEvent,
     IpcCommand,
     InitCommand,
+    GetChatStartupStateCommand,
     GetConnectionsCommand,
     GetContactsListCommand,
     ConnectCommand,
@@ -38,6 +39,7 @@ from metor.core.api import (
     ClearContactsCommand,
     SwitchCommand,
     SendDropCommand,
+    GetTransportStateCommand,
     GetInboxCommand,
     MarkReadCommand,
     FallbackCommand,
@@ -75,6 +77,7 @@ from metor.utils import Constants, clean_onion, secure_shred_file
 
 # Local Package Imports
 from metor.core.daemon.managed.crypto import Crypto
+from metor.core.daemon.managed.models import SessionState, TorCommand
 from metor.core.daemon.managed.bootstrap import (
     build_runtime,
     CorruptedStorageError,
@@ -84,6 +87,7 @@ from metor.core.daemon.managed.handlers import NetworkCommandHandler
 from metor.core.daemon.managed.ipc import IpcServer
 from metor.core.daemon.managed.outbox import OutboxWorker
 from metor.core.daemon.managed.network import NetworkManager, StateTracker
+from metor.core.daemon.managed.notify import NotificationService
 from metor.core.daemon import InvalidMasterPasswordError
 from metor.core.daemon.managed.local_auth import (
     LocalAuthTracker,
@@ -152,11 +156,17 @@ class Daemon:
         self._is_stopping: bool = False
         self._require_session_auth: bool = require_session_auth
         self._authenticated_clients: Set[socket.socket] = set()
-        self._live_consumer_clients: Set[socket.socket] = set()
+        self._session_consumers: Set[socket.socket] = set()
         self._local_auth: LocalAuthTracker = LocalAuthTracker()
         self._transport_state: StateTracker = StateTracker()
 
         self._crypto: Optional[Crypto] = None
+        self._notification_service: NotificationService = NotificationService(
+            config_getter=lambda: self._pm.config.get_str(
+                SettingKey.NOTIFICATION_SINK
+            ),
+            error_callback=self._on_runtime_internal_error,
+        )
         self._ipc: IpcServer = IpcServer(
             pm,
             self._process_ui_command,
@@ -224,7 +234,8 @@ class Daemon:
             self._crypto,
             self._broadcast_ipc_event,
             self._ipc.has_active_clients,
-            self._has_live_consumers,
+            self._has_session_consumers,
+            self._notification_service.dispatch,
             self._stop_flag,
             config=self._pm.config,
             state=self._transport_state,
@@ -247,6 +258,7 @@ class Daemon:
             runtime.mm,
             self._network.get_active_onions,
             self._broadcast_ipc_event,
+            self._send_read_receipts,
         )
         self._sys_handler = SystemCommandHandler(self._pm, runtime.tm)
         self._network_handler = NetworkCommandHandler(
@@ -258,7 +270,7 @@ class Daemon:
             self._outbox,
             self._broadcast_ipc_event,
             self._send_to_client,
-            self._register_live_consumer,
+            self._register_session_consumer,
             config=self._pm.config,
         )
 
@@ -305,7 +317,7 @@ class Daemon:
 
         self._ipc.broadcast(event)
 
-    def _has_live_consumers(self) -> bool:
+    def _has_session_consumers(self) -> bool:
         """
         Checks whether an interactive chat session is currently attached.
 
@@ -316,9 +328,9 @@ class Daemon:
             bool: True if at least one live consumer is connected.
         """
         with self._client_state_lock:
-            return bool(self._live_consumer_clients)
+            return bool(self._session_consumers)
 
-    def _register_live_consumer(self, conn: socket.socket) -> None:
+    def _register_session_consumer(self, conn: socket.socket) -> None:
         """
         Marks one IPC session as an interactive live-message consumer.
 
@@ -329,8 +341,8 @@ class Daemon:
             None
         """
         with self._client_state_lock:
-            had_consumers: bool = bool(self._live_consumer_clients)
-            self._live_consumer_clients.add(conn)
+            had_consumers: bool = bool(self._session_consumers)
+            self._session_consumers.add(conn)
 
         if not had_consumers and self._network is not None:
             self._network.on_live_consumer_available()
@@ -348,6 +360,35 @@ class Daemon:
         """
         stamp_request_id(event)
         self._ipc.send_to(conn, event)
+
+    def _send_read_receipts(self, onion: str, msg_ids: List[str]) -> None:
+        """
+        Sends one transient read-receipt frame per consumed message over the live session.
+
+        Read receipts are best-effort and strictly transient: failures are
+        swallowed silently because a read receipt must never crash the daemon.
+
+        Args:
+            onion (str): The peer onion identity.
+            msg_ids (List[str]): The locally consumed message identifiers.
+
+        Returns:
+            None
+        """
+        if not self._transport_state.is_live_active(onion):
+            return
+
+        conn: Optional[socket.socket] = self._transport_state.get_connection(onion)
+        if conn is None:
+            return
+
+        try:
+            for msg_id in msg_ids:
+                conn.sendall(
+                    f'{TorCommand.READ.value} {msg_id}\n'.encode('utf-8')
+                )
+        except Exception:
+            pass
 
     def _sig_handler(self, signum: int, frame: Optional[types.FrameType]) -> None:
         """
@@ -382,10 +423,74 @@ class Daemon:
 
             while not self._stop_flag.is_set():
                 time.sleep(Constants.WORKER_SLEEP_SEC)
+                self._check_live_idle_timeouts()
         except KeyboardInterrupt:
             pass
         finally:
             self.stop()
+
+    def _check_live_idle_timeouts(self) -> None:
+        """
+        Closes stable CONNECTED live sessions that stayed unfocused and idle.
+
+        Only fully connected sessions without pending live messages are
+        considered; sessions inside grace, retunnel, or auto-reconnect flows are
+        never touched. The disconnect reuses the existing controller machinery,
+        so DisconnectedEvent emission and pending-live-to-drop promotion follow
+        the established rules.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if self._network is None or self._mm is None:
+            return
+
+        idle_timeout: float = self._pm.config.get_float(SettingKey.LIVE_IDLE_TIMEOUT)
+        if idle_timeout <= 0:
+            return
+
+        now: float = time.time()
+        for onion in self._transport_state.get_active_connections_keys():
+            if (
+                self._transport_state.get_live_state(onion)
+                is not SessionState.CONNECTED
+            ):
+                continue
+
+            if self._transport_state.get_focus_count(onion) > 0:
+                continue
+
+            if self._transport_state.is_retunneling(onion):
+                continue
+
+            if self._transport_state.has_live_reconnect_grace(onion):
+                continue
+
+            if self._transport_state.has_scheduled_auto_reconnect(onion):
+                continue
+
+            if self._transport_state.has_outbound_attempt(onion):
+                continue
+
+            if self._transport_state.has_unacked_messages(onion):
+                continue
+
+            if self._mm.get_pending_live_outbox(onion):
+                continue
+
+            last_activity: Optional[float] = (
+                self._transport_state.get_session_last_activity(onion)
+            )
+            if last_activity is None:
+                continue
+
+            if now - last_activity <= idle_timeout:
+                continue
+
+            self._network.disconnect(onion, initiated_by_self=True)
 
     def _start_subsystems(self) -> bool:
         """
@@ -447,7 +552,7 @@ class Daemon:
             self._stop_flag.set()
             with self._client_state_lock:
                 self._authenticated_clients.clear()
-                self._live_consumer_clients.clear()
+                self._session_consumers.clear()
             self._local_auth.install_context(None)
 
         try:
@@ -557,7 +662,7 @@ class Daemon:
         """
         with self._client_state_lock:
             self._authenticated_clients.discard(conn)
-            self._live_consumer_clients.discard(conn)
+            self._session_consumers.discard(conn)
         self._local_auth.clear_connection(conn)
 
         if self._network_handler is not None:
@@ -862,6 +967,7 @@ class Daemon:
             cmd,
             (
                 InitCommand,
+                GetChatStartupStateCommand,
                 GetConnectionsCommand,
                 ConnectCommand,
                 DisconnectCommand,
@@ -873,6 +979,7 @@ class Daemon:
                 SendDropCommand,
                 SwitchCommand,
                 RetunnelCommand,
+                GetTransportStateCommand,
             ),
         ):
             if self._network_handler is None:

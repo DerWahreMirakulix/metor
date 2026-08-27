@@ -9,6 +9,7 @@ Built on a robust **Client-Daemon Architecture** and structured via **Domain-Dri
 Use this README as the landing page, then jump to the specialized documents below:
 
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md): Canonical architecture decisions guide covering system boundaries, config routing, IPC contracts, OPSEC guardrails, and transport invariants.
+- [GLOSSARY.md](docs/GLOSSARY.md): Canonical terminology — the two dimensions (message semantics `live`/`drop`, connection types `session`/`tunnel`/`direct`) and the settings namespaces.
 - [SETTINGS.md](docs/SETTINGS.md): Generated reference for all supported `settings` and profile `config` keys, including defaults, constraints, and security notes.
 - [API.md](docs/API.md): Generated IPC contract reference for all daemon commands and events.
 - [AUDIT.md](docs/AUDIT.md): Security and architecture audit checklist used for every critical change.
@@ -147,6 +148,12 @@ If you want the daemon to expose IPC first and defer all key/database access unt
 metor daemon --locked
 ```
 
+For daemon-only deployments (no UI code, e.g. on a VPS or in minimal bundles) a headless entry is available:
+
+```bash
+metor-daemon -p my_server daemon
+```
+
 Use `metor unlock` only to unlock a daemon that was explicitly started in locked mode:
 
 ```bash
@@ -176,6 +183,7 @@ Inside the Chat UI, you have access to the following slash commands:
 | `/sessions`                     | Lists all active and pending sessions.                               |
 | `/retunnel [onion\|alias]`      | Forces a Tor circuit rotation (`NEWNYM`) and reconnects to the peer. |
 | `/inbox [onion\|alias]`         | Shows inbox counts or consumes unread messages for one peer.         |
+| `/transport [onion\|alias]`     | Shows the current transport state (session/tunnel, focus, pending).   |
 | `/clear`                        | Clears the current chat display.                                     |
 | `/contacts list`                | Displays the address book and temporary discovered peers.            |
 | `/contacts add <alias> [onion]` | Saves a temporary RAM peer permanently to disk.                      |
@@ -195,6 +203,7 @@ You don't need to enter the Chat UI to use Metor. It can act as an asynchronous 
 | `metor contacts list`                       | Lists your saved contacts.                                                   |
 | `metor history show [onion\|alias] [--raw]` | Shows projected history or, with `--raw`, the raw transport ledger.          |
 | `metor messages show <onion\|alias>`        | Prints the chat history with a contact directly to the console.              |
+| `metor transport [onion\|alias]`            | Prints the transport state (session/tunnel, focus count, pending live).      |
 
 ### 4. Profile Management & Remote Setup
 
@@ -229,7 +238,7 @@ Metor's configuration system uses a cascading architecture. You can define **glo
 
 ### Global Settings (`settings`)
 
-Values are global defaults. `ui.*` keys are stored in the local client `settings.json`, while `daemon.*` keys target the current daemon host and affect all profiles there unless overridden locally.
+Values are global defaults. `client.*` and `ui.<frontend>.*` keys are stored in the local client `settings.json` (client behavior and frontend-owned presentation settings), while `daemon.*` keys target the current daemon host and affect all profiles there unless overridden locally.
 
 - **Set a global value:** `metor settings set daemon.ephemeral_messages true`
 - **Get a global value:** `metor settings get daemon.ephemeral_messages`
@@ -248,8 +257,8 @@ Values are stored in the active profile's `config.json` and override the global 
 
 When interacting with a remote daemon over SSH, Metor's CLI acts as a smart router to maintain strict domain boundaries:
 
-- **UI Settings (`ui.*`):** Commands like `metor config set ui.chat_limit 100` are stored **locally** on your laptop. The remote server never sees them, keeping its configuration clean.
-- **Global UI Settings (`metor settings ui.*`):** Commands like `metor settings set ui.prompt_sign '>'` still remain **local** to your client machine, even when the active profile is remote.
+- **Client Settings (`client.*`) and UI Settings (`ui.<frontend>.*`):** Commands like `metor config set ui.terminal.chat_limit 100` are stored **locally** on your laptop. The remote server never sees them, keeping its configuration clean.
+- **Global Client/UI Settings (`metor settings client.*` / `metor settings ui.*`):** Commands like `metor settings set ui.terminal.prompt_sign '>'` still remain **local** to your client machine, even when the active profile is remote.
 - **Daemon Settings (`daemon.*`):** Commands like `metor config set daemon.tor_timeout 30` are securely transmitted via IPC and stored directly on the **remote server's** disk.
 - **Global Daemon Settings (`metor settings daemon.*`):** Commands like `metor settings set daemon.allow_drops false` are applied on the targeted daemon host, not on the local laptop, so global daemon defaults stay host-correct.
 - **Config Sync:** Running `metor config sync` intelligently wipes UI overrides on your local machine _and_ instructs the remote daemon to wipe its overrides simultaneously.
@@ -262,8 +271,10 @@ When interacting with a remote daemon over SSH, Metor's CLI acts as a smart rout
 - `daemon.require_local_auth` (bool): Requires each new local IPC session to authenticate before it can issue runtime commands. Defaults to `true` and remains configurable per profile or host policy.
 - `daemon.allow_drops` (bool): Globally allows or blocks the reception of asynchronous offline messages.
 - `daemon.max_unseen_live_msgs` (int): Caps unread crash-safe live backlog per peer. `0` disables headless live backlog, `-1` removes the limit.
-- `ui.inbox_notification_delay` (float): Delays and aggregates unread-message notifications for unfocused peers on this local UI.
-- `ui.chat_limit` (int): Maximum number of messages kept in the UI's volatile RAM display buffer.
+- `daemon.reuse_live_for_drops` (bool): Routes queued drop messages over an existing live session channel when available, avoiding a second circuit. Paired with `daemon.allow_drop_standby_on_live` as one drop-delivery policy.
+- `daemon.notification_sink` (str): Optional JSON sink config (`file` or `webhook`) for structured notifications when no UI is connected, e.g. `{"type": "file", "path": "/tmp/metor-notify.jsonl"}`.
+- `ui.terminal.inbox_notification_delay` (float): Delays and aggregates unread-message notifications for unfocused peers on this local UI.
+- `ui.terminal.chat_limit` (int): Maximum number of messages kept in the UI's volatile RAM display buffer.
 
 The full list, including all network and transport tuning knobs, is documented in [SETTINGS.md](docs/SETTINGS.md).
 

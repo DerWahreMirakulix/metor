@@ -3,9 +3,10 @@
 # ruff: noqa: E402
 
 import sys
+import threading
 import unittest
 from pathlib import Path
-from typing import cast
+from typing import Optional, cast
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
@@ -39,12 +40,19 @@ from metor.core.api import (
     SwitchCommand,
     UnreadInboxSummaryEntry,
     MsgCommand,
+    MarkReadCommand,
+    RemoteMsgEvent,
+    UnreadMessageEntry,
+    UnreadMessagesEvent,
 )
 from metor.ui import Theme
 from metor.ui.chat.command import CommandDispatcher
 from metor.ui.chat.engine import Chat
+from metor.ui.chat.event.content import handle_content_event
 from metor.ui.chat.event.handler import EventHandler
 from metor.ui.chat.models import ChatMessageType, ChatTransportState
+from metor.ui import Help
+from unittest.mock import patch
 
 
 class _DummyConfig:
@@ -179,7 +187,6 @@ class ChatContractTests(unittest.TestCase):
             chat.run()
 
         renderer.clear_input_area.assert_called()
-        renderer.print_divider.assert_called_once_with(skip_prompt=True)
         renderer.print_message.assert_any_call(
             f'{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}',
             msg_type=ChatMessageType.RAW,
@@ -1137,6 +1144,233 @@ class ChatContractTests(unittest.TestCase):
         self.assertIsInstance(sent_cmd, RejectCommand)
         self.assertEqual(sent_cmd.target, 'alice')
         renderer.print_message.assert_not_called()
+
+
+class LivePushContentTests(unittest.TestCase):
+    """
+    Regression tests for focus-aware live push handling.
+
+    Guards two defects: unfocused peers must not render pushed live messages
+    inline or consume their unread spool, and the MarkRead round-trip must not
+    re-render a message that was already pushed.
+    """
+
+    @staticmethod
+    def _make_handler(focused_alias: Optional[str]) -> EventHandler:
+        """
+        Builds one EventHandler with mocked dependencies.
+
+        Args:
+            focused_alias (Optional[str]): The session focus to simulate.
+
+        Returns:
+            EventHandler: The configured handler.
+        """
+        session = Mock()
+        session.focused_alias = focused_alias
+        return EventHandler(
+            ipc=Mock(),
+            session=session,
+            renderer=Mock(),
+            init_event=threading.Event(),
+            conn_event=threading.Event(),
+            get_notification_buffer_seconds=lambda: 10.0,
+            has_auto_reconnect=lambda: False,
+        )
+
+    def test_remote_msg_for_unfocused_peer_buffers_without_rendering_or_consume(self) -> None:
+        """
+        Verifies that pushed live messages for unfocused peers are buffered.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        handler = self._make_handler(focused_alias='alice')
+        handler._queue_buffered_notification = Mock()
+        event = RemoteMsgEvent(
+            alias='bob',
+            onion='bob.onion',
+            text='hi',
+            msg_id='m1',
+        )
+        self.assertTrue(handle_content_event(handler, event))
+        handler._renderer.print_message.assert_not_called()
+        handler._ipc.send_command.assert_not_called()
+        handler._queue_buffered_notification.assert_called_once_with(
+            'bob', 'bob.onion', 1
+        )
+
+    def test_remote_msg_for_focused_peer_renders_and_consumes(self) -> None:
+        """
+        Verifies that pushed live messages for the focused peer render inline.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        handler = self._make_handler(focused_alias='alice')
+        event = RemoteMsgEvent(
+            alias='alice',
+            onion='alice.onion',
+            text='hi',
+            msg_id='m1',
+        )
+        self.assertTrue(handle_content_event(handler, event))
+        handler._renderer.print_message.assert_called_once()
+        handler._ipc.send_command.assert_called_once()
+        command = handler._ipc.send_command.call_args.args[0]
+        self.assertIsInstance(command, MarkReadCommand)
+        self.assertEqual(command.target, 'alice')
+
+    def test_unfocused_push_then_consume_still_renders_message(self) -> None:
+        """
+        Verifies that a buffered push does not pollute the dedupe set.
+
+        Regression guard for the message-loss defect: a pushed message that was
+        NOT rendered (unfocused peer) must still render when the peer is later
+        consumed via UnreadMessagesEvent. The buggy placement remembered the
+        msg id before the focus check, so the consume response skipped it and
+        the message was lost.
+        """
+        handler = self._make_handler(focused_alias='alice')
+        handler._queue_buffered_notification = Mock()
+        push = RemoteMsgEvent(
+            alias='bob',
+            onion='bob.onion',
+            text='hi',
+            msg_id='m1',
+        )
+        handle_content_event(handler, push)
+        handler._renderer.reset_mock()
+        consume_response = UnreadMessagesEvent(
+            alias='bob',
+            onion='bob.onion',
+            messages=[
+                UnreadMessageEntry(
+                    timestamp='2026-01-01T00:00:00+00:00',
+                    payload='hi',
+                    is_drop=False,
+                    msg_id='m1',
+                )
+            ],
+        )
+        self.assertTrue(handle_content_event(handler, consume_response))
+        handler._renderer.print_messages_batch.assert_called_once()
+
+    def test_mark_read_response_does_not_rerender_pushed_live_message(self) -> None:
+        """
+        Verifies that the consume response skips already pushed messages.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        handler = self._make_handler(focused_alias='alice')
+        push = RemoteMsgEvent(
+            alias='alice',
+            onion='alice.onion',
+            text='hi',
+            msg_id='m1',
+        )
+        handle_content_event(handler, push)
+        handler._renderer.reset_mock()
+        consume_response = UnreadMessagesEvent(
+            alias='alice',
+            onion='alice.onion',
+            messages=[
+                UnreadMessageEntry(
+                    timestamp='2026-01-01T00:00:00+00:00',
+                    payload='hi',
+                    is_drop=False,
+                    msg_id='m1',
+                )
+            ],
+        )
+        self.assertTrue(handle_content_event(handler, consume_response))
+        handler._renderer.print_messages_batch.assert_not_called()
+
+    def test_mark_read_response_still_renders_fresh_messages(self) -> None:
+        """
+        Verifies that the consume response still renders non-pushed messages.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        handler = self._make_handler(focused_alias='alice')
+        push = RemoteMsgEvent(
+            alias='alice',
+            onion='alice.onion',
+            text='hi',
+            msg_id='m1',
+        )
+        handle_content_event(handler, push)
+        handler._renderer.reset_mock()
+        consume_response = UnreadMessagesEvent(
+            alias='alice',
+            onion='alice.onion',
+            messages=[
+                UnreadMessageEntry(
+                    timestamp='2026-01-01T00:00:00+00:00',
+                    payload='old',
+                    is_drop=True,
+                    msg_id='m2',
+                )
+            ],
+        )
+        self.assertTrue(handle_content_event(handler, consume_response))
+        handler._renderer.print_messages_batch.assert_called_once()
+
+
+    def test_chat_help_lists_slash_help_command(self) -> None:
+        """
+        Verifies that the chat help overview documents the /help command.
+
+        Regression guard: /help was not registered, so typing it in the chat
+        UI printed 'Unknown command' instead of the command overview.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        rendered = Help.show_chat_help()
+        self.assertIn('/help', rendered)
+        self.assertIn('Show the chat command overview.', rendered)
+
+
+
+    def test_input_handler_non_tty_stdin_exits_cleanly(self) -> None:
+        """
+        Verifies that a non-TTY stdin produces a clean error, not a termios traceback.
+
+        Regression guard: InputHandler._init_terminal called termios.tcgetattr on
+        a non-TTY file descriptor without a fallback, crashing the chat UI with a
+        raw termios.error when stdin was piped.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        from metor.ui.chat.renderer.input import InputHandler
+
+        with patch('sys.stdin', open('/dev/null', 'r')):
+            with self.assertRaises(SystemExit) as ctx:
+                InputHandler()
+            self.assertEqual(ctx.exception.code, 1)
+
 
 
 if __name__ == '__main__':

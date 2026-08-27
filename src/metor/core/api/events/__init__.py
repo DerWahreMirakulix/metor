@@ -72,7 +72,7 @@ from metor.core.api.events.runtime import (
     ConfigSyncedEvent,
     ConfigUpdateFailedEvent,
     ConfigUpdatedEvent,
-    DaemonCannotManageUiEvent,
+    ClientScopeKeyRejectedEvent,
     IpcClientLimitReachedEvent,
     DaemonLockedEvent,
     DaemonOfflineEvent,
@@ -83,6 +83,7 @@ from metor.core.api.events.runtime import (
     LocalAuthRateLimitedEvent,
     InvalidPasswordEvent,
     InvalidSettingKeyEvent,
+    ProtocolMismatchEvent,
     SelfDestructInitiatedEvent,
     SessionAuthenticatedEvent,
     SettingDataEvent,
@@ -121,6 +122,7 @@ from metor.core.api.events.transport import (
     NoPendingLiveMessagesEvent,
     PendingConnectionExpiredEvent,
     RemoteMsgEvent,
+    ReadReceiptEvent,
     RetunnelFailedEvent,
     RetunnelInitiatedEvent,
     RetunnelSuccessEvent,
@@ -129,6 +131,7 @@ from metor.core.api.events.transport import (
     TorKeyWriteFailedEvent,
     TorProcessTerminatedEvent,
     TorStartFailedEvent,
+    TransportStateEvent,
 )
 
 
@@ -148,6 +151,7 @@ __all__ = [
     'TorStartFailedEvent',
     'TorProcessTerminatedEvent',
     'RemoteMsgEvent',
+    'ReadReceiptEvent',
     'AckEvent',
     'DropFailedEvent',
     'AutoFallbackQueuedEvent',
@@ -184,6 +188,7 @@ __all__ = [
     'ProfileOperationResultEvent',
     'AuthRequiredEvent',
     'InvalidPasswordEvent',
+    'ProtocolMismatchEvent',
     'LocalAuthRateLimitedEvent',
     'DatabaseCorruptedEvent',
     'AlreadyUnlockedEvent',
@@ -197,7 +202,7 @@ __all__ = [
     'InternalErrorEvent',
     'InvalidSettingKeyEvent',
     'InvalidConfigKeyEvent',
-    'DaemonCannotManageUiEvent',
+    'ClientScopeKeyRejectedEvent',
     'SettingUpdatedEvent',
     'SettingUpdateFailedEvent',
     'SettingTypeErrorEvent',
@@ -249,4 +254,5 @@ __all__ = [
     'RetunnelInitiatedEvent',
     'RetunnelSuccessEvent',
     'RetunnelFailedEvent',
+    'TransportStateEvent',
 ]

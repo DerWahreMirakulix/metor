@@ -27,9 +27,10 @@ if TYPE_CHECKING:
     from metor.data import Config
 
 
-UI_PROMPT_SIGN_KEY: str = 'ui.prompt_sign'
-UI_CHAT_LIMIT_KEY: str = 'ui.chat_limit'
-UI_CHAT_BUFFER_PADDING_KEY: str = 'ui.chat_buffer_padding'
+UI_PROMPT_SIGN_KEY: str = 'ui.terminal.prompt_sign'
+UI_CHAT_LIMIT_KEY: str = 'ui.terminal.chat_limit'
+UI_CHAT_BUFFER_PADDING_KEY: str = 'ui.terminal.chat_buffer_padding'
+UI_SHOW_TRANSPORT_STATUS_KEY: str = 'ui.terminal.show_transport_status'
 FOCUS_STATE_TAGS: dict[ChatTransportState, str] = {
     ChatTransportState.SWITCHING: ' [Switching]',
     ChatTransportState.RECONNECTING: ' [Reconnecting]',
@@ -38,7 +39,10 @@ FOCUS_STATE_TAGS: dict[ChatTransportState, str] = {
 
 
 class Renderer:
-    """Facade for the UI rendering layer. Manages threading locks and sub-components."""
+    """Facade for the UI rendering layer. Manages threading locks and sub-components.
+
+    Implements the ChatRenderer protocol structurally.
+    """
 
     def __init__(self, config: 'Config') -> None:
         """
@@ -51,7 +55,7 @@ class Renderer:
             None
         """
         self._config: 'Config' = config
-        self._initial_prompt: str = f'{self._config.get_str(UI_PROMPT_SIGN_KEY)} '
+        self._initial_prompt: str = f'{self._config.get_namespace_str(UI_PROMPT_SIGN_KEY)} '
         self._prompt: str = self._initial_prompt
         self._alias_resolver: Callable[
             [Optional[str], Optional[str]], Optional[str]
@@ -122,6 +126,8 @@ class Renderer:
             self._focus_transport_state = transport_state
             if alias:
                 state_tag: str = FOCUS_STATE_TAGS.get(transport_state, '')
+                if self._config.get_namespace_bool(UI_SHOW_TRANSPORT_STATUS_KEY):
+                    state_tag = f' [Transport: {transport_state.value}]'
                 self._prompt = f'{alias}{state_tag}{self._initial_prompt}'
             else:
                 self._prompt = self._initial_prompt
@@ -186,7 +192,7 @@ class Renderer:
 
             insert_index: int = self._insert_chat_line(chat_line)
 
-            self._trim_message_buffer(self._config.get_int(UI_CHAT_LIMIT_KEY))
+            self._trim_message_buffer(self._config.get_namespace_int(UI_CHAT_LIMIT_KEY))
 
             if len(self._display.all_msgs) <= previous_count:
                 self._redraw_from_index_locked(0, cols, skip_prompt)
@@ -270,8 +276,8 @@ class Renderer:
                 )
                 self._insert_chat_line(chat_line)
 
-            limit: int = self._config.get_int(UI_CHAT_LIMIT_KEY)
-            padding: int = self._config.get_int(UI_CHAT_BUFFER_PADDING_KEY)
+            limit: int = self._config.get_namespace_int(UI_CHAT_LIMIT_KEY)
+            padding: int = self._config.get_namespace_int(UI_CHAT_BUFFER_PADDING_KEY)
             total_limit: int = limit + padding
 
             self._trim_message_buffer(total_limit)
@@ -427,31 +433,6 @@ class Renderer:
             None
         """
         self.print_message(' ', msg_type=ChatMessageType.RAW, skip_prompt=True)
-
-    def print_divider(
-        self,
-        msg_type: ChatMessageType = ChatMessageType.RAW,
-        compact: bool = False,
-        skip_prompt: bool = False,
-    ) -> None:
-        """
-        Prints a visual divider line.
-
-        Args:
-            msg_type (ChatMessageType): The message type for the divider.
-            compact (bool): Whether to use a compact divider.
-            skip_prompt (bool): Whether to avoid redrawing the prompt afterward.
-
-        Returns:
-            None
-        """
-        self.print_message(
-            UIPresenter.get_divider_string()
-            if not compact
-            else UIPresenter.get_divider_string(3, add_spaces=True),
-            msg_type=msg_type,
-            skip_prompt=skip_prompt,
-        )
 
     def clear_input_area(self) -> None:
         """

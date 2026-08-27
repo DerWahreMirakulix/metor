@@ -1,6 +1,6 @@
 """Message and inbox-specific database command handling."""
 
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from metor.core.api import (
     ClearMessagesCommand,
@@ -40,6 +40,8 @@ MESSAGE_CLEAR_EVENT_TYPES: dict[MessageClearOperationType, EventType] = {
 
 class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
     """Handles chat-history, inbox, and clear-message database commands."""
+
+    _send_read_receipt_cb: Optional[Callable[[str, List[str]], None]]
 
     def _handle_get_messages(self, cmd: GetMessagesCommand) -> IpcEvent:
         """
@@ -154,7 +156,13 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
                 timestamp=str(message[3]),
                 payload=str(message[2]),
                 is_drop=str(message[1]) != MessageType.LIVE_TEXT.value,
+                msg_id=str(message[4]) if message[4] is not None else None,
             )
             for message in raw_messages
         ]
+        msg_ids: List[str] = [
+            str(message[4]) for message in raw_messages if message[4] is not None
+        ]
+        if self._send_read_receipt_cb is not None and msg_ids:
+            self._send_read_receipt_cb(onion, msg_ids)
         return UnreadMessagesEvent(messages=messages_list, alias=alias, onion=onion)

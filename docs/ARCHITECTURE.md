@@ -18,6 +18,8 @@ Use this document when you need to answer one of these questions:
 - [README.md](../README.md): Master entry point for installation, usage, and repository navigation.
 - [SETTINGS.md](./SETTINGS.md): Generated reference for user-facing settings and structural profile config keys.
 - [API.md](./API.md): Generated reference for the typed IPC contract.
+- [api.schema.json](./api.schema.json): Generated JSON Schema wire contract for the typed IPC DTOs.
+- [GLOSSARY.md](./GLOSSARY.md): Canonical terminology reference for settings namespaces, transport fields, and renamed symbols.
 - [AUDIT.md](./AUDIT.md): Review checklist for security, OPSEC, concurrency, and architecture risks.
 - [CONTRIBUTE.md](./CONTRIBUTE.md): Coding rules, import boundaries, typing requirements, and formatting standards.
 
@@ -48,6 +50,44 @@ Metor has three configuration classes with different responsibilities:
 3. Structural profile config.
    Keys such as `is_remote`, `daemon_port`, and `security_mode` are profile metadata, not ordinary cascading settings.
 
+Settings keys live in exactly three namespaces (see [GLOSSARY.md](./GLOSSARY.md)):
+
+| Prefix | Scope | Validated by |
+| ------ | ----- | ------------ |
+| `client.*` | Client-machine behavior, paradigm-neutral (e.g. `client.history_limit`) | Client registry |
+| `daemon.*` | Daemon-host behavior | Daemon `SettingKey` registry |
+| `ui.<frontend>.*` | Frontend-owned presentation and behavior | Registering UI frontend |
+
+Validation is a two-registry rule: the daemon accepts only `daemon.*` keys that
+exist in its own `SettingKey` registry. Any client-scope key (`client.*` or
+`ui.<frontend>.*`) that gets routed to the daemon is rejected with the typed
+`CLIENT_SCOPE_KEY_REJECTED` event instead of the legacy
+`DAEMON_CANNOT_MANAGE_UI` naming.
+
+Request defaults are resolved client-side, not daemon-side:
+`client.history_limit` and `client.messages_limit` are read by the client and
+carried into the `limit` field of `GetHistoryCommand` / `GetMessagesCommand`.
+The daemon falls back to its own request constants only when no `limit` is
+present in the request.
+
+The drop-transport policy is one decision with two knobs:
+`daemon.reuse_live_for_drops` and `daemon.allow_drop_standby_on_live` are
+documented together as a policy group, not as independent switches. When live
+reuse is enabled, queued drops ride the existing live session channel and a
+cached drop tunnel is closed while live exists, so `allow_drop_standby_on_live`
+only has meaning when reuse is disabled:
+
+| `reuse_live_for_drops` | `allow_drop_standby_on_live` | Drop routing while live is active |
+| ---------------------- | ---------------------------- | --------------------------------- |
+| `true` (default) | `false` (default) | Drops ride the live session channel; no drop tunnel cache is kept warm. |
+| `true` | `true` | Same routing; the standby flag is moot because the cache is closed while live exists. |
+| `false` | `false` | Drops use tunnel/direct delivery; no warm standby cache. |
+| `false` | `true` | Drops use tunnel/direct delivery; the cached drop tunnel stays warm as fallback while live is primary. |
+
+The ledger `transport` field is written only when the live-history policy allows
+it: when `daemon.record_live_history` is `false`, the field is omitted from ALL
+ledger rows, including drop rows — uniform absence, never selective absence.
+
 Configuration should follow these rules:
 
 - User-relevant runtime behavior belongs in documented settings metadata and appears in [SETTINGS.md](./SETTINGS.md).
@@ -70,6 +110,77 @@ The IPC boundary is typed on purpose. Future changes should extend that contract
 
 4. Alias-bearing peer-state logs should stay rename-safe when the event still refers to the current peer identity.
    In chat mode this means preserving the `{alias}` placeholder together with alias metadata for dynamic redraws, while inherently final events such as completed removals may remain static.
+
+## IPC Contract Evolution
+
+The typed IPC contract is versioned so client/daemon drift becomes a typed error
+instead of silent misbehavior. Two version axes exist:
+
+1. IPC wire protocol (`Constants.IPC_PROTOCOL_VERSION` / `IPC_PROTOCOL_MIN_SUPPORTED`):
+   negotiated over the local IPC socket between UI clients and the daemon.
+
+2. Peer wire protocol (`Constants.PEER_PROTOCOL_VERSION` / `PEER_PROTOCOL_MIN_SUPPORTED`):
+   negotiated between daemons inside the Tor peer handshake.
+
+### Additive-Only Within a Major Version
+
+- New commands, events, and payload fields may be added within the same major
+  version, but every new field MUST have a default so writers from older
+  versions stay valid.
+- Removing or renaming a field, event, or command is a major-version bump.
+  Renames are never aliased; every caller migrates in the same release.
+- Strict unknown-field rejection stays in place: a payload with an unknown field
+  is a hard error, never a silent ignore. The version handshake converts
+  version drift into a typed `ProtocolMismatchEvent` before any payload parsing
+  could otherwise fail with an untyped error.
+
+### IPC Version Handshake (UI -> Daemon)
+
+1. The client sends `InitCommand` with its `protocol_version`.
+2. If `protocol_version` is below `IPC_PROTOCOL_MIN_SUPPORTED`, the daemon
+   replies with `ProtocolMismatchEvent(daemon_version, min_supported, client_version)`
+   and the session is rejected.
+3. Otherwise the daemon replies with `InitEvent(onion, version, min_supported, profile)`.
+   A client whose own `protocol_version` is below the announced `min_supported`
+   must treat the session as incompatible.
+
+### Peer Wire Version (Daemon -> Daemon)
+
+- The authenticated handshake CHALLENGE frame carries the peer's
+  `PEER_PROTOCOL_VERSION` as an explicit token; legacy frames without the token
+  default to version 1.
+- Each side validates the announced version against `PEER_PROTOCOL_MIN_SUPPORTED`
+  before accepting the connection. A too-old peer is rejected with a typed
+  handshake error instead of failing later on an unparseable payload.
+
+### Delivery-Only Connect Hint (deliberately not implemented)
+
+A `delivery_only` handshake hint — an outbound connect that must not surface an
+accept prompt at the peer — was considered and deliberately rejected. It only
+makes sense for an automatic live-connect path, and automatic live connect was
+itself rejected: the UI sends `MsgCommand` (live) or `SendDropCommand` (drop)
+and never asks the daemon to auto-establish a session. A flag without a caller
+would be dead protocol surface, so it is not implemented. If a future UI
+paradigm reintroduces automatic live connect, this document must be revisited
+before any flag is added.
+
+## Notification Sinks
+
+The daemon may surface asynchronous user-facing notifications to headless
+consumers that are not connected as interactive UI clients. This is the
+canonical contract for that path:
+
+- Notifications use a structured `NotificationPayload` with typed fields, never
+  free-form display text. Consumers branch on payload fields, and the payload is
+  derived from the existing typed event DTOs — it is never a second wire format.
+- A sink is a named registration with a documented payload contract. Sinks are
+  configured through the `daemon.notification_sink` setting and receive the
+  daemon's structured notifications.
+- Sinks fire only while the daemon has no connected interactive clients. As soon
+  as an interactive client attaches, sink delivery is suspended because the
+  attached client is the authoritative notification consumer.
+- UI developers register their own sink types for their frontend instead of
+  bolting display logic onto the daemon broadcast path.
 
 ## History Model
 
@@ -156,7 +267,7 @@ They exist so future work extends one coherent model instead of reintroducing ad
 - `daemon.max_unseen_live_msgs`
   Caps the unread crash-safe live backlog per peer. When the limit is reached, new inbound live messages stop ACKing so the sender's existing fallback policy can take over. A value of `0` disables headless live backlog and only allows automatic live acceptance while an interactive live consumer is attached. A value of `-1` removes the limit entirely.
 
-- `ui.inbox_notification_delay`
+- `ui.terminal.inbox_notification_delay`
   Buffers and aggregates unread-message notification lines locally for unfocused peers. This is a UI-only presentation setting and does not affect daemon read state or transport behavior.
 
 ## Transport Shared State Model
@@ -418,5 +529,67 @@ When you add a new architecture-relevant behavior:
 
 1. Decide whether it belongs in fixed guardrails, cascading settings, or structural profile config.
 2. Extend the typed IPC contract if the UI must observe or control it.
-3. Update [SETTINGS.md](./SETTINGS.md) or [API.md](./API.md) via the generators instead of hand-editing generated references.
+3. Update [SETTINGS.md](./SETTINGS.md) or [API.md](./API.md) via the generators instead of hand-editing generated references; the IPC contract schema in [api.schema.json](./api.schema.json) is regenerated by `scripts/generate_api_docs.py` as well.
 4. Update [AUDIT.md](./AUDIT.md) and [CONTRIBUTE.md](./CONTRIBUTE.md) if the new behavior changes review or implementation rules.
+
+## Terminal UI Design Guidelines
+
+One convention for every CLI and chat surface. These rules are the
+codified version of how the terminal output already renders; keep new
+output inside them instead of inventing new visual vocabulary.
+
+### Multi-Line Output Convention
+
+1. **The first line is the header.** It starts directly at the status
+   prefix (`sys$`, `inf$`, `err$`) with no leading blank line. A
+   multi-line command output must never open with an empty line.
+
+2. **No decorative separators.** Dashes are not used as headers or
+   dividers anywhere (`---`, `- - -`, divider lines). Structure comes
+   from the header line, indentation, and section spacing — not from
+   box-drawing characters.
+
+3. **Header to content: exactly one blank line.** The header is
+   followed by one empty line before the first content line, giving
+   multi-line blocks a consistent title + body rhythm.
+
+4. **Sections: one blank line before the section header.** When a single
+   output has multiple sections (e.g. `Active session:` / `Pending
+   session:`, or saved contacts / discovered peers), separate them with
+   exactly one empty line placed *before* the next section header.
+
+5. **Chat continuation lines are indented** by the visible prefix width
+   (timestamp + `sys$`/`To X$`/`From X$`) via `indent_multiline_text`, so
+   wrapped and multi-line output aligns under the first content column.
+
+6. **Single-line results render inline.** A command that resolves to one
+   message (e.g. `No active sessions.`) prints just that message at the
+   prefix — no header wrapper.
+
+### Color Semantics
+
+Colors carry meaning only; they are never decorative. The palette is
+fixed — do not introduce new colors without updating this section.
+
+| Color | Meaning |
+|-------|---------|
+| `CYAN` | System context: `sys$` prefix, command names, peer identity in headers |
+| `YELLOW` | State values (`session_state: connected`), user input echoes, warnings |
+| `GREEN` | Success/active state: own messages (`To X`), active sessions, saved contacts |
+| `RED` | Errors: `err$` prefix, failed messages, destructive warnings |
+| `PURPLE` | Remote context: `From X` messages, remote-profile markers |
+| `DARK_GREY` | Incidental detail: markers, `none` values, unfocused/unbound entries |
+
+Consequences: value labels stay uncolored (`session_state:`) while the
+value itself is colored; peers are identified with `CYAN` in headers and
+`GREEN`/`DARK_GREY` in lists depending on saved state; `RESET` is
+applied after every colored span.
+
+### Enforcement
+
+- `UIPresenter` formatters (transport, history, data snapshots, contacts)
+  are the single source for these layouts — chat and CLI share them.
+- The chat renderer only adds the prefix and continuation indentation; it
+  does not decorate content.
+- Tests assert the convention (no leading blank line, no `---`, header
+  before content) for representative multi-line outputs.

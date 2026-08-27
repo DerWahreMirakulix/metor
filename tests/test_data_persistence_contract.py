@@ -265,6 +265,76 @@ class DataPersistenceContractTests(unittest.TestCase):
         self.assertIs(result.operation_type, ContactOperationType.CONTACT_REMOVED)
         self.assertIsNone(self._cm.get_alias_by_onion(onion))
 
+    def test_inbox_consume_rows_carry_msg_id(self) -> None:
+        """
+        Verifies that get_and_read_inbox returns five-field rows including msg id.
+
+        Regression guard for the MarkRead consume path: the SQL row must expose
+        the stable message id so the read-receipt chain can address the message.
+        A four-field row made the handler index message[4] and crash with
+        InternalErrorEvent.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        onion: str = 'c' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
+        self._cm.ensure_alias_for_onion(onion)
+        self._mm.queue_message(
+            contact_onion=onion,
+            direction=MessageDirection.IN,
+            msg_type=MessageType.DROP_TEXT,
+            payload='hello e2e',
+            status=MessageStatus.UNREAD,
+            msg_id='e2e-consume-msg-1',
+        )
+
+        rows = self._mm.get_and_read_inbox(onion)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(len(rows[0]), 5)
+        self.assertEqual(rows[0][4], 'e2e-consume-msg-1')
+        self.assertEqual(str(rows[0][2]), 'hello e2e')
+        self.assertEqual(str(rows[0][1]), MessageType.DROP_TEXT.value)
+
+
+    def test_add_contact_rejects_invalid_onion_format(self) -> None:
+        """
+        Verifies that add_contact rejects malformed onion identities.
+
+        Regression guard: arbitrary strings like 'kein-onion' were accepted and
+        stored as contacts, polluting the address book.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        result = self._cm.add_contact('badpeer', 'kein-onion')
+        self.assertFalse(result.success)
+        self.assertIs(result.operation_type, ContactOperationType.INVALID_ONION)
+        self.assertIsNone(self._cm.get_alias_by_onion('kein-onion'))
+
+    def test_add_contact_accepts_valid_v3_onion(self) -> None:
+        """
+        Verifies that a structurally valid v3 onion is accepted.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        result = self._cm.add_contact(
+            'goodpeer',
+            'gqncaw2sjprzovtdquir4etnswg2eyvomid4bsbdld2p5roay5vmvtyd.onion',
+        )
+        self.assertTrue(result.success)
+        self.assertIs(result.operation_type, ContactOperationType.CONTACT_ADDED)
+
+
 
 if __name__ == '__main__':
     unittest.main()

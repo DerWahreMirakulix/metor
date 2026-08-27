@@ -3,6 +3,8 @@
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from metor.utils import Constants
+
 from metor.data.message.models import (
     MessageClearOperationType,
     MessageClearResult,
@@ -149,6 +151,29 @@ class MessageManager:
         """
         self._messages.update_message_status(msg_id, new_status)
 
+    def mark_drop_delivered(
+        self,
+        contact_onion: str,
+        msg_id: str,
+    ) -> Optional[str]:
+        """
+        Marks one pending drop-visible outbound message as delivered.
+
+        Used when a drop sent over the live session channel is confirmed by an
+        ACK read by the session receiver thread. The message stays durably
+        PENDING until this confirmation arrives, preserving the no-loss
+        invariant.
+
+        Args:
+            contact_onion (str): The peer onion identity.
+            msg_id (str): The stable logical message identifier.
+
+        Returns:
+            Optional[str]: The original message timestamp when a pending drop
+                row was marked delivered, or None if no pending drop row matched.
+        """
+        return self._messages.mark_drop_delivered(contact_onion, msg_id)
+
     def update_outbound_message_status(
         self,
         contact_onion: str,
@@ -196,7 +221,7 @@ class MessageManager:
         """
         return self._messages.get_unread_inbox_summaries()
 
-    def get_and_read_inbox(self, contact_onion: str) -> List[Tuple[int, str, str, str]]:
+    def get_and_read_inbox(self, contact_onion: str) -> List[Tuple[int, str, str, str, Optional[str]]]:
         """
         Retrieves unread inbox rows for one contact and executes the consume policy.
 
@@ -204,7 +229,7 @@ class MessageManager:
             contact_onion (str): The target onion address.
 
         Returns:
-            List[Tuple[int, str, str, str]]: Message rows as receipt id, type, payload, timestamp.
+            List[Tuple[int, str, str, str, Optional[str]]]: Message rows as receipt id, type, payload, timestamp, msg id.
         """
         return self._messages.get_and_read_inbox(
             contact_onion,
@@ -229,7 +254,7 @@ class MessageManager:
         actual_limit: int = (
             limit
             if limit is not None
-            else self._pm.config.get_int(SettingKey.MESSAGES_LIMIT)
+            else Constants.DEFAULT_MESSAGES_LIMIT
         )
         return self._messages.get_chat_history(contact_onion, actual_limit)
 

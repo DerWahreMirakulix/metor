@@ -61,6 +61,7 @@ class CliProxyProfileActions:
         is_remote: bool,
         port: Optional[int],
         security_mode: ProfileSecurityMode,
+        master_password: Optional[str] = None,
     ) -> str:
         """
         Creates one local or remote profile via the local headless command path.
@@ -70,6 +71,8 @@ class CliProxyProfileActions:
             is_remote (bool): Whether the profile is remote.
             port (Optional[int]): Optional static remote port.
             security_mode (ProfileSecurityMode): The requested storage mode.
+            master_password (Optional[str]): The master password protecting the
+                newly created encrypted profile keys.
 
         Returns:
             str: The formatted operation result.
@@ -80,6 +83,7 @@ class CliProxyProfileActions:
                 is_remote=is_remote,
                 port=port,
                 security_mode=security_mode.value,
+                master_password=master_password,
             )
         )
 

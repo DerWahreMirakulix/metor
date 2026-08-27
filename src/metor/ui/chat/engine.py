@@ -42,7 +42,7 @@ from metor.utils import build_session_auth_proof, clean_onion, Constants
 
 # Local Package Imports
 from metor.ui.chat.models import ChatMessageType
-from metor.ui.chat.renderer import Renderer
+from metor.ui.chat.renderer import ChatRenderer, Renderer
 from metor.ui.chat.presenter import ChatPresenter
 from metor.ui.chat.ipc import IpcClient
 from metor.ui.chat.session import Session
@@ -72,7 +72,7 @@ class Chat:
             None
         """
         self._pm: ProfileManager = pm
-        self._renderer: Renderer = Renderer(self._pm.config)
+        self._renderer: ChatRenderer = Renderer(self._pm.config)
         self._session: Session = Session()
         self._renderer.set_alias_resolver(self._session.get_peer_alias)
         self._ipc: Optional[IpcClient] = None
@@ -301,8 +301,6 @@ class Chat:
             None
         """
         self._renderer.clear_input_area()
-        if show_divider:
-            self._renderer.print_divider(skip_prompt=True)
         self._renderer.print_message(
             f'{Theme.RED}Connection to Daemon lost! Exiting...{Theme.RESET}',
             msg_type=ChatMessageType.RAW,
@@ -355,7 +353,9 @@ class Chat:
             self._renderer,
             self._init_event,
             self._conn_event,
-            lambda: self._pm.config.get_float(SettingKey.INBOX_NOTIFICATION_DELAY),
+            lambda: self._pm.config.get_namespace_float(
+                'ui.terminal.inbox_notification_delay'
+            ),
             lambda: self._pm.config.get_float(SettingKey.LIVE_RECONNECT_DELAY) > 0.0,
         )
         self._dispatcher = CommandDispatcher(self._ipc, self._session, self._renderer)
@@ -386,6 +386,11 @@ class Chat:
                 elif user_input.startswith('/'):
                     if user_input == '/clear':
                         self._print_header(clear_screen=True)
+                    elif user_input == '/help':
+                        self._renderer.print_message(
+                            Help.show_chat_help(), skip_prompt=True
+                        )
+                        self._renderer.print_prompt()
                     elif user_input == '/exit':
                         break
                     else:
@@ -611,8 +616,6 @@ class Chat:
         )
         self._renderer.print_empty_line()
         self._renderer.print_message(Help.show_chat_help(), skip_prompt=True)
-
-        self._renderer.print_divider(compact=True)
 
         if self._session.header_active or self._session.header_pending:
             self._renderer.print_empty_line()

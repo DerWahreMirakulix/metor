@@ -18,6 +18,7 @@ class AddProfileCommand(IpcCommand):
     is_remote: bool = False
     port: Optional[int] = None
     security_mode: str = 'encrypted'
+    master_password: Optional[str] = None
     command_type: CommandType = field(default=CommandType.ADD_PROFILE, init=False)
 
 

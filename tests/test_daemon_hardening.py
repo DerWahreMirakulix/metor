@@ -28,6 +28,7 @@ from metor.core.api import (
     ConnectedEvent,
     EventType,
     FallbackSuccessEvent,
+    GetChatStartupStateCommand,
     InitCommand,
     IpcEvent,
     RuntimeErrorCode,
@@ -501,6 +502,24 @@ class _DummyMessageManager:
                 )
             )
         return _QueueResult()
+
+    def mark_drop_delivered(
+        self,
+        _onion: str,
+        _msg_id: str,
+    ) -> Optional[str]:
+        """
+        Reports no matching drop row for the helper.
+
+        Args:
+            _onion (str): The onion.
+            _msg_id (str): The msg ID.
+
+        Returns:
+            Optional[str]: None, signaling no drop-visible outbound receipt matched.
+        """
+
+        return None
 
     def has_inbound_message(self, _onion: str, _msg_id: str) -> bool:
         """
@@ -2121,6 +2140,8 @@ class DaemonHardeningTests(unittest.TestCase):
             receiver=cast(StreamReceiver, receiver_mock),
             broadcast_callback=Mock(),
             has_live_consumers_callback=lambda: has_live_consumers,
+            has_clients_callback=lambda: False,
+            notify_callback=lambda _payload: None,
             enqueue_live_reconnect_callback=lambda _onion: True,
             stop_flag=threading.Event(),
             config=cast(
@@ -2290,6 +2311,8 @@ class DaemonHardeningTests(unittest.TestCase):
             receiver=cast(StreamReceiver, Mock()),
             broadcast_callback=broadcast_mock,
             has_live_consumers_callback=lambda: False,
+            has_clients_callback=lambda: False,
+            notify_callback=lambda _payload: None,
             enqueue_live_reconnect_callback=lambda _onion: True,
             stop_flag=threading.Event(),
             config=cast(Config, _DummyConfig()),
@@ -3193,6 +3216,7 @@ class DaemonHardeningTests(unittest.TestCase):
             broadcast_callback=lambda _event: None,
             has_clients_callback=lambda: False,
             has_live_consumers_callback=lambda: False,
+            notify_callback=lambda _payload: None,
             config=cast(Config, _DummyConfig()),
         )
         payload_text = json.dumps(
@@ -3244,6 +3268,7 @@ class DaemonHardeningTests(unittest.TestCase):
             broadcast_callback=lambda _event: None,
             has_clients_callback=lambda: False,
             has_live_consumers_callback=lambda: False,
+            notify_callback=lambda _payload: None,
             config=cast(Config, _DropQuotaConfig(unread_drop_limit=1)),
         )
         payload_text = json.dumps(
@@ -3285,6 +3310,7 @@ class DaemonHardeningTests(unittest.TestCase):
             broadcast_callback=lambda _event: None,
             has_clients_callback=lambda: False,
             has_live_consumers_callback=lambda: False,
+            notify_callback=lambda _payload: None,
             config=cast(Config, _DummyConfig()),
         )
         conn = _DummyConn()
@@ -3362,6 +3388,7 @@ class DaemonHardeningTests(unittest.TestCase):
             broadcast_callback=broadcasted.append,
             has_clients_callback=lambda: False,
             has_live_consumers_callback=lambda: False,
+            notify_callback=lambda _payload: None,
             config=cast(Config, _DummyConfig()),
         )
 
@@ -3421,6 +3448,7 @@ class DaemonHardeningTests(unittest.TestCase):
             broadcast_callback=broadcasted.append,
             has_clients_callback=lambda: False,
             has_live_consumers_callback=lambda: False,
+            notify_callback=lambda _payload: None,
             config=cast(Config, _DummyConfig()),
         )
 
@@ -3468,6 +3496,7 @@ class DaemonHardeningTests(unittest.TestCase):
             broadcast_callback=lambda _event: None,
             has_clients_callback=lambda: False,
             has_live_consumers_callback=lambda: False,
+            notify_callback=lambda _payload: None,
             config=cast(Config, _DummyConfig()),
         )
 
@@ -3515,6 +3544,7 @@ class DaemonHardeningTests(unittest.TestCase):
             broadcast_callback=broadcasted.append,
             has_clients_callback=lambda: False,
             has_live_consumers_callback=lambda: False,
+            notify_callback=lambda _payload: None,
             config=cast(Config, _DummyConfig()),
         )
         state.add_unacked_message(
@@ -3569,6 +3599,7 @@ class DaemonHardeningTests(unittest.TestCase):
             broadcast_callback=lambda _event: None,
             has_clients_callback=lambda: False,
             has_live_consumers_callback=lambda: False,
+            notify_callback=lambda _payload: None,
             config=cast(Config, _DummyConfig()),
         )
 
@@ -3612,7 +3643,7 @@ class DaemonHardeningTests(unittest.TestCase):
             outbox=cast(OutboxWorker, outbox_worker),
             broadcast_cb=lambda _event: None,
             send_to_cb=lambda _conn, event: sent_events.append(event),
-            register_live_consumer_cb=lambda _conn: None,
+            register_session_consumer_cb=lambda _conn: None,
             config=cast(Config, _DummyConfig()),
         )
         command = SendDropCommand(
@@ -5220,6 +5251,8 @@ class DaemonHardeningTests(unittest.TestCase):
             receiver=cast(StreamReceiver, Mock()),
             broadcast_callback=broadcast_mock,
             has_live_consumers_callback=lambda: False,
+            has_clients_callback=lambda: False,
+            notify_callback=lambda _payload: None,
             enqueue_live_reconnect_callback=_enqueue_reconnect,
             stop_flag=threading.Event(),
             config=cast(Config, _ListenerReconnectConfig()),
@@ -6403,6 +6436,7 @@ class DaemonHardeningTests(unittest.TestCase):
             broadcast_callback=lambda _event: None,
             has_clients_callback=lambda: False,
             has_live_consumers_callback=lambda: False,
+            notify_callback=lambda _payload: None,
             config=cast(Config, _DummyConfig()),
         )
 
@@ -6441,6 +6475,7 @@ class DaemonHardeningTests(unittest.TestCase):
             broadcast_callback=lambda _event: None,
             has_clients_callback=lambda: False,
             has_live_consumers_callback=lambda: False,
+            notify_callback=lambda _payload: None,
             config=cast(Config, _DummyConfig()),
         )
 
@@ -6599,6 +6634,36 @@ class DaemonHardeningTests(unittest.TestCase):
 
         self.assertIsNone(result)
         self.assertTrue(conn.closed)
+
+
+
+    def test_chat_startup_state_command_is_routed_to_network_handler(self) -> None:
+        """
+        Verifies that GetChatStartupStateCommand reaches the network handler.
+
+        Regression guard for the chat bootstrap: the command was missing from
+        the dispatcher routing, so the chat UI waited for a startup snapshot
+        that never arrived and failed with an IPC timeout.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        daemon = self._build_daemon()
+        daemon._ipc = Mock()
+        daemon._network_handler = Mock()
+        conn, peer = socket.socketpair()
+
+        try:
+            daemon._process_ui_command(GetChatStartupStateCommand(), conn)
+            daemon._network_handler.handle.assert_called_once()
+            routed_cmd = daemon._network_handler.handle.call_args.args[0]
+            self.assertIsInstance(routed_cmd, GetChatStartupStateCommand)
+        finally:
+            conn.close()
+            peer.close()
 
 
 if __name__ == '__main__':

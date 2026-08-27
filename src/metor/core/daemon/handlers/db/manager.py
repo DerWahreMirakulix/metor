@@ -1,6 +1,6 @@
 """Thin routing facade for the modular database command handlers."""
 
-from typing import Callable, List
+from typing import Callable, List, Optional
 
 from metor.core.api import (
     AddContactCommand,
@@ -49,6 +49,7 @@ class DatabaseCommandHandler(
         mm: MessageManager,
         get_active_onions: Callable[[], List[str]],
         broadcast: Callable[[IpcEvent], None],
+        send_read_receipt_cb: Optional[Callable[[str, List[str]], None]] = None,
     ) -> None:
         """
         Initializes the DatabaseCommandHandler.
@@ -60,6 +61,8 @@ class DatabaseCommandHandler(
             mm (MessageManager): Offline messages manager.
             get_active_onions (Callable[[], List[str]]): Hook to retrieve currently connected onions.
             broadcast (Callable[[IpcEvent], None]): Hook to broadcast side-effect events to all clients.
+            send_read_receipt_cb (Optional[Callable[[str, List[str]], None]]): Hook to send transient
+                read receipts to a peer over its live session.
 
         Returns:
             None
@@ -70,6 +73,9 @@ class DatabaseCommandHandler(
         self._mm: MessageManager = mm
         self._get_active_onions: Callable[[], List[str]] = get_active_onions
         self._broadcast: Callable[[IpcEvent], None] = broadcast
+        self._send_read_receipt_cb: Optional[Callable[[str, List[str]], None]] = (
+            send_read_receipt_cb
+        )
 
     def handle(self, cmd: IpcCommand) -> IpcEvent:
         """

@@ -59,6 +59,20 @@ class ProfileCommandHandler:
                 port=cmd.port,
                 security_mode=ProfileSecurityMode(cmd.security_mode),
             )
+            if (
+                result.success
+                and cmd.master_password
+                and cmd.security_mode == ProfileSecurityMode.ENCRYPTED.value
+                and not cmd.is_remote
+            ):
+                from metor.core import KeyManager
+
+                km = KeyManager(
+                    ProfileManager(cmd.name),
+                    password=cmd.master_password,
+                )
+                km.generate_keys()
+                km.clear_sensitive_state()
             return self._build_result_event(result)
 
         if isinstance(cmd, MigrateProfileSecurityCommand):

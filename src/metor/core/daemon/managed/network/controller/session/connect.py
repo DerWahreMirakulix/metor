@@ -19,6 +19,7 @@ from metor.data import (
     HistoryReasonCode,
     SettingKey,
 )
+from metor.utils import Constants
 
 # Local Package Imports
 from metor.core.daemon.managed.network.handshake import HandshakeProtocol
@@ -146,7 +147,13 @@ def connect_to(
                 if not challenge_line:
                     raise ConnectionError('Handshake incomplete.')
 
-                challenge: str = HandshakeProtocol.parse_challenge_line(challenge_line)
+                challenge, peer_version = HandshakeProtocol.parse_challenge_line(
+                    challenge_line
+                )
+                if peer_version < Constants.PEER_PROTOCOL_MIN_SUPPORTED:
+                    raise ValueError(
+                        f'Peer protocol version {peer_version} is too old'
+                    )
                 signature: Optional[str] = controller._crypto.sign_challenge(challenge)
 
                 if not signature:

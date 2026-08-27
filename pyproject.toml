@@ -22,9 +22,15 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["ruff==0.15.8", "mypy==1.19.1"]
+# Frontend selection markers (no additional dependencies):
+#   terminal = default CLI frontend, daemon = headless daemon-only entry, sdk = programmatic API.
+terminal = []
+daemon = []
+sdk = []
 
 [project.scripts]
 metor = "metor.main:main"
+metor-daemon = "metor.daemon_main:main"
 
 [tool.setuptools]
 include-package-data = true

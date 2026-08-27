@@ -4,7 +4,7 @@ Encapsulates operations routing global settings and profile configurations.
 Enforces the Zero-Text Policy by eliminating raw string errors from DTOs.
 """
 
-from typing import Iterable, Union
+from typing import Iterable
 
 from metor.core.api import (
     EventType,
@@ -21,6 +21,7 @@ from metor.core.api import (
     SyncConfigCommand,
 )
 from metor.data import (
+    DAEMON_SETTING_KEYS,
     Settings,
     SettingKey,
     SettingSnapshotRow,
@@ -28,7 +29,6 @@ from metor.data import (
 )
 from metor.data.profile import (
     ProfileManager,
-    ProfileConfigKey,
     ProfileConfigValidationError,
 )
 
@@ -84,13 +84,16 @@ class ConfigCommandHandler:
             IpcEvent: The strictly typed response event DTO.
         """
         if isinstance(cmd, SetSettingCommand):
-            try:
-                setting_key = SettingKey(cmd.setting_key)
-            except ValueError:
+            key_str = cmd.setting_key
+            if not key_str.startswith('daemon.'):
+                return create_event(
+                    EventType.CLIENT_SCOPE_KEY_REJECTED,
+                    {'key': key_str},
+                )
+            if key_str not in DAEMON_SETTING_KEYS:
                 return create_event(EventType.INVALID_SETTING_KEY)
 
-            if setting_key.is_ui:
-                return create_event(EventType.DAEMON_CANNOT_MANAGE_UI)
+            setting_key = SettingKey(key_str)  # guaranteed valid
 
             try:
                 Settings.set(setting_key, cmd.setting_value)
@@ -107,13 +110,16 @@ class ConfigCommandHandler:
                 return create_event(EventType.SETTING_UPDATE_FAILED)
 
         if isinstance(cmd, GetSettingCommand):
-            try:
-                setting_key = SettingKey(cmd.setting_key)
-            except ValueError:
+            key_str = cmd.setting_key
+            if not key_str.startswith('daemon.'):
+                return create_event(
+                    EventType.CLIENT_SCOPE_KEY_REJECTED,
+                    {'key': key_str},
+                )
+            if key_str not in DAEMON_SETTING_KEYS:
                 return create_event(EventType.INVALID_SETTING_KEY)
 
-            if setting_key.is_ui:
-                return create_event(EventType.DAEMON_CANNOT_MANAGE_UI)
+            setting_key = SettingKey(key_str)  # guaranteed valid
 
             try:
                 val: str = Settings.get_str(setting_key)
@@ -136,17 +142,14 @@ class ConfigCommandHandler:
             )
 
         if isinstance(cmd, SetConfigCommand):
-            set_config_key: Union[SettingKey, ProfileConfigKey]
-            try:
-                set_config_key = SettingKey(cmd.setting_key)
-            except ValueError:
-                try:
-                    set_config_key = ProfileConfigKey(cmd.setting_key)
-                except ValueError:
-                    return create_event(EventType.INVALID_CONFIG_KEY)
-
-            if getattr(set_config_key, 'is_ui', False):
-                return create_event(EventType.DAEMON_CANNOT_MANAGE_UI)
+            key_str = cmd.setting_key
+            if key_str.startswith('daemon.') and key_str in DAEMON_SETTING_KEYS:
+                set_config_key: SettingKey = SettingKey(key_str)
+            else:
+                return create_event(
+                    EventType.CLIENT_SCOPE_KEY_REJECTED,
+                    {'key': key_str},
+                )
 
             try:
                 self._pm.config.set(set_config_key, cmd.setting_value)
@@ -167,17 +170,14 @@ class ConfigCommandHandler:
                 return create_event(EventType.CONFIG_UPDATE_FAILED)
 
         if isinstance(cmd, GetConfigCommand):
-            get_config_key: Union[SettingKey, ProfileConfigKey]
-            try:
-                get_config_key = SettingKey(cmd.setting_key)
-            except ValueError:
-                try:
-                    get_config_key = ProfileConfigKey(cmd.setting_key)
-                except ValueError:
-                    return create_event(EventType.INVALID_CONFIG_KEY)
-
-            if getattr(get_config_key, 'is_ui', False):
-                return create_event(EventType.DAEMON_CANNOT_MANAGE_UI)
+            key_str = cmd.setting_key
+            if key_str.startswith('daemon.') and key_str in DAEMON_SETTING_KEYS:
+                get_config_key: SettingKey = SettingKey(key_str)
+            else:
+                return create_event(
+                    EventType.CLIENT_SCOPE_KEY_REJECTED,
+                    {'key': key_str},
+                )
 
             try:
                 val = self._pm.config.get_str(get_config_key)

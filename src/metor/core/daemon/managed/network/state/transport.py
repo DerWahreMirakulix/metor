@@ -6,8 +6,8 @@ import time
 from typing import TYPE_CHECKING, Dict, Optional, Set
 
 from metor.core.daemon.managed.models import (
-    DropTunnelState,
-    LiveTransportState,
+    TunnelState,
+    SessionState,
     PeerTransportState,
     PrimaryTransport,
 )
@@ -21,12 +21,13 @@ class StateTrackerTransportMixin:
     _pending_connections: Dict[str, socket.socket]
     _outbound_attempts: Set[str]
     _retunnel_in_progress: Set[str]
-    _drop_tunnels: Dict[str, DropTunnelState]
+    _drop_tunnels: Dict[str, TunnelState]
     _ui_focus_counts: Dict[str, int]
+    _session_last_activity: Dict[str, float]
 
     if TYPE_CHECKING:
 
-        def get_live_state(self, onion: str) -> LiveTransportState:
+        def get_live_state(self, onion: str) -> SessionState:
             """
             Returns the current live transport lifecycle state for one peer.
 
@@ -34,7 +35,7 @@ class StateTrackerTransportMixin:
                 onion (str): The peer onion identity.
 
             Returns:
-                LiveTransportState: The derived live transport lifecycle state.
+                SessionState: The derived live transport lifecycle state.
             """
             ...
 
@@ -105,6 +106,36 @@ class StateTrackerTransportMixin:
         with self._lock:
             return self._ui_focus_counts.get(onion, 0) > 0
 
+    def touch_session_activity(
+        self, onion: str, touched_at: Optional[float] = None
+    ) -> None:
+        """
+        Records the current activity timestamp for one live session.
+
+        Args:
+            onion (str): The peer onion identity.
+            touched_at (Optional[float]): Optional explicit touch timestamp.
+
+        Returns:
+            None
+        """
+        timestamp: float = touched_at if touched_at is not None else time.time()
+        with self._lock:
+            self._session_last_activity[onion] = timestamp
+
+    def get_session_last_activity(self, onion: str) -> Optional[float]:
+        """
+        Returns the last recorded activity timestamp for one live session.
+
+        Args:
+            onion (str): The peer onion identity.
+
+        Returns:
+            Optional[float]: The last activity timestamp, if one was recorded.
+        """
+        with self._lock:
+            return self._session_last_activity.get(onion)
+
     def mark_drop_tunnel_open(
         self, onion: str, opened_at: Optional[float] = None
     ) -> None:
@@ -120,7 +151,7 @@ class StateTrackerTransportMixin:
         """
         timestamp: float = opened_at if opened_at is not None else time.time()
         with self._lock:
-            self._drop_tunnels[onion] = DropTunnelState(
+            self._drop_tunnels[onion] = TunnelState(
                 opened_at=timestamp,
                 last_used_at=timestamp,
             )
@@ -138,15 +169,15 @@ class StateTrackerTransportMixin:
         """
         timestamp: float = touched_at if touched_at is not None else time.time()
         with self._lock:
-            tunnel: Optional[DropTunnelState] = self._drop_tunnels.get(onion)
+            tunnel: Optional[TunnelState] = self._drop_tunnels.get(onion)
             if not tunnel:
-                self._drop_tunnels[onion] = DropTunnelState(
+                self._drop_tunnels[onion] = TunnelState(
                     opened_at=timestamp,
                     last_used_at=timestamp,
                 )
                 return
 
-            self._drop_tunnels[onion] = DropTunnelState(
+            self._drop_tunnels[onion] = TunnelState(
                 opened_at=tunnel.opened_at,
                 last_used_at=timestamp,
             )
@@ -177,7 +208,7 @@ class StateTrackerTransportMixin:
         with self._lock:
             return onion in self._drop_tunnels
 
-    def get_drop_tunnel_state(self, onion: str) -> Optional[DropTunnelState]:
+    def get_drop_tunnel_state(self, onion: str) -> Optional[TunnelState]:
         """
         Returns the cached drop tunnel metadata for one peer.
 
@@ -185,7 +216,7 @@ class StateTrackerTransportMixin:
             onion (str): The peer onion identity.
 
         Returns:
-            Optional[DropTunnelState]: The cached tunnel metadata, if present.
+            Optional[TunnelState]: The cached tunnel metadata, if present.
         """
         with self._lock:
             return self._drop_tunnels.get(onion)
@@ -223,22 +254,22 @@ class StateTrackerTransportMixin:
         """
         with self._lock:
             if onion in self._connections:
-                live_state: LiveTransportState = LiveTransportState.CONNECTED
+                live_state: SessionState = SessionState.CONNECTED
             elif onion in self._pending_connections:
-                live_state = LiveTransportState.PENDING
+                live_state = SessionState.PENDING
             elif onion in self._retunnel_in_progress:
-                live_state = LiveTransportState.RETUNNELING
+                live_state = SessionState.RETUNNELING
             elif onion in self._outbound_attempts:
-                live_state = LiveTransportState.CONNECTING
+                live_state = SessionState.CONNECTING
             else:
-                live_state = LiveTransportState.DISCONNECTED
+                live_state = SessionState.DISCONNECTED
 
             has_drop_tunnel: bool = onion in self._drop_tunnels
             primary_transport: PrimaryTransport = (
-                PrimaryTransport.LIVE
-                if live_state is not LiveTransportState.DISCONNECTED
+                PrimaryTransport.SESSION
+                if live_state is not SessionState.DISCONNECTED
                 else (
-                    PrimaryTransport.DROP if has_drop_tunnel else PrimaryTransport.NONE
+                    PrimaryTransport.TUNNEL if has_drop_tunnel else PrimaryTransport.NONE
                 )
             )
             return PeerTransportState(
