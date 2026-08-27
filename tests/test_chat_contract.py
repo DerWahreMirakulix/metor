@@ -1349,6 +1349,10 @@ class LivePushContentTests(unittest.TestCase):
         self.assertIn('/help', rendered)
         self.assertIn('Show the chat command overview.', rendered)
 
+    @unittest.skipIf(
+        os.name == 'nt',
+        'termios TTY guard is POSIX-only; Windows input uses msvcrt',
+    )
     def test_input_handler_non_tty_stdin_exits_cleanly(self) -> None:
         """
         Verifies that a non-TTY stdin produces a clean error, not a termios traceback.
@@ -1365,10 +1369,11 @@ class LivePushContentTests(unittest.TestCase):
         """
         from metor.ui.chat.renderer.input import InputHandler
 
-        with patch('sys.stdin', open(os.devnull, 'r')):
-            with self.assertRaises(SystemExit) as ctx:
-                InputHandler()
-            self.assertEqual(ctx.exception.code, 1)
+        with open(os.devnull, 'r') as null_stdin:
+            with patch('sys.stdin', null_stdin):
+                with self.assertRaises(SystemExit) as ctx:
+                    InputHandler()
+                self.assertEqual(ctx.exception.code, 1)
 
 
 if __name__ == '__main__':
