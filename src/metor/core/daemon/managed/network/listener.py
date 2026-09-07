@@ -12,7 +12,6 @@ import time
 from datetime import datetime, timezone
 from typing import Optional, Callable, TYPE_CHECKING
 
-from metor.core import TorManager
 from metor.core.api import (
     AutoReconnectScheduledEvent,
     ConnectionActor,
@@ -29,6 +28,7 @@ from metor.core.api import (
     MaxConnectionsReachedEvent,
     create_event,
 )
+from metor.core.tor import TorManager
 from metor.core.daemon.managed.models import (
     SessionState,
     RejectIntent,

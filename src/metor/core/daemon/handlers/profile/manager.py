@@ -65,7 +65,7 @@ class ProfileCommandHandler:
                 and cmd.security_mode == ProfileSecurityMode.ENCRYPTED.value
                 and not cmd.is_remote
             ):
-                from metor.core import KeyManager
+                from metor.core.key import KeyManager
 
                 km = KeyManager(
                     ProfileManager(cmd.name),

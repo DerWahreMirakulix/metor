@@ -52,11 +52,11 @@ Metor has three configuration classes with different responsibilities:
 
 Settings keys live in exactly three namespaces (see [GLOSSARY.md](./GLOSSARY.md)):
 
-| Prefix | Scope | Validated by |
-| ------ | ----- | ------------ |
-| `client.*` | Client-machine behavior, paradigm-neutral (e.g. `client.history_limit`) | Client registry |
-| `daemon.*` | Daemon-host behavior | Daemon `SettingKey` registry |
-| `ui.<frontend>.*` | Frontend-owned presentation and behavior | Registering UI frontend |
+| Prefix            | Scope                                                                   | Validated by                 |
+| ----------------- | ----------------------------------------------------------------------- | ---------------------------- |
+| `client.*`        | Client-machine behavior, paradigm-neutral (e.g. `client.history_limit`) | Client registry              |
+| `daemon.*`        | Daemon-host behavior                                                    | Daemon `SettingKey` registry |
+| `ui.<frontend>.*` | Frontend-owned presentation and behavior                                | Registering UI frontend      |
 
 Validation is a two-registry rule: the daemon accepts only `daemon.*` keys that
 exist in its own `SettingKey` registry. Any client-scope key (`client.*` or
@@ -77,12 +77,12 @@ reuse is enabled, queued drops ride the existing live session channel and a
 cached drop tunnel is closed while live exists, so `allow_drop_standby_on_live`
 only has meaning when reuse is disabled:
 
-| `reuse_live_for_drops` | `allow_drop_standby_on_live` | Drop routing while live is active |
-| ---------------------- | ---------------------------- | --------------------------------- |
-| `true` (default) | `false` (default) | Drops ride the live session channel; no drop tunnel cache is kept warm. |
-| `true` | `true` | Same routing; the standby flag is moot because the cache is closed while live exists. |
-| `false` | `false` | Drops use tunnel/direct delivery; no warm standby cache. |
-| `false` | `true` | Drops use tunnel/direct delivery; the cached drop tunnel stays warm as fallback while live is primary. |
+| `reuse_live_for_drops` | `allow_drop_standby_on_live` | Drop routing while live is active                                                                      |
+| ---------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `true` (default)       | `false` (default)            | Drops ride the live session channel; no drop tunnel cache is kept warm.                                |
+| `true`                 | `true`                       | Same routing; the standby flag is moot because the cache is closed while live exists.                  |
+| `false`                | `false`                      | Drops use tunnel/direct delivery; no warm standby cache.                                               |
+| `false`                | `true`                       | Drops use tunnel/direct delivery; the cached drop tunnel stays warm as fallback while live is primary. |
 
 The ledger `transport` field is written only when the live-history policy allows
 it: when `daemon.record_live_history` is `false`, the field is omitted from ALL
@@ -143,6 +143,23 @@ instead of silent misbehavior. Two version axes exist:
 3. Otherwise the daemon replies with `InitEvent(onion, version, min_supported, profile)`.
    A client whose own `protocol_version` is below the announced `min_supported`
    must treat the session as incompatible.
+
+### Canonical Client Lifecycle and Wire Sequence (Track 1 & Track 2)
+
+Metor provides two complementary client integration surfaces:
+
+- **Track 1 (Reference Client):** A reusable Python library (`metor-sdk`, providing `MetorClient`) that handles connection lifecycle, framing, auth derivation, and dispatching.
+- **Track 2 (Documented Wire Contract):** The newline-delimited JSON IPC wire protocol allowing implementations in any programming language.
+
+The canonical wire sequence is:
+
+1. **Connect:** Connect to the daemon's local IPC listener (`127.0.0.1:<daemon_port>`). When connecting to a remote VPS daemon, the port is forwarded locally via SSH tunnel, keeping remote transparent.
+2. **Handshake:** Send `InitCommand(client_version, protocol_version)` with a unique `request_id`. Await `InitEvent`.
+3. **Auth & Unlock Gate:**
+   - If the daemon responds with `DaemonLockedEvent`, send `UnlockCommand(password=...)` and await `DaemonUnlockedEvent`.
+   - If the daemon responds with `AuthRequiredEvent(challenge, salt)`, compute `proof = HMAC-SHA256(Argon2i(password, salt), challenge)` and send `AuthenticateSessionCommand(proof=...)`, awaiting `SessionAuthenticatedEvent`.
+4. **Register Live Consumer:** Send `RegisterLiveConsumerCommand()`. The daemon will now stream asynchronous push events (messages, status updates, contact requests) to this socket.
+5. **Initial State & Event Loop:** Fetch startup state via `GetChatStartupStateCommand` or `GetHistoryCommand`. Process continuous streaming events delimited by newlines.
 
 ### Peer Wire Version (Daemon -> Daemon)
 
@@ -555,8 +572,8 @@ output inside them instead of inventing new visual vocabulary.
 
 4. **Sections: one blank line before the section header.** When a single
    output has multiple sections (e.g. `Active session:` / `Pending
-   session:`, or saved contacts / discovered peers), separate them with
-   exactly one empty line placed *before* the next section header.
+session:`, or saved contacts / discovered peers), separate them with
+   exactly one empty line placed _before_ the next section header.
 
 5. **Chat continuation lines are indented** by the visible prefix width
    (timestamp + `sys$`/`To X$`/`From X$`) via `indent_multiline_text`, so
@@ -571,14 +588,14 @@ output inside them instead of inventing new visual vocabulary.
 Colors carry meaning only; they are never decorative. The palette is
 fixed — do not introduce new colors without updating this section.
 
-| Color | Meaning |
-|-------|---------|
-| `CYAN` | System context: `sys$` prefix, command names, peer identity in headers |
-| `YELLOW` | State values (`session_state: connected`), user input echoes, warnings |
-| `GREEN` | Success/active state: own messages (`To X`), active sessions, saved contacts |
-| `RED` | Errors: `err$` prefix, failed messages, destructive warnings |
-| `PURPLE` | Remote context: `From X` messages, remote-profile markers |
-| `DARK_GREY` | Incidental detail: markers, `none` values, unfocused/unbound entries |
+| Color       | Meaning                                                                      |
+| ----------- | ---------------------------------------------------------------------------- |
+| `CYAN`      | System context: `sys$` prefix, command names, peer identity in headers       |
+| `YELLOW`    | State values (`session_state: connected`), user input echoes, warnings       |
+| `GREEN`     | Success/active state: own messages (`To X`), active sessions, saved contacts |
+| `RED`       | Errors: `err$` prefix, failed messages, destructive warnings                 |
+| `PURPLE`    | Remote context: `From X` messages, remote-profile markers                    |
+| `DARK_GREY` | Incidental detail: markers, `none` values, unfocused/unbound entries         |
 
 Consequences: value labels stay uncolored (`session_state:`) while the
 value itself is colored; peers are identified with `CYAN` in headers and

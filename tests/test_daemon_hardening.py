@@ -38,8 +38,8 @@ from metor.core.api import (
     create_event,
     request_context,
 )
-from metor.core import TorManager
 from metor.core.key import KeyManager
+from metor.core.tor import TorManager
 from metor.core.daemon.managed.engine import Daemon
 from metor.core.daemon.managed.factory import (
     PlaintextLockedDaemonError,
@@ -87,9 +87,9 @@ from metor.data import (
     MessageType,
     SettingKey,
 )
+from metor.client import IpcClient
 from metor.data.profile import ProfileManager
 from metor.data.profile.config import Config
-from metor.ui.chat.ipc import IpcClient
 from metor.ui.cli.handlers import CommandHandlers
 from metor.ui.theme import Theme
 from metor.utils import Constants
@@ -2710,8 +2710,8 @@ class DaemonHardeningTests(unittest.TestCase):
         )
 
         with (
-            patch('metor.ui.chat.ipc.socket.socket', return_value=fake_socket),
-            patch('metor.ui.chat.ipc.threading.Thread', return_value=_PassiveThread()),
+            patch('metor.client.ipc.socket.socket', return_value=fake_socket),
+            patch('metor.client.ipc.threading.Thread', return_value=_PassiveThread()),
         ):
             self.assertTrue(client.connect())
 

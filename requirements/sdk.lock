@@ -1,0 +1,7 @@
+# Exact runtime dependency set for metor-sdk installs (no SQLCipher, no Tor, no UI).
+# Install with:
+#   pip install -r requirements/sdk.lock
+
+PyNaCl==1.6.2
+cffi==2.0.0
+pycparser==3.0

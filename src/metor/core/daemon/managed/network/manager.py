@@ -7,10 +7,10 @@ the complex interactions between the Listener, Receiver, Controller, and Router.
 import threading
 from typing import Dict, List, Callable, Optional, Tuple, TYPE_CHECKING
 
-from metor.core import TorManager
 from metor.core.api import ConnectionOrigin, EventType, IpcEvent, JsonValue
 from metor.core.daemon.managed.crypto import Crypto
 from metor.core.daemon.managed.models import TunnelState, SessionState
+from metor.core.tor import TorManager
 from metor.data import HistoryManager, ContactManager, MessageManager
 
 # Local Package Imports

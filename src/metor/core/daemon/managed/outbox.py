@@ -12,7 +12,6 @@ import time
 import base64
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, cast
 
-from metor.core import TorManager
 from metor.core.api import (
     IpcEvent,
     AckEvent,
@@ -24,6 +23,7 @@ from metor.core.api import (
     create_event,
     get_current_request_id,
 )
+from metor.core.tor import TorManager
 from metor.core.daemon.managed.models import PrimaryTransport
 from metor.data import (
     HistoryActor,

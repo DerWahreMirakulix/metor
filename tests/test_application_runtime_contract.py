@@ -163,6 +163,29 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
             self.assertEqual(killed, 0)
             self.assertTrue(pid_file.exists())
 
+    def test_daemon_launch_command_uses_headless_daemon_main_entry(self) -> None:
+        """
+        Verifies that daemon autostart spawns metor.daemon_main without UI dependencies.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        from metor.application.runtime.daemon import _build_daemon_launch_command
+        from unittest.mock import Mock
+
+        pm = Mock()
+        pm.profile_name = 'default'
+
+        cmd = _build_daemon_launch_command(
+            pm, start_locked=False, startup_session_auth_stdin=False
+        )
+        self.assertIn('metor.daemon_main', cmd)
+        self.assertNotIn('metor.main', cmd)
+        self.assertNotIn('metor.ui', ' '.join(cmd))
+
 
 if __name__ == '__main__':
     unittest.main()

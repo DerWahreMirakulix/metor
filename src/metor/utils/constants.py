@@ -86,6 +86,7 @@ class Constants:
     INPUT_SELECT_TIMEOUT_SEC: float = 0.0  # Non-blocking POSIX stdin poll
 
     # Request Defaults
+    DEFAULT_IPC_TIMEOUT: float = 15.0  # Default client IPC socket timeout in seconds
     DEFAULT_HISTORY_LIMIT: int = (
         50  # History rows per request when no explicit limit is sent
     )

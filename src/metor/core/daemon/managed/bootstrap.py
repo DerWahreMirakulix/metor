@@ -3,8 +3,9 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from metor.core import KeyManager, TorManager
 from metor.core.daemon import InvalidMasterPasswordError, verify_master_password
+from metor.core.key import KeyManager
+from metor.core.tor import TorManager
 from metor.data import (
     ContactManager,
     DatabaseCorruptedError,

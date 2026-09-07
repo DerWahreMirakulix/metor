@@ -4,10 +4,10 @@ import socket
 import threading
 from typing import TYPE_CHECKING, Callable, Optional, Protocol
 
-from metor.core import TorManager
 from metor.core.api import ConnectionActor, ConnectionOrigin, IpcEvent
 from metor.core.daemon.managed.crypto import Crypto
 from metor.core.daemon.managed.network.state import StateTracker
+from metor.core.tor import TorManager
 from metor.data import ContactManager, HistoryActor, HistoryManager, MessageManager
 
 if TYPE_CHECKING:

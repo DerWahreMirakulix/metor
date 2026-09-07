@@ -62,6 +62,16 @@ Recommended reading order:
 
 For security reasons and to prevent supply-chain attacks, Metor **does not** bundle the Tor binary. You must install it from the official Tor Project sources.
 
+### Distribution Matrix
+
+Metor is split into three modular packages to support different deployment roles:
+
+| Package            | Contents                                                                                 | Typical Use Case                          | Install Target             |
+| :----------------- | :--------------------------------------------------------------------------------------- | :---------------------------------------- | :------------------------- |
+| **`metor`**        | Terminal UI, CLI dispatcher, headless daemon, and SDK                                    | Full desktop/laptop installation          | `pip install metor`        |
+| **`metor-daemon`** | Headless Tor runtime, SQLCipher database, and profile management (**no UI code**)        | 24/7 background daemon on a VPS or server | `pip install metor-daemon` |
+| **`metor-sdk`**    | Lightweight IPC client library and typed wire contract (**no SQLCipher, no Tor, no UI**) | Custom app development, GUIs, or bots     | `pip install metor-sdk`    |
+
 Choose the install path that matches your role:
 
 - **End users:** Use the **Release Wheel Bundle** from GitHub Releases. This is the recommended install path for normal runtime use on Linux and Windows.
@@ -151,6 +161,10 @@ metor daemon --locked
 For daemon-only deployments (no UI code, e.g. on a VPS or in minimal bundles) a headless entry is available:
 
 ```bash
+# Encrypted profiles (default) require locked startup in headless mode:
+metor-daemon -p my_server --locked daemon
+
+# Plaintext profiles can start unlocked directly:
 metor-daemon -p my_server daemon
 ```
 
@@ -183,7 +197,7 @@ Inside the Chat UI, you have access to the following slash commands:
 | `/sessions`                     | Lists all active and pending sessions.                               |
 | `/retunnel [onion\|alias]`      | Forces a Tor circuit rotation (`NEWNYM`) and reconnects to the peer. |
 | `/inbox [onion\|alias]`         | Shows inbox counts or consumes unread messages for one peer.         |
-| `/transport [onion\|alias]`     | Shows the current transport state (session/tunnel, focus, pending).   |
+| `/transport [onion\|alias]`     | Shows the current transport state (session/tunnel, focus, pending).  |
 | `/clear`                        | Clears the current chat display.                                     |
 | `/contacts list`                | Displays the address book and temporary discovered peers.            |
 | `/contacts add <alias> [onion]` | Saves a temporary RAM peer permanently to disk.                      |
@@ -220,10 +234,10 @@ metor profiles migrate <name> --to <encrypted|plaintext>
 
 Want to run Metor on a server and connect securely from your laptop?
 
-1. **On the Server (VPS):** Run `metor profiles add my_server --port 50051` and start it with `metor -p my_server daemon`.
+1. **On the Server (VPS):** Run `metor-daemon -p my_server --locked daemon` (using the headless `metor-daemon` package).
 2. **On your Laptop:** Run `metor profiles add remote_node --remote --port 50051`.
 3. **Establish SSH Tunnel:** `ssh -N -L 50051:127.0.0.1:50051 user@server_ip`.
-4. **Start Chatting:** Run `metor -p remote_node chat` (Your local UI now securely controls the remote daemon).
+4. **Start Chatting:** Run `metor -p remote_node chat` (Your local UI now securely controls the remote daemon over the forwarded port).
 
 ### 5. Emergency & Cleanup
 

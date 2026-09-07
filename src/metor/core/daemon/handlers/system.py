@@ -3,7 +3,6 @@ Module defining the SystemCommandHandler.
 Encapsulates profile-level system operations such as Tor address generation.
 """
 
-from metor.core import TorManager
 from metor.core.api import (
     EventType,
     IpcCommand,
@@ -12,6 +11,7 @@ from metor.core.api import (
     GetAddressCommand,
     GenerateAddressCommand,
 )
+from metor.core.tor import TorManager
 from metor.data.profile import ProfileManager
 
 

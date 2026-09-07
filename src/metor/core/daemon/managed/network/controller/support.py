@@ -5,7 +5,6 @@ import threading
 import time
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 
-from metor.core import TorManager
 from metor.core.api import (
     AutoReconnectScheduledEvent,
     ConnectionActor,
@@ -18,6 +17,7 @@ from metor.core.api import (
     create_event,
     get_current_request_id,
 )
+from metor.core.tor import TorManager
 from metor.core.daemon.managed.crypto import Crypto
 from metor.data import (
     ContactManager,

@@ -606,6 +606,22 @@ class ReleaseContractTests(unittest.TestCase):
 
         self.assertEqual(bundle_name, 'metor-wheelhouse-windows-x86_64-py311')
 
+    def test_release_bundle_name_supports_daemon_and_sdk_variants(self) -> None:
+        """
+        Verifies that release bundle names distinguish daemon and SDK variants.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        daemon_bundle = build_bundle_name('Linux', 'x86_64', 3, 11, variant='daemon')
+        sdk_bundle = build_bundle_name('Linux', 'x86_64', 3, 11, variant='sdk')
+
+        self.assertEqual(daemon_bundle, 'metor-daemon-wheelhouse-linux-x86_64-py311')
+        self.assertEqual(sdk_bundle, 'metor-sdk-wheelhouse-linux-x86_64-py311')
+
     def test_release_install_guide_uses_offline_bundle_install(self) -> None:
         """
         Verifies that release install guide uses offline bundle install.
@@ -725,6 +741,102 @@ class ReleaseContractTests(unittest.TestCase):
                 and '--only-binary=:all:' in command
                 and f'pip=={PIP_VERSION}' in command
                 for command in commands
+            )
+        )
+
+    def test_release_builder_supports_sdk_and_daemon_variants(self) -> None:
+        """
+        Verifies that release builder targets variant-specific lockfiles and packages.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        commands_sdk: list[list[str]] = []
+        commands_daemon: list[list[str]] = []
+
+        def fake_run_sdk(command: Sequence[str], cwd: Path) -> None:
+            """
+            Records fake commands executed for the SDK variant.
+
+            Args:
+                command (Sequence[str]): The executed command.
+                cwd (Path): Working directory.
+
+            Returns:
+                None
+            """
+            del cwd
+            commands_sdk.append(list(command))
+
+        def fake_run_daemon(command: Sequence[str], cwd: Path) -> None:
+            """
+            Records fake commands executed for the Daemon variant.
+
+            Args:
+                command (Sequence[str]): The executed command.
+                cwd (Path): Working directory.
+
+            Returns:
+                None
+            """
+            del cwd
+            commands_daemon.append(list(command))
+
+        with TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            with (
+                patch(
+                    'metor.utils.release_bundle.run_command',
+                    side_effect=fake_run_sdk,
+                ),
+                patch(
+                    'metor.utils.release_bundle.archive_bundle',
+                    return_value=output_dir / 'bundle.zip',
+                ),
+            ):
+                build_release_wheelhouse(
+                    output_dir, skip_pip_upgrade=True, variant='sdk'
+                )
+
+            with (
+                patch(
+                    'metor.utils.release_bundle.run_command',
+                    side_effect=fake_run_daemon,
+                ),
+                patch(
+                    'metor.utils.release_bundle.archive_bundle',
+                    return_value=output_dir / 'bundle.zip',
+                ),
+            ):
+                build_release_wheelhouse(
+                    output_dir, skip_pip_upgrade=True, variant='daemon'
+                )
+
+        self.assertTrue(
+            any(
+                'requirements/sdk.lock' in command and 'wheel' in command
+                for command in commands_sdk
+            )
+        )
+        self.assertTrue(
+            any(
+                'packaging/sdk' in command and 'wheel' in command
+                for command in commands_sdk
+            )
+        )
+        self.assertTrue(
+            any(
+                'requirements/daemon.lock' in command and 'wheel' in command
+                for command in commands_daemon
+            )
+        )
+        self.assertTrue(
+            any(
+                'packaging/daemon' in command and 'wheel' in command
+                for command in commands_daemon
             )
         )
 
@@ -1064,6 +1176,36 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 1)
         printed = ' '.join(str(call) for call in print_mock.call_args_list)
         self.assertIn('does not exist', printed)
+
+    def test_daemon_main_parser_parity_with_daemon_launch_command(self) -> None:
+        """
+        Verifies that daemon_main CLI parser supports all flags produced by daemon launch.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        from metor import daemon_main
+
+        parser = daemon_main._build_parser()
+        for start_locked in (True, False):
+            for startup_session_auth_stdin in (True, False):
+                argv: list[str] = ['-p', 'test_profile']
+                if start_locked:
+                    argv.append('--locked')
+                if startup_session_auth_stdin:
+                    argv.append('--startup-session-auth-stdin')
+                argv.append('daemon')
+
+                args = parser.parse_args(argv)
+                self.assertEqual(args.profile, 'test_profile')
+                self.assertEqual(args.locked, start_locked)
+                self.assertEqual(
+                    args.startup_session_auth_stdin, startup_session_auth_stdin
+                )
+                self.assertEqual(args.command, 'daemon')
 
     def test_messages_show_error_rendering_exits_nonzero(self) -> None:
         """

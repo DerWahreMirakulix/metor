@@ -6,7 +6,7 @@ Responsible for signing and verifying Ed25519 challenges.
 import nacl.bindings
 from typing import Optional
 
-from metor.core import KeyManager
+from metor.core.key import KeyManager
 from metor.utils import decode_tor_v3_onion_public_key
 
 

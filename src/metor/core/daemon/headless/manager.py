@@ -6,8 +6,9 @@ import types
 from functools import cached_property
 from typing import Optional, Type
 
-from metor.core import KeyManager, TorManager
 from metor.core.api import IpcCommand, IpcEvent
+from metor.core.key import KeyManager
+from metor.core.tor import TorManager
 from metor.data import ContactManager, HistoryManager, MessageManager
 from metor.data.profile import ProfileManager
 from metor.utils import Constants

@@ -25,6 +25,7 @@ from metor.ui import UIPresenter
 
 REPO_ROOT: Path = Path(__file__).resolve().parents[1]
 UI_ROOT: Path = REPO_ROOT / 'src' / 'metor' / 'ui'
+CLIENT_ROOT: Path = REPO_ROOT / 'src' / 'metor' / 'client'
 APPLICATION_ROOT: Path = REPO_ROOT / 'src' / 'metor' / 'application'
 LOWER_LAYER_ROOTS: tuple[Path, ...] = (
     REPO_ROOT / 'src' / 'metor' / 'core',
@@ -85,6 +86,22 @@ def _is_ui_application_violation(line: str) -> bool:
     """Determines whether one application-layer file imports UI code."""
 
     return line.startswith('from metor.ui') or line.startswith('import metor.ui')
+
+
+def _is_client_layer_violation(line: str) -> bool:
+    """Determines whether a client-layer module imports data, application, ui, or sqlcipher."""
+
+    forbidden_prefixes: tuple[str, ...] = (
+        'from metor.data',
+        'import metor.data',
+        'from metor.application',
+        'import metor.application',
+        'from metor.ui',
+        'import metor.ui',
+        'import sqlcipher3',
+        'from sqlcipher3',
+    )
+    return any(line.startswith(prefix) for prefix in forbidden_prefixes)
 
 
 def _is_ui_profile_mutation_violation(line: str) -> bool:
@@ -182,6 +199,24 @@ class UiBoundaryTests(unittest.TestCase):
         violations: list[str] = _collect_import_violations(
             APPLICATION_ROOT,
             _is_ui_application_violation,
+        )
+
+        self.assertEqual(violations, [])
+
+    def test_client_layer_does_not_import_ui_data_or_application(self) -> None:
+        """
+        Verifies that client SDK never imports UI, data, application, or SQLCipher.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        violations: list[str] = _collect_import_violations(
+            CLIENT_ROOT,
+            _is_client_layer_violation,
         )
 
         self.assertEqual(violations, [])

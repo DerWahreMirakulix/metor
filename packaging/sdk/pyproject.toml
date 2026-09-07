@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools==80.10.2", "wheel==0.46.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "metor-sdk"
+version = "0.2.0"
+description = "Client SDK and typed IPC wire contract for Metor."
+authors = [{ name = "LuRex" }]
+requires-python = ">=3.11"
+license = { text = "GPLv3" }
+dependencies = ["pynacl==1.6.2"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-dir]
+"" = "../../src"
+
+[tool.setuptools.packages.find]
+where = ["../../src"]
+include = ["metor.core.api*", "metor.client*", "metor.utils*"]

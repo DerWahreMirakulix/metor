@@ -10,6 +10,16 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - Every payload is a single JSON object followed by a newline (`\n`).
 - The daemon emits structured data only. Human-readable text is resolved in the UI from `event_type`.
 
+## Canonical Client Session Sequence
+
+1. **Establish TCP connection:** Connect to the daemon IPC listener at `127.0.0.1:<daemon_port>` (local or via SSH tunnel).
+2. **Protocol Version Handshake:** Send `InitCommand(protocol_version=...)`. Await `InitEvent`. If incompatible, daemon returns `ProtocolMismatchEvent`.
+3. **Auth & Unlock Gate:**
+   - If daemon returns `DaemonLockedEvent`, send `UnlockCommand(password=...)` and await `DaemonUnlockedEvent`.
+   - If daemon returns `AuthRequiredEvent(challenge=..., salt=...)`, derive proof using Argon2i + HMAC-SHA256 and send `AuthenticateSessionCommand(proof=...)`, then await `SessionAuthenticatedEvent`.
+4. **Register Live Consumer:** Send `RegisterLiveConsumerCommand()` to register the socket for asynchronous event streaming.
+5. **State Retrieval & Event Loop:** Retrieve initial state (e.g. `GetChatStartupStateCommand`) and process continuous newline-delimited event streams.
+
 ## Table of Contents
 
 **Commands (UI -> Daemon)**

@@ -17,7 +17,6 @@ import types
 from typing import List, Set, Optional, Callable, Dict, Union
 from pathlib import Path
 
-from metor.core import KeyManager, TorManager
 from metor.core.api import (
     AuthenticateSessionCommand,
     create_event,
@@ -66,6 +65,8 @@ from metor.core.api import (
     request_context,
     stamp_request_id,
 )
+from metor.core.key import KeyManager
+from metor.core.tor import TorManager
 from metor.data.profile import ProfileManager
 from metor.data import (
     HistoryManager,

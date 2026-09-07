@@ -9,7 +9,6 @@ import socket
 import threading
 from typing import Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
-from metor.core import TorManager
 from metor.core.api import (
     ChatStartupStateEvent,
     ConnectionOrigin,
@@ -44,6 +43,7 @@ from metor.core.api import (
     GetTransportStateCommand,
     TransportStateEvent,
 )
+from metor.core.tor import TorManager
 from metor.core.daemon.managed.models import (
     TunnelState,
     SessionState,
