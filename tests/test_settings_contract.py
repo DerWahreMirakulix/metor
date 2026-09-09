@@ -1394,6 +1394,7 @@ class SettingsContractTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
     def test_auto_accept_contacts_defaults_to_disabled(self) -> None:
         """Verifies inbound LIVE sessions require explicit acceptance by default.
 

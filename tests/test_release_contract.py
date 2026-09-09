@@ -840,9 +840,9 @@ class ReleaseContractTests(unittest.TestCase):
             )
         )
 
-    def test_project_wheel_excludes_legacy_cli_proxy_module(self) -> None:
+    def test_project_wheel_uses_terminal_frontend_package(self) -> None:
         """
-        Verifies that project wheel excludes legacy cli proxy module.
+        Verifies that the wheel contains only the canonical terminal CLI path.
 
         Args:
             None
@@ -879,8 +879,8 @@ class ReleaseContractTests(unittest.TestCase):
             with ZipFile(wheel_files[0]) as wheel_archive:
                 archive_names = set(wheel_archive.namelist())
 
-            self.assertIn('metor/ui/cli/proxy/core.py', archive_names)
-            self.assertNotIn('metor/ui/cli/proxy.py', archive_names)
+            self.assertIn('metor/ui/terminal/cli/proxy/core.py', archive_names)
+            self.assertNotIn('metor/ui/cli/proxy/core.py', archive_names)
 
     def test_release_bundle_import_avoids_optional_runtime_utils_dependencies(
         self,

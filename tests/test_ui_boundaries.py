@@ -92,7 +92,7 @@ def _is_ui_application_violation(line: str) -> bool:
 
 
 def _is_client_layer_violation(line: str) -> bool:
-    """Determines whether a client-layer module imports data, application, ui, or sqlcipher."""
+    """Determines whether a client import crosses a forbidden boundary."""
 
     forbidden_prefixes: tuple[str, ...] = (
         'from metor.data',
@@ -108,7 +108,7 @@ def _is_client_layer_violation(line: str) -> bool:
 
 
 def _is_ui_profile_mutation_violation(line: str) -> bool:
-    """Determines whether one UI line bypasses the local profile orchestration boundary."""
+    """Detects UI code bypassing local profile orchestration."""
 
     forbidden_fragments: tuple[str, ...] = (
         'ProfileManager.add_profile_folder(',
@@ -233,13 +233,17 @@ class UiBoundaryTests(unittest.TestCase):
         """
         terminal_violations = _collect_import_violations(
             TERMINAL_ROOT,
-            lambda line: line.startswith('from metor.ui.embedded')
-            or line.startswith('import metor.ui.embedded'),
+            lambda line: (
+                line.startswith('from metor.ui.embedded')
+                or line.startswith('import metor.ui.embedded')
+            ),
         )
         embedded_violations = _collect_import_violations(
             EMBEDDED_ROOT,
-            lambda line: line.startswith('from metor.ui.terminal')
-            or line.startswith('import metor.ui.terminal'),
+            lambda line: (
+                line.startswith('from metor.ui.terminal')
+                or line.startswith('import metor.ui.terminal')
+            ),
         )
         self.assertEqual(terminal_violations + embedded_violations, [])
 

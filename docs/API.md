@@ -2577,13 +2577,14 @@ Signals an inbound live connection request.
 
 Initializes the UI with the local onion address and protocol versions.
 
-| Field           | Type               | Default |
-| --------------- | ------------------ | ------- |
-| `request_id`    | `Union[str, None]` | `None`  |
-| `onion`         | `Union[str, None]` | `None`  |
-| `version`       | `Union[int, None]` | `None`  |
-| `min_supported` | `Union[int, None]` | `None`  |
-| `profile`       | `Union[str, None]` | `None`  |
+| Field           | Type               | Default     |
+| --------------- | ------------------ | ----------- |
+| `request_id`    | `Union[str, None]` | `None`      |
+| `onion`         | `Union[str, None]` | `None`      |
+| `version`       | `Union[int, None]` | `None`      |
+| `min_supported` | `Union[int, None]` | `None`      |
+| `profile`       | `Union[str, None]` | `None`      |
+| `capabilities`  | `List[str]`        | `Factory()` |
 
 **Wire Value:** `init`
 

@@ -142,7 +142,9 @@ def _coerce_and_validate(
                     and dataclasses.is_dataclass(expected_type)
                     and isinstance(value, dict)
                 ):
-                    nested_keys = {field.name for field in dataclasses.fields(expected_type)}
+                    nested_keys = {
+                        field.name for field in dataclasses.fields(expected_type)
+                    }
                     _reject_unknown_fields(expected_type, value, nested_keys, '')
                     nested_kwargs = {
                         nested_key: nested_value
@@ -151,7 +153,9 @@ def _coerce_and_validate(
                         and dataclasses.fields(expected_type)[
                             next(
                                 index
-                                for index, field in enumerate(dataclasses.fields(expected_type))
+                                for index, field in enumerate(
+                                    dataclasses.fields(expected_type)
+                                )
                                 if field.name == nested_key
                             )
                         ].init

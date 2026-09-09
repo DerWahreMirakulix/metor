@@ -8,8 +8,7 @@ import os
 import sys
 from typing import List, Optional, Tuple
 
-from metor.ui import get_frontend, get_registered_frontends
-from metor.ui.registry import register_frontend
+from metor.ui import get_frontend, get_registered_frontends, register_frontend
 from metor.ui.terminal.cli.entry import run_cli
 
 
@@ -21,7 +20,8 @@ def _extract_ui_argument(argv: List[str]) -> Tuple[Optional[str], List[str]]:
         argv (List[str]): The raw argument vector excluding the program name.
 
     Returns:
-        Tuple[Optional[str], List[str]]: The requested frontend id (or None when absent) and the filtered argv.
+        Tuple[Optional[str], List[str]]: The requested frontend id and filtered
+            argument vector.
     """
     ui_id: Optional[str] = None
     filtered: List[str] = []

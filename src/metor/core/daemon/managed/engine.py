@@ -691,9 +691,7 @@ class Daemon:
         self._km = None
         self._transport_state = StateTracker()
         self._lifecycle = (
-            DaemonLifecycle.LOCKED
-            if cleanup_succeeded
-            else DaemonLifecycle.LOCKING
+            DaemonLifecycle.LOCKED if cleanup_succeeded else DaemonLifecycle.LOCKING
         )
         return cleanup_succeeded
 

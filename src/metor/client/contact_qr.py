@@ -3,7 +3,7 @@
 import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Optional, cast
 
 from metor.core.api import JsonValue
 from metor.utils import decode_tor_v3_onion_public_key, ensure_onion_format
@@ -13,6 +13,7 @@ class ContactQrError(str, Enum):
     """Stable contact QR validation failures."""
 
     MALFORMED = 'malformed'
+    INVALID_FIELDS = 'invalid_fields'
     UNSUPPORTED_VERSION = 'unsupported_version'
     INVALID_ALIAS = 'invalid_alias'
     INVALID_ONION = 'invalid_onion'
@@ -57,12 +58,15 @@ def validate_contact_qr(raw: bytes | str) -> ContactQrValidationResult:
         ContactQrValidationResult: Typed payload or stable failure code.
     """
     try:
-        decoded: object = json.loads(raw.decode('utf-8') if isinstance(raw, bytes) else raw)
+        raw_text: str = raw.decode('utf-8') if isinstance(raw, bytes) else raw
+        decoded: object = json.loads(raw_text)
     except (UnicodeDecodeError, json.JSONDecodeError):
         return ContactQrValidationResult(error=ContactQrError.MALFORMED)
     if not isinstance(decoded, dict):
         return ContactQrValidationResult(error=ContactQrError.MALFORMED)
-    data: dict[str, JsonValue] = decoded
+    data: dict[str, JsonValue] = cast(dict[str, JsonValue], decoded)
+    if set(data) - {'version', 'onion', 'alias'}:
+        return ContactQrValidationResult(error=ContactQrError.INVALID_FIELDS)
     if data.get('version') != 1:
         return ContactQrValidationResult(error=ContactQrError.UNSUPPORTED_VERSION)
     alias_value = data.get('alias')

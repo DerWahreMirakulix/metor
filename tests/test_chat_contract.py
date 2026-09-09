@@ -253,7 +253,8 @@ class ChatContractTests(unittest.TestCase):
                 return_value='Enter Master Password: ',
             ),
             patch(
-                'metor.ui.terminal.chat.engine.prompt_session_auth_proof', return_value='proof'
+                'metor.ui.terminal.chat.engine.prompt_session_auth_proof',
+                return_value='proof',
             ),
             patch('builtins.print') as print_mock,
         ):
@@ -357,7 +358,9 @@ class ChatContractTests(unittest.TestCase):
                 'metor.ui.terminal.chat.engine.build_session_auth_proof',
                 return_value='proof',
             ) as build_proof_mock,
-            patch('metor.ui.terminal.chat.engine.prompt_session_auth_proof') as prompt_mock,
+            patch(
+                'metor.ui.terminal.chat.engine.prompt_session_auth_proof'
+            ) as prompt_mock,
         ):
             result = chat._request_prechat_event(InitCommand(), InitEvent)
 

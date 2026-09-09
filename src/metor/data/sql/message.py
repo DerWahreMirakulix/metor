@@ -619,14 +619,10 @@ class MessageRepository:
 
             receipt_ids: List[int] = [message[0] for message in messages]
             live_ids: List[int] = [
-                message[0]
-                for message in messages
-                if message[1] == Delivery.LIVE.value
+                message[0] for message in messages if message[1] == Delivery.LIVE.value
             ]
             drop_visible_ids: List[int] = [
-                message[0]
-                for message in messages
-                if message[1] == Delivery.DROP.value
+                message[0] for message in messages if message[1] == Delivery.DROP.value
             ]
 
             placeholder_block = self._placeholders(len(receipt_ids))
@@ -674,7 +670,7 @@ class MessageRepository:
         Returns:
             List[StoredMessageRecord]: Visible chat history rows ordered chronologically.
         """
-        query = f"""
+        query = """
             SELECT r.direction, r.status, a.payload, r.created_at
             FROM message_receipts AS r
             INNER JOIN message_archive AS a ON a.receipt_id = r.id

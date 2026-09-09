@@ -48,7 +48,7 @@ class LiveAction(str, Enum):
 
 @dataclass(frozen=True)
 class CapabilityInfo:
-    """Negotiated daemon and platform capability summary."""
+    """Negotiated daemon capability and protocol summary."""
 
     protocol_version: int
     daemon_version: str
@@ -98,8 +98,8 @@ class LiveSessionSummary:
 
 
 @dataclass(frozen=True)
-class MessagePageItem:
-    """One stable message item in a paginated DROP result or LIVE stream."""
+class DropMessagePageItem:
+    """One stable message item in a paginated DROP result."""
 
     msg_id: str
     peer_id: str
@@ -109,11 +109,22 @@ class MessagePageItem:
 
 
 @dataclass(frozen=True)
-class MessagePage:
+class DropMessagePage:
     """Cursor-based DROP page that never includes LIVE content."""
 
-    items: Tuple[MessagePageItem, ...]
+    items: Tuple[DropMessagePageItem, ...]
     next_cursor: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class LiveContentItem:
+    """One transient LIVE content item, separate from DROP history."""
+
+    msg_id: str
+    peer_id: str
+    content: MessageContent
+    timestamp: datetime
+    revision: int
 
 
 @dataclass(frozen=True)

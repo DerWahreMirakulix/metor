@@ -32,7 +32,6 @@ from metor.core.api import (
     InitCommand,
     IpcEvent,
     RuntimeErrorCode,
-    ContentType,
     Delivery,
     SendMessageCommand,
     TextContent,

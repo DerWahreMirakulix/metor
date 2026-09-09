@@ -160,7 +160,9 @@ class MetorClient:
         """
         self._ipc.send_command(cmd)
 
-    def send_text(self, target: str, delivery: Delivery, text: str, msg_id: str) -> None:
+    def send_text(
+        self, target: str, delivery: Delivery, text: str, msg_id: str
+    ) -> None:
         """Sends text through the typed public message boundary.
 
         Args:

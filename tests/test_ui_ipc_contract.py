@@ -1017,7 +1017,9 @@ class UiIpcContractTests(unittest.TestCase):
                 'metor.ui.terminal.cli.handlers.start_managed_daemon_process',
                 return_value=True,
             ) as start_mock,
-            patch('metor.ui.terminal.cli.handlers.Chat', return_value=chat_instance) as chat_cls,
+            patch(
+                'metor.ui.terminal.cli.handlers.Chat', return_value=chat_instance
+            ) as chat_cls,
             patch('builtins.print') as print_mock,
         ):
             CommandHandlers.handle_chat(cast(ProfileManager, pm))
@@ -1061,7 +1063,9 @@ class UiIpcContractTests(unittest.TestCase):
                 'metor.ui.terminal.cli.handlers.start_managed_daemon_process',
                 return_value=True,
             ) as start_mock,
-            patch('metor.ui.terminal.cli.handlers.Chat', return_value=chat_instance) as chat_cls,
+            patch(
+                'metor.ui.terminal.cli.handlers.Chat', return_value=chat_instance
+            ) as chat_cls,
             patch('builtins.print') as print_mock,
         ):
             CommandHandlers.handle_chat(cast(ProfileManager, pm))
@@ -1145,7 +1149,9 @@ class UiIpcContractTests(unittest.TestCase):
         pm.config.get_str.return_value = 'always'
 
         with (
-            patch('metor.ui.terminal.cli.handlers.start_managed_daemon_process') as start_mock,
+            patch(
+                'metor.ui.terminal.cli.handlers.start_managed_daemon_process'
+            ) as start_mock,
             patch('builtins.print') as print_mock,
         ):
             CommandHandlers.handle_chat(
@@ -1186,12 +1192,17 @@ class UiIpcContractTests(unittest.TestCase):
         chat_instance = Mock()
 
         with (
-            patch('metor.ui.terminal.cli.handlers.prompt_hidden', return_value='session-secret'),
+            patch(
+                'metor.ui.terminal.cli.handlers.prompt_hidden',
+                return_value='session-secret',
+            ),
             patch(
                 'metor.ui.terminal.cli.handlers.start_managed_daemon_process',
                 return_value=True,
             ) as start_mock,
-            patch('metor.ui.terminal.cli.handlers.Chat', return_value=chat_instance) as chat_cls,
+            patch(
+                'metor.ui.terminal.cli.handlers.Chat', return_value=chat_instance
+            ) as chat_cls,
         ):
             CommandHandlers.handle_chat(cast(ProfileManager, pm))
 
@@ -1258,7 +1269,9 @@ class UiIpcContractTests(unittest.TestCase):
         )
 
         with (
-            patch('metor.ui.terminal.cli.handlers.prompt_hidden', return_value='secret'),
+            patch(
+                'metor.ui.terminal.cli.handlers.prompt_hidden', return_value='secret'
+            ),
             patch('metor.ui.terminal.cli.handlers.configure_daemon_runtime_logging'),
             patch('metor.ui.terminal.cli.handlers.run_managed_daemon') as run_daemon,
             patch('builtins.print'),
@@ -1297,7 +1310,9 @@ class UiIpcContractTests(unittest.TestCase):
 
         with (
             patch('metor.ui.terminal.cli.handlers.ProfileManager', return_value=pm),
-            patch('metor.ui.terminal.cli.handlers.prompt_hidden', return_value='secret'),
+            patch(
+                'metor.ui.terminal.cli.handlers.prompt_hidden', return_value='secret'
+            ),
             patch('metor.ui.terminal.cli.handlers.prompt_text', return_value='yes'),
         ):
             result = CommandHandlers.handle_profile_security_migration(
@@ -1325,9 +1340,13 @@ class UiIpcContractTests(unittest.TestCase):
         proxy.nuke_daemon_event.return_value = create_event(EventType.INTERNAL_ERROR)
 
         with (
-            patch('metor.ui.terminal.cli.handlers.ProfileManager', return_value=remote_pm),
+            patch(
+                'metor.ui.terminal.cli.handlers.ProfileManager', return_value=remote_pm
+            ),
             patch('metor.ui.terminal.cli.handlers.CliProxy', return_value=proxy),
-            patch('metor.ui.terminal.cli.handlers.prompt_text', return_value='n') as prompt_mock,
+            patch(
+                'metor.ui.terminal.cli.handlers.prompt_text', return_value='n'
+            ) as prompt_mock,
             patch('builtins.print'),
         ):
             result = CommandHandlers._nuke_remote_profiles(['remote-a'])
@@ -1355,7 +1374,9 @@ class UiIpcContractTests(unittest.TestCase):
         )
 
         with (
-            patch('metor.ui.terminal.cli.handlers.ProfileManager', return_value=remote_pm),
+            patch(
+                'metor.ui.terminal.cli.handlers.ProfileManager', return_value=remote_pm
+            ),
             patch('metor.ui.terminal.cli.handlers.CliProxy', return_value=proxy),
             patch('metor.ui.terminal.cli.handlers.prompt_text') as prompt_mock,
             patch('builtins.print'),
