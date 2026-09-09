@@ -1,6 +1,7 @@
 """Security contracts for PMK-based profiles and encrypted external blobs."""
 
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -210,12 +211,15 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                 pm = ProfileManager('created')
                 self.assertTrue(pm.paths.get_keyslot_file().exists())
                 self.assertTrue(pm.paths.get_db_file().exists())
-                self.assertEqual(
-                    pm.paths.get_keyslot_file().stat().st_mode & 0o777, 0o600
-                )
-                self.assertEqual(
-                    pm.paths.get_protected_key_dir().stat().st_mode & 0o777, 0o700
-                )
+                if os.name != 'nt':
+                    self.assertEqual(
+                        pm.paths.get_keyslot_file().stat().st_mode & 0o777,
+                        0o600,
+                    )
+                    self.assertEqual(
+                        pm.paths.get_protected_key_dir().stat().st_mode & 0o777,
+                        0o700,
+                    )
                 self.assertTrue(
                     KeyManager(pm, 'profile-password').has_complete_key_material()
                 )
