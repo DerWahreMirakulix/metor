@@ -13,6 +13,12 @@ from metor.client.auth import (
     extract_session_auth_prompt,
 )
 from metor.client.ipc import IpcClient
+from metor.client.contact_qr import (
+    ContactQrError,
+    ContactQrPayload,
+    ContactQrValidationResult,
+    validate_contact_qr,
+)
 from metor.client.session import MetorClient, parse_endpoint
 from metor.client.stream import BufferedIpcEventReader
 
@@ -22,10 +28,14 @@ __all__ = [
     'IpcAuthExchange',
     'IpcAuthResult',
     'IpcClient',
+    'ContactQrError',
+    'ContactQrPayload',
+    'ContactQrValidationResult',
     'MetorClient',
     'build_session_auth_proof',
     'build_session_auth_proof_from_key',
     'derive_session_auth_proof_key',
     'extract_session_auth_prompt',
     'parse_endpoint',
+    'validate_contact_qr',
 ]

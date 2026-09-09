@@ -33,8 +33,8 @@ from metor.data.profile.models import ProfileSecurityMode
 from metor.data.sql import SqlCipherDbApi, _load_sqlcipher_dbapi
 from metor.data.sql.schema import ensure_core_schema
 from metor.data.settings import Settings, SettingKey
-from metor.ui.cli.dispatcher import CliDispatcher
-from metor.ui.cli.proxy import CliProxy
+from metor.ui.terminal.cli.dispatcher import CliDispatcher
+from metor.ui.terminal.cli.proxy import CliProxy
 
 
 class _DummyProfileManager:
@@ -285,7 +285,7 @@ class ReleaseContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.cli.dispatcher.profiles.CliProxy.add_profile',
+                'metor.ui.terminal.cli.dispatcher.profiles.CliProxy.add_profile',
                 return_value='ok',
             ) as add_profile,
             patch('builtins.print'),
@@ -316,7 +316,7 @@ class ReleaseContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.cli.dispatcher.profiles.CliProxy.add_profile',
+                'metor.ui.terminal.cli.dispatcher.profiles.CliProxy.add_profile',
                 return_value='ok',
             ) as add_profile,
             patch('builtins.print'),
@@ -390,7 +390,7 @@ class ReleaseContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.cli.dispatcher.base.CliProxy.handle_settings_list',
+                'metor.ui.terminal.cli.dispatcher.base.CliProxy.handle_settings_list',
                 return_value='settings-list',
             ) as handle_settings_list,
             patch('builtins.print') as print_mock,
@@ -428,7 +428,7 @@ class ReleaseContractTests(unittest.TestCase):
         )
 
         with patch(
-            'metor.ui.cli.dispatcher.base.CommandHandlers.handle_chat'
+            'metor.ui.terminal.cli.dispatcher.base.CommandHandlers.handle_chat'
         ) as handle_chat:
             dispatcher.dispatch()
 
@@ -461,7 +461,7 @@ class ReleaseContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.cli.dispatcher.base.CliProxy.handle_config_list',
+                'metor.ui.terminal.cli.dispatcher.base.CliProxy.handle_config_list',
                 return_value='config-list',
             ) as handle_config_list,
             patch('builtins.print') as print_mock,
@@ -565,7 +565,7 @@ class ReleaseContractTests(unittest.TestCase):
         proxy = CliProxy(cast(ProfileManager, _DummyUiProfileManager('9.5')))
 
         with patch(
-            'metor.ui.cli.proxy.settings.Settings.get_str',
+            'metor.ui.terminal.cli.proxy.settings.Settings.get_str',
             return_value='7.5',
         ):
             result = proxy.handle_settings_get(SettingKey.IPC_TIMEOUT.value)

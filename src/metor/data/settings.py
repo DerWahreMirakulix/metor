@@ -350,11 +350,11 @@ class Settings:
         ),
         SettingKey.AUTO_ACCEPT_CONTACTS: SettingSpec(
             key=SettingKey.AUTO_ACCEPT_CONTACTS,
-            default=True,
+            default=False,
             category='Core Daemon',
             description='Automatically accepts incoming live sessions from saved contacts.',
             constraints='Boolean.',
-            security_note='Improves convenience for known contacts, but reduces explicit confirmation on inbound reconnects.',
+            security_note='Keep disabled when explicit confirmation of every inbound LIVE session is required.',
         ),
         SettingKey.REQUIRE_LOCAL_AUTH: SettingSpec(
             key=SettingKey.REQUIRE_LOCAL_AUTH,

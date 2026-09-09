@@ -33,7 +33,7 @@ from metor.data.history import (
     HistoryTrigger,
 )
 from metor.data.history.projector import HistoryProjector
-from metor.ui import UIPresenter
+from metor.ui.terminal import UIPresenter
 
 
 class HistoryContractTests(unittest.TestCase):
@@ -204,7 +204,7 @@ class HistoryContractTests(unittest.TestCase):
         Returns:
             None
         """
-        from metor.ui.presenter.history import format_raw_history
+        from metor.ui.terminal.presenter.history import format_raw_history
 
         event = HistoryRawDataEvent(
             profile='alice',
@@ -242,7 +242,7 @@ class HistoryContractTests(unittest.TestCase):
         Returns:
             None
         """
-        from metor.ui.presenter.transport import format_transport_state
+        from metor.ui.terminal.presenter.transport import format_transport_state
 
         peer_output = format_transport_state(
             TransportStateEvent(

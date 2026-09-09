@@ -14,6 +14,7 @@ import atexit
 import os
 import signal
 import types
+from enum import Enum
 from typing import List, Set, Optional, Callable, Dict, Union
 from pathlib import Path
 
@@ -30,14 +31,14 @@ from metor.core.api import (
     DisconnectCommand,
     AcceptCommand,
     RejectCommand,
-    MsgCommand,
+    LockCommand,
     RegisterLiveConsumerCommand,
     AddContactCommand,
     RemoveContactCommand,
     RenameContactCommand,
     ClearContactsCommand,
     SwitchCommand,
-    SendDropCommand,
+    SendMessageCommand,
     GetTransportStateCommand,
     GetInboxCommand,
     MarkReadCommand,
@@ -74,6 +75,7 @@ from metor.data import (
     MessageManager,
     SettingKey,
 )
+from metor.data.sql import SqlManager
 from metor.utils import Constants, clean_onion, secure_shred_file
 
 # Local Package Imports
@@ -102,6 +104,15 @@ from metor.core.daemon.handlers import (
     DatabaseCommandHandler,
     SystemCommandHandler,
 )
+
+
+class DaemonLifecycle(str, Enum):
+    """Security-relevant daemon lifecycle states."""
+
+    LOCKED = 'locked'
+    UNLOCKING = 'unlocking'
+    UNLOCKED = 'unlocked'
+    LOCKING = 'locking'
 
 
 class Daemon:
@@ -153,8 +164,11 @@ class Daemon:
         self._stop_flag: threading.Event = threading.Event()
         self._stop_lock: threading.Lock = threading.Lock()
         self._client_state_lock: threading.Lock = threading.Lock()
-        self._is_locked: bool = start_locked
+        self._lifecycle: DaemonLifecycle = (
+            DaemonLifecycle.LOCKED if start_locked else DaemonLifecycle.UNLOCKED
+        )
         self._is_stopping: bool = False
+        self._runtime_stop_flag: threading.Event = threading.Event()
         self._require_session_auth: bool = require_session_auth
         self._authenticated_clients: Set[socket.socket] = set()
         self._session_consumers: Set[socket.socket] = set()
@@ -216,6 +230,7 @@ class Daemon:
         Returns:
             None
         """
+        self._runtime_stop_flag = threading.Event()
         self._km = runtime.km
         self._tm = runtime.tm
         self._cm = runtime.cm
@@ -235,7 +250,7 @@ class Daemon:
             self._ipc.has_active_clients,
             self._has_session_consumers,
             self._notification_service.dispatch,
-            self._stop_flag,
+            self._runtime_stop_flag,
             config=self._pm.config,
             state=self._transport_state,
         )
@@ -245,7 +260,7 @@ class Daemon:
             runtime.hm,
             self._crypto,
             self._broadcast_ipc_event,
-            self._stop_flag,
+            self._runtime_stop_flag,
             config=self._pm.config,
             state=self._transport_state,
             error_callback=self._on_runtime_internal_error,
@@ -411,7 +426,7 @@ class Daemon:
             None
         """
         try:
-            if self._is_locked:
+            if self._lifecycle is DaemonLifecycle.LOCKED:
                 self._ipc.start()
                 if self._status_cb:
                     self._status_cb(DaemonStatus.LOCKED_MODE, {})
@@ -547,6 +562,7 @@ class Daemon:
                 return
             self._is_stopping = True
             self._stop_flag.set()
+            self._runtime_stop_flag.set()
             with self._client_state_lock:
                 self._authenticated_clients.clear()
                 self._session_consumers.clear()
@@ -604,6 +620,82 @@ class Daemon:
                 self._km.clear_sensitive_state()
         except Exception:
             pass
+
+    def _lock_runtime(self) -> bool:
+        """Tears down all profile-scoped state while keeping IPC available.
+
+        Args:
+            None
+
+        Returns:
+            bool: True only when every security-sensitive cleanup step completed.
+        """
+        self._lifecycle = DaemonLifecycle.LOCKING
+        self._runtime_stop_flag.set()
+        cleanup_succeeded: bool = True
+
+        # Revoke access first, then tear down decrypted resources.  The locked
+        # event is emitted only after this method completes.
+        with self._client_state_lock:
+            self._authenticated_clients.clear()
+            self._session_consumers.clear()
+        self._local_auth.install_context(None)
+
+        try:
+            if self._outbox is not None:
+                self._outbox.stop()
+        except Exception:
+            cleanup_succeeded = False
+        try:
+            if self._network_handler is not None:
+                self._network_handler.clear_all_focus()
+        except Exception:
+            cleanup_succeeded = False
+        try:
+            if self._network is not None:
+                self._network.disconnect_all()
+        except Exception:
+            cleanup_succeeded = False
+        try:
+            if self._tm is not None:
+                self._tm.stop()
+        except Exception:
+            cleanup_succeeded = False
+        SqlManager.close_connection(self._pm.paths.get_db_file())
+        runtime_db_path: Path = (
+            self._pm.paths.get_config_dir() / Constants.DB_RUNTIME_FILE
+        )
+        try:
+            secure_shred_file(runtime_db_path)
+        except OSError:
+            cleanup_succeeded = False
+            self._on_runtime_internal_error(
+                'Failed to shred the runtime database mirror while locking.'
+            )
+        try:
+            if self._km is not None:
+                self._km.clear_sensitive_state()
+        except Exception:
+            cleanup_succeeded = False
+
+        self._network_handler = None
+        self._db_handler = None
+        self._sys_handler = None
+        self._network = None
+        self._outbox = None
+        self._crypto = None
+        self._tm = None
+        self._cm = None
+        self._hm = None
+        self._mm = None
+        self._km = None
+        self._transport_state = StateTracker()
+        self._lifecycle = (
+            DaemonLifecycle.LOCKED
+            if cleanup_succeeded
+            else DaemonLifecycle.LOCKING
+        )
+        return cleanup_succeeded
 
     def _nuke_data(self) -> None:
         """
@@ -792,7 +884,10 @@ class Daemon:
         if (
             not is_authenticated
             and local_auth_retry_after is not None
-            and (self._is_locked or self._requires_session_auth())
+            and (
+                self._lifecycle is not DaemonLifecycle.UNLOCKED
+                or self._requires_session_auth()
+            )
         ):
             self._ipc.send_to(
                 conn,
@@ -800,7 +895,10 @@ class Daemon:
             )
             return
 
-        if self._requires_session_auth() and not self._is_locked:
+        if (
+            self._requires_session_auth()
+            and self._lifecycle is DaemonLifecycle.UNLOCKED
+        ):
             if not isinstance(cmd, AuthenticateSessionCommand):
                 if not is_authenticated:
                     prompt: Optional[SessionAuthPrompt] = (
@@ -817,7 +915,7 @@ class Daemon:
                     return
 
         if isinstance(cmd, AuthenticateSessionCommand):
-            if self._is_locked:
+            if self._lifecycle is not DaemonLifecycle.UNLOCKED:
                 self._ipc.send_to(conn, create_event(EventType.DAEMON_LOCKED))
                 return
 
@@ -882,13 +980,17 @@ class Daemon:
             return
 
         if isinstance(cmd, UnlockCommand):
-            if not self._is_locked:
+            if self._lifecycle is DaemonLifecycle.UNLOCKED:
                 self._ipc.send_to(
                     conn,
                     create_event(EventType.ALREADY_UNLOCKED),
                 )
                 return
+            if self._lifecycle is not DaemonLifecycle.LOCKED:
+                self._ipc.send_to(conn, create_event(EventType.INTERNAL_ERROR))
+                return
 
+            self._lifecycle = DaemonLifecycle.UNLOCKING
             try:
                 runtime = build_runtime(
                     self._pm,
@@ -896,6 +998,7 @@ class Daemon:
                     enable_session_auth=self._require_session_auth,
                 )
             except InvalidMasterPasswordError:
+                self._lifecycle = DaemonLifecycle.LOCKED
                 should_disconnect: bool = self._local_auth.register_invalid_unlock(
                     conn,
                     self._get_local_auth_lockout_timeout(),
@@ -918,12 +1021,13 @@ class Daemon:
                     self._disconnect_ipc_client(conn)
                 return
             except CorruptedStorageError:
+                self._lifecycle = DaemonLifecycle.LOCKED
                 self._ipc.send_to(conn, create_event(EventType.DB_CORRUPTED))
                 return
 
             self._install_runtime(runtime)
 
-            self._is_locked = False
+            self._lifecycle = DaemonLifecycle.UNLOCKED
             self._local_auth.clear_connection(conn)
             with self._client_state_lock:
                 self._authenticated_clients.add(conn)
@@ -932,7 +1036,15 @@ class Daemon:
             self._ipc.send_to(conn, create_event(EventType.DAEMON_UNLOCKED))
             return
 
-        if self._is_locked:
+        if isinstance(cmd, LockCommand):
+            if self._lifecycle is not DaemonLifecycle.LOCKED:
+                if not self._lock_runtime():
+                    self._ipc.send_to(conn, create_event(EventType.INTERNAL_ERROR))
+                    return
+            self._ipc.broadcast(create_event(EventType.DAEMON_LOCKED))
+            return
+
+        if self._lifecycle is not DaemonLifecycle.UNLOCKED:
             self._ipc.send_to(conn, create_event(EventType.DAEMON_LOCKED))
             return
 
@@ -970,10 +1082,9 @@ class Daemon:
                 DisconnectCommand,
                 AcceptCommand,
                 RejectCommand,
-                MsgCommand,
+                SendMessageCommand,
                 RegisterLiveConsumerCommand,
                 FallbackCommand,
-                SendDropCommand,
                 SwitchCommand,
                 RetunnelCommand,
                 GetTransportStateCommand,

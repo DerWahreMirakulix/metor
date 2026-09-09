@@ -6,29 +6,20 @@ from typing import Optional
 # Local Package Imports
 from metor.core.api.base import IpcCommand
 from metor.core.api.codes import CommandType
+from metor.core.api.content import Delivery, MessageContent
 from metor.core.api.registry import register_command
 
 
-@register_command(CommandType.MSG)
+@register_command(CommandType.SEND_MESSAGE)
 @dataclass
-class MsgCommand(IpcCommand):
-    """Sends a live chat message to a peer."""
+class SendMessageCommand(IpcCommand):
+    """Sends typed content using the requested delivery semantics."""
 
     target: str
-    text: str
+    delivery: Delivery
+    content: MessageContent
     msg_id: str
-    command_type: CommandType = field(default=CommandType.MSG, init=False)
-
-
-@register_command(CommandType.SEND_DROP)
-@dataclass
-class SendDropCommand(IpcCommand):
-    """Queues an asynchronous offline message."""
-
-    target: str
-    text: str
-    msg_id: str
-    command_type: CommandType = field(default=CommandType.SEND_DROP, init=False)
+    command_type: CommandType = field(default=CommandType.SEND_MESSAGE, init=False)
 
 
 @register_command(CommandType.GET_INBOX)

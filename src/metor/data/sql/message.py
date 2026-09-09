@@ -6,10 +6,10 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, cast
 
 from metor.utils import Constants, clean_onion
+from metor.core.api import ContentType, Delivery
 from metor.data.message.models import (
     MessageDirection,
     MessageStatus,
-    MessageType,
     QueuedMessageResult,
     StoredMessageRecord,
     UnreadInboxSummaryRecord,
@@ -30,7 +30,8 @@ class MessageReceiptRow:
     msg_id: str
     peer_onion: str
     direction: MessageDirection
-    transport_kind: MessageType
+    delivery: Delivery
+    content_type: ContentType
     status: MessageStatus
     visible_in_history: bool
     created_at: str
@@ -39,12 +40,6 @@ class MessageReceiptRow:
 
 class MessageRepository:
     """Centralized durable message spool, archive, and receipt helpers."""
-
-    _DROP_VISIBLE_TYPES: tuple[str, str] = (
-        MessageType.TEXT.value,
-        MessageType.DROP_TEXT.value,
-    )
-    _DROP_VISIBLE_PLACEHOLDERS: str = ', '.join('?' for _ in _DROP_VISIBLE_TYPES)
 
     def __init__(self, sql: 'SqlManager') -> None:
         """
@@ -99,11 +94,12 @@ class MessageRepository:
             msg_id=str(row[1]),
             peer_onion=str(row[2]),
             direction=MessageDirection(str(row[3])),
-            transport_kind=MessageType(str(row[4])),
-            status=MessageStatus(str(row[5])),
-            visible_in_history=int(str(row[6])) == 1,
-            created_at=str(row[7]),
-            updated_at=str(row[8]),
+            delivery=Delivery(str(row[4])),
+            content_type=ContentType(str(row[5])),
+            status=MessageStatus(str(row[6])),
+            visible_in_history=int(str(row[7])) == 1,
+            created_at=str(row[8]),
+            updated_at=str(row[9]),
         )
 
     def _get_receipt(
@@ -126,7 +122,7 @@ class MessageRepository:
             Optional[MessageReceiptRow]: The matching receipt, if present.
         """
         query = (
-            'SELECT id, msg_id, peer_onion, direction, transport_kind, status, '
+            'SELECT id, msg_id, peer_onion, direction, delivery, content_type, status, '
             'visible_in_history, created_at, updated_at '
             'FROM message_receipts WHERE peer_onion = ? AND direction = ? AND msg_id = ?'
         )
@@ -148,7 +144,8 @@ class MessageRepository:
         self,
         contact_onion: str,
         direction: MessageDirection,
-        msg_type: MessageType,
+        delivery: Delivery,
+        content_type: ContentType,
         payload: str,
         status: MessageStatus,
         msg_id: Optional[str] = None,
@@ -160,7 +157,8 @@ class MessageRepository:
         Args:
             contact_onion (str): The peer onion identity.
             direction (MessageDirection): The message direction.
-            msg_type (MessageType): The transport role of the payload.
+            delivery (Delivery): Live or persistent delivery semantics.
+            content_type (ContentType): The payload discriminator.
             payload (str): The stored payload.
             status (MessageStatus): The persisted delivery state.
             msg_id (Optional[str]): The stable message identifier.
@@ -174,7 +172,7 @@ class MessageRepository:
             msg_id if msg_id else secrets.token_hex(Constants.UUID_MSG_BYTES)
         )
         created_at: str = timestamp if timestamp else self._now()
-        visible_in_history: int = 1 if msg_type.value in self._DROP_VISIBLE_TYPES else 0
+        visible_in_history: int = 1 if delivery is Delivery.DROP else 0
 
         with self._sql.transaction() as cursor:
             existing = self._get_receipt(
@@ -190,10 +188,11 @@ class MessageRepository:
                 updated_at: str = self._now()
                 cursor.execute(
                     'UPDATE message_receipts '
-                    'SET transport_kind = ?, status = ?, visible_in_history = ?, updated_at = ? '
+                    'SET delivery = ?, content_type = ?, status = ?, visible_in_history = ?, updated_at = ? '
                     'WHERE id = ?',
                     (
-                        msg_type.value,
+                        delivery.value,
+                        content_type.value,
                         status.value,
                         visible_in_history,
                         updated_at,
@@ -232,13 +231,14 @@ class MessageRepository:
 
             cursor.execute(
                 'INSERT INTO message_receipts '
-                '(msg_id, peer_onion, direction, transport_kind, status, visible_in_history, created_at, updated_at) '
-                'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                '(msg_id, peer_onion, direction, delivery, content_type, status, visible_in_history, created_at, updated_at) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 (
                     actual_msg_id,
                     normalized_onion,
                     direction.value,
-                    msg_type.value,
+                    delivery.value,
+                    content_type.value,
                     status.value,
                     visible_in_history,
                     created_at,
@@ -290,24 +290,24 @@ class MessageRepository:
             is not None
         )
 
-    def count_unread_by_type(self, contact_onion: str, msg_type: MessageType) -> int:
+    def count_unread_by_delivery(self, contact_onion: str, delivery: Delivery) -> int:
         """
         Counts unread inbound messages of one transport kind for one peer.
 
         Args:
             contact_onion (str): The remote onion identity.
-            msg_type (MessageType): The message transport kind.
+            delivery (Delivery): The delivery semantics to count.
 
         Returns:
             int: The unread count.
         """
         rows = self._sql.fetchall(
             'SELECT COUNT(*) FROM message_receipts '
-            'WHERE peer_onion = ? AND direction = ? AND transport_kind = ? AND status = ?',
+            'WHERE peer_onion = ? AND direction = ? AND delivery = ? AND status = ?',
             (
                 clean_onion(contact_onion),
                 MessageDirection.IN.value,
-                msg_type.value,
+                delivery.value,
                 MessageStatus.UNREAD.value,
             ),
         )
@@ -324,10 +324,10 @@ class MessageRepository:
             List[Tuple[int, str, str, str, str, str]]: Pending outbox rows.
         """
         query = (
-            'SELECT r.id, r.peer_onion, r.transport_kind, o.payload, r.msg_id, r.created_at '
+            'SELECT r.id, r.peer_onion, r.content_type, o.payload, r.msg_id, r.created_at '
             'FROM message_receipts AS r '
             'INNER JOIN outbox_spool AS o ON o.receipt_id = r.id '
-            f'WHERE r.direction = ? AND r.status = ? AND r.transport_kind IN ({self._DROP_VISIBLE_PLACEHOLDERS}) '
+            'WHERE r.direction = ? AND r.status = ? AND r.delivery = ? '
             'ORDER BY r.id ASC'
         )
         rows = self._sql.fetchall(
@@ -335,7 +335,7 @@ class MessageRepository:
             (
                 MessageDirection.OUT.value,
                 MessageStatus.PENDING.value,
-                *self._DROP_VISIBLE_TYPES,
+                Delivery.DROP.value,
             ),
         )
         return [
@@ -367,7 +367,7 @@ class MessageRepository:
         filters: list[SqlParam] = [
             MessageDirection.OUT.value,
             MessageStatus.PENDING.value,
-            MessageType.LIVE_TEXT.value,
+            Delivery.LIVE.value,
         ]
         peer_filter: str = ''
         if contact_onion is not None:
@@ -378,7 +378,7 @@ class MessageRepository:
             'SELECT r.id, r.peer_onion, o.payload, r.msg_id, r.created_at '
             'FROM message_receipts AS r '
             'INNER JOIN outbox_spool AS o ON o.receipt_id = r.id '
-            'WHERE r.direction = ? AND r.status = ? AND r.transport_kind = ?'
+            'WHERE r.direction = ? AND r.status = ? AND r.delivery = ?'
             f'{peer_filter} '
             'ORDER BY r.created_at ASC, r.id ASC'
         )
@@ -465,7 +465,7 @@ class MessageRepository:
             )
             if receipt is None:
                 return None
-            if receipt.transport_kind not in self._DROP_VISIBLE_TYPES:
+            if receipt.delivery is not Delivery.DROP:
                 return None
             if receipt.status is not MessageStatus.PENDING:
                 return None
@@ -544,15 +544,15 @@ class MessageRepository:
         """
         rows = self._sql.fetchall(
             'SELECT peer_onion, COUNT(*), '
-            'COALESCE(SUM(CASE WHEN transport_kind = ? THEN 1 ELSE 0 END), 0), '
-            'COALESCE(SUM(CASE WHEN transport_kind = ? THEN 1 ELSE 0 END), 0) '
+            'COALESCE(SUM(CASE WHEN delivery = ? THEN 1 ELSE 0 END), 0), '
+            'COALESCE(SUM(CASE WHEN delivery = ? THEN 1 ELSE 0 END), 0) '
             'FROM message_receipts '
             'WHERE direction = ? AND status = ? '
             'GROUP BY peer_onion '
             'ORDER BY peer_onion ASC',
             (
-                MessageType.DROP_TEXT.value,
-                MessageType.LIVE_TEXT.value,
+                Delivery.DROP.value,
+                Delivery.LIVE.value,
                 MessageDirection.IN.value,
                 MessageStatus.UNREAD.value,
             ),
@@ -584,7 +584,7 @@ class MessageRepository:
         """
         normalized_onion: str = clean_onion(contact_onion)
         query = (
-            'SELECT r.id, r.transport_kind, s.payload, r.created_at, r.msg_id '
+            'SELECT r.id, r.delivery, s.payload, r.created_at, r.msg_id '
             'FROM message_receipts AS r '
             'INNER JOIN inbound_spool AS s ON s.receipt_id = r.id '
             'WHERE r.peer_onion = ? AND r.direction = ? AND r.status = ? '
@@ -621,12 +621,12 @@ class MessageRepository:
             live_ids: List[int] = [
                 message[0]
                 for message in messages
-                if message[1] == MessageType.LIVE_TEXT.value
+                if message[1] == Delivery.LIVE.value
             ]
             drop_visible_ids: List[int] = [
                 message[0]
                 for message in messages
-                if message[1] in self._DROP_VISIBLE_TYPES
+                if message[1] == Delivery.DROP.value
             ]
 
             placeholder_block = self._placeholders(len(receipt_ids))
@@ -680,7 +680,7 @@ class MessageRepository:
             INNER JOIN message_archive AS a ON a.receipt_id = r.id
             WHERE r.peer_onion = ?
               AND a.payload != ''
-              AND r.transport_kind IN ({self._DROP_VISIBLE_PLACEHOLDERS})
+              AND r.delivery = ?
             ORDER BY r.created_at DESC, r.id DESC
             LIMIT ?
         """
@@ -688,7 +688,7 @@ class MessageRepository:
             query,
             (
                 clean_onion(contact_onion),
-                *self._DROP_VISIBLE_TYPES,
+                Delivery.DROP.value,
                 limit,
             ),
         )

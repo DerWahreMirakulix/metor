@@ -21,14 +21,6 @@ class MessageDirection(str, Enum):
     OUT = 'out'
 
 
-class MessageType(str, Enum):
-    """Represents the transport role of a persisted message payload."""
-
-    TEXT = 'text'
-    DROP_TEXT = 'drop_text'
-    LIVE_TEXT = 'live_text'
-
-
 @dataclass(frozen=True)
 class QueuedMessageResult:
     """Represents the result of a message queue operation."""

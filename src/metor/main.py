@@ -9,6 +9,8 @@ import sys
 from typing import List, Optional, Tuple
 
 from metor.ui import get_frontend, get_registered_frontends
+from metor.ui.registry import register_frontend
+from metor.ui.terminal.cli.entry import run_cli
 
 
 def _extract_ui_argument(argv: List[str]) -> Tuple[Optional[str], List[str]]:
@@ -67,6 +69,9 @@ def main() -> None:
     Returns:
         None
     """
+    if 'terminal' not in get_registered_frontends():
+        register_frontend('terminal', run_cli)
+
     ui_argument: Optional[str]
     argv: List[str]
     ui_argument, argv = _extract_ui_argument(sys.argv[1:])

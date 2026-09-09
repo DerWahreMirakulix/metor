@@ -19,8 +19,7 @@ from metor.core.api.commands.messages import (
     GetInboxCommand,
     GetMessagesCommand,
     MarkReadCommand,
-    MsgCommand,
-    SendDropCommand,
+    SendMessageCommand,
 )
 from metor.core.api.commands.profile import (
     AddProfileCommand,
@@ -41,6 +40,7 @@ from metor.core.api.commands.session import (
     RejectCommand,
     RetunnelCommand,
     SwitchCommand,
+    LockCommand,
     UnlockCommand,
 )
 from metor.core.api.commands.settings import (
@@ -67,6 +67,7 @@ __all__ = [
     'RejectCommand',
     'SwitchCommand',
     'UnlockCommand',
+    'LockCommand',
     'AuthenticateSessionCommand',
     'RetunnelCommand',
     'GetContactsListCommand',
@@ -79,8 +80,7 @@ __all__ = [
     'RemoveProfileCommand',
     'RenameProfileCommand',
     'SetDefaultProfileCommand',
-    'MsgCommand',
-    'SendDropCommand',
+    'SendMessageCommand',
     'GetInboxCommand',
     'MarkReadCommand',
     'FallbackCommand',

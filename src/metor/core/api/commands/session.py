@@ -1,4 +1,4 @@
-"""Session and live-connection command DTOs."""
+"""Session, daemon-lock, and live-connection command DTOs."""
 
 from dataclasses import dataclass, field
 from typing import Optional
@@ -104,6 +104,14 @@ class UnlockCommand(IpcCommand):
 
     password: str
     command_type: CommandType = field(default=CommandType.UNLOCK, init=False)
+
+
+@register_command(CommandType.LOCK)
+@dataclass
+class LockCommand(IpcCommand):
+    """Securely releases the active profile runtime without stopping IPC."""
+
+    command_type: CommandType = field(default=CommandType.LOCK, init=False)
 
 
 @register_command(CommandType.AUTHENTICATE_SESSION)

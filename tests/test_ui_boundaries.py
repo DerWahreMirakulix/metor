@@ -11,6 +11,7 @@ from typing import Callable, cast
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.core.api import (
+    Delivery,
     EventType,
     IpcEvent,
     MessageDirectionCode,
@@ -20,12 +21,14 @@ from metor.core.api import (
     ProfileOperationCode,
     ProfileOperationResultEvent,
 )
-from metor.ui import UIPresenter
+from metor.ui.terminal import UIPresenter
 
 
 REPO_ROOT: Path = Path(__file__).resolve().parents[1]
 UI_ROOT: Path = REPO_ROOT / 'src' / 'metor' / 'ui'
 CLIENT_ROOT: Path = REPO_ROOT / 'src' / 'metor' / 'client'
+TERMINAL_ROOT: Path = UI_ROOT / 'terminal'
+EMBEDDED_ROOT: Path = UI_ROOT / 'embedded'
 APPLICATION_ROOT: Path = REPO_ROOT / 'src' / 'metor' / 'application'
 LOWER_LAYER_ROOTS: tuple[Path, ...] = (
     REPO_ROOT / 'src' / 'metor' / 'core',
@@ -203,6 +206,43 @@ class UiBoundaryTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_core_and_data_layers_do_not_import_ui(self) -> None:
+        """Verifies authoritative lower layers never depend on frontends.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        violations: list[str] = []
+        for root in LOWER_LAYER_ROOTS:
+            violations.extend(
+                _collect_import_violations(root, _is_ui_application_violation)
+            )
+        self.assertEqual(violations, [])
+
+    def test_frontends_do_not_import_each_other(self) -> None:
+        """Verifies terminal and embedded packages remain independent consumers.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        terminal_violations = _collect_import_violations(
+            TERMINAL_ROOT,
+            lambda line: line.startswith('from metor.ui.embedded')
+            or line.startswith('import metor.ui.embedded'),
+        )
+        embedded_violations = _collect_import_violations(
+            EMBEDDED_ROOT,
+            lambda line: line.startswith('from metor.ui.terminal')
+            or line.startswith('import metor.ui.terminal'),
+        )
+        self.assertEqual(terminal_violations + embedded_violations, [])
+
     def test_client_layer_does_not_import_ui_data_or_application(self) -> None:
         """
         Verifies that client SDK never imports UI, data, application, or SQLCipher.
@@ -374,7 +414,8 @@ class UiBoundaryTests(unittest.TestCase):
                     {
                         'direction': 'out',
                         'status': 'delivered',
-                        'payload': 'hello',
+                        'delivery': 'drop',
+                        'content': {'type': 'text', 'text': 'hello'},
                         'timestamp': '2026-04-04T18:30:00+00:00',
                     }
                 ],
@@ -387,6 +428,8 @@ class UiBoundaryTests(unittest.TestCase):
 
         self.assertIs(message.direction, MessageDirectionCode.OUT)
         self.assertIs(message.status, MessageStatusCode.DELIVERED)
+        self.assertIs(message.delivery, Delivery.DROP)
+        self.assertEqual(message.content.text, 'hello')
 
         rendered: str = UIPresenter.format_messages(event)
 

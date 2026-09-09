@@ -16,6 +16,8 @@ from metor.core.api import (
     RuntimeErrorCode,
     create_event,
     get_current_request_id,
+    Delivery,
+    ContentType,
 )
 from metor.core.tor import TorManager
 from metor.core.daemon.managed.crypto import Crypto
@@ -28,7 +30,6 @@ from metor.data import (
     MessageManager,
     MessageDirection,
     MessageStatus,
-    MessageType,
     SettingKey,
 )
 from metor.utils import Constants
@@ -283,7 +284,8 @@ class ConnectionControllerSupportMixin:
             self._mm.queue_message(
                 contact_onion=onion,
                 direction=MessageDirection.OUT,
-                msg_type=MessageType.DROP_TEXT,
+                delivery=Delivery.DROP,
+                content_type=ContentType.TEXT,
                 payload=content,
                 status=MessageStatus.PENDING,
                 msg_id=msg_id,

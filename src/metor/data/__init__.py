@@ -37,7 +37,6 @@ from metor.data.message import (
     MessageManager,
     MessageStatus,
     MessageDirection,
-    MessageType,
 )
 from metor.data.profile import (
     Config,
@@ -63,7 +62,6 @@ __all__ = [
     'MessageManager',
     'MessageStatus',
     'MessageDirection',
-    'MessageType',
     'ChatDaemonAutostartPolicy',
     'DAEMON_SETTING_KEYS',
     'Settings',

@@ -10,12 +10,17 @@ from metor.client.auth import (
 )
 from metor.client.ipc import IpcClient
 from metor.core.api import (
+    DaemonLockedEvent,
+    Delivery,
     InitCommand,
     InitEvent,
     IpcCommand,
     IpcEvent,
+    LockCommand,
     ProtocolMismatchEvent,
     RegisterLiveConsumerCommand,
+    SendMessageCommand,
+    TextContent,
     ensure_request_id,
 )
 from metor.utils.constants import Constants
@@ -154,6 +159,38 @@ class MetorClient:
             None
         """
         self._ipc.send_command(cmd)
+
+    def send_text(self, target: str, delivery: Delivery, text: str, msg_id: str) -> None:
+        """Sends text through the typed public message boundary.
+
+        Args:
+            target (str): Destination alias or onion.
+            delivery (Delivery): Requested delivery semantics.
+            text (str): UTF-8 text payload.
+            msg_id (str): Stable logical message identifier.
+
+        Returns:
+            None
+        """
+        self.send_command(
+            SendMessageCommand(
+                target=target,
+                delivery=delivery,
+                content=TextContent(text),
+                msg_id=msg_id,
+            )
+        )
+
+    def lock(self) -> bool:
+        """Securely locks the daemon while retaining the IPC connection.
+
+        Args:
+            None
+
+        Returns:
+            bool: True after the daemon confirms the locked state.
+        """
+        return self.request(LockCommand(), DaemonLockedEvent) is not None
 
     def request(
         self,

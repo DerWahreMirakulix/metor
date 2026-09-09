@@ -361,22 +361,22 @@ Exports a plaintext runtime copy of the encrypted database for local inspection 
 
 Automatically accepts incoming live sessions from saved contacts.
 
-| Property         | Value                                                                                             |
-| ---------------- | ------------------------------------------------------------------------------------------------- |
-| Type             | `bool`                                                                                            |
-| Default          | `True`                                                                                            |
-| Category         | `Core Daemon`                                                                                     |
-| Scope            | `Daemon runtime`                                                                                  |
-| Profile Override | `Yes`                                                                                             |
-| Constraints      | Boolean.                                                                                          |
-| Security Note    | Improves convenience for known contacts, but reduces explicit confirmation on inbound reconnects. |
+| Property         | Value                                                                               |
+| ---------------- | ----------------------------------------------------------------------------------- |
+| Type             | `bool`                                                                              |
+| Default          | `False`                                                                             |
+| Category         | `Core Daemon`                                                                       |
+| Scope            | `Daemon runtime`                                                                    |
+| Profile Override | `Yes`                                                                               |
+| Constraints      | Boolean.                                                                            |
+| Security Note    | Keep disabled when explicit confirmation of every inbound LIVE session is required. |
 
 **CLI Examples**
 
 - `metor settings get daemon.auto_accept_contacts`
-- `metor settings set daemon.auto_accept_contacts true`
+- `metor settings set daemon.auto_accept_contacts false`
 - `metor -p <profile> config get daemon.auto_accept_contacts`
-- `metor -p <profile> config set daemon.auto_accept_contacts true`
+- `metor -p <profile> config set daemon.auto_accept_contacts false`
 
 ---
 

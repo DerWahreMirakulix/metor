@@ -34,10 +34,10 @@ from metor.data.settings import (
     SettingKey,
     SettingValidationError,
 )
-from metor.ui import Theme, UIPresenter
-from metor.ui.cli.ipc.request.models import IpcRequestResult
-from metor.ui.cli.proxy.settings import CliProxySettingsActions
-from metor.ui.cli.proxy.transport import CliProxyTransport
+from metor.ui.terminal import Theme, UIPresenter
+from metor.ui.terminal.cli.ipc.request.models import IpcRequestResult
+from metor.ui.terminal.cli.proxy.settings import CliProxySettingsActions
+from metor.ui.terminal.cli.proxy.transport import CliProxyTransport
 from metor.data.settings_registry import (
     get_ui_setting_spec,
     validate_ui_setting_value,
@@ -741,7 +741,7 @@ class SettingsContractTests(unittest.TestCase):
         )
 
         with patch(
-            'metor.ui.cli.proxy.transport.run_with_headless_daemon',
+            'metor.ui.terminal.cli.proxy.transport.run_with_headless_daemon',
             side_effect=_build_headless_result_callback(
                 captured_passwords,
                 'settings-output\nline-2',
@@ -777,7 +777,7 @@ class SettingsContractTests(unittest.TestCase):
         )
 
         with patch(
-            'metor.ui.cli.proxy.transport.run_with_headless_daemon',
+            'metor.ui.terminal.cli.proxy.transport.run_with_headless_daemon',
             return_value='history-output\nline-2',
         ):
             result = transport.request_ipc(GetHistoryCommand())
@@ -809,7 +809,7 @@ class SettingsContractTests(unittest.TestCase):
         )
 
         with patch(
-            'metor.ui.cli.proxy.transport.run_with_headless_daemon',
+            'metor.ui.terminal.cli.proxy.transport.run_with_headless_daemon',
             return_value='setting-value',
         ):
             result = transport.request_ipc(
@@ -842,7 +842,7 @@ class SettingsContractTests(unittest.TestCase):
         )
 
         with patch(
-            'metor.ui.cli.proxy.transport.run_with_headless_daemon',
+            'metor.ui.terminal.cli.proxy.transport.run_with_headless_daemon',
             side_effect=_build_headless_result_callback(
                 captured_passwords,
                 'ok',
@@ -1394,3 +1394,15 @@ class SettingsContractTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+    def test_auto_accept_contacts_defaults_to_disabled(self) -> None:
+        """Verifies inbound LIVE sessions require explicit acceptance by default.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        from metor.data import SETTING_SPECS, SettingKey
+
+        self.assertFalse(SETTING_SPECS[SettingKey.AUTO_ACCEPT_CONTACTS].default)

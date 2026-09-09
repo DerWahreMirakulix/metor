@@ -32,7 +32,10 @@ from metor.core.api import (
     InitCommand,
     IpcEvent,
     RuntimeErrorCode,
-    SendDropCommand,
+    ContentType,
+    Delivery,
+    SendMessageCommand,
+    TextContent,
     SelfDestructCommand,
     UnlockCommand,
     create_event,
@@ -84,14 +87,13 @@ from metor.data import (
     MessageManager,
     MessageDirection,
     MessageStatus,
-    MessageType,
     SettingKey,
 )
 from metor.client import IpcClient
 from metor.data.profile import ProfileManager
 from metor.data.profile.config import Config
-from metor.ui.cli.handlers import CommandHandlers
-from metor.ui.theme import Theme
+from metor.ui.terminal.cli.handlers import CommandHandlers
+from metor.ui.terminal.theme import Theme
 from metor.utils import Constants
 
 
@@ -478,7 +480,7 @@ class _DummyMessageManager:
         self.queued.append(kwargs)
         contact_onion: str = str(kwargs['contact_onion'])
         direction = kwargs['direction']
-        msg_type = kwargs['msg_type']
+        delivery = kwargs['delivery']
         status = kwargs['status']
         msg_id: str = str(kwargs['msg_id'])
         timestamp: str = str(kwargs.get('timestamp') or '1970-01-01T00:00:00+00:00')
@@ -490,7 +492,7 @@ class _DummyMessageManager:
         if (
             direction is MessageDirection.OUT
             and status is MessageStatus.PENDING
-            and msg_type is MessageType.LIVE_TEXT
+            and delivery is Delivery.LIVE
         ):
             self.pending_live_outbox.append(
                 (
@@ -3457,7 +3459,7 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(len(message_manager.queued), 1)
         self.assertEqual(message_manager.queued[0]['msg_id'], 'msg-1')
         self.assertEqual(message_manager.queued[0]['payload'], 'hello')
-        self.assertIs(message_manager.queued[0]['msg_type'], MessageType.LIVE_TEXT)
+        self.assertIs(message_manager.queued[0]['delivery'], Delivery.LIVE)
         self.assertIs(message_manager.queued[0]['status'], MessageStatus.PENDING)
         self.assertEqual(history_manager.events, [])
         self.assertTrue(state.has_unacked_messages('peer-onion'))
@@ -3606,7 +3608,7 @@ class DaemonHardeningTests(unittest.TestCase):
         router.finalize_pending_live_messages()
 
         self.assertGreaterEqual(len(message_manager.queued), 1)
-        self.assertIs(message_manager.queued[-1]['msg_type'], MessageType.DROP_TEXT)
+        self.assertIs(message_manager.queued[-1]['delivery'], Delivery.DROP)
         self.assertEqual(message_manager.queued[-1]['msg_id'], 'msg-1')
         self.assertEqual(history_manager.events[-1][0][0], HistoryEvent.QUEUED)
 
@@ -3646,9 +3648,10 @@ class DaemonHardeningTests(unittest.TestCase):
             register_session_consumer_cb=lambda _conn: None,
             config=cast(Config, _DummyConfig()),
         )
-        command = SendDropCommand(
+        command = SendMessageCommand(
             target='peer',
-            text='hello',
+            delivery=Delivery.DROP,
+            content=TextContent('hello'),
             msg_id='msg-1',
             request_id='req-drop-1',
         )
@@ -5432,7 +5435,7 @@ class DaemonHardeningTests(unittest.TestCase):
         )
         self.assertEqual(message_manager.pending_live_outbox, [])
         self.assertEqual(len(message_manager.queued), 1)
-        self.assertEqual(message_manager.queued[0]['msg_type'], MessageType.DROP_TEXT)
+        self.assertEqual(message_manager.queued[0]['delivery'], Delivery.DROP)
         self.assertEqual(message_manager.queued[0]['msg_id'], 'msg-1')
 
     def test_manual_disconnect_during_retunnel_cancels_outbound_reconnect(self) -> None:
@@ -5527,7 +5530,7 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(controller.enqueued_live_reconnects, [])
         self.assertEqual(message_manager.pending_live_outbox, [])
         self.assertEqual(len(message_manager.queued), 1)
-        self.assertEqual(message_manager.queued[0]['msg_type'], MessageType.DROP_TEXT)
+        self.assertEqual(message_manager.queued[0]['delivery'], Delivery.DROP)
         self.assertEqual(message_manager.queued[0]['msg_id'], 'msg-peer-reject')
         disconnected_event = cast(
             IpcEvent,
@@ -5604,7 +5607,7 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertTrue(cast(_DummyConn, outbound_conn).closed)
         self.assertEqual(message_manager.pending_live_outbox, [])
         self.assertEqual(len(message_manager.queued), 1)
-        self.assertEqual(message_manager.queued[0]['msg_type'], MessageType.DROP_TEXT)
+        self.assertEqual(message_manager.queued[0]['delivery'], Delivery.DROP)
         self.assertEqual(message_manager.queued[0]['msg_id'], 'msg-remote-end')
 
     def test_remote_fallback_disconnect_defers_noise_until_reconnect_grace_expires(
@@ -6485,7 +6488,7 @@ class DaemonHardeningTests(unittest.TestCase):
             emit_event=False,
         )
 
-        self.assertEqual(message_manager.queued[0]['msg_type'], MessageType.DROP_TEXT)
+        self.assertEqual(message_manager.queued[0]['delivery'], Delivery.DROP)
 
     def test_listener_tracks_remote_auto_reconnect_replacement_as_pending(
         self,

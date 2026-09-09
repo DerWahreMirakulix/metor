@@ -15,8 +15,8 @@ used by the UI, the IPC contract, and the message store. They do NOT change.
 | `live` | Ephemeral, interactive. Never appears in chat history; payload is shredded after consume. |
 | `drop` | Durable, mailbox-style. Persists until deletion or shred policy.                          |
 
-Examples that keep this vocabulary: `MsgCommand`, `SendDropCommand`,
-`MessageType.LIVE_TEXT` / `DROP_TEXT`, `ChatTransportState`, UI prompt tags
+Examples that keep this vocabulary: `SendMessageCommand`, `Delivery.LIVE` /
+`Delivery.DROP`, `TextContent`, `ChatTransportState`, UI prompt tags
 (`[Drop]`, `[Switching]`, `[Reconnecting]`).
 
 ## Dimension 2 — Connection Type (Backend, `transport` field)

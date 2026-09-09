@@ -40,8 +40,8 @@ class Constants:
     SERVER_BACKLOG_HEADLESS: int = 1  # Minimal socket backlog for ephemeral daemons
 
     # Protocol Versions
-    IPC_PROTOCOL_VERSION: int = 1  # Current IPC wire protocol version
-    IPC_PROTOCOL_MIN_SUPPORTED: int = 1  # Oldest accepted IPC wire protocol version
+    IPC_PROTOCOL_VERSION: int = 2  # Current IPC wire protocol version
+    IPC_PROTOCOL_MIN_SUPPORTED: int = 2  # Oldest accepted IPC wire protocol version
     PEER_PROTOCOL_VERSION: int = 1  # Current peer-wire handshake version
     PEER_PROTOCOL_MIN_SUPPORTED: int = 1  # Oldest accepted peer-wire handshake version
 

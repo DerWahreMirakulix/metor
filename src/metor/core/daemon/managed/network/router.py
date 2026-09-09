@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, cast
 
 from metor.core.api import (
     AutoFallbackQueuedEvent,
+    ContentType,
     EventType,
     IpcEvent,
     FallbackSuccessEvent,
@@ -20,7 +21,9 @@ from metor.core.api import (
     InboxNotificationEvent,
     JsonValue,
     ReadReceiptEvent,
-    RemoteMsgEvent,
+    Delivery,
+    MessageReceivedEvent,
+    TextContent,
     get_current_request_id,
 )
 from metor.core.daemon.managed.models import TorCommand
@@ -32,7 +35,6 @@ from metor.data import (
     HistoryReasonCode,
     MessageManager,
     MessageDirection,
-    MessageType,
     MessageStatus,
     SettingKey,
 )
@@ -226,7 +228,8 @@ class MessageRouter:
         self._mm.queue_message(
             contact_onion=onion,
             direction=MessageDirection.OUT,
-            msg_type=MessageType.LIVE_TEXT,
+            delivery=Delivery.LIVE,
+            content_type=ContentType.TEXT,
             payload=msg,
             status=MessageStatus.PENDING,
             msg_id=msg_id,
@@ -304,7 +307,8 @@ class MessageRouter:
             self._mm.queue_message(
                 contact_onion=onion,
                 direction=MessageDirection.OUT,
-                msg_type=MessageType.DROP_TEXT,
+                delivery=Delivery.DROP,
+                content_type=ContentType.TEXT,
                 payload=content,
                 status=MessageStatus.PENDING,
                 msg_id=msg_id,
@@ -431,7 +435,8 @@ class MessageRouter:
                 self._mm.queue_message(
                     contact_onion=onion,
                     direction=MessageDirection.OUT,
-                    msg_type=MessageType.DROP_TEXT,
+                    delivery=Delivery.DROP,
+                    content_type=ContentType.TEXT,
                     payload=msg,
                     status=MessageStatus.PENDING,
                     msg_id=msg_id,
@@ -511,7 +516,8 @@ class MessageRouter:
         queue_result = self._mm.queue_message(
             contact_onion=onion,
             direction=MessageDirection.IN,
-            msg_type=MessageType.LIVE_TEXT,
+            delivery=Delivery.LIVE,
+            content_type=ContentType.TEXT,
             payload=content,
             status=MessageStatus.UNREAD,
             msg_id=msg_id,
@@ -530,10 +536,11 @@ class MessageRouter:
             if has_clients:
                 if has_live_consumers:
                     self._broadcast(
-                        RemoteMsgEvent(
+                        MessageReceivedEvent(
                             alias=alias,
                             onion=onion,
-                            text=content,
+                            delivery=Delivery.LIVE,
+                            content=TextContent(content),
                             timestamp=timestamp,
                             msg_id=msg_id,
                         )
@@ -819,7 +826,8 @@ class MessageRouter:
         queue_result = self._mm.queue_message(
             contact_onion=onion,
             direction=MessageDirection.IN,
-            msg_type=MessageType.DROP_TEXT,
+            delivery=Delivery.DROP,
+            content_type=ContentType.TEXT,
             payload=content,
             status=MessageStatus.UNREAD,
             msg_id=msg_id,

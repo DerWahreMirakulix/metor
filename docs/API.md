@@ -50,9 +50,9 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [GetSettingsListCommand](#getsettingslistcommand)
 - [GetTransportStateCommand](#gettransportstatecommand)
 - [InitCommand](#initcommand)
+- [LockCommand](#lockcommand)
 - [MarkReadCommand](#markreadcommand)
 - [MigrateProfileSecurityCommand](#migrateprofilesecuritycommand)
-- [MsgCommand](#msgcommand)
 - [RegisterLiveConsumerCommand](#registerliveconsumercommand)
 - [RejectCommand](#rejectcommand)
 - [RemoveContactCommand](#removecontactcommand)
@@ -61,7 +61,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [RenameProfileCommand](#renameprofilecommand)
 - [RetunnelCommand](#retunnelcommand)
 - [SelfDestructCommand](#selfdestructcommand)
-- [SendDropCommand](#senddropcommand)
+- [SendMessageCommand](#sendmessagecommand)
 - [SetConfigCommand](#setconfigcommand)
 - [SetDefaultProfileCommand](#setdefaultprofilecommand)
 - [SetSettingCommand](#setsettingcommand)
@@ -140,6 +140,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [IpcClientLimitReachedEvent](#ipcclientlimitreachedevent)
 - [LocalAuthRateLimitedEvent](#localauthratelimitedevent)
 - [MaxConnectionsReachedEvent](#maxconnectionsreachedevent)
+- [MessageReceivedEvent](#messagereceivedevent)
 - [MessagesClearFailedEvent](#messagesclearfailedevent)
 - [MessagesClearedEvent](#messagesclearedevent)
 - [MessagesClearedAllEvent](#messagesclearedallevent)
@@ -161,7 +162,6 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [ProfilesDataEvent](#profilesdataevent)
 - [ProtocolMismatchEvent](#protocolmismatchevent)
 - [ReadReceiptEvent](#readreceiptevent)
-- [RemoteMsgEvent](#remotemsgevent)
 - [RenameSuccessEvent](#renamesuccessevent)
 - [RetunnelFailedEvent](#retunnelfailedevent)
 - [RetunnelInitiatedEvent](#retunnelinitiatedevent)
@@ -754,6 +754,26 @@ Requests daemon-session initialization.
 
 ---
 
+### `LockCommand`
+
+Securely releases the active profile runtime without stopping IPC.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+
+**Wire Value:** `lock`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "lock"
+}
+```
+
+---
+
 ### `MarkReadCommand`
 
 Reads and clears unread messages for a peer.
@@ -797,32 +817,6 @@ Requests migration of one local profile between encrypted and plaintext storage.
   "command_type": "migrate_profile_security",
   "name": "string",
   "target_mode": "string"
-}
-```
-
----
-
-### `MsgCommand`
-
-Sends a live chat message to a peer.
-
-| Field        | Type               | Default  |
-| ------------ | ------------------ | -------- |
-| `request_id` | `Union[str, None]` | `None`   |
-| `target`     | `str`              | Required |
-| `text`       | `str`              | Required |
-| `msg_id`     | `str`              | Required |
-
-**Wire Value:** `msg`
-
-**Example JSON**
-
-```json
-{
-  "command_type": "msg",
-  "target": "string",
-  "text": "string",
-  "msg_id": "string"
 }
 ```
 
@@ -1005,26 +999,28 @@ Triggers daemon self-destruction.
 
 ---
 
-### `SendDropCommand`
+### `SendMessageCommand`
 
-Queues an asynchronous offline message.
+Sends typed content using the requested delivery semantics.
 
-| Field        | Type               | Default  |
-| ------------ | ------------------ | -------- |
-| `request_id` | `Union[str, None]` | `None`   |
-| `target`     | `str`              | Required |
-| `text`       | `str`              | Required |
-| `msg_id`     | `str`              | Required |
+| Field        | Type                | Default  |
+| ------------ | ------------------- | -------- |
+| `request_id` | `Union[str, None]`  | `None`   |
+| `target`     | `str`               | Required |
+| `delivery`   | `<enum 'Delivery'>` | Required |
+| `content`    | `TextContent`       | Required |
+| `msg_id`     | `str`               | Required |
 
-**Wire Value:** `send_drop`
+**Wire Value:** `send_message`
 
 **Example JSON**
 
 ```json
 {
-  "command_type": "send_drop",
+  "command_type": "send_message",
   "target": "string",
-  "text": "string",
+  "delivery": "live",
+  "content": "value",
   "msg_id": "string"
 }
 ```
@@ -1185,7 +1181,6 @@ Confirms delivery of a live outbound message.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `msg_id`     | `str`              | Required |
-| `text`       | `Union[str, None]` | `None`   |
 | `timestamp`  | `Union[str, None]` | `None`   |
 
 **Wire Value:** `ack`
@@ -2774,6 +2769,35 @@ Signals that the maximum live connection count was reached.
 
 ---
 
+### `MessageReceivedEvent`
+
+Carries inbound typed content and independent delivery semantics.
+
+| Field        | Type                | Default  |
+| ------------ | ------------------- | -------- |
+| `request_id` | `Union[str, None]`  | `None`   |
+| `alias`      | `str`               | Required |
+| `delivery`   | `<enum 'Delivery'>` | Required |
+| `content`    | `TextContent`       | Required |
+| `onion`      | `Union[str, None]`  | `None`   |
+| `timestamp`  | `Union[str, None]`  | `None`   |
+| `msg_id`     | `Union[str, None]`  | `None`   |
+
+**Wire Value:** `message_received`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "message_received",
+  "alias": "string",
+  "delivery": "live",
+  "content": "value"
+}
+```
+
+---
+
 ### `MessagesClearFailedEvent`
 
 Signals that clearing messages failed.
@@ -3265,33 +3289,6 @@ Signals that the peer consumed one message and acknowledges it as read.
   "event_type": "read_receipt",
   "alias": "string",
   "msg_id": "string"
-}
-```
-
----
-
-### `RemoteMsgEvent`
-
-Carries a live inbound message.
-
-| Field        | Type               | Default  |
-| ------------ | ------------------ | -------- |
-| `request_id` | `Union[str, None]` | `None`   |
-| `alias`      | `str`              | Required |
-| `text`       | `str`              | Required |
-| `onion`      | `Union[str, None]` | `None`   |
-| `timestamp`  | `Union[str, None]` | `None`   |
-| `msg_id`     | `Union[str, None]` | `None`   |
-
-**Wire Value:** `remote_msg`
-
-**Example JSON**
-
-```json
-{
-  "event_type": "remote_msg",
-  "alias": "string",
-  "text": "string"
 }
 ```
 

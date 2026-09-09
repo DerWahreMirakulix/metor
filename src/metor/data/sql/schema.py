@@ -3,7 +3,7 @@
 from metor.data.sql.backends import SqlCipherCursor
 
 
-SCHEMA_VERSION: int = 3
+SCHEMA_VERSION: int = 4
 
 PEER_TABLE_QUERY: str = """
 CREATE TABLE IF NOT EXISTS peers (
@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS message_receipts (
     msg_id TEXT NOT NULL CHECK (msg_id <> ''),
     peer_onion TEXT NOT NULL CHECK (peer_onion <> '') REFERENCES peers(onion) ON DELETE RESTRICT,
     direction TEXT NOT NULL CHECK (direction IN ('in', 'out')),
-    transport_kind TEXT NOT NULL CHECK (transport_kind IN ('text', 'drop_text', 'live_text')),
+    delivery TEXT NOT NULL CHECK (delivery IN ('live', 'drop')),
+    content_type TEXT NOT NULL CHECK (content_type IN ('text')),
     status TEXT NOT NULL CHECK (status IN ('pending', 'delivered', 'unread', 'read')),
     visible_in_history INTEGER NOT NULL DEFAULT 0 CHECK (visible_in_history IN (0, 1)),
     created_at TEXT NOT NULL CHECK (created_at <> ''),

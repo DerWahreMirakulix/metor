@@ -11,6 +11,7 @@ from typing import Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from metor.core.api import (
     ChatStartupStateEvent,
+    ContentType,
     ConnectionOrigin,
     EventType,
     GetChatStartupStateCommand,
@@ -29,10 +30,10 @@ from metor.core.api import (
     DisconnectCommand,
     AcceptCommand,
     RejectCommand,
-    MsgCommand,
+    Delivery,
     FallbackCommand,
     RegisterLiveConsumerCommand,
-    SendDropCommand,
+    SendMessageCommand,
     SwitchCommand,
     SwitchSuccessEvent,
     RetunnelCommand,
@@ -57,7 +58,6 @@ from metor.data import (
     ContactManager,
     MessageManager,
     MessageDirection,
-    MessageType,
     MessageStatus,
     SettingKey,
 )
@@ -224,6 +224,20 @@ class NetworkCommandHandler:
             None
         """
         self._set_client_focus(conn, None)
+
+    def clear_all_focus(self) -> None:
+        """Clears focus owned by every attached IPC client.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with self._focus_lock:
+            connections = list(self._client_focuses)
+        for conn in connections:
+            self._set_client_focus(conn, None)
 
     def _retunnel_target(self, alias: str, onion: str) -> None:
         """
@@ -505,6 +519,7 @@ class NetworkCommandHandler:
                         version=Constants.IPC_PROTOCOL_VERSION,
                         min_supported=Constants.IPC_PROTOCOL_MIN_SUPPORTED,
                         profile=self._config._paths.profile_name,
+                        capabilities=['text_content', 'runtime_lock'],
                     ),
                 )
 
@@ -560,8 +575,8 @@ class NetworkCommandHandler:
         elif isinstance(cmd, RejectCommand):
             self._network.reject(cmd.target, initiated_by_self=True)
 
-        elif isinstance(cmd, MsgCommand):
-            self._network.send_message(cmd.target, cmd.text, cmd.msg_id)
+        elif isinstance(cmd, SendMessageCommand) and cmd.delivery is Delivery.LIVE:
+            self._network.send_message(cmd.target, cmd.content.text, cmd.msg_id)
 
         elif isinstance(cmd, FallbackCommand):
             _, event_type, params = self._network.force_fallback(cmd.target)
@@ -587,7 +602,7 @@ class NetworkCommandHandler:
                 onion,
             )
 
-        elif isinstance(cmd, SendDropCommand):
+        elif isinstance(cmd, SendMessageCommand):
             if not self._config.get_bool(SettingKey.ALLOW_DROPS):
                 self._send_event(conn, create_event(EventType.DROPS_DISABLED))
                 return
@@ -607,8 +622,9 @@ class NetworkCommandHandler:
                 self._mm.queue_message(
                     contact_onion=str(onion),
                     direction=MessageDirection.OUT,
-                    msg_type=MessageType.DROP_TEXT,
-                    payload=cmd.text,
+                    delivery=Delivery.DROP,
+                    content_type=ContentType.TEXT,
+                    payload=cmd.content.text,
                     status=MessageStatus.PENDING,
                     msg_id=cmd.msg_id,
                 )

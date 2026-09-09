@@ -617,6 +617,22 @@
         }
       }
     },
+    "LockCommand": {
+      "title": "LockCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
     "MarkReadCommand": {
       "title": "MarkReadCommand",
       "type": "object",
@@ -683,36 +699,6 @@
       "required": [
         "name",
         "target_mode"
-      ]
-    },
-    "MsgCommand": {
-      "title": "MsgCommand",
-      "type": "object",
-      "properties": {
-        "request_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "target": {
-          "type": "string"
-        },
-        "text": {
-          "type": "string"
-        },
-        "msg_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "target",
-        "text",
-        "msg_id"
       ]
     },
     "RegisterLiveConsumerCommand": {
@@ -897,8 +883,8 @@
         }
       }
     },
-    "SendDropCommand": {
-      "title": "SendDropCommand",
+    "SendMessageCommand": {
+      "title": "SendMessageCommand",
       "type": "object",
       "properties": {
         "request_id": {
@@ -914,16 +900,22 @@
         "target": {
           "type": "string"
         },
-        "text": {
+        "delivery": {
+          "enum": [
+            "live",
+            "drop"
+          ],
           "type": "string"
         },
+        "content": {},
         "msg_id": {
           "type": "string"
         }
       },
       "required": [
         "target",
-        "text",
+        "delivery",
+        "content",
         "msg_id"
       ]
     },
@@ -1107,16 +1099,6 @@
         },
         "msg_id": {
           "type": "string"
-        },
-        "text": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
         },
         "timestamp": {
           "anyOf": [
@@ -3273,6 +3255,68 @@
         "max_conn"
       ]
     },
+    "MessageReceivedEvent": {
+      "title": "MessageReceivedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alias": {
+          "type": "string"
+        },
+        "delivery": {
+          "enum": [
+            "live",
+            "drop"
+          ],
+          "type": "string"
+        },
+        "content": {},
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timestamp": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "msg_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "alias",
+        "delivery",
+        "content"
+      ]
+    },
     "MessagesClearFailedEvent": {
       "title": "MessagesClearFailedEvent",
       "type": "object",
@@ -3964,62 +4008,6 @@
       "required": [
         "alias",
         "msg_id"
-      ]
-    },
-    "RemoteMsgEvent": {
-      "title": "RemoteMsgEvent",
-      "type": "object",
-      "properties": {
-        "request_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "alias": {
-          "type": "string"
-        },
-        "text": {
-          "type": "string"
-        },
-        "onion": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "timestamp": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "msg_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "alias",
-        "text"
       ]
     },
     "RenameSuccessEvent": {
@@ -4729,14 +4717,14 @@
     "init": {
       "$ref": "#/definitions/InitCommand"
     },
+    "lock": {
+      "$ref": "#/definitions/LockCommand"
+    },
     "mark_read": {
       "$ref": "#/definitions/MarkReadCommand"
     },
     "migrate_profile_security": {
       "$ref": "#/definitions/MigrateProfileSecurityCommand"
-    },
-    "msg": {
-      "$ref": "#/definitions/MsgCommand"
     },
     "register_live_consumer": {
       "$ref": "#/definitions/RegisterLiveConsumerCommand"
@@ -4762,8 +4750,8 @@
     "self_destruct": {
       "$ref": "#/definitions/SelfDestructCommand"
     },
-    "send_drop": {
-      "$ref": "#/definitions/SendDropCommand"
+    "send_message": {
+      "$ref": "#/definitions/SendMessageCommand"
     },
     "set_config": {
       "$ref": "#/definitions/SetConfigCommand"
@@ -4992,6 +4980,9 @@
     "max_connections_reached": {
       "$ref": "#/definitions/MaxConnectionsReachedEvent"
     },
+    "message_received": {
+      "$ref": "#/definitions/MessageReceivedEvent"
+    },
     "messages_clear_failed": {
       "$ref": "#/definitions/MessagesClearFailedEvent"
     },
@@ -5054,9 +5045,6 @@
     },
     "read_receipt": {
       "$ref": "#/definitions/ReadReceiptEvent"
-    },
-    "remote_msg": {
-      "$ref": "#/definitions/RemoteMsgEvent"
     },
     "rename_success": {
       "$ref": "#/definitions/RenameSuccessEvent"

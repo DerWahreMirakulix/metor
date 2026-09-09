@@ -18,7 +18,7 @@ from metor.core.api import (
     UnreadMessagesEvent,
     create_event,
 )
-from metor.data import MessageType
+from metor.core.api import Delivery, TextContent
 from metor.data.message import MessageClearOperationType, MessageClearResult
 
 # Local Package Imports
@@ -66,7 +66,8 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
             MessageEntry(
                 direction=MessageDirectionCode(message.direction),
                 status=MessageStatusCode(message.status),
-                payload=message.payload,
+                delivery=Delivery.DROP,
+                content=TextContent(message.payload),
                 timestamp=message.timestamp,
             )
             for message in messages_raw
@@ -154,8 +155,8 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
         messages_list: List[UnreadMessageEntry] = [
             UnreadMessageEntry(
                 timestamp=str(message[3]),
-                payload=str(message[2]),
-                is_drop=str(message[1]) != MessageType.LIVE_TEXT.value,
+                delivery=Delivery(str(message[1])),
+                content=TextContent(str(message[2])),
                 msg_id=str(message[4]) if message[4] is not None else None,
             )
             for message in raw_messages

@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from metor.core.api.content import Delivery, MessageContent
+
 # Local Package Imports
 from metor.core.api.base import IpcEvent, JsonValue
 from metor.core.api.codes import (
@@ -24,6 +26,7 @@ class InitEvent(IpcEvent):
     version: Optional[int] = None
     min_supported: Optional[int] = None
     profile: Optional[str] = None
+    capabilities: List[str] = field(default_factory=list)
     event_type: EventType = field(default=EventType.INIT, init=False)
 
 
@@ -71,17 +74,18 @@ class TorProcessTerminatedEvent(IpcEvent):
     )
 
 
-@register_event(EventType.REMOTE_MSG)
+@register_event(EventType.MESSAGE_RECEIVED)
 @dataclass
-class RemoteMsgEvent(IpcEvent):
-    """Carries a live inbound message."""
+class MessageReceivedEvent(IpcEvent):
+    """Carries inbound typed content and independent delivery semantics."""
 
     alias: str
-    text: str
+    delivery: Delivery
+    content: MessageContent
     onion: Optional[str] = None
     timestamp: Optional[str] = None
     msg_id: Optional[str] = None
-    event_type: EventType = field(default=EventType.REMOTE_MSG, init=False)
+    event_type: EventType = field(default=EventType.MESSAGE_RECEIVED, init=False)
 
 
 @register_event(EventType.ACK)
@@ -90,7 +94,6 @@ class AckEvent(IpcEvent):
     """Confirms delivery of a live outbound message."""
 
     msg_id: str
-    text: Optional[str] = None
     timestamp: Optional[str] = None
     event_type: EventType = field(default=EventType.ACK, init=False)
 

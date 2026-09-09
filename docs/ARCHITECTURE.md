@@ -4,6 +4,47 @@ This document is the canonical architecture guide for the repository.
 It records the long-lived design boundaries that should survive feature work, refactors, and UI changes.
 Future architecture decisions should extend this file instead of creating separate top-level notes.
 
+## Daemon lock lifecycle
+
+The managed daemon has an explicit security lifecycle:
+
+```text
+START → LOCKED → UnlockCommand → UNLOCKED → LockCommand → LOCKED
+```
+
+`LockCommand` is an idempotent runtime lock, not a screen lock, shutdown, or
+self-destruct operation. It revokes authenticated sessions and UI focus before
+stopping profile-scoped workers, peer sessions, Tor, database access, and key
+state. IPC stays available so the process can accept a later `UnlockCommand`,
+which constructs a fresh profile runtime.
+
+Secure overwrite is best-effort on copy-on-write filesystems and SSDs with
+wear-leveling. Metor closes the database and overwrites/removes its runtime
+mirror, but full media-level erasure depends on the host storage stack; full-disk
+encryption remains recommended.
+
+## Messages: delivery and content
+
+Messages have two independent dimensions. `Delivery` is either `LIVE`
+(ephemeral interactive delivery, with a temporary reliability spool) or `DROP`
+(persistent asynchronous delivery). `ContentType` is currently only `TEXT`,
+represented by `TextContent`.
+
+```text
+LIVE + TEXT → ephemeral interactive text
+DROP + TEXT → persistent asynchronous text
+```
+
+The public boundary uses `SendMessageCommand(target, delivery, content,
+msg_id)` and `MessageReceivedEvent(alias, delivery, content, msg_id)`. Fallback
+changes only `Delivery.LIVE` to `Delivery.DROP`; logical identity and content
+remain unchanged.
+
+Future `VOICE`, `FILE`, and `PAYMENT_REQUEST` content types are extension
+examples, not implemented features. Voice and files require a bounded,
+authenticated blob-transfer protocol and reference payloads; binary data must
+not become a permanent Base64-in-NDJSON representation.
+
 ## Purpose
 
 Use this document when you need to answer one of these questions:
@@ -20,6 +61,7 @@ Use this document when you need to answer one of these questions:
 - [API.md](./API.md): Generated reference for the typed IPC contract.
 - [api.schema.json](./api.schema.json): Generated JSON Schema wire contract for the typed IPC DTOs.
 - [GLOSSARY.md](./GLOSSARY.md): Canonical terminology reference for settings namespaces, transport fields, and renamed symbols.
+- [EMBEDDED_UI_CONTRACTS.md](./EMBEDDED_UI_CONTRACTS.md): Embedded frontend ownership, platform ports, projections, recovery rules, and contract matrix.
 - [AUDIT.md](./AUDIT.md): Review checklist for security, OPSEC, concurrency, and architecture risks.
 - [CONTRIBUTE.md](./CONTRIBUTE.md): Coding rules, import boundaries, typing requirements, and formatting standards.
 
@@ -175,7 +217,8 @@ The canonical wire sequence is:
 A `delivery_only` handshake hint — an outbound connect that must not surface an
 accept prompt at the peer — was considered and deliberately rejected. It only
 makes sense for an automatic live-connect path, and automatic live connect was
-itself rejected: the UI sends `MsgCommand` (live) or `SendDropCommand` (drop)
+itself rejected: the UI sends `SendMessageCommand` with `Delivery.LIVE` or
+`Delivery.DROP`
 and never asks the daemon to auto-establish a session. A flag without a caller
 would be dead protocol surface, so it is not implemented. If a future UI
 paradigm reintroduces automatic live connect, this document must be revisited
@@ -317,7 +360,7 @@ It exists to keep reconnect, retunnel, fallback, and durable pending-live handli
    `StateTracker` tracks active live sockets, pending live sockets, outbound attempts, reconnect-grace windows, scheduled auto-reconnect intent, retunnel markers, and the in-memory mirror of per-peer pending live messages.
 
 2. Durable pending outbound live state is daemon-owned too.
-   The message store retains outbound `LIVE_TEXT` rows with `PENDING` status until ACK, terminal fallback conversion, or explicit manual fallback. That durable spool is the crash-safe source for recoverable live sends.
+   The message store retains outbound rows with `delivery = live` and `status = pending` until ACK, terminal fallback conversion, or explicit manual fallback. That durable spool is the crash-safe source for recoverable live sends.
 
 3. Live lifecycle state is derived, not stored redundantly.
    For each peer the daemon derives one `LiveTransportState`: `DISCONNECTED`, `CONNECTING`, `PENDING`, `CONNECTED`, or `RETUNNELING`.
@@ -326,7 +369,7 @@ It exists to keep reconnect, retunnel, fallback, and durable pending-live handli
    The UI may mark one peer as `LIVE`, `SWITCHING`, `RECONNECTING`, or `DROP`, but that state is only a rendering/send-policy mirror driven by typed IPC events.
 
 5. The UI does not own a recoverable outgoing buffer.
-   When the user types while the chat still routes through live semantics, the UI sends `MsgCommand` immediately and renders a pending self-message. Whether that message is sent now, durably deferred, replayed after recovery, or promoted to drop is daemon logic.
+   When the user types while the chat still routes through live semantics, the UI sends `SendMessageCommand(delivery=Delivery.LIVE, content=TextContent(...))` immediately and renders a pending self-message. Whether that message is sent now, durably deferred, replayed after recovery, or promoted to drop is daemon logic.
 
 6. `StateTracker` keeps only the fast in-memory replay mirror.
    The in-memory pending-live map exists to replay over the current process without rereading SQLite for every ACK or replay step, but it is not the sole source of truth.
@@ -464,7 +507,7 @@ The UI may translate them differently, but it must not reinterpret them.
    Pending live messages should survive recoverable grace, retunnel, and auto-reconnect paths and only become drops when the daemon concludes that the live recovery path is terminal or when the user explicitly forces fallback.
 
 8. Clean daemon shutdown is also a terminal decision point.
-   If `daemon.fallback_to_drop` is enabled, the daemon finalizes any remaining durable pending live rows into `DROP_TEXT` before shutdown. If fallback-to-drop is disabled, those durable pending live rows remain pending for a future live recovery.
+   If `daemon.fallback_to_drop` is enabled, the daemon changes any remaining durable pending rows from `delivery = live` to `delivery = drop` before shutdown. If fallback-to-drop is disabled, those durable pending live rows remain pending for a future live recovery.
 
 9. A seamless replacement over a still-connected old socket is still a recovery success.
    It must preserve retained pending live messages and replay them over the replacement socket rather than forcing fallback because the swap happened quickly.

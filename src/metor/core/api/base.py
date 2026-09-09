@@ -137,6 +137,29 @@ def _coerce_and_validate(
                     if not isinstance(value, (list, dict)):
                         raise TypeError()
                     coerced[key] = value
+                elif (
+                    isinstance(expected_type, type)
+                    and dataclasses.is_dataclass(expected_type)
+                    and isinstance(value, dict)
+                ):
+                    nested_keys = {field.name for field in dataclasses.fields(expected_type)}
+                    _reject_unknown_fields(expected_type, value, nested_keys, '')
+                    nested_kwargs = {
+                        nested_key: nested_value
+                        for nested_key, nested_value in value.items()
+                        if nested_key in nested_keys
+                        and dataclasses.fields(expected_type)[
+                            next(
+                                index
+                                for index, field in enumerate(dataclasses.fields(expected_type))
+                                if field.name == nested_key
+                            )
+                        ].init
+                    }
+                    coerced[key] = _instantiate_validated_message(
+                        expected_type,
+                        _coerce_and_validate(expected_type, nested_kwargs),
+                    )
                 elif isinstance(expected_type, type) and not isinstance(
                     value, expected_type
                 ):

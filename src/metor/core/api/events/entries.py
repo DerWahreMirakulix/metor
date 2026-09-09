@@ -10,6 +10,7 @@ from metor.core.api.codes import (
     MessageStatusCode,
     PendingConnectionReasonCode,
 )
+from metor.core.api.content import Delivery, MessageContent, TextContent
 
 
 EnumT = TypeVar('EnumT', bound=Enum)
@@ -37,13 +38,17 @@ class MessageEntry:
 
     direction: MessageDirectionCode
     status: MessageStatusCode
-    payload: str
+    delivery: Delivery
+    content: MessageContent
     timestamp: str
 
     def __post_init__(self) -> None:
         """Coerces string-backed direction and status fields to their typed enum equivalents."""
         self.direction = _coerce_enum(MessageDirectionCode, self.direction)
         self.status = _coerce_enum(MessageStatusCode, self.status)
+        self.delivery = _coerce_enum(Delivery, self.delivery)
+        if isinstance(self.content, dict):
+            self.content = TextContent(text=str(self.content['text']))
 
 
 @dataclass
@@ -51,9 +56,22 @@ class UnreadMessageEntry:
     """Represents one unread message awaiting explicit consume."""
 
     timestamp: str
-    payload: str
-    is_drop: bool
+    delivery: Delivery
+    content: MessageContent
     msg_id: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        """Casts JSON-shaped nested content to its typed DTO.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self.delivery = _coerce_enum(Delivery, self.delivery)
+        if isinstance(self.content, dict):
+            self.content = TextContent(text=str(self.content['text']))
 
 
 @dataclass

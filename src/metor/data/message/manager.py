@@ -4,13 +4,13 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from metor.utils import Constants
+from metor.core.api import ContentType, Delivery
 
 from metor.data.message.models import (
     MessageClearOperationType,
     MessageClearResult,
     MessageDirection,
     MessageStatus,
-    MessageType,
     QueuedMessageResult,
     StoredMessageRecord,
     UnreadInboxSummaryRecord,
@@ -43,7 +43,8 @@ class MessageManager:
         self,
         contact_onion: str,
         direction: MessageDirection,
-        msg_type: MessageType,
+        delivery: Delivery,
+        content_type: ContentType,
         payload: str,
         status: MessageStatus,
         msg_id: Optional[str] = None,
@@ -55,7 +56,8 @@ class MessageManager:
         Args:
             contact_onion (str): The onion address of the remote peer.
             direction (MessageDirection): Whether the message is inbound or outbound.
-            msg_type (MessageType): The type of payload.
+            delivery (Delivery): Live or persistent delivery semantics.
+            content_type (ContentType): The typed payload discriminator.
             payload (str): The actual message content.
             status (MessageStatus): The initial persisted status.
             msg_id (Optional[str]): Stable logical message id.
@@ -67,7 +69,8 @@ class MessageManager:
         return self._messages.queue_message(
             contact_onion=contact_onion,
             direction=direction,
-            msg_type=msg_type,
+            delivery=delivery,
+            content_type=content_type,
             payload=payload,
             status=status,
             msg_id=msg_id,
@@ -97,7 +100,7 @@ class MessageManager:
         Returns:
             int: The unread inbound live-message backlog for the peer.
         """
-        return self._messages.count_unread_by_type(contact_onion, MessageType.LIVE_TEXT)
+        return self._messages.count_unread_by_delivery(contact_onion, Delivery.LIVE)
 
     def get_unread_drop_count(self, contact_onion: str) -> int:
         """
@@ -109,7 +112,7 @@ class MessageManager:
         Returns:
             int: The unread inbound drop-message backlog for the peer.
         """
-        return self._messages.count_unread_by_type(contact_onion, MessageType.DROP_TEXT)
+        return self._messages.count_unread_by_delivery(contact_onion, Delivery.DROP)
 
     def get_pending_outbox(self) -> List[Tuple[int, str, str, str, str, str]]:
         """

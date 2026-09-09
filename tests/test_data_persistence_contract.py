@@ -11,12 +11,12 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.data import ContactManager, HistoryActor, HistoryEvent, HistoryManager
+from metor.core.api import ContentType, Delivery
 from metor.data.contact import ContactOperationType
 from metor.data.message import (
     MessageDirection,
     MessageManager,
     MessageStatus,
-    MessageType,
 )
 from metor.data.profile import ProfileManager
 from metor.data.sql import SqlManager
@@ -226,7 +226,8 @@ class DataPersistenceContractTests(unittest.TestCase):
         self._mm.queue_message(
             contact_onion=kept_onion,
             direction=MessageDirection.IN,
-            msg_type=MessageType.DROP_TEXT,
+            delivery=Delivery.DROP,
+            content_type=ContentType.TEXT,
             payload='hello',
             status=MessageStatus.UNREAD,
             msg_id='msg-1',
@@ -285,7 +286,8 @@ class DataPersistenceContractTests(unittest.TestCase):
         self._mm.queue_message(
             contact_onion=onion,
             direction=MessageDirection.IN,
-            msg_type=MessageType.DROP_TEXT,
+            delivery=Delivery.DROP,
+            content_type=ContentType.TEXT,
             payload='hello e2e',
             status=MessageStatus.UNREAD,
             msg_id='e2e-consume-msg-1',
@@ -296,7 +298,7 @@ class DataPersistenceContractTests(unittest.TestCase):
         self.assertEqual(len(rows[0]), 5)
         self.assertEqual(rows[0][4], 'e2e-consume-msg-1')
         self.assertEqual(str(rows[0][2]), 'hello e2e')
-        self.assertEqual(str(rows[0][1]), MessageType.DROP_TEXT.value)
+        self.assertEqual(str(rows[0][1]), Delivery.DROP.value)
 
     def test_add_contact_rejects_invalid_onion_format(self) -> None:
         """
