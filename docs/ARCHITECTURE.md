@@ -90,16 +90,40 @@ wrong passwords, and authentication failures are rejected. The keyslot never
 stores the password, KEK, derived domain keys, or plaintext PMK. Argon2id uses
 libsodium's interactive limits (operation limit `2` and a 64 MiB memory limit).
 These parameters provide a memory-hard interactive unlock without applying the much larger sensitive
-profile to every desktop daemon start. The numeric values are persisted so the
-format is explicit, but this version accepts only the compiled supported values
-to prevent attacker-controlled resource-exhaustion parameters.
+profile to every desktop daemon start. Unlock derives the KEK from the persisted
+parameters, after validating the supported algorithm/version and bounded
+Argon2id operation and memory limits. Future recommended defaults can therefore
+change without invalidating existing valid keyslots, while hostile metadata
+cannot request unbounded work or memory.
 
 Keyslot creation and password rewrap use an owner-only temporary file, flush and
 `fsync`, then atomic replacement. Rewrap authenticates the old password and
 wraps the same PMK with a new salt and nonce. It does not re-encrypt SQLCipher,
 identity data, or blobs. A failed rewrap leaves the prior valid keyslot in place.
-The internal rewrap capability exists; a public `ChangePasswordCommand` remains
-future API work.
+`ChangePasswordCommand(current_password, new_password)` requires explicit
+current-password verification even from an authenticated unlocked daemon session;
+this prevents a separate local IPC client from changing another session's
+profile password. Password-bearing commands suppress dataclass `repr` output.
+
+`PasswordKeyProtector.destroy` overwrites and `fsync`s its regular keyslot file,
+unlinks it, and synchronizes the parent directory where supported. This is
+best-effort software destruction only: flash wear-leveling, copy-on-write,
+snapshots, backups, and remapped blocks can retain historical copies.
+
+### Security-mode migration
+
+Security-mode migration is a multi-resource staged transaction. It copies the
+active profile to a sibling staged generation, transforms the staged database,
+keyslot, private secret representation, and metadata, then reopens and validates
+that staged target. The active source is not modified during preparation.
+
+The explicit durable commit point is the atomic replacement of a sibling
+migration journal from `prepared` to `committed`, after the complete staged tree
+has been synchronized. Recovery reads this journal before opening a profile:
+`prepared` discards the staged tree and continues using the unchanged source;
+`committed` completes generation activation and then performs best-effort old
+source cleanup. Cleanup failure after commit leaves the target authoritative and
+usable; it never triggers destructive rollback.
 
 ### Profile layout
 
@@ -173,6 +197,12 @@ SQLCipher access, clears any injected runtime keys, calls
 key-first ordering. If cleanup fails after key destruction, nothing recreates
 protected key material.
 
+`daemon.self_destruct_requires_unlock` defaults to `true`, so locked daemons
+reject self-destruction. Embedded deployments may set it to `false` to permit a
+locked destructive IPC command. That choice creates a deliberate availability
+and denial-of-service risk: any actor able to issue the local IPC command can
+destroy the profile, so it requires appropriate device and IPC access controls.
+
 `secure_remove_path` remains defense in depth. Portable Python overwrite and
 unlink cannot guarantee physical erasure on SSD, SD, flash, copy-on-write,
 snapshotted, journaled, remapped, or backed-up storage. The software password
@@ -184,13 +214,13 @@ protector can make purge stronger by destroying a non-exportable wrapping key.
 
 ### Plaintext and debug modes
 
-Plaintext local profiles remain available for explicit development and testing
-workflows, but are not appropriate for hardened or embedded deployment. They
-have no PMK, no password-backed local unlock, no encrypted external blob store,
-and no cryptographic-erasure guarantee; purge is filesystem cleanup only. The
-first hardened device policy should reject plaintext profiles. Removing the
-mode entirely before public release remains the preferred product decision if
-development workflows can move to disposable encrypted profiles.
+Plaintext local profiles remain an explicit DEVELOPMENT/DEBUG option for testing
+workflows, but are not appropriate for normal or hardened deployment. They have
+no PMK, no at-rest confidentiality, no password-backed local unlock, no
+encrypted external blob store, and no cryptographic-erasure guarantee; purge is
+filesystem cleanup only. `daemon.allow_plaintext_profiles` defaults to `false`;
+development environments must deliberately enable it, while hardened/device
+builds keep it disabled to prohibit plaintext profile creation and migration.
 
 `daemon.enable_runtime_db_mirror` is disabled by default and is explicitly a
 DEBUG/DEVELOPMENT-ONLY facility. When enabled it writes a plaintext database

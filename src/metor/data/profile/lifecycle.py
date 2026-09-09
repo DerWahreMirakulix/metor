@@ -1,9 +1,13 @@
-"""Lifecycle operations for local profile creation, mutation, and cleanup."""
+"""Lifecycle operations for local profile creation, mutation, cleanup, and recovery."""
 
+import json
+import os
+import secrets
+import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
-from metor.data import DatabaseCorruptedError, SqlManager
+from metor.data import DatabaseCorruptedError, SettingKey, Settings, SqlManager
 from metor.utils import Constants, secure_remove_path, secure_shred_file
 
 # Local Package Imports
@@ -14,6 +18,204 @@ from metor.data.profile.models import (
     ProfileSecurityMode,
 )
 from metor.data.profile.support import normalize_profile_name
+
+_MIGRATION_JOURNAL_VERSION = 1
+_MIGRATION_PREPARED = 'prepared'
+_MIGRATION_COMMITTED = 'committed'
+
+
+def _migration_checkpoint(_stage: str) -> None:
+    """Provides a private no-op boundary for deterministic lifecycle fault tests.
+
+    Args:
+        _stage (str): Named migration transition.
+
+    Returns:
+        None
+    """
+
+
+def _migration_paths(profile_name: str) -> tuple[Path, Path, Path]:
+    """Returns the durable journal and sibling generation paths for one profile.
+
+    Args:
+        profile_name (str): Validated local profile name.
+
+    Returns:
+        tuple[Path, Path, Path]: Journal, staged target, and source-backup paths.
+    """
+    prefix = f'.{profile_name}.security-migration'
+    return (
+        Constants.DATA / f'{prefix}.json',
+        Constants.DATA / f'{prefix}.staged',
+        Constants.DATA / f'{prefix}.backup',
+    )
+
+
+def _fsync_directory(directory: Path) -> None:
+    """Best-effort syncs one directory after a durable filesystem transition.
+
+    Args:
+        directory (Path): Existing directory to synchronize.
+
+    Returns:
+        None
+    """
+    if os.name == 'nt':
+        return
+    try:
+        directory_fd = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError:
+        pass
+
+
+def _fsync_tree(path: Path) -> None:
+    """Best-effort syncs regular files and directories in a staged profile tree.
+
+    Args:
+        path (Path): Staged profile root or child path.
+
+    Returns:
+        None
+    """
+    if path.is_symlink():
+        return
+    if path.is_file():
+        try:
+            with path.open('rb') as handle:
+                os.fsync(handle.fileno())
+        except OSError:
+            pass
+        return
+    if path.is_dir():
+        for child in path.iterdir():
+            _fsync_tree(child)
+        _fsync_directory(path)
+
+
+def _write_migration_journal(journal_path: Path, profile_name: str, state: str) -> None:
+    """Atomically persists one explicit security-migration journal state.
+
+    Args:
+        journal_path (Path): Sibling journal path.
+        profile_name (str): Validated local profile name.
+        state (str): Prepared or committed migration state.
+
+    Returns:
+        None
+    """
+    document = json.dumps(
+        {
+            'profile': profile_name,
+            'state': state,
+            'version': _MIGRATION_JOURNAL_VERSION,
+        },
+        sort_keys=True,
+        separators=(',', ':'),
+    ).encode('utf-8')
+    journal_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temp_path = journal_path.parent / f'.{journal_path.name}.{secrets.token_hex(8)}.tmp'
+    try:
+        with temp_path.open('xb') as handle:
+            handle.write(document)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temp_path.chmod(0o600)
+        temp_path.replace(journal_path)
+        journal_path.chmod(0o600)
+        _fsync_directory(journal_path.parent)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def _read_migration_journal(journal_path: Path, profile_name: str) -> str:
+    """Reads one strict migration journal without trusting path-like metadata.
+
+    Args:
+        journal_path (Path): Existing sibling journal path.
+        profile_name (str): Expected validated local profile name.
+
+    Raises:
+        ValueError: If the durable migration journal is malformed or unexpected.
+
+    Returns:
+        str: The validated migration state.
+    """
+    try:
+        document = json.loads(journal_path.read_text('utf-8'))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError('Profile security migration journal is unreadable.') from exc
+    if not isinstance(document, dict) or set(document) != {
+        'profile',
+        'state',
+        'version',
+    }:
+        raise ValueError('Profile security migration journal is invalid.')
+    typed_document = cast(dict[str, object], document)
+    if (
+        typed_document['version'] != _MIGRATION_JOURNAL_VERSION
+        or typed_document['profile'] != profile_name
+        or typed_document['state'] not in (_MIGRATION_PREPARED, _MIGRATION_COMMITTED)
+    ):
+        raise ValueError('Profile security migration journal is unsupported.')
+    return cast(str, typed_document['state'])
+
+
+def recover_profile_security_migration(profile_name: str) -> None:
+    """Recovers a staged profile migration according to its explicit journal state.
+
+    A prepared journal means the source remains authoritative and its staged target
+    is discarded. A committed journal means the staged target is authoritative and
+    activation is completed before any profile is opened.
+
+    Args:
+        profile_name (str): Local profile name whose sibling journal is checked.
+
+    Raises:
+        ValueError: If committed migration state cannot be completed safely.
+
+    Returns:
+        None
+    """
+    safe_name = normalize_profile_name(profile_name)
+    if not safe_name:
+        return
+    journal_path, staged_path, backup_path = _migration_paths(safe_name)
+    if not journal_path.exists():
+        return
+    state = _read_migration_journal(journal_path, safe_name)
+    source_path = Constants.DATA / safe_name
+
+    if state == _MIGRATION_PREPARED:
+        secure_remove_path(staged_path)
+        journal_path.unlink(missing_ok=True)
+        _fsync_directory(journal_path.parent)
+        return
+
+    if not source_path.exists():
+        if not staged_path.exists():
+            raise ValueError('Committed profile migration is missing its target.')
+        staged_path.replace(source_path)
+        _fsync_directory(source_path.parent)
+    elif staged_path.exists():
+        if backup_path.exists():
+            raise ValueError('Committed profile migration has conflicting generations.')
+        source_path.replace(backup_path)
+        _fsync_directory(source_path.parent)
+        staged_path.replace(source_path)
+        _fsync_directory(source_path.parent)
+
+    try:
+        _migration_checkpoint('during_old_state_cleanup')
+        secure_remove_path(backup_path)
+    except OSError:
+        return
+    journal_path.unlink(missing_ok=True)
+    _fsync_directory(journal_path.parent)
 
 
 def add_profile_folder(
@@ -56,6 +258,16 @@ def add_profile_folder(
             {},
         )
 
+    if (
+        security_mode is ProfileSecurityMode.PLAINTEXT
+        and not Settings.get_bool(SettingKey.ALLOW_PLAINTEXT_PROFILES)
+    ):
+        return ProfileOperationResult(
+            False,
+            ProfileOperationType.PLAINTEXT_PROFILES_DISABLED,
+            {'profile': safe_name},
+        )
+
     target_dir: Path = Constants.DATA / safe_name
     if target_dir.exists():
         return ProfileOperationResult(
@@ -64,6 +276,7 @@ def add_profile_folder(
             {'profile': safe_name},
         )
 
+    recover_profile_security_migration(safe_name)
     pm = ProfileManager(safe_name)
     pm.initialize()
 
@@ -178,6 +391,16 @@ def migrate_profile_security(
             {'profile': safe_name},
         )
 
+    if (
+        target_mode is ProfileSecurityMode.PLAINTEXT
+        and not Settings.get_bool(SettingKey.ALLOW_PLAINTEXT_PROFILES)
+    ):
+        return ProfileOperationResult(
+            False,
+            ProfileOperationType.PLAINTEXT_PROFILES_DISABLED,
+            {'profile': safe_name},
+        )
+
     current_mode: ProfileSecurityMode = pm.get_security_mode()
     if current_mode is target_mode:
         return ProfileOperationResult(
@@ -193,12 +416,9 @@ def migrate_profile_security(
         new_password if target_mode is ProfileSecurityMode.ENCRYPTED else None
     )
 
-    key_manager = KeyManager(pm, old_password)
     db_path: Path = pm.paths.get_db_file()
-    config_dir: Path = pm.paths.get_config_dir()
-    runtime_db_path: Path = config_dir / Constants.DB_RUNTIME_FILE
-    temp_db_path: Path = config_dir / f'{Constants.DB_FILE}.security-migration'
-    backup_db_path: Path = config_dir / f'{Constants.DB_FILE}.security-backup'
+    journal_path, staged_path, backup_path = _migration_paths(safe_name)
+    key_manager = KeyManager(pm, old_password)
 
     if current_mode is ProfileSecurityMode.ENCRYPTED and (
         key_manager.has_any_key_material() or db_path.exists()
@@ -235,90 +455,97 @@ def migrate_profile_security(
             },
         )
 
-    secure_shred_file(temp_db_path)
-    secure_shred_file(backup_db_path)
-
     try:
+        _write_migration_journal(journal_path, safe_name, _MIGRATION_PREPARED)
+        secure_remove_path(staged_path)
+        secure_remove_path(backup_path)
+        shutil.copytree(pm.paths.get_config_dir(), staged_path, symlinks=True)
+
+        staged_pm = ProfileManager(staged_path.name)
+        staged_db_path = staged_pm.paths.get_db_file()
+        _migration_checkpoint('before_target_db_creation')
+        secure_shred_file(staged_db_path)
         current_db_key: Optional[bytes] = (
             key_manager.get_database_key()
-            if current_mode is ProfileSecurityMode.ENCRYPTED
+            if current_mode is ProfileSecurityMode.ENCRYPTED and db_path.exists()
             else None
         )
-        if target_mode is ProfileSecurityMode.ENCRYPTED:
-            key_manager.rewrite_password_protection(target_password)
-        target_db_key: Optional[bytes] = (
-            key_manager.get_database_key()
-            if target_mode is ProfileSecurityMode.ENCRYPTED
-            else None
-        )
+        staged_key_manager = KeyManager(staged_pm, old_password)
+        try:
+            _migration_checkpoint('during_secret_transformation')
+            if target_mode is ProfileSecurityMode.ENCRYPTED:
+                staged_key_manager.rewrite_password_protection(target_password or '')
+                staged_pm.config.set(
+                    ProfileConfigKey.SECURITY_MODE,
+                    target_mode.value,
+                    allow_mutating_structural_keys=True,
+                )
+                target_db_key: Optional[bytes] = staged_key_manager.get_database_key()
+                _migration_checkpoint('after_target_keyslot_creation')
+            else:
+                if staged_key_manager.has_metor_key():
+                    staged_key_manager.rewrite_password_protection(None)
+                else:
+                    staged_key_manager.clear_sensitive_state()
+                    secure_shred_file(staged_pm.paths.get_keyslot_file())
+                staged_pm.config.set(
+                    ProfileConfigKey.SECURITY_MODE,
+                    target_mode.value,
+                    allow_mutating_structural_keys=True,
+                )
+                target_db_key = None
 
-        if db_path.exists():
-            SqlManager.export_database_copy(
-                db_path,
-                temp_db_path,
-                current_key=current_db_key,
-                target_key=target_db_key,
-            )
+            if db_path.exists():
+                _migration_checkpoint('during_db_copy')
+                SqlManager.export_database_copy(
+                    db_path,
+                    staged_db_path,
+                    current_key=current_db_key,
+                    target_key=target_db_key,
+                )
+            SqlManager.close_connection(staged_db_path)
+            _migration_checkpoint('after_target_db_creation')
 
-        if target_mode is ProfileSecurityMode.PLAINTEXT:
-            key_manager.rewrite_password_protection(None)
+            validation_key_manager = KeyManager(staged_pm, target_password)
+            try:
+                _migration_checkpoint('before_validation')
+                validated_key: Optional[bytes] = (
+                    validation_key_manager.get_database_key()
+                    if target_mode is ProfileSecurityMode.ENCRYPTED
+                    else None
+                )
+                _migration_checkpoint('during_validation')
+                SqlManager(staged_db_path, staged_pm.config, validated_key)
+                SqlManager.close_connection(staged_db_path)
+                if validation_key_manager.has_metor_key():
+                    validation_key_manager.get_metor_key()
+                staged_pm.validate_integrity()
+            finally:
+                validation_key_manager.clear_sensitive_state()
+        finally:
+            staged_key_manager.clear_sensitive_state()
 
-        SqlManager.close_connection(db_path)
-        SqlManager.close_connection(temp_db_path)
-
-        if db_path.exists():
-            db_path.replace(backup_db_path)
-
-        if temp_db_path.exists():
-            temp_db_path.replace(db_path)
-
-        secure_shred_file(runtime_db_path)
-        pm.config.set(
-            ProfileConfigKey.SECURITY_MODE,
-            target_mode.value,
-            allow_mutating_structural_keys=True,
-        )
+        _fsync_tree(staged_path)
+        _migration_checkpoint('immediately_before_commit')
+        _write_migration_journal(journal_path, safe_name, _MIGRATION_COMMITTED)
+        _migration_checkpoint('immediately_after_commit')
+        recover_profile_security_migration(safe_name)
     except DatabaseCorruptedError as exc:
-        secure_shred_file(temp_db_path)
+        key_manager.clear_sensitive_state()
         return ProfileOperationResult(
             False,
             ProfileOperationType.SECURITY_MIGRATION_FAILED,
             {'profile': safe_name, 'reason': str(exc)},
         )
     except Exception as exc:
-        secure_shred_file(temp_db_path)
-
-        if backup_db_path.exists():
-            try:
-                SqlManager.close_connection(db_path)
-                secure_shred_file(db_path)
-                backup_db_path.replace(db_path)
-            except Exception:
-                pass
-
-        try:
-            rollback_key_manager = KeyManager(pm, target_password)
-            rollback_key_manager.rewrite_password_protection(old_password)
-        except Exception:
-            pass
-
-        try:
-            pm.config.set(
-                ProfileConfigKey.SECURITY_MODE,
-                current_mode.value,
-                allow_mutating_structural_keys=True,
-            )
-        except Exception:
-            pass
-
+        key_manager.clear_sensitive_state()
         return ProfileOperationResult(
             False,
             ProfileOperationType.SECURITY_MIGRATION_FAILED,
             {'profile': safe_name, 'reason': str(exc) or 'Migration failed.'},
         )
 
-    if backup_db_path.exists():
-        secure_shred_file(backup_db_path)
+    key_manager.clear_sensitive_state()
 
     return ProfileOperationResult(
         True,
@@ -437,12 +664,16 @@ def rename_profile_folder(old_name: str, new_name: str) -> ProfileOperationResul
     )
 
 
-def clear_profile_db(name: str) -> ProfileOperationResult:
+def clear_profile_db(
+    name: str,
+    master_password: Optional[str] = None,
+) -> ProfileOperationResult:
     """
     Clears the SQLite database for one profile.
 
     Args:
         name (str): The target profile name.
+        master_password (Optional[str]): Required credential for encrypted storage.
 
     Returns:
         ProfileOperationResult: Structured local outcome for the CLI layer.
@@ -476,20 +707,32 @@ def clear_profile_db(name: str) -> ProfileOperationResult:
             {'profile': safe_name},
         )
 
+    key_manager = None
     try:
-        sql = SqlManager(db_path, pm.config)
+        encryption_key: Optional[bytes] = None
+        if pm.uses_encrypted_storage():
+            from metor.core.key import KeyManager
+
+            key_manager = KeyManager(pm, master_password)
+            encryption_key = key_manager.get_database_key()
+        sql = SqlManager(db_path, pm.config, encryption_key)
         sql.clear_all_profile_data()
+        SqlManager.close_connection(db_path)
         return ProfileOperationResult(
             True,
             ProfileOperationType.DATABASE_CLEARED,
             {'profile': safe_name},
         )
     except Exception:
+        SqlManager.close_connection(db_path)
         return ProfileOperationResult(
             False,
             ProfileOperationType.DATABASE_CLEAR_FAILED,
             {},
         )
+    finally:
+        if key_manager is not None:
+            key_manager.clear_sensitive_state()
 
 
 def purge_all_profile_data() -> None:

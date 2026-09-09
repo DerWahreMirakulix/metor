@@ -126,6 +126,32 @@
         "proof"
       ]
     },
+    "ChangePasswordCommand": {
+      "title": "ChangePasswordCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "current_password": {
+          "type": "string"
+        },
+        "new_password": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "current_password",
+        "new_password"
+      ]
+    },
     "ClearContactsCommand": {
       "title": "ClearContactsCommand",
       "type": "object",
@@ -3117,6 +3143,22 @@
         }
       }
     },
+    "InvalidNewPasswordEvent": {
+      "title": "InvalidNewPasswordEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
     "InvalidPasswordEvent": {
       "title": "InvalidPasswordEvent",
       "type": "object",
@@ -3643,6 +3685,54 @@
       "required": [
         "alias"
       ]
+    },
+    "PasswordChangeFailedEvent": {
+      "title": "PasswordChangeFailedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PasswordChangeUnsupportedEvent": {
+      "title": "PasswordChangeUnsupportedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PasswordChangedEvent": {
+      "title": "PasswordChangedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
     },
     "PeerAnonymizedEvent": {
       "title": "PeerAnonymizedEvent",
@@ -4658,6 +4748,9 @@
     "authenticate_session": {
       "$ref": "#/definitions/AuthenticateSessionCommand"
     },
+    "change_password": {
+      "$ref": "#/definitions/ChangePasswordCommand"
+    },
     "clear_contacts": {
       "$ref": "#/definitions/ClearContactsCommand"
     },
@@ -4969,6 +5062,9 @@
     "invalid_config_key": {
       "$ref": "#/definitions/InvalidConfigKeyEvent"
     },
+    "invalid_new_password": {
+      "$ref": "#/definitions/InvalidNewPasswordEvent"
+    },
     "invalid_password": {
       "$ref": "#/definitions/InvalidPasswordEvent"
     },
@@ -5022,6 +5118,15 @@
     },
     "onion_in_use": {
       "$ref": "#/definitions/OnionInUseEvent"
+    },
+    "password_change_failed": {
+      "$ref": "#/definitions/PasswordChangeFailedEvent"
+    },
+    "password_change_unsupported": {
+      "$ref": "#/definitions/PasswordChangeUnsupportedEvent"
+    },
+    "password_changed": {
+      "$ref": "#/definitions/PasswordChangedEvent"
     },
     "peer_anonymized": {
       "$ref": "#/definitions/PeerAnonymizedEvent"

@@ -28,6 +28,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [AddContactCommand](#addcontactcommand)
 - [AddProfileCommand](#addprofilecommand)
 - [AuthenticateSessionCommand](#authenticatesessioncommand)
+- [ChangePasswordCommand](#changepasswordcommand)
 - [ClearContactsCommand](#clearcontactscommand)
 - [ClearHistoryCommand](#clearhistorycommand)
 - [ClearMessagesCommand](#clearmessagescommand)
@@ -134,6 +135,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [InitEvent](#initevent)
 - [InternalErrorEvent](#internalerrorevent)
 - [InvalidConfigKeyEvent](#invalidconfigkeyevent)
+- [InvalidNewPasswordEvent](#invalidnewpasswordevent)
 - [InvalidPasswordEvent](#invalidpasswordevent)
 - [InvalidSettingKeyEvent](#invalidsettingkeyevent)
 - [InvalidTargetEvent](#invalidtargetevent)
@@ -152,6 +154,9 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [NoPendingConnectionEvent](#nopendingconnectionevent)
 - [NoPendingLiveMessagesEvent](#nopendinglivemessagesevent)
 - [OnionInUseEvent](#onioninuseevent)
+- [PasswordChangeFailedEvent](#passwordchangefailedevent)
+- [PasswordChangeUnsupportedEvent](#passwordchangeunsupportedevent)
+- [PasswordChangedEvent](#passwordchangedevent)
 - [PeerAnonymizedEvent](#peeranonymizedevent)
 - [PeerCantDeleteActiveEvent](#peercantdeleteactiveevent)
 - [PeerNotFoundEvent](#peernotfoundevent)
@@ -272,6 +277,30 @@ Authenticates the current IPC session using one daemon-issued proof challenge.
 {
   "command_type": "authenticate_session",
   "proof": "string"
+}
+```
+
+---
+
+### `ChangePasswordCommand`
+
+Rewraps an encrypted profile PMK after verifying its current password.
+
+| Field              | Type               | Default  |
+| ------------------ | ------------------ | -------- |
+| `request_id`       | `Union[str, None]` | `None`   |
+| `current_password` | `str`              | Required |
+| `new_password`     | `str`              | Required |
+
+**Wire Value:** `change_password`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "change_password",
+  "current_password": "string",
+  "new_password": "string"
 }
 ```
 
@@ -2638,6 +2667,26 @@ Signals that a configuration key was invalid.
 
 ---
 
+### `InvalidNewPasswordEvent`
+
+Signals that a replacement password fails validation.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+
+**Wire Value:** `invalid_new_password`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "invalid_new_password"
+}
+```
+
+---
+
 ### `InvalidPasswordEvent`
 
 Signals that the supplied unlock password or session proof was invalid.
@@ -3044,6 +3093,66 @@ Signals that an onion is already bound to a saved contact.
 {
   "event_type": "onion_in_use",
   "alias": "string"
+}
+```
+
+---
+
+### `PasswordChangeFailedEvent`
+
+Signals that password-keyslot replacement could not be committed.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+
+**Wire Value:** `password_change_failed`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "password_change_failed"
+}
+```
+
+---
+
+### `PasswordChangeUnsupportedEvent`
+
+Signals that password change is unavailable for plaintext storage.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+
+**Wire Value:** `password_change_unsupported`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "password_change_unsupported"
+}
+```
+
+---
+
+### `PasswordChangedEvent`
+
+Signals that the current profile PMK was rewrapped successfully.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+
+**Wire Value:** `password_changed`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "password_changed"
 }
 ```
 

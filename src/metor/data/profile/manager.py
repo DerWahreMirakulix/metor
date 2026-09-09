@@ -58,6 +58,9 @@ class ProfileManager:
         )
         self.paths: Paths = Paths(self.profile_name)
         self.config: Config = Config(self.paths)
+        from metor.data.profile.lifecycle import recover_profile_security_migration
+
+        recover_profile_security_migration(self.profile_name)
 
     def validate_integrity(self) -> None:
         """
@@ -491,19 +494,24 @@ class ProfileManager:
         return rename_profile_folder(old_name, new_name)
 
     @classmethod
-    def clear_profile_db(cls, name: str) -> ProfileOperationResult:
+    def clear_profile_db(
+        cls,
+        name: str,
+        master_password: Optional[str] = None,
+    ) -> ProfileOperationResult:
         """
         Clears the SQLite database for a profile.
 
         Args:
             name (str): The profile name.
+            master_password (Optional[str]): Required credential for encrypted storage.
 
         Returns:
             ProfileOperationResult: Structured local outcome for the CLI layer.
         """
         from metor.data.profile.lifecycle import clear_profile_db
 
-        return clear_profile_db(name)
+        return clear_profile_db(name, master_password)
 
     @classmethod
     def purge_all_data(cls) -> None:

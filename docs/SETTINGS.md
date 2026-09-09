@@ -357,6 +357,48 @@ DEBUG/DEVELOPMENT ONLY: exports a plaintext runtime copy of the encrypted databa
 
 ---
 
+#### `daemon.allow_plaintext_profiles`
+
+DEVELOPMENT/DEBUG ONLY: permits creation or migration of local plaintext profiles without cryptographic at-rest protection.
+
+| Property         | Value                                                                                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Type             | `bool`                                                                                                                                   |
+| Default          | `False`                                                                                                                                  |
+| Category         | `Core Daemon`                                                                                                                            |
+| Scope            | `Daemon runtime`                                                                                                                         |
+| Profile Override | `No`                                                                                                                                     |
+| Constraints      | Boolean.                                                                                                                                 |
+| Security Note    | Plaintext profiles have no at-rest confidentiality and no cryptographic erase guarantee. Hardened deployments should keep this disabled. |
+
+**CLI Examples**
+
+- `metor settings get daemon.allow_plaintext_profiles`
+- `metor settings set daemon.allow_plaintext_profiles false`
+
+---
+
+#### `daemon.self_destruct_requires_unlock`
+
+Requires an unlocked daemon before accepting self-destruction.
+
+| Property         | Value                                                                                                                                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Type             | `bool`                                                                                                                                                                                   |
+| Default          | `True`                                                                                                                                                                                   |
+| Category         | `Core Daemon`                                                                                                                                                                            |
+| Scope            | `Daemon runtime`                                                                                                                                                                         |
+| Profile Override | `No`                                                                                                                                                                                     |
+| Constraints      | Boolean.                                                                                                                                                                                 |
+| Security Note    | Disabling permits any local IPC actor with command access to destroy a locked profile, creating a destructive availability risk. Use only with appropriate embedded-device IPC controls. |
+
+**CLI Examples**
+
+- `metor settings get daemon.self_destruct_requires_unlock`
+- `metor settings set daemon.self_destruct_requires_unlock true`
+
+---
+
 #### `daemon.auto_accept_contacts`
 
 Automatically accepts incoming live sessions from saved contacts.

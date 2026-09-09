@@ -16,7 +16,7 @@ import nacl.utils
 from nacl.encoding import RawEncoder
 
 from metor.core.api import JsonValue
-from metor.utils import secure_clear_buffer
+from metor.utils import secure_clear_buffer, secure_shred_file
 
 PROFILE_MASTER_KEY_BYTES = 32
 DERIVED_KEY_BYTES = 32
@@ -29,6 +29,10 @@ SECRET_KEY_CONTEXT = b'metor/secrets/v1'
 BLOB_KEY_CONTEXT = b'metor/blobs/v1'
 PASSWORD_KDF_OPSLIMIT = nacl.pwhash.argon2id.OPSLIMIT_INTERACTIVE
 PASSWORD_KDF_MEMLIMIT = nacl.pwhash.argon2id.MEMLIMIT_INTERACTIVE
+MIN_PASSWORD_KDF_OPSLIMIT = nacl.pwhash.argon2id.OPSLIMIT_MIN
+MAX_PASSWORD_KDF_OPSLIMIT = nacl.pwhash.argon2id.OPSLIMIT_MODERATE
+MIN_PASSWORD_KDF_MEMLIMIT = nacl.pwhash.argon2id.MEMLIMIT_MIN
+MAX_PASSWORD_KDF_MEMLIMIT = nacl.pwhash.argon2id.MEMLIMIT_MODERATE
 MAX_KEYSLOT_BYTES = 16_384
 
 
@@ -258,12 +262,19 @@ class PasswordKeyProtector:
         return self._keyslot_path.is_file()
 
     @staticmethod
-    def _derive_kek(credential: str, salt: bytes) -> bytearray:
-        """Derives a Key Encryption Key with interactive Argon2id limits.
+    def _derive_kek(
+        credential: str,
+        salt: bytes,
+        opslimit: int,
+        memlimit: int,
+    ) -> bytearray:
+        """Derives a Key Encryption Key with validated Argon2id limits.
 
         Args:
             credential (str): User unlock password.
             salt (bytes): Per-keyslot random salt.
+            opslimit (int): Persisted Argon2id operation limit.
+            memlimit (int): Persisted Argon2id memory limit in bytes.
 
         Returns:
             bytearray: Mutable KEK buffer.
@@ -277,8 +288,8 @@ class PasswordKeyProtector:
                     nacl.secret.SecretBox.KEY_SIZE,
                     bytes(password),
                     salt,
-                    opslimit=PASSWORD_KDF_OPSLIMIT,
-                    memlimit=PASSWORD_KDF_MEMLIMIT,
+                    opslimit=opslimit,
+                    memlimit=memlimit,
                 )
             )
         finally:
@@ -319,7 +330,12 @@ class PasswordKeyProtector:
             raise ValueError('Profile master key has an invalid length.')
         salt = nacl.utils.random(nacl.pwhash.argon2id.SALTBYTES)
         nonce = nacl.utils.random(nacl.secret.SecretBox.NONCE_SIZE)
-        kek = self._derive_kek(credential, salt)
+        kek = self._derive_kek(
+            credential,
+            salt,
+            PASSWORD_KDF_OPSLIMIT,
+            PASSWORD_KDF_MEMLIMIT,
+        )
         try:
             ciphertext = (
                 nacl.secret.SecretBox(bytes(kek)).encrypt(bytes(pmk), nonce).ciphertext
@@ -392,14 +408,15 @@ class PasswordKeyProtector:
             raise KeyProtectorError('Protected profile key material already exists.')
         self._atomic_write(self._build_document(pmk, credential))
 
-    def _read_document(self) -> tuple[bytes, bytes, bytes]:
+    def _read_document(self) -> tuple[bytes, bytes, bytes, int, int]:
         """Loads and strictly validates supported keyslot metadata.
 
         Args:
             None
 
         Returns:
-            tuple[bytes, bytes, bytes]: Salt, nonce, and ciphertext.
+            tuple[bytes, bytes, bytes, int, int]: Salt, nonce, ciphertext, and
+                validated Argon2id limits.
         """
         if not self.exists:
             raise ProtectedKeyMissingError('Protected profile key material is missing.')
@@ -429,21 +446,27 @@ class PasswordKeyProtector:
             'ciphertext',
         }:
             raise InvalidKeyslotError('Keyslot algorithm fields are invalid.')
+        if kdf['algorithm'] != KEYSLOT_KDF or wrap['algorithm'] != KEYSLOT_WRAP:
+            raise InvalidKeyslotError('Keyslot algorithms are unsupported.')
+        opslimit = kdf['opslimit']
+        memlimit = kdf['memlimit']
         if (
-            kdf['algorithm'] != KEYSLOT_KDF
-            or kdf['opslimit'] != PASSWORD_KDF_OPSLIMIT
-            or kdf['memlimit'] != PASSWORD_KDF_MEMLIMIT
-            or wrap['algorithm'] != KEYSLOT_WRAP
+            type(opslimit) is not int
+            or type(memlimit) is not int
+            or not MIN_PASSWORD_KDF_OPSLIMIT
+            <= opslimit
+            <= MAX_PASSWORD_KDF_OPSLIMIT
+            or not MIN_PASSWORD_KDF_MEMLIMIT
+            <= memlimit
+            <= MAX_PASSWORD_KDF_MEMLIMIT
         ):
-            raise InvalidKeyslotError(
-                'Keyslot algorithms or parameters are unsupported.'
-            )
+            raise InvalidKeyslotError('Keyslot KDF parameters are unsafe.')
         salt = self._decode_field(kdf['salt'], nacl.pwhash.argon2id.SALTBYTES)
         nonce = self._decode_field(wrap['nonce'], nacl.secret.SecretBox.NONCE_SIZE)
         ciphertext = self._decode_field(wrap['ciphertext'])
         if len(ciphertext) != PROFILE_MASTER_KEY_BYTES + nacl.secret.SecretBox.MACBYTES:
             raise InvalidKeyslotError('Protected PMK has an invalid length.')
-        return salt, nonce, ciphertext
+        return salt, nonce, ciphertext, opslimit, memlimit
 
     def unprotect(self, credential: str) -> bytearray:
         """Authenticates the password and recovers the PMK.
@@ -454,8 +477,8 @@ class PasswordKeyProtector:
         Returns:
             bytearray: Recovered PMK.
         """
-        salt, nonce, ciphertext = self._read_document()
-        kek = self._derive_kek(credential, salt)
+        salt, nonce, ciphertext, opslimit, memlimit = self._read_document()
+        kek = self._derive_kek(credential, salt, opslimit, memlimit)
         try:
             try:
                 pmk = nacl.secret.SecretBox(bytes(kek)).decrypt(ciphertext, nonce)
@@ -484,7 +507,10 @@ class PasswordKeyProtector:
             secure_clear_buffer(pmk)
 
     def destroy(self) -> None:
-        """Unlinks and directory-syncs the software keyslot before data cleanup.
+        """Best-effort shreds, unlinks, and directory-syncs the software keyslot.
+
+        This is software-only destruction and cannot guarantee physical erasure on
+        flash, copy-on-write filesystems, snapshots, or backups.
 
         Args:
             None
@@ -492,9 +518,9 @@ class PasswordKeyProtector:
         Returns:
             None
         """
-        if not self._keyslot_path.exists():
+        if not self._keyslot_path.is_file():
             return
-        self._keyslot_path.unlink()
+        secure_shred_file(self._keyslot_path)
         if os.name != 'nt':
             try:
                 directory_fd = os.open(self._keyslot_path.parent, os.O_RDONLY)

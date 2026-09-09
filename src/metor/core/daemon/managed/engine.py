@@ -20,6 +20,7 @@ from pathlib import Path
 
 from metor.core.api import (
     AuthenticateSessionCommand,
+    ChangePasswordCommand,
     create_event,
     IpcEvent,
     IpcCommand,
@@ -67,6 +68,7 @@ from metor.core.api import (
     stamp_request_id,
 )
 from metor.core.key import KeyManager
+from metor.core.profile_keys import InvalidCredentialError
 from metor.core.profile_destruction import destroy_profile_storage
 from metor.core.tor import TorManager
 from metor.data.profile import ProfileManager
@@ -980,6 +982,19 @@ class Daemon:
                 self._disconnect_ipc_client(conn)
             return
 
+        if (
+            isinstance(cmd, SelfDestructCommand)
+            and self._lifecycle is DaemonLifecycle.LOCKED
+            and not self._pm.config.get_bool(SettingKey.SELF_DESTRUCT_REQUIRES_UNLOCK)
+        ):
+            self._lifecycle = DaemonLifecycle.LOCKING
+            self._ipc.send_to(
+                conn,
+                create_event(EventType.SELF_DESTRUCT_INITIATED),
+            )
+            threading.Thread(target=self._nuke_data, daemon=True).start()
+            return
+
         if isinstance(cmd, UnlockCommand):
             if self._lifecycle is DaemonLifecycle.UNLOCKED:
                 self._ipc.send_to(
@@ -1047,6 +1062,27 @@ class Daemon:
 
         if self._lifecycle is not DaemonLifecycle.UNLOCKED:
             self._ipc.send_to(conn, create_event(EventType.DAEMON_LOCKED))
+            return
+
+        if isinstance(cmd, ChangePasswordCommand):
+            if self._km is None or not self._pm.uses_encrypted_storage():
+                self._ipc.send_to(
+                    conn,
+                    create_event(EventType.PASSWORD_CHANGE_UNSUPPORTED),
+                )
+                return
+            if not cmd.new_password:
+                self._ipc.send_to(conn, create_event(EventType.INVALID_NEW_PASSWORD))
+                return
+            try:
+                self._km.change_password(cmd.current_password, cmd.new_password)
+            except (InvalidMasterPasswordError, InvalidCredentialError):
+                self._ipc.send_to(conn, create_event(EventType.INVALID_PASSWORD))
+                return
+            except Exception:
+                self._ipc.send_to(conn, create_event(EventType.PASSWORD_CHANGE_FAILED))
+                return
+            self._ipc.send_to(conn, create_event(EventType.PASSWORD_CHANGED))
             return
 
         if isinstance(cmd, SelfDestructCommand):

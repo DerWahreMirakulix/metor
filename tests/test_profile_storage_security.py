@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.core.daemon.managed.engine import Daemon
+from metor.core.api import CMD_MAP, ChangePasswordCommand, CommandType
 from metor.core.key import KeyManager
 from metor.core.profile_destruction import destroy_profile_storage
 from metor.core.profile_keys import (
@@ -18,6 +19,8 @@ from metor.core.profile_keys import (
     DB_KEY_CONTEXT,
     KEYSLOT_FORMAT,
     KEYSLOT_VERSION,
+    MIN_PASSWORD_KDF_MEMLIMIT,
+    MIN_PASSWORD_KDF_OPSLIMIT,
     PROFILE_MASTER_KEY_BYTES,
     SECRET_KEY_CONTEXT,
     InvalidCredentialError,
@@ -36,7 +39,9 @@ from metor.data.blob import (
     InvalidBlobIdError,
 )
 from metor.data.profile import ProfileConfigKey, ProfileManager, ProfileSecurityMode
+from metor.data.profile import lifecycle as profile_lifecycle
 from metor.data.sql import DatabaseCorruptedError, SqlManager
+from metor.data import Settings
 from metor.utils import Constants
 
 
@@ -281,6 +286,168 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                 before.clear()
                 after.clear()
 
+    def test_keyslot_uses_persisted_bounded_kdf_parameters(self) -> None:
+        """Verifies existing keyslots remain readable when recommended limits change.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            protector = PasswordKeyProtector(Path(temp_dir) / 'keyslot.json')
+            with (
+                patch(
+                    'metor.core.profile_keys.PASSWORD_KDF_OPSLIMIT',
+                    MIN_PASSWORD_KDF_OPSLIMIT,
+                ),
+                patch(
+                    'metor.core.profile_keys.PASSWORD_KDF_MEMLIMIT',
+                    MIN_PASSWORD_KDF_MEMLIMIT,
+                ),
+            ):
+                protector.protect(b'p' * PROFILE_MASTER_KEY_BYTES, 'password')
+            self.assertEqual(
+                bytes(protector.unprotect('password')),
+                b'p' * PROFILE_MASTER_KEY_BYTES,
+            )
+            document = json.loads((Path(temp_dir) / 'keyslot.json').read_text())
+            document['kdf']['memlimit'] = -1
+            (Path(temp_dir) / 'keyslot.json').write_text(json.dumps(document))
+            with self.assertRaises(InvalidKeyslotError):
+                protector.unprotect('password')
+
+    def test_keyslot_destroy_overwrites_before_removal(self) -> None:
+        """Verifies software key destruction delegates overwrite before unlinking.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / 'keyslot.json'
+            protector = self._keyslot(Path(temp_dir), 'password', b'p' * 32)
+            with patch('metor.core.profile_keys.secure_shred_file') as shred:
+                protector.destroy()
+            shred.assert_called_once_with(path)
+
+    def test_key_manager_change_password_preserves_all_derived_keys(self) -> None:
+        """Verifies central password change rewraps, rather than replaces, the PMK.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                Constants.DATA = Path(temp_dir)
+                self.assertTrue(
+                    ProfileManager.add_profile_folder(
+                        'password-change', master_password='old-password'
+                    ).success
+                )
+                pm = ProfileManager('password-change')
+                key_manager = KeyManager(pm, 'old-password')
+                before = (
+                    key_manager.get_database_key(),
+                    key_manager.get_secret_key(),
+                    key_manager.get_blob_key(),
+                )
+                key_manager.change_password('old-password', 'new-password')
+                key_manager.clear_sensitive_state()
+                with self.assertRaises(InvalidCredentialError):
+                    KeyManager(pm, 'old-password').get_database_key()
+                reopened = KeyManager(pm, 'new-password')
+                self.assertEqual(
+                    before,
+                    (
+                        reopened.get_database_key(),
+                        reopened.get_secret_key(),
+                        reopened.get_blob_key(),
+                    ),
+                )
+                reopened.clear_sensitive_state()
+        finally:
+            Constants.DATA = original_data
+
+    def test_offline_clear_profile_db_uses_mode_appropriate_database_access(self) -> None:
+        """Verifies encrypted clears require DB_KEY credentials while plaintext clears do not.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                Constants.DATA = Path(temp_dir)
+                self.assertTrue(
+                    ProfileManager.add_profile_folder(
+                        'encrypted-clear', master_password='clear-password'
+                    ).success
+                )
+                encrypted_pm = ProfileManager('encrypted-clear')
+                encrypted_keys = KeyManager(encrypted_pm, 'clear-password')
+                encrypted_sql = SqlManager(
+                    encrypted_pm.paths.get_db_file(),
+                    encrypted_pm.config,
+                    encrypted_keys.get_database_key(),
+                )
+                encrypted_sql.execute(
+                    'INSERT INTO peers VALUES (?, ?, ?, ?, ?)',
+                    ('onion', 'alias', 'saved', 'created', 'updated'),
+                )
+                SqlManager.close_connection(encrypted_pm.paths.get_db_file())
+                encrypted_keys.clear_sensitive_state()
+                self.assertFalse(
+                    ProfileManager.clear_profile_db('encrypted-clear', 'wrong').success
+                )
+                self.assertTrue(
+                    ProfileManager.clear_profile_db(
+                        'encrypted-clear', 'clear-password'
+                    ).success
+                )
+                verified_keys = KeyManager(encrypted_pm, 'clear-password')
+                verified_sql = SqlManager(
+                    encrypted_pm.paths.get_db_file(),
+                    encrypted_pm.config,
+                    verified_keys.get_database_key(),
+                )
+                self.assertEqual(verified_sql.fetchall('SELECT * FROM peers'), [])
+                SqlManager.close_connection(encrypted_pm.paths.get_db_file())
+                verified_keys.clear_sensitive_state()
+
+                plaintext_pm = self._profile(Constants.DATA, 'plaintext-clear')
+                plaintext_pm.config.set(
+                    ProfileConfigKey.SECURITY_MODE,
+                    ProfileSecurityMode.PLAINTEXT.value,
+                    allow_mutating_structural_keys=True,
+                )
+                plaintext_sql = SqlManager(
+                    plaintext_pm.paths.get_db_file(), plaintext_pm.config
+                )
+                plaintext_sql.execute(
+                    'INSERT INTO peers VALUES (?, ?, ?, ?, ?)',
+                    ('plain-onion', 'plain-alias', 'saved', 'created', 'updated'),
+                )
+                SqlManager.close_connection(plaintext_pm.paths.get_db_file())
+                self.assertTrue(ProfileManager.clear_profile_db('plaintext-clear').success)
+                verified_plain_sql = SqlManager(
+                    plaintext_pm.paths.get_db_file(), plaintext_pm.config
+                )
+                self.assertEqual(verified_plain_sql.fetchall('SELECT * FROM peers'), [])
+                SqlManager.close_connection(plaintext_pm.paths.get_db_file())
+        finally:
+            Constants.DATA = original_data
+
     def test_sqlcipher_uses_derived_key_across_lock_style_release(self) -> None:
         """Verifies profile data opens with DB_KEY rather than the user password.
 
@@ -394,6 +561,285 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                 new_manager.clear_sensitive_state()
         finally:
             Constants.DATA = original_data
+
+    def test_security_migration_stages_both_directions_before_activation(self) -> None:
+        """Verifies both migration directions preserve data and alter mode only at commit.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                Constants.DATA = Path(temp_dir)
+                self.assertTrue(
+                    ProfileManager.add_profile_folder(
+                        'migrated', master_password='old-password'
+                    ).success
+                )
+                pm = ProfileManager('migrated')
+                key_manager = KeyManager(pm, 'old-password')
+                sql = SqlManager(
+                    pm.paths.get_db_file(),
+                    pm.config,
+                    key_manager.get_database_key(),
+                )
+                sql.execute('CREATE TABLE migration_test (value TEXT NOT NULL)')
+                sql.execute('INSERT INTO migration_test VALUES (?)', ('retained',))
+                SqlManager.close_connection(pm.paths.get_db_file())
+                key_manager.clear_sensitive_state()
+
+                with patch.object(Settings, 'get_bool', return_value=True):
+                    plaintext_result = ProfileManager.migrate_profile_security(
+                        'migrated',
+                        ProfileSecurityMode.PLAINTEXT,
+                        current_password='old-password',
+                    )
+                self.assertTrue(plaintext_result.success)
+                plain_pm = ProfileManager('migrated')
+                self.assertTrue(plain_pm.uses_plaintext_storage())
+                plain_sql = SqlManager(plain_pm.paths.get_db_file(), plain_pm.config)
+                self.assertEqual(
+                    plain_sql.fetchall('SELECT value FROM migration_test'),
+                    [('retained',)],
+                )
+                SqlManager.close_connection(plain_pm.paths.get_db_file())
+
+                encrypted_result = ProfileManager.migrate_profile_security(
+                    'migrated',
+                    ProfileSecurityMode.ENCRYPTED,
+                    new_password='new-password',
+                )
+                self.assertTrue(encrypted_result.success)
+                encrypted_pm = ProfileManager('migrated')
+                self.assertTrue(encrypted_pm.uses_encrypted_storage())
+                reopened_key_manager = KeyManager(encrypted_pm, 'new-password')
+                reopened_sql = SqlManager(
+                    encrypted_pm.paths.get_db_file(),
+                    encrypted_pm.config,
+                    reopened_key_manager.get_database_key(),
+                )
+                self.assertEqual(
+                    reopened_sql.fetchall('SELECT value FROM migration_test'),
+                    [('retained',)],
+                )
+                SqlManager.close_connection(encrypted_pm.paths.get_db_file())
+                reopened_key_manager.clear_sensitive_state()
+        finally:
+            Constants.DATA = original_data
+
+    def test_precommit_migration_failure_preserves_encrypted_source(self) -> None:
+        """Verifies a staged migration failure leaves the original password usable.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                Constants.DATA = Path(temp_dir)
+                self.assertTrue(
+                    ProfileManager.add_profile_folder(
+                        'failed', master_password='source-password'
+                    ).success
+                )
+                with (
+                    patch.object(Settings, 'get_bool', return_value=True),
+                    patch.object(
+                        profile_lifecycle,
+                        '_fsync_tree',
+                        side_effect=OSError('injected before commit'),
+                    ),
+                ):
+                    result = ProfileManager.migrate_profile_security(
+                        'failed',
+                        ProfileSecurityMode.PLAINTEXT,
+                        current_password='source-password',
+                    )
+                self.assertFalse(result.success)
+                recovered_pm = ProfileManager('failed')
+                self.assertTrue(recovered_pm.uses_encrypted_storage())
+                KeyManager(recovered_pm, 'source-password').get_database_key()
+                self.assertFalse(
+                    (Constants.DATA / '.failed.security-migration.staged').exists()
+                )
+        finally:
+            Constants.DATA = original_data
+
+    def test_encrypted_to_plaintext_failure_injection_preserves_source_before_commit(
+        self,
+    ) -> None:
+        """Verifies every encrypted-source pre-commit checkpoint preserves unlock.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        stages = (
+            'before_target_db_creation',
+            'during_secret_transformation',
+            'during_db_copy',
+            'after_target_db_creation',
+            'before_validation',
+            'during_validation',
+            'immediately_before_commit',
+        )
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                Constants.DATA = Path(temp_dir)
+                for index, stage in enumerate(stages):
+                    with self.subTest(stage=stage):
+                        name = f'encrypted-failure-{index}'
+                        self.assertTrue(
+                            ProfileManager.add_profile_folder(
+                                name,
+                                master_password='source-password',
+                            ).success
+                        )
+                        with (
+                            patch.object(Settings, 'get_bool', return_value=True),
+                            patch.object(
+                                profile_lifecycle,
+                                '_migration_checkpoint',
+                                side_effect=lambda checkpoint, expected=stage: (
+                                    (_ for _ in ()).throw(OSError(expected))
+                                    if checkpoint == expected
+                                    else None
+                                ),
+                            ),
+                        ):
+                            result = ProfileManager.migrate_profile_security(
+                                name,
+                                ProfileSecurityMode.PLAINTEXT,
+                                current_password='source-password',
+                            )
+                        self.assertFalse(result.success)
+                        source_pm = ProfileManager(name)
+                        self.assertTrue(source_pm.uses_encrypted_storage())
+                        source_keys = KeyManager(source_pm, 'source-password')
+                        self.assertIsNotNone(source_keys.get_database_key())
+                        source_keys.clear_sensitive_state()
+        finally:
+            Constants.DATA = original_data
+
+    def test_plaintext_to_encrypted_keyslot_failure_preserves_source(self) -> None:
+        """Verifies encrypted-target keyslot failure leaves plaintext storage usable.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                Constants.DATA = Path(temp_dir)
+                source_pm = self._profile(Constants.DATA, 'plaintext-failure')
+                source_pm.config.set(
+                    ProfileConfigKey.SECURITY_MODE,
+                    ProfileSecurityMode.PLAINTEXT.value,
+                    allow_mutating_structural_keys=True,
+                )
+                with patch.object(
+                    profile_lifecycle,
+                    '_migration_checkpoint',
+                    side_effect=lambda stage: (
+                        (_ for _ in ()).throw(OSError(stage))
+                        if stage == 'after_target_keyslot_creation'
+                        else None
+                    ),
+                ):
+                    result = ProfileManager.migrate_profile_security(
+                        'plaintext-failure',
+                        ProfileSecurityMode.ENCRYPTED,
+                        new_password='target-password',
+                    )
+                self.assertFalse(result.success)
+                recovered_pm = ProfileManager('plaintext-failure')
+                self.assertTrue(recovered_pm.uses_plaintext_storage())
+                SqlManager(recovered_pm.paths.get_db_file(), recovered_pm.config)
+                SqlManager.close_connection(recovered_pm.paths.get_db_file())
+        finally:
+            Constants.DATA = original_data
+
+    def test_postcommit_failure_recovers_committed_target_and_tolerates_cleanup_failure(
+        self,
+    ) -> None:
+        """Verifies committed generations stay usable after interruption or cleanup loss.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                Constants.DATA = Path(temp_dir)
+                for name, stage in (
+                    ('post-commit', 'immediately_after_commit'),
+                    ('cleanup-failure', 'during_old_state_cleanup'),
+                ):
+                    with self.subTest(stage=stage):
+                        self.assertTrue(
+                            ProfileManager.add_profile_folder(
+                                name,
+                                master_password='source-password',
+                            ).success
+                        )
+                        with (
+                            patch.object(Settings, 'get_bool', return_value=True),
+                            patch.object(
+                                profile_lifecycle,
+                                '_migration_checkpoint',
+                                side_effect=lambda checkpoint, expected=stage: (
+                                    (_ for _ in ()).throw(OSError(expected))
+                                    if checkpoint == expected
+                                    else None
+                                ),
+                            ),
+                        ):
+                            result = ProfileManager.migrate_profile_security(
+                                name,
+                                ProfileSecurityMode.PLAINTEXT,
+                                current_password='source-password',
+                            )
+                        recovered_pm = ProfileManager(name)
+                        self.assertTrue(recovered_pm.uses_plaintext_storage())
+                        self.assertTrue(
+                            result.success
+                            or stage == 'immediately_after_commit'
+                        )
+        finally:
+            Constants.DATA = original_data
+
+    def test_change_password_command_is_registered_and_redacts_credentials(self) -> None:
+        """Verifies the public password-change command has no credential-bearing repr.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        command = ChangePasswordCommand(
+            current_password='current-secret',
+            new_password='replacement-secret',
+        )
+        self.assertIs(CMD_MAP[CommandType.CHANGE_PASSWORD], ChangePasswordCommand)
+        self.assertNotIn('current-secret', repr(command))
+        self.assertNotIn('replacement-secret', repr(command))
 
     def _blob_store(self, root: Path, key: bytes) -> EncryptedBlobStore:
         """Creates one isolated encrypted blob store.

@@ -1,6 +1,7 @@
 """Profile runtime keys plus encrypted Ed25519 identity-key persistence."""
 
 import hashlib
+import hmac
 import secrets
 from pathlib import Path
 from typing import Optional
@@ -329,6 +330,33 @@ class KeyManager:
         old_password = self._password.decode('utf-8')
         self._protector.rewrap(old_password, new_password)
         secure_clear_buffer(self._password)
+        self._password = bytearray(new_password.encode('utf-8'))
+
+    def change_password(self, current_password: str, new_password: str) -> None:
+        """Verifies and atomically rewraps the active PMK under a new password.
+
+        Args:
+            current_password (str): Explicit current profile password.
+            new_password (str): Replacement profile password.
+
+        Raises:
+            InvalidCredentialError: If the profile is plaintext or the current
+                password cannot recover the active PMK.
+
+        Returns:
+            None
+        """
+        if not self._pm.uses_encrypted_storage() or self._profile_keys is None:
+            raise InvalidCredentialError('Password change requires an encrypted profile.')
+        recovered_pmk = self._protector.unprotect(current_password)
+        try:
+            if not hmac.compare_digest(recovered_pmk, self._profile_keys.pmk()):
+                raise InvalidCredentialError('Current profile password is invalid.')
+            self._protector.rewrap(current_password, new_password)
+        finally:
+            secure_clear_buffer(recovered_pmk)
+        if self._password is not None:
+            secure_clear_buffer(self._password)
         self._password = bytearray(new_password.encode('utf-8'))
 
     def rewrite_password_protection(self, new_password: Optional[str]) -> None:

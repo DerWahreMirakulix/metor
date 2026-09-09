@@ -114,6 +114,19 @@ class LockCommand(IpcCommand):
     command_type: CommandType = field(default=CommandType.LOCK, init=False)
 
 
+@register_command(CommandType.CHANGE_PASSWORD)
+@dataclass(repr=False)
+class ChangePasswordCommand(IpcCommand):
+    """Rewraps an encrypted profile PMK after verifying its current password."""
+
+    current_password: str
+    new_password: str
+    command_type: CommandType = field(
+        default=CommandType.CHANGE_PASSWORD,
+        init=False,
+    )
+
+
 @register_command(CommandType.AUTHENTICATE_SESSION)
 @dataclass
 class AuthenticateSessionCommand(IpcCommand):

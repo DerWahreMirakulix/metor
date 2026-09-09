@@ -34,6 +34,7 @@ from metor.core.api import (
     RuntimeErrorCode,
     Delivery,
     SendMessageCommand,
+    ChangePasswordCommand,
     TextContent,
     SelfDestructCommand,
     UnlockCommand,
@@ -41,6 +42,7 @@ from metor.core.api import (
     request_context,
 )
 from metor.core.key import KeyManager
+from metor.core.profile_keys import InvalidCredentialError
 from metor.core.tor import TorManager
 from metor.core.daemon.managed.engine import Daemon
 from metor.core.daemon.managed.factory import (
@@ -2399,6 +2401,67 @@ class DaemonHardeningTests(unittest.TestCase):
             daemon._ipc.send_to.assert_called_once()
             sent_event = daemon._ipc.send_to.call_args.args[1]
             self.assertIs(sent_event.event_type, EventType.DAEMON_LOCKED)
+        finally:
+            conn.close()
+            peer.close()
+
+    def test_locked_daemon_can_self_destruct_when_policy_allows_it(self) -> None:
+        """Verifies locked destruction is available only through explicit policy.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        daemon = self._build_daemon(start_locked=True)
+        daemon._ipc = Mock()
+        daemon._pm.config.get_bool = Mock(return_value=False)
+        conn, peer = socket.socketpair()
+
+        try:
+            with patch('metor.core.daemon.managed.engine.threading.Thread') as thread:
+                daemon._process_ui_command(SelfDestructCommand(), conn)
+
+            thread.assert_called_once()
+            sent_event = daemon._ipc.send_to.call_args.args[1]
+            self.assertIs(sent_event.event_type, EventType.SELF_DESTRUCT_INITIATED)
+        finally:
+            conn.close()
+            peer.close()
+
+    def test_change_password_command_requires_current_password_and_rewraps(self) -> None:
+        """Verifies password changes require explicit current-password verification.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        daemon = self._build_daemon()
+        daemon._ipc = Mock()
+        daemon._km = Mock()
+        conn, peer = socket.socketpair()
+
+        try:
+            command = ChangePasswordCommand(
+                current_password='current-password',
+                new_password='new-password',
+            )
+            daemon._process_ui_command(command, conn)
+            daemon._km.change_password.assert_called_once_with(
+                'current-password',
+                'new-password',
+            )
+            sent_event = daemon._ipc.send_to.call_args.args[1]
+            self.assertIs(sent_event.event_type, EventType.PASSWORD_CHANGED)
+
+            daemon._ipc.reset_mock()
+            daemon._km.change_password.side_effect = InvalidCredentialError('invalid')
+            daemon._process_ui_command(command, conn)
+            sent_event = daemon._ipc.send_to.call_args.args[1]
+            self.assertIs(sent_event.event_type, EventType.INVALID_PASSWORD)
         finally:
             conn.close()
             peer.close()

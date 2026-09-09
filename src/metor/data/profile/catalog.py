@@ -78,7 +78,7 @@ def get_all_profiles() -> List[str]:
     return sorted(
         d.name
         for d in data_dir.iterdir()
-        if d.is_dir() and d.name not in ignored_folders
+        if d.is_dir() and d.name not in ignored_folders and not d.name.startswith('.')
     )
 
 

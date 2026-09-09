@@ -79,6 +79,47 @@ class SelfDestructInitiatedEvent(IpcEvent):
     )
 
 
+@register_event(EventType.PASSWORD_CHANGED)
+@dataclass
+class PasswordChangedEvent(IpcEvent):
+    """Signals that the current profile PMK was rewrapped successfully."""
+
+    event_type: EventType = field(default=EventType.PASSWORD_CHANGED, init=False)
+
+
+@register_event(EventType.PASSWORD_CHANGE_UNSUPPORTED)
+@dataclass
+class PasswordChangeUnsupportedEvent(IpcEvent):
+    """Signals that password change is unavailable for plaintext storage."""
+
+    event_type: EventType = field(
+        default=EventType.PASSWORD_CHANGE_UNSUPPORTED,
+        init=False,
+    )
+
+
+@register_event(EventType.INVALID_NEW_PASSWORD)
+@dataclass
+class InvalidNewPasswordEvent(IpcEvent):
+    """Signals that a replacement password fails validation."""
+
+    event_type: EventType = field(
+        default=EventType.INVALID_NEW_PASSWORD,
+        init=False,
+    )
+
+
+@register_event(EventType.PASSWORD_CHANGE_FAILED)
+@dataclass
+class PasswordChangeFailedEvent(IpcEvent):
+    """Signals that password-keyslot replacement could not be committed."""
+
+    event_type: EventType = field(
+        default=EventType.PASSWORD_CHANGE_FAILED,
+        init=False,
+    )
+
+
 @register_event(EventType.DAEMON_UNLOCKED)
 @dataclass
 class DaemonUnlockedEvent(IpcEvent):
