@@ -20,7 +20,9 @@
           "type": "string"
         }
       },
-      "required": ["target"]
+      "required": [
+        "target"
+      ]
     },
     "AddContactCommand": {
       "title": "AddContactCommand",
@@ -50,7 +52,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "AddProfileCommand": {
       "title": "AddProfileCommand",
@@ -96,7 +100,9 @@
           ]
         }
       },
-      "required": ["name"]
+      "required": [
+        "name"
+      ]
     },
     "AuthenticateSessionCommand": {
       "title": "AuthenticateSessionCommand",
@@ -116,7 +122,9 @@
           "type": "string"
         }
       },
-      "required": ["proof"]
+      "required": [
+        "proof"
+      ]
     },
     "ClearContactsCommand": {
       "title": "ClearContactsCommand",
@@ -223,7 +231,9 @@
           "type": "string"
         }
       },
-      "required": ["target"]
+      "required": [
+        "target"
+      ]
     },
     "DisconnectCommand": {
       "title": "DisconnectCommand",
@@ -243,7 +253,9 @@
           "type": "string"
         }
       },
-      "required": ["target"]
+      "required": [
+        "target"
+      ]
     },
     "FallbackCommand": {
       "title": "FallbackCommand",
@@ -263,7 +275,9 @@
           "type": "string"
         }
       },
-      "required": ["target"]
+      "required": [
+        "target"
+      ]
     },
     "GenerateAddressCommand": {
       "title": "GenerateAddressCommand",
@@ -331,7 +345,9 @@
           "type": "string"
         }
       },
-      "required": ["setting_key"]
+      "required": [
+        "setting_key"
+      ]
     },
     "GetConfigListCommand": {
       "title": "GetConfigListCommand",
@@ -529,7 +545,9 @@
           "type": "string"
         }
       },
-      "required": ["setting_key"]
+      "required": [
+        "setting_key"
+      ]
     },
     "GetSettingsListCommand": {
       "title": "GetSettingsListCommand",
@@ -633,7 +651,9 @@
           "type": "string"
         }
       },
-      "required": ["target"]
+      "required": [
+        "target"
+      ]
     },
     "MigrateProfileSecurityCommand": {
       "title": "MigrateProfileSecurityCommand",
@@ -676,7 +696,10 @@
           ]
         }
       },
-      "required": ["name", "target_mode"]
+      "required": [
+        "name",
+        "target_mode"
+      ]
     },
     "RegisterLiveConsumerCommand": {
       "title": "RegisterLiveConsumerCommand",
@@ -712,7 +735,9 @@
           "type": "string"
         }
       },
-      "required": ["target"]
+      "required": [
+        "target"
+      ]
     },
     "RemoveContactCommand": {
       "title": "RemoveContactCommand",
@@ -732,7 +757,9 @@
           "type": "string"
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "RemoveProfileCommand": {
       "title": "RemoveProfileCommand",
@@ -762,7 +789,9 @@
           ]
         }
       },
-      "required": ["name"]
+      "required": [
+        "name"
+      ]
     },
     "RenameContactCommand": {
       "title": "RenameContactCommand",
@@ -785,7 +814,10 @@
           "type": "string"
         }
       },
-      "required": ["old_alias", "new_alias"]
+      "required": [
+        "old_alias",
+        "new_alias"
+      ]
     },
     "RenameProfileCommand": {
       "title": "RenameProfileCommand",
@@ -808,7 +840,10 @@
           "type": "string"
         }
       },
-      "required": ["old_name", "new_name"]
+      "required": [
+        "old_name",
+        "new_name"
+      ]
     },
     "RetunnelCommand": {
       "title": "RetunnelCommand",
@@ -828,7 +863,9 @@
           "type": "string"
         }
       },
-      "required": ["target"]
+      "required": [
+        "target"
+      ]
     },
     "SelfDestructCommand": {
       "title": "SelfDestructCommand",
@@ -864,7 +901,10 @@
           "type": "string"
         },
         "delivery": {
-          "enum": ["live", "drop"],
+          "enum": [
+            "live",
+            "drop"
+          ],
           "type": "string"
         },
         "content": {},
@@ -872,7 +912,12 @@
           "type": "string"
         }
       },
-      "required": ["target", "delivery", "content", "msg_id"]
+      "required": [
+        "target",
+        "delivery",
+        "content",
+        "msg_id"
+      ]
     },
     "SetConfigCommand": {
       "title": "SetConfigCommand",
@@ -908,7 +953,10 @@
           ]
         }
       },
-      "required": ["setting_key", "setting_value"]
+      "required": [
+        "setting_key",
+        "setting_value"
+      ]
     },
     "SetDefaultProfileCommand": {
       "title": "SetDefaultProfileCommand",
@@ -928,7 +976,9 @@
           "type": "string"
         }
       },
-      "required": ["profile_name"]
+      "required": [
+        "profile_name"
+      ]
     },
     "SetSettingCommand": {
       "title": "SetSettingCommand",
@@ -964,7 +1014,10 @@
           ]
         }
       },
-      "required": ["setting_key", "setting_value"]
+      "required": [
+        "setting_key",
+        "setting_value"
+      ]
     },
     "SwitchCommand": {
       "title": "SwitchCommand",
@@ -1026,7 +1079,9 @@
           "type": "string"
         }
       },
-      "required": ["password"]
+      "required": [
+        "password"
+      ]
     },
     "AckEvent": {
       "title": "AckEvent",
@@ -1056,7 +1111,9 @@
           ]
         }
       },
-      "required": ["msg_id"]
+      "required": [
+        "msg_id"
+      ]
     },
     "AddressCantGenerateRunningEvent": {
       "title": "AddressCantGenerateRunningEvent",
@@ -1076,7 +1133,9 @@
           "type": "string"
         }
       },
-      "required": ["profile"]
+      "required": [
+        "profile"
+      ]
     },
     "AddressCurrentEvent": {
       "title": "AddressCurrentEvent",
@@ -1099,7 +1158,10 @@
           "type": "string"
         }
       },
-      "required": ["profile", "onion"]
+      "required": [
+        "profile",
+        "onion"
+      ]
     },
     "AddressGeneratedEvent": {
       "title": "AddressGeneratedEvent",
@@ -1122,7 +1184,10 @@
           "type": "string"
         }
       },
-      "required": ["profile", "onion"]
+      "required": [
+        "profile",
+        "onion"
+      ]
     },
     "AddressNotGeneratedEvent": {
       "title": "AddressNotGeneratedEvent",
@@ -1142,7 +1207,9 @@
           "type": "string"
         }
       },
-      "required": ["profile"]
+      "required": [
+        "profile"
+      ]
     },
     "AliasInUseEvent": {
       "title": "AliasInUseEvent",
@@ -1172,7 +1239,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "AliasNotFoundEvent": {
       "title": "AliasNotFoundEvent",
@@ -1192,7 +1261,9 @@
           "type": "string"
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "AliasRenamedEvent": {
       "title": "AliasRenamedEvent",
@@ -1225,7 +1296,10 @@
           ]
         }
       },
-      "required": ["old_alias", "new_alias"]
+      "required": [
+        "old_alias",
+        "new_alias"
+      ]
     },
     "AliasSameEvent": {
       "title": "AliasSameEvent",
@@ -1326,7 +1400,10 @@
           ]
         }
       },
-      "required": ["alias", "msg_id"]
+      "required": [
+        "alias",
+        "msg_id"
+      ]
     },
     "AutoReconnectScheduledEvent": {
       "title": "AutoReconnectScheduledEvent",
@@ -1368,11 +1445,17 @@
           "type": "string"
         },
         "actor": {
-          "enum": ["local", "remote", "system"],
+          "enum": [
+            "local",
+            "remote",
+            "system"
+          ],
           "type": "string"
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "CannotConnectSelfEvent": {
       "title": "CannotConnectSelfEvent",
@@ -1457,7 +1540,10 @@
           "items": {}
         }
       },
-      "required": ["active", "contacts"]
+      "required": [
+        "active",
+        "contacts"
+      ]
     },
     "ClientScopeKeyRejectedEvent": {
       "title": "ClientScopeKeyRejectedEvent",
@@ -1499,7 +1585,10 @@
           "type": "string"
         }
       },
-      "required": ["key", "value"]
+      "required": [
+        "key",
+        "value"
+      ]
     },
     "ConfigListDataEvent": {
       "title": "ConfigListDataEvent",
@@ -1526,7 +1615,10 @@
           "items": {}
         }
       },
-      "required": ["scope", "profile"]
+      "required": [
+        "scope",
+        "profile"
+      ]
     },
     "ConfigSyncedEvent": {
       "title": "ConfigSyncedEvent",
@@ -1578,7 +1670,9 @@
           "type": "string"
         }
       },
-      "required": ["key"]
+      "required": [
+        "key"
+      ]
     },
     "ConnectedEvent": {
       "title": "ConnectedEvent",
@@ -1613,11 +1707,18 @@
           "type": "string"
         },
         "actor": {
-          "enum": ["local", "remote", "system"],
+          "enum": [
+            "local",
+            "remote",
+            "system"
+          ],
           "type": "string"
         }
       },
-      "required": ["alias", "onion"]
+      "required": [
+        "alias",
+        "onion"
+      ]
     },
     "ConnectionAutoAcceptedEvent": {
       "title": "ConnectionAutoAcceptedEvent",
@@ -1659,11 +1760,17 @@
           "type": "string"
         },
         "actor": {
-          "enum": ["local", "remote", "system"],
+          "enum": [
+            "local",
+            "remote",
+            "system"
+          ],
           "type": "string"
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "ConnectionConnectingEvent": {
       "title": "ConnectionConnectingEvent",
@@ -1705,11 +1812,17 @@
           "type": "string"
         },
         "actor": {
-          "enum": ["local", "remote", "system"],
+          "enum": [
+            "local",
+            "remote",
+            "system"
+          ],
           "type": "string"
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "ConnectionFailedEvent": {
       "title": "ConnectionFailedEvent",
@@ -1761,7 +1874,11 @@
           "type": "string"
         },
         "actor": {
-          "enum": ["local", "remote", "system"],
+          "enum": [
+            "local",
+            "remote",
+            "system"
+          ],
           "type": "string"
         },
         "reason_code": {
@@ -1788,7 +1905,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "ConnectionPendingEvent": {
       "title": "ConnectionPendingEvent",
@@ -1830,11 +1949,17 @@
           "type": "string"
         },
         "actor": {
-          "enum": ["local", "remote", "system"],
+          "enum": [
+            "local",
+            "remote",
+            "system"
+          ],
           "type": "string"
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "ConnectionRejectedEvent": {
       "title": "ConnectionRejectedEvent",
@@ -1876,7 +2001,11 @@
           "type": "string"
         },
         "actor": {
-          "enum": ["local", "remote", "system"],
+          "enum": [
+            "local",
+            "remote",
+            "system"
+          ],
           "type": "string"
         },
         "reason_code": {
@@ -1903,7 +2032,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "ConnectionRetryEvent": {
       "title": "ConnectionRetryEvent",
@@ -1951,11 +2082,19 @@
           "type": "string"
         },
         "actor": {
-          "enum": ["local", "remote", "system"],
+          "enum": [
+            "local",
+            "remote",
+            "system"
+          ],
           "type": "string"
         }
       },
-      "required": ["alias", "attempt", "max_retries"]
+      "required": [
+        "alias",
+        "attempt",
+        "max_retries"
+      ]
     },
     "ConnectionsStateEvent": {
       "title": "ConnectionsStateEvent",
@@ -1993,7 +2132,11 @@
           "type": "boolean"
         }
       },
-      "required": ["active", "pending", "contacts"]
+      "required": [
+        "active",
+        "pending",
+        "contacts"
+      ]
     },
     "ContactAddedEvent": {
       "title": "ContactAddedEvent",
@@ -2026,7 +2169,10 @@
           ]
         }
       },
-      "required": ["alias", "profile"]
+      "required": [
+        "alias",
+        "profile"
+      ]
     },
     "ContactAlreadySavedEvent": {
       "title": "ContactAlreadySavedEvent",
@@ -2056,7 +2202,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "ContactDowngradedEvent": {
       "title": "ContactDowngradedEvent",
@@ -2086,7 +2234,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "ContactRemovedEvent": {
       "title": "ContactRemovedEvent",
@@ -2126,7 +2276,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "ContactRemovedDowngradedEvent": {
       "title": "ContactRemovedDowngradedEvent",
@@ -2159,7 +2311,10 @@
           ]
         }
       },
-      "required": ["alias", "new_alias"]
+      "required": [
+        "alias",
+        "new_alias"
+      ]
     },
     "ContactsClearFailedEvent": {
       "title": "ContactsClearFailedEvent",
@@ -2198,7 +2353,9 @@
           "type": "integer"
         }
       },
-      "required": ["profile"]
+      "required": [
+        "profile"
+      ]
     },
     "ContactsDataEvent": {
       "title": "ContactsDataEvent",
@@ -2226,7 +2383,11 @@
           "type": "string"
         }
       },
-      "required": ["saved", "discovered", "profile"]
+      "required": [
+        "saved",
+        "discovered",
+        "profile"
+      ]
     },
     "DaemonLockedEvent": {
       "title": "DaemonLockedEvent",
@@ -2313,7 +2474,9 @@
           "type": "integer"
         }
       },
-      "required": ["profile"]
+      "required": [
+        "profile"
+      ]
     },
     "DatabaseCorruptedEvent": {
       "title": "DatabaseCorruptedEvent",
@@ -2359,7 +2522,11 @@
           ]
         },
         "actor": {
-          "enum": ["local", "remote", "system"],
+          "enum": [
+            "local",
+            "remote",
+            "system"
+          ],
           "type": "string"
         },
         "origin": {
@@ -2398,7 +2565,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "DiscoveredPeerNotFoundEvent": {
       "title": "DiscoveredPeerNotFoundEvent",
@@ -2418,7 +2587,9 @@
           "type": "string"
         }
       },
-      "required": ["target"]
+      "required": [
+        "target"
+      ]
     },
     "DropFailedEvent": {
       "title": "DropFailedEvent",
@@ -2448,7 +2619,9 @@
           ]
         }
       },
-      "required": ["msg_id"]
+      "required": [
+        "msg_id"
+      ]
     },
     "DropQueuedEvent": {
       "title": "DropQueuedEvent",
@@ -2478,7 +2651,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "DropsDisabledEvent": {
       "title": "DropsDisabledEvent",
@@ -2533,7 +2708,11 @@
           ]
         }
       },
-      "required": ["alias", "count", "msg_ids"]
+      "required": [
+        "alias",
+        "count",
+        "msg_ids"
+      ]
     },
     "HistoryClearFailedEvent": {
       "title": "HistoryClearFailedEvent",
@@ -2579,7 +2758,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "HistoryClearedAllEvent": {
       "title": "HistoryClearedAllEvent",
@@ -2599,7 +2780,9 @@
           "type": "string"
         }
       },
-      "required": ["profile"]
+      "required": [
+        "profile"
+      ]
     },
     "HistoryDataEvent": {
       "title": "HistoryDataEvent",
@@ -2640,7 +2823,10 @@
           ]
         }
       },
-      "required": ["entries", "profile"]
+      "required": [
+        "entries",
+        "profile"
+      ]
     },
     "HistoryRawDataEvent": {
       "title": "HistoryRawDataEvent",
@@ -2681,7 +2867,10 @@
           ]
         }
       },
-      "required": ["entries", "profile"]
+      "required": [
+        "entries",
+        "profile"
+      ]
     },
     "InboxCountsEvent": {
       "title": "InboxCountsEvent",
@@ -2701,7 +2890,9 @@
           "type": "object"
         }
       },
-      "required": ["inbox"]
+      "required": [
+        "inbox"
+      ]
     },
     "InboxDataEvent": {
       "title": "InboxDataEvent",
@@ -2741,7 +2932,9 @@
           "type": "boolean"
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "InboxNotificationEvent": {
       "title": "InboxNotificationEvent",
@@ -2774,7 +2967,9 @@
           "type": "integer"
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "IncomingConnectionEvent": {
       "title": "IncomingConnectionEvent",
@@ -2816,11 +3011,17 @@
           "type": "string"
         },
         "actor": {
-          "enum": ["local", "remote", "system"],
+          "enum": [
+            "local",
+            "remote",
+            "system"
+          ],
           "type": "string"
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "InitEvent": {
       "title": "InitEvent",
@@ -2986,7 +3187,9 @@
           "type": "string"
         }
       },
-      "required": ["target"]
+      "required": [
+        "target"
+      ]
     },
     "IpcClientLimitReachedEvent": {
       "title": "IpcClientLimitReachedEvent",
@@ -3006,7 +3209,9 @@
           "type": "integer"
         }
       },
-      "required": ["max_clients"]
+      "required": [
+        "max_clients"
+      ]
     },
     "LocalAuthRateLimitedEvent": {
       "title": "LocalAuthRateLimitedEvent",
@@ -3026,7 +3231,9 @@
           "type": "integer"
         }
       },
-      "required": ["retry_after"]
+      "required": [
+        "retry_after"
+      ]
     },
     "MaxConnectionsReachedEvent": {
       "title": "MaxConnectionsReachedEvent",
@@ -3049,7 +3256,10 @@
           "type": "integer"
         }
       },
-      "required": ["target", "max_conn"]
+      "required": [
+        "target",
+        "max_conn"
+      ]
     },
     "MessageReceivedEvent": {
       "title": "MessageReceivedEvent",
@@ -3069,7 +3279,10 @@
           "type": "string"
         },
         "delivery": {
-          "enum": ["live", "drop"],
+          "enum": [
+            "live",
+            "drop"
+          ],
           "type": "string"
         },
         "content": {},
@@ -3104,7 +3317,11 @@
           ]
         }
       },
-      "required": ["alias", "delivery", "content"]
+      "required": [
+        "alias",
+        "delivery",
+        "content"
+      ]
     },
     "MessagesClearFailedEvent": {
       "title": "MessagesClearFailedEvent",
@@ -3150,7 +3367,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "MessagesClearedAllEvent": {
       "title": "MessagesClearedAllEvent",
@@ -3170,7 +3389,9 @@
           "type": "string"
         }
       },
-      "required": ["profile"]
+      "required": [
+        "profile"
+      ]
     },
     "MessagesClearedNonContactsEvent": {
       "title": "MessagesClearedNonContactsEvent",
@@ -3200,7 +3421,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "MessagesClearedNonContactsAllEvent": {
       "title": "MessagesClearedNonContactsAllEvent",
@@ -3220,7 +3443,9 @@
           "type": "string"
         }
       },
-      "required": ["profile"]
+      "required": [
+        "profile"
+      ]
     },
     "MessagesDataEvent": {
       "title": "MessagesDataEvent",
@@ -3254,7 +3479,10 @@
           ]
         }
       },
-      "required": ["messages", "alias"]
+      "required": [
+        "messages",
+        "alias"
+      ]
     },
     "NoConnectionToDisconnectEvent": {
       "title": "NoConnectionToDisconnectEvent",
@@ -3284,7 +3512,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "NoConnectionToRejectEvent": {
       "title": "NoConnectionToRejectEvent",
@@ -3314,7 +3544,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "NoPendingConnectionEvent": {
       "title": "NoPendingConnectionEvent",
@@ -3344,7 +3576,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "NoPendingLiveMessagesEvent": {
       "title": "NoPendingLiveMessagesEvent",
@@ -3374,7 +3608,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "OnionInUseEvent": {
       "title": "OnionInUseEvent",
@@ -3404,7 +3640,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "PeerAnonymizedEvent": {
       "title": "PeerAnonymizedEvent",
@@ -3437,7 +3675,10 @@
           ]
         }
       },
-      "required": ["alias", "new_alias"]
+      "required": [
+        "alias",
+        "new_alias"
+      ]
     },
     "PeerCantDeleteActiveEvent": {
       "title": "PeerCantDeleteActiveEvent",
@@ -3467,7 +3708,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "PeerNotFoundEvent": {
       "title": "PeerNotFoundEvent",
@@ -3487,7 +3730,9 @@
           "type": "string"
         }
       },
-      "required": ["target"]
+      "required": [
+        "target"
+      ]
     },
     "PeerPromotedEvent": {
       "title": "PeerPromotedEvent",
@@ -3517,7 +3762,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "PeerRemovedEvent": {
       "title": "PeerRemovedEvent",
@@ -3547,7 +3794,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "PendingConnectionExpiredEvent": {
       "title": "PendingConnectionExpiredEvent",
@@ -3589,7 +3838,11 @@
           "type": "string"
         },
         "actor": {
-          "enum": ["local", "remote", "system"],
+          "enum": [
+            "local",
+            "remote",
+            "system"
+          ],
           "type": "string"
         },
         "reason_code": {
@@ -3609,7 +3862,9 @@
           "type": "string"
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "ProfileOperationResultEvent": {
       "title": "ProfileOperationResultEvent",
@@ -3661,7 +3916,11 @@
           "type": "object"
         }
       },
-      "required": ["success", "operation_type", "params"]
+      "required": [
+        "success",
+        "operation_type",
+        "params"
+      ]
     },
     "ProfilesDataEvent": {
       "title": "ProfilesDataEvent",
@@ -3682,7 +3941,9 @@
           "items": {}
         }
       },
-      "required": ["profiles"]
+      "required": [
+        "profiles"
+      ]
     },
     "ProtocolMismatchEvent": {
       "title": "ProtocolMismatchEvent",
@@ -3715,7 +3976,10 @@
           ]
         }
       },
-      "required": ["daemon_version", "min_supported"]
+      "required": [
+        "daemon_version",
+        "min_supported"
+      ]
     },
     "ReadReceiptEvent": {
       "title": "ReadReceiptEvent",
@@ -3748,7 +4012,10 @@
           ]
         }
       },
-      "required": ["alias", "msg_id"]
+      "required": [
+        "alias",
+        "msg_id"
+      ]
     },
     "RenameSuccessEvent": {
       "title": "RenameSuccessEvent",
@@ -3787,7 +4054,10 @@
           "type": "boolean"
         }
       },
-      "required": ["old_alias", "new_alias"]
+      "required": [
+        "old_alias",
+        "new_alias"
+      ]
     },
     "RetunnelFailedEvent": {
       "title": "RetunnelFailedEvent",
@@ -3858,7 +4128,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "RetunnelInitiatedEvent": {
       "title": "RetunnelInitiatedEvent",
@@ -3888,7 +4160,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "RetunnelSuccessEvent": {
       "title": "RetunnelSuccessEvent",
@@ -3918,7 +4192,9 @@
           ]
         }
       },
-      "required": ["alias"]
+      "required": [
+        "alias"
+      ]
     },
     "SelfDestructInitiatedEvent": {
       "title": "SelfDestructInitiatedEvent",
@@ -3973,7 +4249,10 @@
           "type": "string"
         }
       },
-      "required": ["key", "value"]
+      "required": [
+        "key",
+        "value"
+      ]
     },
     "SettingTypeErrorEvent": {
       "title": "SettingTypeErrorEvent",
@@ -4045,7 +4324,9 @@
           "type": "string"
         }
       },
-      "required": ["key"]
+      "required": [
+        "key"
+      ]
     },
     "SettingsListDataEvent": {
       "title": "SettingsListDataEvent",
@@ -4069,7 +4350,9 @@
           "items": {}
         }
       },
-      "required": ["scope"]
+      "required": [
+        "scope"
+      ]
     },
     "SwitchSuccessEvent": {
       "title": "SwitchSuccessEvent",
@@ -4303,7 +4586,10 @@
           "type": "boolean"
         }
       },
-      "required": ["peer", "session_state"]
+      "required": [
+        "peer",
+        "session_state"
+      ]
     },
     "UnknownCommandEvent": {
       "title": "UnknownCommandEvent",
@@ -4353,7 +4639,10 @@
           ]
         }
       },
-      "required": ["messages", "alias"]
+      "required": [
+        "messages",
+        "alias"
+      ]
     }
   },
   "commands": {
