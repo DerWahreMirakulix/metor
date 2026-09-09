@@ -54,7 +54,10 @@ jobs:
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
 
-          git add docs/API.md docs/SETTINGS.md
+          git add docs/
 
           # Evaluate diff; commit and push only if the generation resulted in changes
-          git diff --quiet && git diff --staged --quiet || (git commit -m "docs: auto-update generated documentation" && git push origin HEAD)
+          if ! git diff --cached --quiet; then
+            git commit -m "docs: auto-update generated documentation"
+            git push origin HEAD
+          fi
