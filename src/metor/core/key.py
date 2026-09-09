@@ -347,7 +347,9 @@ class KeyManager:
             None
         """
         if not self._pm.uses_encrypted_storage() or self._profile_keys is None:
-            raise InvalidCredentialError('Password change requires an encrypted profile.')
+            raise InvalidCredentialError(
+                'Password change requires an encrypted profile.'
+            )
         recovered_pmk = self._protector.unprotect(current_password)
         try:
             if not hmac.compare_digest(recovered_pmk, self._profile_keys.pmk()):

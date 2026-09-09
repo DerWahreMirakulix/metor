@@ -258,9 +258,8 @@ def add_profile_folder(
             {},
         )
 
-    if (
-        security_mode is ProfileSecurityMode.PLAINTEXT
-        and not Settings.get_bool(SettingKey.ALLOW_PLAINTEXT_PROFILES)
+    if security_mode is ProfileSecurityMode.PLAINTEXT and not Settings.get_bool(
+        SettingKey.ALLOW_PLAINTEXT_PROFILES
     ):
         return ProfileOperationResult(
             False,
@@ -391,9 +390,8 @@ def migrate_profile_security(
             {'profile': safe_name},
         )
 
-    if (
-        target_mode is ProfileSecurityMode.PLAINTEXT
-        and not Settings.get_bool(SettingKey.ALLOW_PLAINTEXT_PROFILES)
+    if target_mode is ProfileSecurityMode.PLAINTEXT and not Settings.get_bool(
+        SettingKey.ALLOW_PLAINTEXT_PROFILES
     ):
         return ProfileOperationResult(
             False,

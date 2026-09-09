@@ -453,12 +453,8 @@ class PasswordKeyProtector:
         if (
             type(opslimit) is not int
             or type(memlimit) is not int
-            or not MIN_PASSWORD_KDF_OPSLIMIT
-            <= opslimit
-            <= MAX_PASSWORD_KDF_OPSLIMIT
-            or not MIN_PASSWORD_KDF_MEMLIMIT
-            <= memlimit
-            <= MAX_PASSWORD_KDF_MEMLIMIT
+            or not MIN_PASSWORD_KDF_OPSLIMIT <= opslimit <= MAX_PASSWORD_KDF_OPSLIMIT
+            or not MIN_PASSWORD_KDF_MEMLIMIT <= memlimit <= MAX_PASSWORD_KDF_MEMLIMIT
         ):
             raise InvalidKeyslotError('Keyslot KDF parameters are unsafe.')
         salt = self._decode_field(kdf['salt'], nacl.pwhash.argon2id.SALTBYTES)

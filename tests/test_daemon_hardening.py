@@ -2430,7 +2430,9 @@ class DaemonHardeningTests(unittest.TestCase):
             conn.close()
             peer.close()
 
-    def test_change_password_command_requires_current_password_and_rewraps(self) -> None:
+    def test_change_password_command_requires_current_password_and_rewraps(
+        self,
+    ) -> None:
         """Verifies password changes require explicit current-password verification.
 
         Args:

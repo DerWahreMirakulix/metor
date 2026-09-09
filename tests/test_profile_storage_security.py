@@ -376,7 +376,9 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         finally:
             Constants.DATA = original_data
 
-    def test_offline_clear_profile_db_uses_mode_appropriate_database_access(self) -> None:
+    def test_offline_clear_profile_db_uses_mode_appropriate_database_access(
+        self,
+    ) -> None:
         """Verifies encrypted clears require DB_KEY credentials while plaintext clears do not.
 
         Args:
@@ -439,7 +441,9 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                     ('plain-onion', 'plain-alias', 'saved', 'created', 'updated'),
                 )
                 SqlManager.close_connection(plaintext_pm.paths.get_db_file())
-                self.assertTrue(ProfileManager.clear_profile_db('plaintext-clear').success)
+                self.assertTrue(
+                    ProfileManager.clear_profile_db('plaintext-clear').success
+                )
                 verified_plain_sql = SqlManager(
                     plaintext_pm.paths.get_db_file(), plaintext_pm.config
                 )
@@ -818,13 +822,14 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                         recovered_pm = ProfileManager(name)
                         self.assertTrue(recovered_pm.uses_plaintext_storage())
                         self.assertTrue(
-                            result.success
-                            or stage == 'immediately_after_commit'
+                            result.success or stage == 'immediately_after_commit'
                         )
         finally:
             Constants.DATA = original_data
 
-    def test_change_password_command_is_registered_and_redacts_credentials(self) -> None:
+    def test_change_password_command_is_registered_and_redacts_credentials(
+        self,
+    ) -> None:
         """Verifies the public password-change command has no credential-bearing repr.
 
         Args:
