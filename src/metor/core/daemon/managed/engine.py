@@ -67,6 +67,7 @@ from metor.core.api import (
     stamp_request_id,
 )
 from metor.core.key import KeyManager
+from metor.core.profile_destruction import destroy_profile_storage
 from metor.core.tor import TorManager
 from metor.data.profile import ProfileManager
 from metor.data import (
@@ -76,6 +77,7 @@ from metor.data import (
     SettingKey,
 )
 from metor.data.sql import SqlManager
+from metor.data.blob import EncryptedBlobStore
 from metor.utils import Constants, clean_onion, secure_shred_file
 
 # Local Package Imports
@@ -126,6 +128,7 @@ class Daemon:
         cm: Optional[ContactManager] = None,
         hm: Optional[HistoryManager] = None,
         mm: Optional[MessageManager] = None,
+        blob_store: Optional[EncryptedBlobStore] = None,
         session_auth: Optional[SessionAuthContext] = None,
         status_callback: Optional[
             Callable[[Union[EventType, DaemonStatus], Dict[str, JsonValue]], None]
@@ -143,6 +146,7 @@ class Daemon:
             cm (Optional[ContactManager]): Address book manager.
             hm (Optional[HistoryManager]): Event logging.
             mm (Optional[MessageManager]): Offline messages storage.
+            blob_store (Optional[EncryptedBlobStore]): Encrypted external object store.
             session_auth (Optional[SessionAuthContext]): Optional verifier context for per-session local auth.
             status_callback (Optional[Callable]): Hook for UI-agnostic startup logging.
             require_session_auth (bool): Whether this daemon runtime should require per-session auth.
@@ -157,6 +161,7 @@ class Daemon:
         self._hm: Optional[HistoryManager] = None
         self._mm: Optional[MessageManager] = None
         self._km: Optional[KeyManager] = None
+        self._blob_store: Optional[EncryptedBlobStore] = None
         self._status_cb: Optional[
             Callable[[Union[EventType, DaemonStatus], Dict[str, JsonValue]], None]
         ] = status_callback
@@ -208,6 +213,7 @@ class Daemon:
                     cm=cm,
                     hm=hm,
                     mm=mm,
+                    blob_store=blob_store,
                     session_auth=session_auth,
                 )
             )
@@ -236,6 +242,7 @@ class Daemon:
         self._cm = runtime.cm
         self._hm = runtime.hm
         self._mm = runtime.mm
+        self._blob_store = runtime.blob_store
         self._transport_state = StateTracker()
         self._local_auth.install_context(runtime.session_auth)
 
@@ -609,9 +616,18 @@ class Daemon:
         except Exception:
             pass
 
+        SqlManager.close_connection(self._pm.paths.get_db_file())
+
         try:
             if self._tm is not None:
                 self._tm.stop()
+        except Exception:
+            pass
+
+        try:
+            if getattr(self, '_blob_store', None) is not None:
+                assert self._blob_store is not None
+                self._blob_store.close()
         except Exception:
             pass
 
@@ -673,6 +689,12 @@ class Daemon:
                 'Failed to shred the runtime database mirror while locking.'
             )
         try:
+            if getattr(self, '_blob_store', None) is not None:
+                assert self._blob_store is not None
+                self._blob_store.close()
+        except Exception:
+            cleanup_succeeded = False
+        try:
             if self._km is not None:
                 self._km.clear_sensitive_state()
         except Exception:
@@ -688,6 +710,7 @@ class Daemon:
         self._cm = None
         self._hm = None
         self._mm = None
+        self._blob_store = None
         self._km = None
         self._transport_state = StateTracker()
         self._lifecycle = (
@@ -697,7 +720,7 @@ class Daemon:
 
     def _nuke_data(self) -> None:
         """
-        Securely erases local SQLite DB and Tor keys, and initiates shutdown.
+        Destroys PMK access before best-effort profile filesystem cleanup.
 
         Args:
             None
@@ -705,37 +728,17 @@ class Daemon:
         Returns:
             None
         """
-        db_path: Path = self._pm.paths.get_db_file()
-        runtime_db_path: Path = (
-            self._pm.paths.get_config_dir() / Constants.DB_RUNTIME_FILE
-        )
-        for path, description in (
-            (db_path, 'profile database'),
-            (runtime_db_path, 'runtime database mirror'),
-        ):
-            try:
-                secure_shred_file(path)
-            except OSError:
-                self._on_runtime_internal_error(
-                    f'Failed to shred the {description} during self-destruct.'
-                )
-
-        hs_dir: Path = self._pm.paths.get_hidden_service_dir()
-        key_files: List[str] = [
-            Constants.METOR_SECRET_KEY,
-            Constants.TOR_SECRET_KEY,
-            f'{Constants.TOR_SECRET_KEY}.enc',
-            Constants.TOR_PUBLIC_KEY,
-        ]
-        for key_file in key_files:
-            try:
-                secure_shred_file(hs_dir / key_file)
-            except OSError:
-                self._on_runtime_internal_error(
-                    f'Failed to shred key material during self-destruct: {key_file}.'
-                )
-
-        self.stop()
+        try:
+            destroy_profile_storage(
+                self._pm,
+                prepare_runtime=self._lock_runtime,
+            )
+        except OSError:
+            self._on_runtime_internal_error(
+                'Encrypted profile cleanup was incomplete after PMK destruction.'
+            )
+        finally:
+            self.stop()
 
     def _on_ipc_disconnect(self, conn: socket.socket) -> None:
         """
@@ -1047,6 +1050,7 @@ class Daemon:
             return
 
         if isinstance(cmd, SelfDestructCommand):
+            self._lifecycle = DaemonLifecycle.LOCKING
             self._ipc.send_to(
                 conn,
                 create_event(EventType.SELF_DESTRUCT_INITIATED),

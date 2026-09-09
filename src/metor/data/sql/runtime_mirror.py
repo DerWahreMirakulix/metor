@@ -111,7 +111,7 @@ def _detach_runtime_mirror(cursor: SqlCipherCursor) -> None:
 def refresh_runtime_mirror(
     conn: SqlCipherConnection,
     db_path: Path,
-    uses_sqlcipher_password: bool,
+    uses_sqlcipher_key: bool,
     config: 'Config',
 ) -> None:
     """
@@ -120,14 +120,14 @@ def refresh_runtime_mirror(
     Args:
         conn (SqlCipherConnection): The active encrypted database connection.
         db_path (Path): The encrypted profile database path.
-        uses_sqlcipher_password (bool): Whether the database is encrypted.
+        uses_sqlcipher_key (bool): Whether the database uses a derived key.
         config (Config): The profile configuration instance.
 
     Returns:
         None
     """
     runtime_db_path: Path = get_runtime_db_path(db_path)
-    if not uses_sqlcipher_password:
+    if not uses_sqlcipher_key:
         cleanup_runtime_mirror_file(runtime_db_path)
         return
 

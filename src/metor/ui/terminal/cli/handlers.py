@@ -33,7 +33,7 @@ from metor.ui.terminal import (
 )
 from metor.ui.terminal.chat import Chat
 from metor.ui.terminal.cli.errors import format_safe_local_runtime_error
-from metor.utils import Constants, ProcessManager, secure_remove_path, TypeCaster
+from metor.utils import Constants, ProcessManager, TypeCaster
 from metor.ui.terminal.cli.proxy import CliProxy
 
 
@@ -548,7 +548,7 @@ class CommandHandlers:
 
             ProcessManager.cleanup_processes()
             if Constants.DATA.exists():
-                secure_remove_path(Constants.DATA)
+                ProfileManager.purge_all_data()
                 print(f'{Theme.GREEN}Purge complete. All data destroyed.{Theme.RESET}')
         else:
             print(f'{Theme.YELLOW}Purge aborted.{Theme.RESET}')

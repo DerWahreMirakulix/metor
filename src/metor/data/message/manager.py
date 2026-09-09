@@ -23,20 +23,22 @@ from metor.data.sql import MessageRepository, SqlManager
 class MessageManager:
     """Manages the persistence of asynchronous messages (inbox and outbox)."""
 
-    def __init__(self, pm: ProfileManager, password: Optional[str] = None) -> None:
+    def __init__(
+        self, pm: ProfileManager, database_key: Optional[bytes] = None
+    ) -> None:
         """
         Initializes the message manager and its centralized persistence repository.
 
         Args:
             pm (ProfileManager): The profile manager instance for context.
-            password (Optional[str]): The master password for SQLCipher encryption.
+            database_key (Optional[bytes]): PMK-derived SQLCipher key.
 
         Returns:
             None
         """
         self._pm: ProfileManager = pm
         self._db_path: Path = self._pm.paths.get_db_file()
-        self._sql: SqlManager = SqlManager(self._db_path, self._pm.config, password)
+        self._sql: SqlManager = SqlManager(self._db_path, self._pm.config, database_key)
         self._messages: MessageRepository = self._sql.messages
 
     def queue_message(

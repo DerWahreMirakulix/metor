@@ -58,6 +58,14 @@ class Paths:
         data_dir.mkdir(mode=0o700, exist_ok=True)
         data_dir.chmod(0o700)
 
+        for protected_dir in (
+            self.get_protected_key_dir(),
+            self.get_persistent_blob_dir(),
+            self.get_temporary_blob_dir(),
+        ):
+            protected_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            protected_dir.chmod(0o700)
+
     def get_config_dir(self) -> Path:
         """
         Retrieves the configuration directory path without auto-creating it.
@@ -141,3 +149,58 @@ class Paths:
             Path: The database file path.
         """
         return self.get_config_dir() / Constants.DB_FILE
+
+    def get_protected_key_dir(self) -> Path:
+        """Returns the directory containing protector-owned PMK metadata.
+
+        Args:
+            None
+
+        Returns:
+            Path: Protected key-material directory.
+        """
+        return self.get_config_dir() / Constants.PROTECTED_KEY_DIR
+
+    def get_keyslot_file(self) -> Path:
+        """Returns the default password-protector keyslot path.
+
+        Args:
+            None
+
+        Returns:
+            Path: Versioned keyslot file.
+        """
+        return self.get_protected_key_dir() / Constants.PROFILE_KEYSLOT_FILE
+
+    def get_blob_dir(self) -> Path:
+        """Returns the encrypted external-object root directory.
+
+        Args:
+            None
+
+        Returns:
+            Path: Blob storage root.
+        """
+        return self.get_config_dir() / Constants.BLOBS_DIR
+
+    def get_persistent_blob_dir(self) -> Path:
+        """Returns the persistent encrypted blob directory.
+
+        Args:
+            None
+
+        Returns:
+            Path: Persistent blob directory.
+        """
+        return self.get_blob_dir() / Constants.PERSISTENT_BLOBS_DIR
+
+    def get_temporary_blob_dir(self) -> Path:
+        """Returns the ephemeral encrypted blob spool directory.
+
+        Args:
+            None
+
+        Returns:
+            Path: Temporary blob directory.
+        """
+        return self.get_blob_dir() / Constants.TEMPORARY_BLOBS_DIR

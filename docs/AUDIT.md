@@ -38,6 +38,10 @@ Every Pull Request, AI code generation, or architectural change MUST be audited 
 - [ ] **SQL Injection Prevention:** Are user inputs and payload data strictly passed via parameterized queries (e.g., `?`)?
 - [ ] **Safe Structural SQL:** In cases where the SQL engine requires f-strings/concatenation (e.g., `PRAGMA` statements or dynamic `IN` clause placeholders), are the injected variables strictly hardcoded system constants, length-validated lists, or mathematically sanitized? _(Raw user input MUST NEVER be directly formatted into a query string)._
 - [ ] **Memory Leaks:** Are sensitive variables (passwords, decrypted keys) minimized in scope? Are exceptions stripped of sensitive payloads before being logged?
+- [ ] **Profile Key Hierarchy:** Does encrypted profile creation generate one random PMK, with only independently domain-separated DB, secret, and blob keys exposed at runtime?
+- [ ] **Protector Boundary:** Is the password used only to unwrap the PMK, and can a future hardware-backed `KeyProtector` replace the software keyslot without changing consumers?
+- [ ] **Key-First Destruction:** Do purge and self-destruct stop runtime access, clear runtime keys, and destroy protected PMK access before filesystem cleanup begins?
+- [ ] **External Blobs:** Are blob IDs path-independent, formats versioned, writes authenticated, plaintext temporary files avoided, and temporary versus persistent ownership explicit?
 
 ## 6. Code Quality & Standards
 

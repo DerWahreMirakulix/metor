@@ -29,20 +29,22 @@ from metor.data.sql import HistoryRepository, SqlManager
 class HistoryManager:
     """Manages raw history persistence and projected summary retrieval."""
 
-    def __init__(self, pm: ProfileManager, password: Optional[str] = None) -> None:
+    def __init__(
+        self, pm: ProfileManager, database_key: Optional[bytes] = None
+    ) -> None:
         """
         Initializes the history manager and its underlying SQL connection.
 
         Args:
             pm (ProfileManager): The active profile manager.
-            password (Optional[str]): Optional SQLCipher password.
+            database_key (Optional[bytes]): PMK-derived SQLCipher key.
 
         Returns:
             None
         """
         self._pm: ProfileManager = pm
         self._db_path: Path = self._pm.paths.get_db_file()
-        self._sql: SqlManager = SqlManager(self._db_path, self._pm.config, password)
+        self._sql: SqlManager = SqlManager(self._db_path, self._pm.config, database_key)
         self._history: HistoryRepository = self._sql.history
         self._active_live_flow_ids: Dict[str, str] = {}
 

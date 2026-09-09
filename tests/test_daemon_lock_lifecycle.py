@@ -52,7 +52,10 @@ class DaemonLockLifecycleTests(unittest.TestCase):
         daemon._network_handler = Mock()
         daemon._network = Mock()
         daemon._tm = Mock()
-        daemon._km = Mock()
+        key_manager = Mock()
+        blob_store = Mock()
+        daemon._km = key_manager
+        daemon._blob_store = blob_store
         daemon._pm = Mock()
         daemon._pm.paths.get_db_file.return_value = Path('/tmp/metor-lock-test.db')
         daemon._pm.paths.get_config_dir.return_value = Path('/tmp')
@@ -71,7 +74,10 @@ class DaemonLockLifecycleTests(unittest.TestCase):
         self.assertEqual(daemon._authenticated_clients, set())
         self.assertEqual(daemon._session_consumers, set())
         close_connection.assert_called_once()
+        key_manager.clear_sensitive_state.assert_called_once_with()
+        blob_store.close.assert_called_once_with()
         self.assertIsNone(daemon._km)
+        self.assertIsNone(daemon._blob_store)
         self.assertIsNone(daemon._network)
         self.assertIsNone(daemon._db_handler)
 

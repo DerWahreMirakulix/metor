@@ -336,17 +336,17 @@ Emits SQLCipher and SQLite diagnostics to the terminal.
 
 #### `daemon.enable_runtime_db_mirror`
 
-Exports a plaintext runtime copy of the encrypted database for local inspection tools.
+DEBUG/DEVELOPMENT ONLY: exports a plaintext runtime copy of the encrypted database for local inspection tools.
 
-| Property         | Value                                                                                                                  |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Type             | `bool`                                                                                                                 |
-| Default          | `False`                                                                                                                |
-| Category         | `Core Daemon`                                                                                                          |
-| Scope            | `Daemon runtime`                                                                                                       |
-| Profile Override | `Yes`                                                                                                                  |
-| Constraints      | Boolean.                                                                                                               |
-| Security Note    | Creates a plaintext database on disk while enabled. Keep disabled unless you explicitly need local inspection tooling. |
+| Property         | Value                                                                                                                        |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Type             | `bool`                                                                                                                       |
+| Default          | `False`                                                                                                                      |
+| Category         | `Core Daemon`                                                                                                                |
+| Scope            | `Daemon runtime`                                                                                                             |
+| Profile Override | `Yes`                                                                                                                        |
+| Constraints      | Boolean.                                                                                                                     |
+| Security Note    | Creates plaintext data that PMK destruction cannot retroactively protect. Keep disabled and prohibit it on hardened devices. |
 
 **CLI Examples**
 

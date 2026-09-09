@@ -99,8 +99,8 @@ class SqlManager:
         cls,
         source_path: str | Path,
         target_path: str | Path,
-        current_password: Optional[str] = None,
-        target_password: Optional[str] = None,
+        current_key: Optional[bytes] = None,
+        target_key: Optional[bytes] = None,
     ) -> None:
         """
         Exports one profile database into a new database file with the target encryption mode.
@@ -108,8 +108,8 @@ class SqlManager:
         Args:
             source_path (str | Path): The current database path.
             target_path (str | Path): The destination database path.
-            current_password (Optional[str]): The current SQLCipher password, if any.
-            target_password (Optional[str]): The target SQLCipher password, if any.
+            current_key (Optional[bytes]): Current raw SQLCipher key, if encrypted.
+            target_key (Optional[bytes]): Target raw SQLCipher key, if encrypted.
 
         Raises:
             DatabaseCorruptedError: If the source database cannot be opened or exported safely.
@@ -129,9 +129,8 @@ class SqlManager:
 
         conn = sqlite3.connect(str(source_db.absolute()), check_same_thread=False)
         try:
-            if current_password:
-                safe_current_password: str = current_password.replace("'", "''")
-                conn.execute(f"PRAGMA key = '{safe_current_password}'")
+            if current_key:
+                conn.execute(f'PRAGMA key = "x\'{current_key.hex()}\'"')
 
             cursor = conn.cursor()
             cursor.execute('PRAGMA foreign_keys = ON')
@@ -139,11 +138,9 @@ class SqlManager:
             cursor.fetchone()
 
             safe_target_path: str = str(target_db.absolute()).replace("'", "''")
-            safe_target_password: str = (
-                target_password.replace("'", "''") if target_password else ''
-            )
+            target_key_clause = f"x'{target_key.hex()}'" if target_key else ''
             cursor.execute(
-                f"ATTACH DATABASE '{safe_target_path}' AS migrated KEY '{safe_target_password}'"
+                f'ATTACH DATABASE \'{safe_target_path}\' AS migrated KEY "{target_key_clause}"'
             )
             try:
                 cursor.execute("SELECT sqlcipher_export('migrated')")
@@ -170,7 +167,7 @@ class SqlManager:
         self,
         db_path: str | Path,
         config: 'Config',
-        password: Optional[str] = None,
+        encryption_key: Optional[bytes] = None,
     ) -> None:
         """
         Initializes the database connection and ensures the central schema exists.
@@ -178,17 +175,17 @@ class SqlManager:
         Args:
             db_path (str | Path): The absolute path to the SQLite database file.
             config (Config): The profile configuration instance.
-            password (Optional[str]): The master password for SQLCipher encryption.
+            encryption_key (Optional[bytes]): PMK-derived SQLCipher key.
 
         Returns:
             None
         """
         self.db_path: Path = Path(db_path)
         self._config: 'Config' = config
-        self._password: Optional[bytearray] = None
-        self._uses_sqlcipher_password: bool = password is not None
-        if password is not None:
-            self._password = bytearray(password.encode('utf-8'))
+        self._encryption_key: Optional[bytearray] = None
+        self._uses_sqlcipher_key: bool = encryption_key is not None
+        if encryption_key is not None:
+            self._encryption_key = bytearray(encryption_key)
 
         self._ensure_tables()
         self.peers: PeerRepository = PeerRepository(self)
@@ -209,16 +206,18 @@ class SqlManager:
 
         with SqlManager._pool_lock:
             if path_str in SqlManager._connections:
+                if self._encryption_key is not None:
+                    secure_clear_buffer(self._encryption_key)
+                    self._encryption_key = None
                 return SqlManager._connections[path_str]
 
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             conn = sqlite3.connect(path_str, check_same_thread=False)
             conn.execute('PRAGMA foreign_keys = ON')
-            if self._password:
-                safe_password: str = self._password.decode('utf-8').replace("'", "''")
-                conn.execute(f"PRAGMA key = '{safe_password}'")
-                secure_clear_buffer(self._password)
-                self._password = None
+            if self._encryption_key:
+                conn.execute(f'PRAGMA key = "x\'{self._encryption_key.hex()}\'"')
+                secure_clear_buffer(self._encryption_key)
+                self._encryption_key = None
 
             SqlManager._connections[path_str] = conn
             return conn
@@ -252,7 +251,7 @@ class SqlManager:
                             refresh_runtime_mirror(
                                 conn,
                                 self.db_path,
-                                self._uses_sqlcipher_password,
+                                self._uses_sqlcipher_key,
                                 self._config,
                             )
                         except Exception:
@@ -293,7 +292,7 @@ class SqlManager:
                     refresh_runtime_mirror(
                         conn,
                         self.db_path,
-                        self._uses_sqlcipher_password,
+                        self._uses_sqlcipher_key,
                         self._config,
                     )
                 except Exception:

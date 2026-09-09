@@ -97,21 +97,26 @@ class ProfileManager:
                 )
 
         hs_dir = self.paths.get_hidden_service_dir()
-        salt_file: Path = hs_dir / 'crypto.salt'
+        keyslot_file = self.paths.get_keyslot_file()
         metor_key_path: Path = hs_dir / Constants.METOR_SECRET_KEY
+        tor_key_path: Path = hs_dir / f'{Constants.TOR_SECRET_KEY}.enc'
 
-        if security_mode is ProfileSecurityMode.PLAINTEXT and salt_file.exists():
+        if security_mode is ProfileSecurityMode.PLAINTEXT and keyslot_file.exists():
             raise ValueError(
-                "Profile state corruption detected: security_mode is 'plaintext', but encrypted key salt exists. Use the security migration workflow or delete the profile."
+                "Profile state corruption detected: security_mode is 'plaintext', but protected PMK material exists. Use the security migration workflow or delete the profile."
             )
 
         if (
             security_mode is ProfileSecurityMode.ENCRYPTED
-            and metor_key_path.exists()
-            and not salt_file.exists()
+            and (
+                self.paths.get_db_file().exists()
+                or metor_key_path.exists()
+                or tor_key_path.exists()
+            )
+            and not keyslot_file.exists()
         ):
             raise ValueError(
-                "Profile state corruption detected: security_mode is 'encrypted', but the key salt is missing. Use the security migration workflow or delete the profile."
+                "Profile state corruption detected: security_mode is 'encrypted', but the PMK keyslot is missing. Development profiles using the retired direct-password format must be recreated."
             )
 
     def exists(self) -> bool:
@@ -395,6 +400,7 @@ class ProfileManager:
         is_remote: bool = False,
         port: Optional[int] = None,
         security_mode: ProfileSecurityMode = ProfileSecurityMode.ENCRYPTED,
+        master_password: Optional[str] = None,
     ) -> ProfileOperationResult:
         """
         Creates a new profile directory safely.
@@ -403,13 +409,21 @@ class ProfileManager:
             name (str): Profile name.
             is_remote (bool): Is remote configuration.
             port (Optional[int]): Static port.
+            security_mode (ProfileSecurityMode): Requested storage security mode.
+            master_password (Optional[str]): Password for encrypted local storage.
 
         Returns:
             ProfileOperationResult: Structured local outcome for the CLI layer.
         """
         from metor.data.profile.lifecycle import add_profile_folder
 
-        return add_profile_folder(name, is_remote, port, security_mode)
+        return add_profile_folder(
+            name,
+            is_remote,
+            port,
+            security_mode,
+            master_password,
+        )
 
     @classmethod
     def migrate_profile_security(
@@ -490,3 +504,17 @@ class ProfileManager:
         from metor.data.profile.lifecycle import clear_profile_db
 
         return clear_profile_db(name)
+
+    @classmethod
+    def purge_all_data(cls) -> None:
+        """Destroys all profile keyslots before global filesystem cleanup.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        from metor.data.profile.lifecycle import purge_all_profile_data
+
+        purge_all_profile_data()

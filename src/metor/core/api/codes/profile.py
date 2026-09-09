@@ -13,6 +13,7 @@ class ProfileOperationCode(str, Enum):
     PROFILE_EXISTS = 'profile_exists'
     PROFILE_CREATED = 'profile_created'
     PROFILE_CREATED_WITH_PORT = 'profile_created_with_port'
+    PROFILE_CREATION_FAILED = 'profile_creation_failed'
     SECURITY_MIGRATION_REMOTE_NOT_ALLOWED = 'security_migration_remote_not_allowed'
     CANNOT_MIGRATE_RUNNING = 'cannot_migrate_running'
     SECURITY_MODE_UNCHANGED = 'security_mode_unchanged'

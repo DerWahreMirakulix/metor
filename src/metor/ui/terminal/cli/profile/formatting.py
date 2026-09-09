@@ -44,6 +44,8 @@ def _format_profile_result_by_code(
         if params.get('security_mode') == ProfileSecurityMode.PLAINTEXT.value:
             storage_suffix = ' without password protection'
         return f"{params['remote_tag']}profile '{params['profile']}' successfully created{storage_suffix} (Port {params['port']})."
+    if operation_code is ProfileOperationCode.PROFILE_CREATION_FAILED:
+        return str(params.get('reason') or 'Profile creation failed safely.')
     if operation_code is ProfileOperationCode.SECURITY_MIGRATION_REMOTE_NOT_ALLOWED:
         return 'Remote profiles cannot migrate local storage security mode.'
     if operation_code is ProfileOperationCode.CANNOT_MIGRATE_RUNNING:

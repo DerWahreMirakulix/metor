@@ -54,6 +54,22 @@ field is omitted from ALL rows — uniform absence, never selective absence.
 The daemon validates only `daemon.*` keys against its own registry. Any other
 prefix is client scope and rejected with `CLIENT_SCOPE_KEY_REJECTED`.
 
+## Profile storage security
+
+| Term                  | Meaning                                                                 |
+| --------------------- | ----------------------------------------------------------------------- |
+| `PMK`                 | Random 32-byte Profile Master Key; root of encrypted profile storage.   |
+| `KEK`                 | Password-derived Key Encryption Key used only to wrap or unwrap a PMK.  |
+| `DB_KEY`              | PMK-derived SQLCipher key under the `metor/db/v1` domain.               |
+| `SECRET_KEY`          | PMK-derived identity-secret key under `metor/secrets/v1`.               |
+| `BLOB_KEY`            | PMK-derived external-object root under `metor/blobs/v1`.                |
+| `keyslot`             | Versioned protector metadata containing only an authenticated PMK wrap. |
+| `blob_id`             | Opaque identifier for an encrypted object; never a filesystem path.     |
+| `temporary blob`      | Encrypted crash-safe spool object that is not normal persisted history. |
+| `persistent blob`     | Encrypted durable object referenced by structured database metadata.    |
+| `KeyProtector`        | Boundary that protects, unwraps, rewraps, and destroys PMK access.      |
+| `cryptographic erase` | Destruction of PMK access before best-effort ciphertext cleanup.        |
+
 ## Mapping (old → new)
 
 | Old                                                                                                             | New                                | Where                                 |

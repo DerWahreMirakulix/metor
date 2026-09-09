@@ -130,6 +130,11 @@ class Constants:
     DATA_DIR: str = '.metor'
     HIDDEN_SERVICE_DIR: str = 'hidden_service'
     TOR_DATA_DIR: str = 'tor_data'
+    PROTECTED_KEY_DIR: str = 'protected-key-material'
+    PROFILE_KEYSLOT_FILE: str = 'keyslot.json'
+    BLOBS_DIR: str = 'blobs'
+    PERSISTENT_BLOBS_DIR: str = 'persistent'
+    TEMPORARY_BLOBS_DIR: str = 'temporary'
 
     # Key Files (Tor & Metor)
     METOR_SECRET_KEY: str = 'metor_secret.key'

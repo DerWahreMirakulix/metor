@@ -1,0 +1,705 @@
+"""Security contracts for PMK-based profiles and encrypted external blobs."""
+
+import json
+import sys
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import cast
+from unittest.mock import Mock, patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
+
+from metor.core.daemon.managed.engine import Daemon
+from metor.core.key import KeyManager
+from metor.core.profile_destruction import destroy_profile_storage
+from metor.core.profile_keys import (
+    BLOB_KEY_CONTEXT,
+    DB_KEY_CONTEXT,
+    KEYSLOT_FORMAT,
+    KEYSLOT_VERSION,
+    PROFILE_MASTER_KEY_BYTES,
+    SECRET_KEY_CONTEXT,
+    InvalidCredentialError,
+    InvalidKeyslotError,
+    KeyProtector,
+    PasswordKeyProtector,
+    ProfileKeySet,
+    ProtectedKeyMissingError,
+)
+from metor.data.blob import (
+    BLOB_FORMAT_MAGIC,
+    BlobAuthenticationError,
+    BlobFormatError,
+    BlobLifecycle,
+    EncryptedBlobStore,
+    InvalidBlobIdError,
+)
+from metor.data.profile import ProfileConfigKey, ProfileManager, ProfileSecurityMode
+from metor.data.sql import DatabaseCorruptedError, SqlManager
+from metor.utils import Constants
+
+
+class ProfileStorageSecurityTests(unittest.TestCase):
+    """Covers profile root keys, SQLCipher integration, and blob encryption."""
+
+    def _profile(self, root: Path, name: str = 'primary') -> ProfileManager:
+        """Creates one default encrypted profile under an isolated data root.
+
+        Args:
+            root (Path): Isolated profile parent.
+            name (str): Profile name.
+
+        Returns:
+            ProfileManager: Initialized encrypted profile manager.
+        """
+        Constants.DATA = root
+        pm = ProfileManager(name)
+        pm.initialize()
+        return pm
+
+    def _keyslot(self, root: Path, password: str, pmk: bytes) -> PasswordKeyProtector:
+        """Creates one isolated password keyslot.
+
+        Args:
+            root (Path): Keyslot directory.
+            password (str): Protection password.
+            pmk (bytes): Profile master key.
+
+        Returns:
+            PasswordKeyProtector: Initialized protector.
+        """
+        protector = PasswordKeyProtector(root / 'keyslot.json')
+        protector.protect(pmk, password)
+        return protector
+
+    def test_profile_key_hierarchy_is_stable_and_domain_separated(self) -> None:
+        """Verifies explicit versioned labels produce independent deterministic keys.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self.assertEqual(DB_KEY_CONTEXT, b'metor/db/v1')
+        self.assertEqual(SECRET_KEY_CONTEXT, b'metor/secrets/v1')
+        self.assertEqual(BLOB_KEY_CONTEXT, b'metor/blobs/v1')
+        pmk = bytes(range(PROFILE_MASTER_KEY_BYTES))
+        first = ProfileKeySet.derive(pmk)
+        second = ProfileKeySet.derive(pmk)
+        try:
+            keys = {
+                first.database_key(),
+                first.secret_key(),
+                first.blob_key(),
+            }
+            self.assertEqual(len(keys), 3)
+            self.assertEqual(first.database_key(), second.database_key())
+            self.assertEqual(first.secret_key(), second.secret_key())
+            self.assertEqual(first.blob_key(), second.blob_key())
+            self.assertNotIn(pmk.hex(), repr(first))
+        finally:
+            first.clear()
+            second.clear()
+
+    def test_same_password_protects_independent_random_pmks(self) -> None:
+        """Verifies profiles and keyslot salts remain independent.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            first_pmk = bytes(range(PROFILE_MASTER_KEY_BYTES))
+            second_pmk = bytes(reversed(range(PROFILE_MASTER_KEY_BYTES)))
+            first = self._keyslot(root / 'first', 'same-password', first_pmk)
+            second = self._keyslot(root / 'second', 'same-password', second_pmk)
+            first_doc = json.loads((root / 'first' / 'keyslot.json').read_text())
+            second_doc = json.loads((root / 'second' / 'keyslot.json').read_text())
+            self.assertNotEqual(first_doc['kdf']['salt'], second_doc['kdf']['salt'])
+            self.assertEqual(bytes(first.unprotect('same-password')), first_pmk)
+            self.assertEqual(bytes(second.unprotect('same-password')), second_pmk)
+
+    def test_encrypted_profile_creation_generates_one_random_pmk(self) -> None:
+        """Verifies independent profiles generate distinct 32-byte PMKs.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                first_pm = self._profile(root, 'first')
+                second_pm = self._profile(root, 'second')
+                first_manager = KeyManager(first_pm, 'same-password')
+                second_manager = KeyManager(second_pm, 'same-password')
+                first_manager.unlock_profile_keys()
+                second_manager.unlock_profile_keys()
+                first_pmk = PasswordKeyProtector(
+                    first_pm.paths.get_keyslot_file()
+                ).unprotect('same-password')
+                second_pmk = PasswordKeyProtector(
+                    second_pm.paths.get_keyslot_file()
+                ).unprotect('same-password')
+                try:
+                    self.assertEqual(len(first_pmk), PROFILE_MASTER_KEY_BYTES)
+                    self.assertEqual(len(second_pmk), PROFILE_MASTER_KEY_BYTES)
+                    self.assertNotEqual(first_pmk, second_pmk)
+                finally:
+                    first_manager.clear_sensitive_state()
+                    second_manager.clear_sensitive_state()
+                    first_pmk[:] = b'\x00' * len(first_pmk)
+                    second_pmk[:] = b'\x00' * len(second_pmk)
+        finally:
+            Constants.DATA = original_data
+
+    def test_keyslot_contains_only_versioned_protected_material(self) -> None:
+        """Verifies passwords, KEKs, and plaintext PMKs are never persisted.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            pmk = b'p' * PROFILE_MASTER_KEY_BYTES
+            password = 'unique-password-value'
+            path = Path(temp_dir) / 'keyslot.json'
+            self._keyslot(Path(temp_dir), password, pmk)
+            raw = path.read_bytes()
+            document = json.loads(raw)
+            self.assertEqual(document['format'], KEYSLOT_FORMAT)
+            self.assertEqual(document['version'], KEYSLOT_VERSION)
+            self.assertEqual(document['kdf']['algorithm'], 'argon2id')
+            self.assertNotIn(password.encode(), raw)
+            self.assertNotIn(pmk, raw)
+            self.assertNotIn('kek', document)
+
+    def test_profile_creation_is_complete_or_removed(self) -> None:
+        """Verifies encrypted creation persists keyslot, keys, and SQLCipher atomically.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                Constants.DATA = root
+                created = ProfileManager.add_profile_folder(
+                    'created', master_password='profile-password'
+                )
+                self.assertTrue(created.success)
+                pm = ProfileManager('created')
+                self.assertTrue(pm.paths.get_keyslot_file().exists())
+                self.assertTrue(pm.paths.get_db_file().exists())
+                self.assertEqual(
+                    pm.paths.get_keyslot_file().stat().st_mode & 0o777, 0o600
+                )
+                self.assertEqual(
+                    pm.paths.get_protected_key_dir().stat().st_mode & 0o777, 0o700
+                )
+                self.assertTrue(
+                    KeyManager(pm, 'profile-password').has_complete_key_material()
+                )
+
+                rejected = ProfileManager.add_profile_folder('incomplete')
+                self.assertFalse(rejected.success)
+                self.assertFalse((root / 'incomplete').exists())
+        finally:
+            Constants.DATA = original_data
+
+    def test_wrong_password_tamper_and_unsupported_format_fail(self) -> None:
+        """Verifies keyslot authentication and strict format handling.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            protector = self._keyslot(root, 'correct', b'k' * PROFILE_MASTER_KEY_BYTES)
+            with self.assertRaises(InvalidCredentialError):
+                protector.unprotect('incorrect')
+
+            path = root / 'keyslot.json'
+            document = json.loads(path.read_text())
+            document['version'] = KEYSLOT_VERSION + 1
+            path.write_text(json.dumps(document))
+            with self.assertRaises(InvalidKeyslotError):
+                protector.unprotect('correct')
+
+            document['version'] = KEYSLOT_VERSION
+            ciphertext = document['wrap']['ciphertext']
+            document['wrap']['ciphertext'] = (
+                'A' if ciphertext[0] != 'A' else 'B'
+            ) + ciphertext[1:]
+            path.write_text(json.dumps(document))
+            with self.assertRaises((InvalidCredentialError, InvalidKeyslotError)):
+                protector.unprotect('correct')
+
+    def test_password_rewrap_keeps_pmk_and_derived_keys(self) -> None:
+        """Verifies password changes replace only PMK wrapping metadata.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            pmk = b'r' * PROFILE_MASTER_KEY_BYTES
+            protector = self._keyslot(Path(temp_dir), 'old', pmk)
+            before = ProfileKeySet.derive(pmk)
+            with self.assertRaises(InvalidCredentialError):
+                protector.rewrap('wrong', 'new')
+            self.assertEqual(bytes(protector.unprotect('old')), pmk)
+            protector.rewrap('old', 'new')
+            with self.assertRaises(InvalidCredentialError):
+                protector.unprotect('old')
+            recovered = protector.unprotect('new')
+            after = ProfileKeySet.derive(recovered)
+            try:
+                self.assertEqual(bytes(recovered), pmk)
+                self.assertEqual(before.database_key(), after.database_key())
+                self.assertEqual(before.blob_key(), after.blob_key())
+            finally:
+                before.clear()
+                after.clear()
+
+    def test_sqlcipher_uses_derived_key_across_lock_style_release(self) -> None:
+        """Verifies profile data opens with DB_KEY rather than the user password.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                pm = self._profile(Path(temp_dir))
+                first = KeyManager(pm, 'user-password')
+                first.unlock_profile_keys()
+                database_key = first.get_database_key()
+                self.assertIsNotNone(database_key)
+                self.assertNotEqual(database_key, b'user-password')
+                sql = SqlManager(pm.paths.get_db_file(), pm.config, database_key)
+                sql.execute('CREATE TABLE protected_test (value TEXT NOT NULL)')
+                sql.execute('INSERT INTO protected_test VALUES (?)', ('survives',))
+                SqlManager.close_connection(pm.paths.get_db_file())
+                first.clear_sensitive_state()
+                self.assertTrue(pm.paths.get_keyslot_file().exists())
+
+                second = KeyManager(pm, 'user-password')
+                reopened = SqlManager(
+                    pm.paths.get_db_file(), pm.config, second.get_database_key()
+                )
+                self.assertEqual(
+                    reopened.fetchall('SELECT value FROM protected_test'),
+                    [('survives',)],
+                )
+                SqlManager.close_connection(pm.paths.get_db_file())
+                second.clear_sensitive_state()
+
+                wrong_keys = ProfileKeySet.derive(b'w' * PROFILE_MASTER_KEY_BYTES)
+                with self.assertRaises(DatabaseCorruptedError):
+                    SqlManager(
+                        pm.paths.get_db_file(),
+                        pm.config,
+                        wrong_keys.database_key(),
+                    )
+                wrong_keys.clear()
+
+                wrong = KeyManager(pm, 'wrong-password')
+                with self.assertRaises(InvalidCredentialError):
+                    wrong.get_database_key()
+        finally:
+            Constants.DATA = original_data
+
+    def test_profile_password_rewrap_preserves_database_and_blobs(self) -> None:
+        """Verifies internal rewrap changes no PMK-derived persistent encryption.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                Constants.DATA = Path(temp_dir)
+                result = ProfileManager.add_profile_folder(
+                    'rewrap', master_password='old-password'
+                )
+                self.assertTrue(result.success)
+                pm = ProfileManager('rewrap')
+                old_manager = KeyManager(pm, 'old-password')
+                database_key_before = old_manager.get_database_key()
+                blob_key_before = old_manager.get_blob_key()
+                self.assertIsNotNone(database_key_before)
+                sql = SqlManager(pm.paths.get_db_file(), pm.config, database_key_before)
+                sql.execute('CREATE TABLE rewrap_test (value TEXT NOT NULL)')
+                sql.execute('INSERT INTO rewrap_test VALUES (?)', ('same-db',))
+                SqlManager.close_connection(pm.paths.get_db_file())
+                blob_store = EncryptedBlobStore(
+                    pm.paths.get_persistent_blob_dir(),
+                    pm.paths.get_temporary_blob_dir(),
+                    blob_key_before,
+                )
+                blob_id = blob_store.put(b'same-blob')
+                blob_store.close()
+
+                old_manager.rewrap_password('new-password')
+                old_manager.clear_sensitive_state()
+                with self.assertRaises(InvalidCredentialError):
+                    KeyManager(pm, 'old-password').get_database_key()
+
+                new_manager = KeyManager(pm, 'new-password')
+                self.assertEqual(new_manager.get_database_key(), database_key_before)
+                self.assertEqual(new_manager.get_blob_key(), blob_key_before)
+                reopened = SqlManager(
+                    pm.paths.get_db_file(),
+                    pm.config,
+                    new_manager.get_database_key(),
+                )
+                self.assertEqual(
+                    reopened.fetchall('SELECT value FROM rewrap_test'),
+                    [('same-db',)],
+                )
+                SqlManager.close_connection(pm.paths.get_db_file())
+                reopened_blobs = EncryptedBlobStore(
+                    pm.paths.get_persistent_blob_dir(),
+                    pm.paths.get_temporary_blob_dir(),
+                    new_manager.get_blob_key(),
+                )
+                self.assertEqual(reopened_blobs.read(blob_id), b'same-blob')
+                reopened_blobs.close()
+                new_manager.clear_sensitive_state()
+        finally:
+            Constants.DATA = original_data
+
+    def _blob_store(self, root: Path, key: bytes) -> EncryptedBlobStore:
+        """Creates one isolated encrypted blob store.
+
+        Args:
+            root (Path): Store root.
+            key (bytes): Blob-domain key.
+
+        Returns:
+            EncryptedBlobStore: Active test store.
+        """
+        return EncryptedBlobStore(root / 'persistent', root / 'temporary', key)
+
+    def test_blob_round_trip_tamper_wrong_key_and_deletion(self) -> None:
+        """Verifies ciphertext confidentiality, authentication, and logical deletion.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            plaintext = b'future voice payload with private content'
+            right_keys = ProfileKeySet.derive(b'a' * PROFILE_MASTER_KEY_BYTES)
+            wrong_keys = ProfileKeySet.derive(b'b' * PROFILE_MASTER_KEY_BYTES)
+            store = self._blob_store(root, right_keys.blob_key())
+            blob_id = store.put(plaintext)
+            path = root / 'persistent' / f'{blob_id}.blob'
+            encoded = path.read_bytes()
+            self.assertTrue(encoded.startswith(BLOB_FORMAT_MAGIC))
+            self.assertNotIn(plaintext, encoded)
+            self.assertEqual(store.read(blob_id), plaintext)
+            second_blob_id = store.put(plaintext)
+            second_path = root / 'persistent' / f'{second_blob_id}.blob'
+            self.assertNotEqual(blob_id, second_blob_id)
+            self.assertNotEqual(encoded, second_path.read_bytes())
+
+            wrong_store = self._blob_store(root, wrong_keys.blob_key())
+            with self.assertRaises(BlobAuthenticationError):
+                wrong_store.read(blob_id)
+
+            tampered = bytearray(encoded)
+            tampered[-1] ^= 1
+            path.write_bytes(tampered)
+            with self.assertRaises(BlobAuthenticationError):
+                store.read(blob_id)
+            path.write_bytes(encoded)
+
+            store.delete(blob_id)
+            self.assertFalse(path.exists())
+            store.delete(blob_id)
+            store.close()
+            wrong_store.close()
+            right_keys.clear()
+            wrong_keys.clear()
+
+    def test_blob_header_identity_and_paths_are_strict(self) -> None:
+        """Verifies immutable context and identifiers cannot be redirected.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = self._blob_store(root, b'c' * 32)
+            blob_id = store.put(b'content')
+            original = root / 'persistent' / f'{blob_id}.blob'
+            encoded = original.read_bytes()
+
+            encoded_with_bad_header = bytearray(encoded)
+            encoded_with_bad_header[0] ^= 1
+            original.write_bytes(encoded_with_bad_header)
+            with self.assertRaises(BlobFormatError):
+                store.read(blob_id)
+            original.write_bytes(encoded)
+
+            encoded_with_bad_version = bytearray(encoded)
+            encoded_with_bad_version[len(BLOB_FORMAT_MAGIC)] += 1
+            original.write_bytes(encoded_with_bad_version)
+            with self.assertRaises(BlobFormatError):
+                store.read(blob_id)
+            original.write_bytes(encoded)
+
+            other_id = 'f' * 64 if blob_id != 'f' * 64 else 'e' * 64
+            other_path = root / 'persistent' / f'{other_id}.blob'
+            original.replace(other_path)
+            with self.assertRaises(BlobAuthenticationError):
+                store.read(other_id)
+            with self.assertRaises(InvalidBlobIdError):
+                store.read('../../keyslot')
+
+    def test_temporary_blob_promotes_without_plaintext_spool(self) -> None:
+        """Verifies LIVE-style ciphertext can move into DROP-style ownership.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = self._blob_store(root, b'd' * 32)
+            blob_id = store.put(b'pending voice', BlobLifecycle.TEMPORARY)
+            temporary = root / 'temporary' / f'{blob_id}.blob'
+            persistent = root / 'persistent' / f'{blob_id}.blob'
+            self.assertTrue(temporary.exists())
+            self.assertNotIn(b'pending voice', temporary.read_bytes())
+            store.promote(blob_id)
+            self.assertFalse(temporary.exists())
+            self.assertTrue(persistent.exists())
+            self.assertEqual(store.read(blob_id), b'pending voice')
+            self.assertEqual(list((root / 'temporary').glob('*.tmp')), [])
+
+    def test_blob_corruption_and_closed_runtime_fail_cleanly(self) -> None:
+        """Verifies truncated objects and released runtime keys cannot be used.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = self._blob_store(root, b'e' * 32)
+            blob_id = store.put(b'value')
+            path = root / 'persistent' / f'{blob_id}.blob'
+            path.write_bytes(BLOB_FORMAT_MAGIC)
+            with self.assertRaises(BlobFormatError):
+                store.read(blob_id)
+            store.close()
+            with self.assertRaises(RuntimeError):
+                store.put(b'new')
+
+    def test_blob_store_enforces_injected_size_limit(self) -> None:
+        """Verifies object limits reject oversized plaintext before persistence.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = EncryptedBlobStore(
+                root / 'persistent',
+                root / 'temporary',
+                b's' * 32,
+                max_blob_bytes=4,
+            )
+            with self.assertRaises(ValueError):
+                store.put(b'oversized')
+            self.assertEqual(list((root / 'persistent').iterdir()), [])
+
+    def test_key_destruction_precedes_filesystem_cleanup(self) -> None:
+        """Verifies purge ordering keeps cleanup secondary to cryptographic erasure.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                pm = self._profile(Path(temp_dir))
+                order: list[str] = []
+                protector = Mock()
+                protector.destroy.side_effect = lambda: order.append('key')
+
+                with patch.object(
+                    SqlManager,
+                    'close_connection',
+                    side_effect=lambda _path: order.append('db'),
+                ):
+                    destroy_profile_storage(
+                        pm,
+                        prepare_runtime=lambda: order.append('runtime'),
+                        clear_runtime_keys=lambda: order.append('memory'),
+                        protector=cast(KeyProtector, protector),
+                        cleanup=lambda _path: order.append('filesystem'),
+                    )
+                self.assertEqual(
+                    order, ['runtime', 'db', 'memory', 'key', 'filesystem']
+                )
+        finally:
+            Constants.DATA = original_data
+
+    def test_cleanup_failure_does_not_restore_destroyed_keyslot(self) -> None:
+        """Verifies a post-erasure cleanup failure cannot recreate PMK access.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                pm = self._profile(Path(temp_dir))
+                protector = PasswordKeyProtector(pm.paths.get_keyslot_file())
+                protector.protect(b'z' * PROFILE_MASTER_KEY_BYTES, 'password')
+
+                def fail_cleanup(_path: Path) -> None:
+                    """Raises after logical key destruction.
+
+                    Args:
+                        _path (Path): Ignored profile path.
+
+                    Returns:
+                        None
+                    """
+                    raise OSError('simulated cleanup failure')
+
+                with self.assertRaises(OSError):
+                    destroy_profile_storage(
+                        pm, protector=protector, cleanup=fail_cleanup
+                    )
+                self.assertFalse(pm.paths.get_keyslot_file().exists())
+                with self.assertRaises(ProtectedKeyMissingError):
+                    protector.unprotect('password')
+        finally:
+            Constants.DATA = original_data
+
+    def test_self_destruct_uses_central_profile_destruction(self) -> None:
+        """Verifies SelfDestruct delegates to the key-first purge path.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        daemon = Daemon.__new__(Daemon)
+        daemon._pm = Mock()
+        daemon._lock_runtime = Mock(return_value=True)
+        daemon.stop = Mock()
+        daemon._on_runtime_internal_error = Mock()
+        with patch(
+            'metor.core.daemon.managed.engine.destroy_profile_storage'
+        ) as destroy:
+            daemon._nuke_data()
+        destroy.assert_called_once_with(
+            daemon._pm,
+            prepare_runtime=daemon._lock_runtime,
+        )
+        daemon.stop.assert_called_once_with()
+
+    def test_profile_destruction_is_idempotent_when_files_are_missing(self) -> None:
+        """Verifies repeated logical destruction safely tolerates absent storage.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                pm = self._profile(Path(temp_dir))
+                destroy_profile_storage(pm)
+                destroy_profile_storage(pm)
+                self.assertFalse(pm.paths.get_config_dir().exists())
+        finally:
+            Constants.DATA = original_data
+
+    def test_plaintext_profile_has_no_cryptographic_erase_claim(self) -> None:
+        """Verifies explicit plaintext profiles have no keyslot or blob runtime.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                pm = self._profile(Path(temp_dir))
+                pm.config.set(
+                    ProfileConfigKey.SECURITY_MODE,
+                    ProfileSecurityMode.PLAINTEXT.value,
+                    allow_mutating_structural_keys=True,
+                )
+                marker = pm.paths.get_config_dir() / 'plaintext.txt'
+                marker.write_text('not cryptographically protected')
+                km = KeyManager(pm)
+                self.assertIsNone(km.get_database_key())
+                self.assertFalse(pm.paths.get_keyslot_file().exists())
+                with self.assertRaises(InvalidKeyslotError):
+                    km.get_blob_key()
+                destroy_profile_storage(pm)
+                self.assertFalse(marker.exists())
+        finally:
+            Constants.DATA = original_data
+
+
+if __name__ == '__main__':
+    unittest.main()

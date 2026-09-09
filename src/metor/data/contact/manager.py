@@ -20,20 +20,22 @@ from metor.data.sql import PeerRepository, SqlManager
 class ContactManager:
     """Manages the database mapping between aliases and .onion addresses."""
 
-    def __init__(self, pm: ProfileManager, password: Optional[str] = None) -> None:
+    def __init__(
+        self, pm: ProfileManager, database_key: Optional[bytes] = None
+    ) -> None:
         """
         Initializes the contact manager connected to the centralized peer store.
 
         Args:
             pm (ProfileManager): The profile manager instance.
-            password (Optional[str]): The master password for SQLCipher encryption.
+            database_key (Optional[bytes]): PMK-derived SQLCipher key.
 
         Returns:
             None
         """
         self._pm: ProfileManager = pm
         self._db_path: Path = self._pm.paths.get_db_file()
-        self._sql: SqlManager = SqlManager(self._db_path, self._pm.config, password)
+        self._sql: SqlManager = SqlManager(self._db_path, self._pm.config, database_key)
         self._peers: PeerRepository = self._sql.peers
 
     def get_all_contacts(self) -> List[str]:

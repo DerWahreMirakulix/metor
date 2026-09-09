@@ -12,6 +12,7 @@ from metor.data import (
     HistoryManager,
     MessageManager,
 )
+from metor.data.blob import EncryptedBlobStore
 from metor.data.profile import ProfileManager
 
 # Local Package Imports
@@ -34,6 +35,7 @@ class DaemonRuntime:
     cm: ContactManager
     hm: HistoryManager
     mm: MessageManager
+    blob_store: Optional[EncryptedBlobStore]
     session_auth: Optional[SessionAuthContext]
 
 
@@ -75,11 +77,20 @@ def build_runtime(
             raise InvalidMasterPasswordError()
         session_auth = create_session_auth_context(auth_password)
 
+    database_key = km.get_database_key()
+    blob_store: Optional[EncryptedBlobStore] = None
     try:
-        cm = ContactManager(pm, password)
-        hm = HistoryManager(pm, password)
-        mm = MessageManager(pm, password)
+        cm = ContactManager(pm, database_key)
+        hm = HistoryManager(pm, database_key)
+        mm = MessageManager(pm, database_key)
+        if pm.uses_encrypted_storage():
+            blob_store = EncryptedBlobStore(
+                pm.paths.get_persistent_blob_dir(),
+                pm.paths.get_temporary_blob_dir(),
+                km.get_blob_key(),
+            )
     except DatabaseCorruptedError as exc:
+        km.clear_sensitive_state()
         raise CorruptedStorageError() from exc
 
     return DaemonRuntime(
@@ -88,5 +99,6 @@ def build_runtime(
         cm=cm,
         hm=hm,
         mm=mm,
+        blob_store=blob_store,
         session_auth=session_auth,
     )

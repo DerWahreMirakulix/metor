@@ -344,9 +344,9 @@ class Settings:
             key=SettingKey.ENABLE_RUNTIME_DB_MIRROR,
             default=False,
             category='Core Daemon',
-            description='Exports a plaintext runtime copy of the encrypted database for local inspection tools.',
+            description='DEBUG/DEVELOPMENT ONLY: exports a plaintext runtime copy of the encrypted database for local inspection tools.',
             constraints='Boolean.',
-            security_note='Creates a plaintext database on disk while enabled. Keep disabled unless you explicitly need local inspection tooling.',
+            security_note='Creates plaintext data that PMK destruction cannot retroactively protect. Keep disabled and prohibit it on hardened devices.',
         ),
         SettingKey.AUTO_ACCEPT_CONTACTS: SettingSpec(
             key=SettingKey.AUTO_ACCEPT_CONTACTS,

@@ -58,7 +58,7 @@ class HeadlessDaemon:
         Returns:
             ContactManager: The active instance.
         """
-        return ContactManager(self._pm, self._password)
+        return ContactManager(self._pm, self._km.get_database_key())
 
     @cached_property
     def _hm(self) -> HistoryManager:
@@ -71,7 +71,7 @@ class HeadlessDaemon:
         Returns:
             HistoryManager: The active instance.
         """
-        return HistoryManager(self._pm, self._password)
+        return HistoryManager(self._pm, self._km.get_database_key())
 
     @cached_property
     def _mm(self) -> MessageManager:
@@ -84,7 +84,7 @@ class HeadlessDaemon:
         Returns:
             MessageManager: The active instance.
         """
-        return MessageManager(self._pm, self._password)
+        return MessageManager(self._pm, self._km.get_database_key())
 
     @cached_property
     def _km(self) -> KeyManager:
@@ -237,6 +237,9 @@ class HeadlessDaemon:
                 self._server.close()
             except OSError:
                 pass
+        if '_km' in self.__dict__:
+            self._km.clear_sensitive_state()
+        self._password = None
 
     def _acceptor(self) -> None:
         """

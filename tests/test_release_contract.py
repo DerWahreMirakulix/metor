@@ -882,6 +882,44 @@ class ReleaseContractTests(unittest.TestCase):
             self.assertIn('metor/ui/terminal/cli/proxy/core.py', archive_names)
             self.assertNotIn('metor/ui/cli/proxy/core.py', archive_names)
 
+    def test_daemon_wheel_contains_profile_security_runtime(self) -> None:
+        """Verifies the split daemon wheel includes PMK and blob implementations.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            clean_packaging_artifacts(repo_root)
+            subprocess.run(
+                [
+                    sys.executable,
+                    '-m',
+                    'pip',
+                    'wheel',
+                    'packaging/daemon',
+                    '--no-deps',
+                    '-w',
+                    str(output_dir),
+                ],
+                check=True,
+                cwd=repo_root,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            wheel_files = sorted(output_dir.glob('metor_daemon-*.whl'))
+            self.assertEqual(len(wheel_files), 1)
+            with ZipFile(wheel_files[0]) as wheel_archive:
+                archive_names = set(wheel_archive.namelist())
+
+            self.assertIn('metor/core/profile_keys.py', archive_names)
+            self.assertIn('metor/core/profile_destruction.py', archive_names)
+            self.assertIn('metor/data/blob/store.py', archive_names)
+
     def test_release_bundle_import_avoids_optional_runtime_utils_dependencies(
         self,
     ) -> None:

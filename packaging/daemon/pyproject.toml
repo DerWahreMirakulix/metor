@@ -24,7 +24,13 @@ metor-daemon = "metor.daemon_main:main"
 
 [tool.setuptools]
 include-package-data = true
-py-modules = ["metor.daemon_main", "metor.core.key", "metor.core.tor"]
+py-modules = [
+    "metor.daemon_main",
+    "metor.core.key",
+    "metor.core.profile_destruction",
+    "metor.core.profile_keys",
+    "metor.core.tor",
+]
 
 [tool.setuptools.package-dir]
 "" = "../../src"

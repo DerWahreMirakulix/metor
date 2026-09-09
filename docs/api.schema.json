@@ -3637,6 +3637,7 @@
             "profile_exists",
             "profile_created",
             "profile_created_with_port",
+            "profile_creation_failed",
             "security_migration_remote_not_allowed",
             "cannot_migrate_running",
             "security_mode_unchanged",

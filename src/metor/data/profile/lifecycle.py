@@ -21,6 +21,7 @@ def add_profile_folder(
     is_remote: bool = False,
     port: Optional[int] = None,
     security_mode: ProfileSecurityMode = ProfileSecurityMode.ENCRYPTED,
+    master_password: Optional[str] = None,
 ) -> ProfileOperationResult:
     """
     Creates one new profile directory safely.
@@ -30,6 +31,7 @@ def add_profile_folder(
         is_remote (bool): Whether the profile represents a remote daemon.
         port (Optional[int]): The optional static daemon port.
         security_mode (ProfileSecurityMode): The requested storage protection mode.
+        master_password (Optional[str]): Password for encrypted local storage.
 
     Returns:
         ProfileOperationResult: Structured local outcome for the CLI layer.
@@ -71,6 +73,30 @@ def add_profile_folder(
             security_mode.value,
             allow_mutating_structural_keys=True,
         )
+
+    if not is_remote and security_mode is ProfileSecurityMode.ENCRYPTED:
+        from metor.core.key import KeyManager
+        from metor.core.profile_destruction import destroy_profile_storage
+
+        km = KeyManager(pm, password=master_password)
+        try:
+            if not master_password:
+                raise ValueError(
+                    'A master password is required for encrypted profiles.'
+                )
+            km.unlock_profile_keys()
+            km.generate_keys()
+            SqlManager(pm.paths.get_db_file(), pm.config, km.get_database_key())
+            SqlManager.close_connection(pm.paths.get_db_file())
+        except Exception as exc:
+            km.clear_sensitive_state()
+            destroy_profile_storage(pm)
+            return ProfileOperationResult(
+                False,
+                ProfileOperationType.PROFILE_CREATION_FAILED,
+                {'profile': safe_name, 'reason': str(exc)},
+            )
+        km.clear_sensitive_state()
 
     if is_remote or port:
         if is_remote:
@@ -213,15 +239,29 @@ def migrate_profile_security(
     secure_shred_file(backup_db_path)
 
     try:
+        current_db_key: Optional[bytes] = (
+            key_manager.get_database_key()
+            if current_mode is ProfileSecurityMode.ENCRYPTED
+            else None
+        )
+        if target_mode is ProfileSecurityMode.ENCRYPTED:
+            key_manager.rewrite_password_protection(target_password)
+        target_db_key: Optional[bytes] = (
+            key_manager.get_database_key()
+            if target_mode is ProfileSecurityMode.ENCRYPTED
+            else None
+        )
+
         if db_path.exists():
             SqlManager.export_database_copy(
                 db_path,
                 temp_db_path,
-                current_password=old_password,
-                target_password=target_password,
+                current_key=current_db_key,
+                target_key=target_db_key,
             )
 
-        key_manager.rewrite_password_protection(target_password)
+        if target_mode is ProfileSecurityMode.PLAINTEXT:
+            key_manager.rewrite_password_protection(None)
 
         SqlManager.close_connection(db_path)
         SqlManager.close_connection(temp_db_path)
@@ -339,7 +379,9 @@ def remove_profile_folder(
             {'profile': safe_name},
         )
 
-    secure_remove_path(target_dir)
+    from metor.core.profile_destruction import destroy_profile_storage
+
+    destroy_profile_storage(pm)
     return ProfileOperationResult(
         True,
         ProfileOperationType.PROFILE_REMOVED,
@@ -448,3 +490,23 @@ def clear_profile_db(name: str) -> ProfileOperationResult:
             ProfileOperationType.DATABASE_CLEAR_FAILED,
             {},
         )
+
+
+def purge_all_profile_data() -> None:
+    """Destroys every local keyslot before removing the global data tree.
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    from metor.core.profile_destruction import destroy_profile_storage
+    from metor.data.profile.manager import ProfileManager
+
+    if not Constants.DATA.exists():
+        return
+    for entry in tuple(Constants.DATA.iterdir()):
+        if entry.is_dir():
+            destroy_profile_storage(ProfileManager(entry.name))
+    secure_remove_path(Constants.DATA)

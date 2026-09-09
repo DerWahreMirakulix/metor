@@ -18,10 +18,208 @@ stopping profile-scoped workers, peer sessions, Tor, database access, and key
 state. IPC stays available so the process can accept a later `UnlockCommand`,
 which constructs a fresh profile runtime.
 
-Secure overwrite is best-effort on copy-on-write filesystems and SSDs with
-wear-leveling. Metor closes the database and overwrites/removes its runtime
-mirror, but full media-level erasure depends on the host storage stack; full-disk
-encryption remains recommended.
+For encrypted profiles, unlock uses the configured `KeyProtector` to recover the
+PMK and derives fresh DB, secret, and blob keys. Lock closes SQLCipher and the
+blob store, clears their mutable runtime key buffers, clears the PMK hierarchy,
+and releases all references. The protected PMK keyslot remains intact. Python
+cannot guarantee deterministic erasure of every interpreter-created immutable
+copy, so this is honest best-effort process-memory hygiene rather than a claim
+of secure-memory behavior.
+
+## Profile encryption and storage
+
+### Retired development model
+
+Before the first-release PMK design, the user password was passed directly to
+SQLCipher. A separate Argon2i derivation of the same password encrypted Metor
+and Tor identity files. There was no single random profile root, no blob-domain
+key, and purge depended primarily on recursive overwrite/delete. The repository
+is unreleased, so that development-only format is deliberately unsupported and
+has no migration shim; affected profiles must be recreated.
+
+### First-release encrypted profile model
+
+Each encrypted local profile has exactly one independently random 32-byte
+Profile Master Key (PMK), created with the operating system CSPRNG. The password
+is an unlock credential and never becomes the SQLCipher key.
+
+```text
+Password
+   │
+Argon2id
+   ▼
+  KEK ── authenticated unwrap ──► PMK
+                                  │
+                      keyed BLAKE2b KDF
+                    ┌─────────────┼─────────────┐
+                    ▼             ▼             ▼
+              DB_KEY         SECRET_KEY      BLOB_KEY
+             metor/db/v1  metor/secrets/v1 metor/blobs/v1
+```
+
+- `DB_KEY` is the raw 32-byte SQLCipher key. User passwords are never passed to
+  SQLCipher.
+- `SECRET_KEY` encrypts long-lived Metor signing and Tor Onion Service private
+  identity files. These remain separate files because Tor consumes its own key
+  format at runtime; moving them into SQLCipher would not remove the need for a
+  carefully controlled Tor runtime export.
+- `BLOB_KEY` is the root for encrypted external binary objects. It is not a
+  network key and is never used by the typed message/delivery layer directly.
+
+Domain derivation uses PyNaCl/libsodium keyed BLAKE2b with stable, versioned
+labels. Raw material is never reused between domains. Runtime keys live in
+mutable buffers where practical and are cleared on lock, shutdown, and purge.
+
+### KeyProtector and password keyslot
+
+Profile lifecycle code depends on `KeyProtector`, whose responsibilities are to
+protect, unprotect, atomically rewrap, and destroy PMK access. The desktop
+implementation is `PasswordKeyProtector`. Future TPM or Secure Element
+implementations can replace it without changing SQLCipher, key derivation,
+blob storage, message DTOs, or lock semantics.
+
+The password keyslot is strict JSON containing:
+
+- format `metor-password-keyslot`, version `1`;
+- Argon2id algorithm, random salt, and persisted operation/memory limits;
+- XSalsa20-Poly1305 SecretBox algorithm, random nonce, and authenticated PMK
+  ciphertext.
+
+Unknown fields, unsupported versions/algorithms/parameters, malformed Base64,
+wrong passwords, and authentication failures are rejected. The keyslot never
+stores the password, KEK, derived domain keys, or plaintext PMK. Argon2id uses
+libsodium's interactive limits (operation limit `2` and a 64 MiB memory limit).
+These parameters provide a memory-hard interactive unlock without applying the much larger sensitive
+profile to every desktop daemon start. The numeric values are persisted so the
+format is explicit, but this version accepts only the compiled supported values
+to prevent attacker-controlled resource-exhaustion parameters.
+
+Keyslot creation and password rewrap use an owner-only temporary file, flush and
+`fsync`, then atomic replacement. Rewrap authenticates the old password and
+wraps the same PMK with a new salt and nonce. It does not re-encrypt SQLCipher,
+identity data, or blobs. A failed rewrap leaves the prior valid keyslot in place.
+The internal rewrap capability exists; a public `ChangePasswordCommand` remains
+future API work.
+
+### Profile layout
+
+```text
+profile/
+├── config.json
+├── storage.db                         # plaintext or DB_KEY-protected SQLCipher
+├── storage.runtime.db                 # optional plaintext DEBUG mirror
+├── protected-key-material/
+│   └── keyslot.json                   # protected PMK, owner-only
+├── blobs/
+│   ├── persistent/                    # future DROP/file durable ciphertext
+│   └── temporary/                     # future LIVE crash-safe ciphertext spool
+├── hidden_service/
+│   ├── metor_secret.key               # SECRET_KEY ciphertext when encrypted
+│   ├── hs_ed25519_secret_key.enc       # SECRET_KEY ciphertext when encrypted
+│   └── hs_ed25519_secret_key           # runtime-only Tor plaintext, shredded
+└── tor_data/                           # Tor runtime state
+```
+
+Sensitive directories use owner-only permissions where the platform supports
+them. Permissions are defense in depth, not encryption.
+
+### Encrypted external blob store
+
+`EncryptedBlobStore` maps random 256-bit lowercase hexadecimal blob IDs to
+internal files; callers never supply or receive filesystem paths. It supports
+`put`, authenticated `read`, idempotent `delete`, and atomic temporary-to-
+persistent `promote`. IDs are strictly validated, preventing path traversal.
+
+Each object derives an independent key from `BLOB_KEY`, the versioned
+`metor/blob-object/v1` context, and its blob ID using keyed BLAKE2b. Files use an
+explicit `METORB01` magic value and format version followed by a fresh
+XChaCha20-Poly1305 nonce and authenticated ciphertext. Magic/version and blob ID
+form immutable authenticated context. Reads reject truncated, unsupported,
+relocated, wrong-key, or modified objects before returning plaintext. Writes
+encrypt in memory and atomically persist ciphertext without creating a
+plaintext temporary file. The initial whole-object implementation caps
+plaintext objects at 64 MiB to bound corrupt-file reads; future streaming media
+work may introduce a different documented limit with a new format version.
+
+The current whole-object API establishes crypto and ownership semantics. A
+future bounded streaming transfer implementation may evolve the versioned file
+format without exposing paths or encryption details to message DTOs. A future
+`VoiceContent` or `FileContent` will carry `blob_id` and small metadata only;
+raw binary data must not enter NDJSON.
+
+Temporary and persistent objects use the same encryption model. Consequently a
+future `LIVE + VOICE` object can be promoted to `DROP + VOICE` during fallback
+without changing keys or embedding content in transport messages. Promotion
+changes ownership/lifecycle only; LIVE content does not become history merely
+because it required encrypted crash-safe spooling.
+
+### Lock versus purge and self-destruct
+
+```text
+LOCK                              PURGE / SELF DESTRUCT
+stop profile runtime              stop profile runtime
+close SQLCipher/blob handles      close SQLCipher/blob handles
+clear PMK and derived keys        clear PMK and derived keys
+keep protected PMK                destroy protected PMK access
+keep encrypted profile data       then best-effort filesystem cleanup
+keep IPC available                stop/remove profile data
+```
+
+All destructive paths use the central `destroy_profile_storage` lifecycle.
+Callers first stop or exclude runtime activity; the lifecycle then closes pooled
+SQLCipher access, clears any injected runtime keys, calls
+`KeyProtector.destroy`, and only afterward invokes recursive filesystem cleanup.
+`SelfDestructCommand`, individual profile removal, and global purge share this
+key-first ordering. If cleanup fails after key destruction, nothing recreates
+protected key material.
+
+`secure_remove_path` remains defense in depth. Portable Python overwrite and
+unlink cannot guarantee physical erasure on SSD, SD, flash, copy-on-write,
+snapshotted, journaled, remapped, or backed-up storage. The software password
+protector's keyslot is itself stored on that media, so historical physical
+copies may remain recoverable. Software purge therefore provides clean logical
+key destruction plus best-effort cleanup, not guaranteed irreversible hardware
+sanitization. Full-disk encryption is still recommended. A future hardware
+protector can make purge stronger by destroying a non-exportable wrapping key.
+
+### Plaintext and debug modes
+
+Plaintext local profiles remain available for explicit development and testing
+workflows, but are not appropriate for hardened or embedded deployment. They
+have no PMK, no password-backed local unlock, no encrypted external blob store,
+and no cryptographic-erasure guarantee; purge is filesystem cleanup only. The
+first hardened device policy should reject plaintext profiles. Removing the
+mode entirely before public release remains the preferred product decision if
+development workflows can move to disposable encrypted profiles.
+
+`daemon.enable_runtime_db_mirror` is disabled by default and is explicitly a
+DEBUG/DEVELOPMENT-ONLY facility. When enabled it writes a plaintext database
+copy beside encrypted storage. It is removed on disable, lock, shutdown, purge,
+and self-destruct, but PMK destruction cannot retroactively protect deliberately
+created plaintext copies, snapshots, or backups. Hardened device configuration
+must prohibit this setting.
+
+### Threat-model separation and future hardware work
+
+Tor and Onion Services protect network transport and network-identity
+properties. PMK-derived keys protect persistent data on the local device. The
+blob key exists for local at-rest protection, not because Tor transport lacks
+encryption.
+
+A future `TPMKeyProtector` or `SecureElementKeyProtector` must implement the same
+protector contract, define versioned provider metadata, provision a
+non-exportable wrapping key, map authentication failures to the existing error
+boundary, register/select the provider, inject it through `KeyManager` and the
+central destruction lifecycle, and destroy that hardware key during purge. No
+SQLCipher, key-hierarchy, blob, message, or lock semantic requires redesign.
+
+Future voice/file integration still requires a bounded authenticated SDK/IPC
+blob-transfer channel, authorization tying blob operations to the active
+profile/session, streaming/chunk limits and cancellation, database reference
+ownership and orphan cleanup, registered `VoiceContent`/`FileContent` DTOs, and
+fallback logic that promotes temporary ownership only after durable message
+metadata commits. None of those media/transport features is implemented by the
+at-rest blob foundation.
 
 ## Messages: delivery and content
 

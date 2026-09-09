@@ -113,6 +113,7 @@ def create_managed_daemon(
         runtime.cm,
         runtime.hm,
         runtime.mm,
+        runtime.blob_store,
         session_auth=runtime.session_auth,
         require_session_auth=require_local_auth,
         status_callback=status_callback,
