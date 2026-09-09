@@ -42,6 +42,13 @@ def set_default_profile(profile_name: str) -> ProfileOperationResult:
     if not safe_name:
         return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
 
+    if not (Constants.DATA / safe_name).exists():
+        return ProfileOperationResult(
+            False,
+            ProfileOperationType.PROFILE_NOT_FOUND,
+            {'profile': safe_name},
+        )
+
     Settings.set(SettingKey.DEFAULT_PROFILE, safe_name)
     return ProfileOperationResult(
         True,

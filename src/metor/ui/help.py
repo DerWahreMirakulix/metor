@@ -9,7 +9,6 @@ from typing import Dict, List, Optional
 
 # Local Package Imports
 from metor.ui.theme import Theme
-from metor.ui.presenter import UIPresenter
 
 
 @dataclass
@@ -139,6 +138,12 @@ class Help:
                 ),
                 SubCommandDef('clear [onion|alias]', 'Wipe the connection event log.'),
             ],
+        ),
+        'transport': CommandDef(
+            name='transport',
+            usage='metor transport [onion|alias]',
+            description='Show the current transport state for one peer or the whole daemon.',
+            category='Messaging & History',
         ),
         'contacts': CommandDef(
             name='contacts',
@@ -281,6 +286,12 @@ class Help:
             description='List all active and pending sessions.',
             category='Session & Connection',
         ),
+        'transport': CommandDef(
+            name='transport',
+            usage='/transport [onion|alias]',
+            description='Show the current transport state for one peer or the focused session.',
+            category='Session & Connection',
+        ),
         'retunnel': CommandDef(
             name='retunnel',
             usage='/retunnel [onion|alias]',
@@ -319,6 +330,12 @@ class Help:
                     'Change the name of any saved or discovered peer.',
                 ),
             ],
+        ),
+        'help': CommandDef(
+            name='help',
+            usage='/help',
+            description='Show the chat command overview.',
+            category='System',
         ),
         'exit': CommandDef(
             name='exit',
@@ -494,6 +511,5 @@ class Help:
                             )
             out += '\n'
 
-        out += f'{ind}{UIPresenter.get_divider_string(3, add_spaces=True)}\n\n'
         out += cls.show_chat_help(start, intend)
         return out

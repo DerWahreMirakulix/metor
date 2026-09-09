@@ -39,6 +39,12 @@ class Constants:
     SERVER_BACKLOG: int = 5  # Standard socket backlog for daemon IPC and listeners
     SERVER_BACKLOG_HEADLESS: int = 1  # Minimal socket backlog for ephemeral daemons
 
+    # Protocol Versions
+    IPC_PROTOCOL_VERSION: int = 1  # Current IPC wire protocol version
+    IPC_PROTOCOL_MIN_SUPPORTED: int = 1  # Oldest accepted IPC wire protocol version
+    PEER_PROTOCOL_VERSION: int = 1  # Current peer-wire handshake version
+    PEER_PROTOCOL_MIN_SUPPORTED: int = 1  # Oldest accepted peer-wire handshake version
+
     # Tor Bootstrapping
     UNIX_TOR_TIMEOUT: int = 45  # Process launch timeout for Unix Tor binaries
     TOR_BOOTSTRAP_POLL_SEC: float = 1.0
@@ -78,6 +84,15 @@ class Constants:
     TOR_V3_CHECKSUM_BYTES: int = 2  # Checksum bytes embedded in v3 onions
     TOR_V3_VERSION_BYTE: int = 3  # Tor v3 onion address version marker
     INPUT_SELECT_TIMEOUT_SEC: float = 0.0  # Non-blocking POSIX stdin poll
+
+    # Request Defaults
+    DEFAULT_IPC_TIMEOUT: float = 15.0  # Default client IPC socket timeout in seconds
+    DEFAULT_HISTORY_LIMIT: int = (
+        50  # History rows per request when no explicit limit is sent
+    )
+    DEFAULT_MESSAGES_LIMIT: int = (
+        50  # Stored messages per request when no explicit limit is sent
+    )
 
     # Thread Constraints & Timing
     THREAD_POLL_TIMEOUT: float = 1.0  # Timeout for non-blocking accept/recv loops

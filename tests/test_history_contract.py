@@ -3,6 +3,7 @@
 # ruff: noqa: E402
 
 import sys
+import re
 import unittest
 from pathlib import Path
 from typing import cast
@@ -20,6 +21,7 @@ from metor.core.api import (
     HistorySummaryEventCode,
     RawHistoryEntry,
     SummaryHistoryEntry,
+    TransportStateEvent,
 )
 from metor.data.history import (
     HistoryActor,
@@ -187,6 +189,93 @@ class HistoryContractTests(unittest.TestCase):
 
         self.assertIn('Connection to', rendered)
         self.assertIn('retry limit exhausted', rendered)
+
+    def test_raw_history_presenter_renders_transport_field(self) -> None:
+        """
+        Verifies that format_raw_history renders the ledger transport field.
+
+        Regression guard: the transport field existed in the ledger DTO but the
+        CLI presenter never printed it, so `history show --raw` could not show
+        session/tunnel/direct provenance.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        from metor.ui.presenter.history import format_raw_history
+
+        event = HistoryRawDataEvent(
+            profile='alice',
+            alias='bob',
+            entries=[
+                RawHistoryEntry(
+                    timestamp=1700000000.0,
+                    family=HistoryEntryFamily.DROP,
+                    event_code=HistoryRawEventCode.SENT,
+                    actor=HistoryEntryActor.LOCAL,
+                    peer_onion='bob',
+                    flow_id='flow-1',
+                    trigger=None,
+                    detail_code=None,
+                    detail_text=None,
+                    transport='session',
+                ),
+            ],
+        )
+        rendered = format_raw_history(event)
+        clean_rendered = re.sub(r'\x1b\[[0-9;]*m', '', rendered)
+        self.assertIn('transport: session', clean_rendered)
+
+    def test_transport_state_formatting_has_no_decorative_header(self) -> None:
+        """
+        Verifies the terminal transport-state formatting convention.
+
+        Regression guard: transport output used '--- Transport state ---' header
+        decorators and a leading blank line; the peer case must start with the
+        header as first line and the no-peer case must render only the message.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        from metor.ui.presenter.transport import format_transport_state
+
+        peer_output = format_transport_state(
+            TransportStateEvent(
+                peer='k4i7sr',
+                session_state='connected',
+                drop_tunnel=None,
+                focus_count=1,
+                pending_live_count=0,
+                auto_accept=False,
+            )
+        )
+        clean_peer = re.sub(r'\x1b\[[0-9;]*m', '', peer_output)
+        self.assertFalse(clean_peer.startswith('\n'))
+        self.assertNotIn('---', clean_peer)
+        self.assertTrue(clean_peer.startswith('Transport state for k4i7sr'))
+        self.assertIn(
+            'Transport state for k4i7sr\n\nsession_state: connected', clean_peer
+        )
+
+        no_peer_output = format_transport_state(
+            TransportStateEvent(
+                peer='',
+                session_state='disconnected',
+                drop_tunnel=None,
+                focus_count=0,
+                pending_live_count=0,
+                auto_accept=False,
+            )
+        )
+        clean_no_peer = re.sub(r'\x1b\[[0-9;]*m', '', no_peer_output)
+        self.assertNotIn('Transport state', clean_no_peer)
+        self.assertNotIn('---', clean_no_peer)
+        self.assertIn('No active sessions.', clean_no_peer)
 
 
 if __name__ == '__main__':

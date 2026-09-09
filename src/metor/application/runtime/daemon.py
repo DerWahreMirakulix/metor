@@ -74,7 +74,7 @@ def _build_daemon_launch_command(
     command: list[str] = [
         sys.executable,
         '-m',
-        'metor.main',
+        'metor.daemon_main',
         '-p',
         pm.profile_name,
     ]

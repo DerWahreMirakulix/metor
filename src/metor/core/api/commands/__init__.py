@@ -53,6 +53,7 @@ from metor.core.api.commands.settings import (
     SyncConfigCommand,
 )
 from metor.core.api.commands.system import ClearProfileDbCommand, SelfDestructCommand
+from metor.core.api.commands.transport import GetTransportStateCommand
 
 
 __all__ = [
@@ -99,4 +100,5 @@ __all__ = [
     'SyncConfigCommand',
     'ClearProfileDbCommand',
     'SelfDestructCommand',
+    'GetTransportStateCommand',
 ]

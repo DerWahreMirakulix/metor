@@ -3,9 +3,9 @@
 import threading
 from typing import TYPE_CHECKING, Callable, Optional
 
-from metor.core import TorManager
 from metor.core.api import IpcEvent
 from metor.core.daemon.managed.crypto import Crypto
+from metor.core.tor import TorManager
 from metor.data import ContactManager, HistoryManager, MessageManager
 
 # Local Package Imports

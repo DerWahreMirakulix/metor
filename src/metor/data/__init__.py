@@ -6,6 +6,7 @@ Exposes core data managers, settings, parsers, and domain enums via a unified Fa
 # 1. Base Data Layer
 from metor.data.settings import (
     ChatDaemonAutostartPolicy,
+    DAEMON_SETTING_KEYS,
     Settings,
     SettingKey,
     SettingSpec,
@@ -14,6 +15,13 @@ from metor.data.settings import (
     SettingValidationError,
     build_snapshot_row,
     is_setting_value,
+)
+from metor.data.settings_registry import (
+    TERMINAL_UI_SETTINGS,
+    UiSettingSpec,
+    get_registered_ui_settings,
+    get_ui_setting_spec,
+    register_ui_settings,
 )
 from metor.data.sql import DatabaseCorruptedError, SqlManager, SqlParam
 
@@ -57,6 +65,7 @@ __all__ = [
     'MessageDirection',
     'MessageType',
     'ChatDaemonAutostartPolicy',
+    'DAEMON_SETTING_KEYS',
     'Settings',
     'SettingKey',
     'SettingSpec',
@@ -65,6 +74,11 @@ __all__ = [
     'SettingValidationError',
     'build_snapshot_row',
     'is_setting_value',
+    'TERMINAL_UI_SETTINGS',
+    'UiSettingSpec',
+    'get_registered_ui_settings',
+    'get_ui_setting_spec',
+    'register_ui_settings',
     'PROFILE_CONFIG_SPECS',
     'ProfileConfigKey',
     'ProfileConfigSpec',

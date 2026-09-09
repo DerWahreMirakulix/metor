@@ -136,6 +136,7 @@ class HistoryManager:
         trigger: Optional[str | HistoryTrigger] = None,
         detail_code: Optional[HistoryReasonCode] = None,
         flow_id: Optional[str] = None,
+        transport: Optional[str] = None,
     ) -> None:
         """
         Persists one raw transport history row when retention is enabled.
@@ -148,17 +149,24 @@ class HistoryManager:
             trigger (Optional[str | HistoryTrigger]): Optional machine-readable trigger.
             detail_code (Optional[HistoryReasonCode]): Optional machine-readable detail code.
             flow_id (Optional[str]): Optional externally supplied flow identifier.
+            transport (Optional[str]): Optional transport channel label. Discarded
+                when live history retention is disabled so the field's absence
+                never reveals that a live channel existed.
 
         Returns:
             None
         """
+        live_history_enabled: bool = self._pm.config.get_bool(
+            SettingKey.RECORD_LIVE_HISTORY
+        )
         if event_code.family is HistoryFamily.DROP:
             if not self._pm.config.get_bool(SettingKey.RECORD_DROP_HISTORY):
                 return
         else:
-            if not self._pm.config.get_bool(SettingKey.RECORD_LIVE_HISTORY):
+            if not live_history_enabled:
                 return
 
+        transport_value: Optional[str] = transport if live_history_enabled else None
         normalized_onion: Optional[str] = (
             clean_onion(peer_onion) if peer_onion else None
         )
@@ -181,6 +189,7 @@ class HistoryManager:
             detail_code=detail_code,
             detail_text=detail_text,
             flow_id=resolved_flow_id,
+            transport=transport_value,
         )
 
     def get_raw_history(
@@ -199,9 +208,7 @@ class HistoryManager:
             List[HistoryLedgerEntry]: Raw history rows ordered newest-first.
         """
         actual_limit: int = (
-            limit
-            if limit is not None
-            else self._pm.config.get_int(SettingKey.HISTORY_LIMIT)
+            limit if limit is not None else Constants.DEFAULT_HISTORY_LIMIT
         )
         return self._history.get_entries(filter_onion, actual_limit)
 
@@ -221,9 +228,7 @@ class HistoryManager:
             List[HistorySummaryEntry]: Projected summary rows ordered newest-first.
         """
         actual_limit: int = (
-            limit
-            if limit is not None
-            else self._pm.config.get_int(SettingKey.HISTORY_LIMIT)
+            limit if limit is not None else Constants.DEFAULT_HISTORY_LIMIT
         )
         raw_entries: List[HistoryLedgerEntry] = self._history.get_entries(
             filter_onion,

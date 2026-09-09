@@ -60,32 +60,39 @@ def build_bundle_name(
     machine: str,
     python_major: int,
     python_minor: int,
+    variant: str = 'full',
 ) -> str:
     """
-    Builds the release bundle folder name for one platform and Python version.
+    Builds the release bundle folder name for one platform, Python version, and variant.
 
     Args:
         system_name (str): The host operating system name.
         machine (str): The host architecture label.
         python_major (int): The Python major version.
         python_minor (int): The Python minor version.
+        variant (str): The distribution variant ('full', 'daemon', or 'sdk').
 
     Returns:
         str: The bundle directory name.
     """
     system_slug: str = system_name.strip().lower() or 'unknown'
     machine_slug: str = normalize_machine(machine)
-    return (
-        f'metor-wheelhouse-{system_slug}-{machine_slug}-py{python_major}{python_minor}'
-    )
+    prefix: str = 'metor-wheelhouse'
+    if variant == 'daemon':
+        prefix = 'metor-daemon-wheelhouse'
+    elif variant == 'sdk':
+        prefix = 'metor-sdk-wheelhouse'
+
+    return f'{prefix}-{system_slug}-{machine_slug}-py{python_major}{python_minor}'
 
 
-def build_install_guide(bundle_name: str) -> str:
+def build_install_guide(bundle_name: str, package_name: str = 'metor') -> str:
     """
     Builds the human-readable offline installation guide for one bundle.
 
     Args:
         bundle_name (str): The generated bundle directory name.
+        package_name (str): The package to install from the wheelhouse.
 
     Returns:
         str: The installation guide text.
@@ -94,7 +101,7 @@ def build_install_guide(bundle_name: str) -> str:
         f"""\
         Metor release bundle: {bundle_name}
 
-        This archive contains the Metor wheel plus all Python runtime wheels
+        This archive contains the {package_name} wheel plus all Python runtime wheels
         required for this host platform. Install Tor separately from the
         official Tor Project sources.
 
@@ -104,36 +111,41 @@ def build_install_guide(bundle_name: str) -> str:
           Windows: {INSTALL_WINDOWS_NAME}
 
         Both scripts create a local .venv inside the extracted bundle and
-        install Metor entirely from the bundled wheelhouse.
+        install {package_name} entirely from the bundled wheelhouse.
 
         Manual fallback:
 
           python -m venv .venv
-                    .venv/bin/python -m pip install --no-index --find-links wheelhouse --upgrade pip=={PIP_VERSION}
-          .venv/bin/python -m pip install --no-index --find-links wheelhouse metor
+          .venv/bin/python -m pip install --no-index --find-links wheelhouse --upgrade pip=={PIP_VERSION}
+          .venv/bin/python -m pip install --no-index --find-links wheelhouse {package_name}
 
         On Windows PowerShell, use:
 
-                    .venv\\Scripts\\python.exe -m pip install --no-index --find-links wheelhouse --upgrade pip=={PIP_VERSION}
-          .venv\\Scripts\\python.exe -m pip install --no-index --find-links wheelhouse metor
+          .venv\\Scripts\\python.exe -m pip install --no-index --find-links wheelhouse --upgrade pip=={PIP_VERSION}
+          .venv\\Scripts\\python.exe -m pip install --no-index --find-links wheelhouse {package_name}
 
-                The --no-index flag ensures installation stays inside this bundle,
-                requires no package index access, and never falls back to building
-                native extensions on the target host.
+        The --no-index flag ensures installation stays inside this bundle,
+        requires no package index access, and never falls back to building
+        native extensions on the target host.
         """
     )
 
 
-def build_install_shell_script() -> str:
+def build_install_shell_script(package_name: str = 'metor') -> str:
     """
     Builds the Linux shell installer shipped inside one release bundle.
 
     Args:
-        None
+        package_name (str): Name of the package to install.
 
     Returns:
         str: The shell installer script.
     """
+    verification_line: str = (
+        f'echo "Run $venv_dir/bin/{package_name} --help to verify the install."'
+        if package_name != 'metor-sdk'
+        else 'echo "Run $venv_dir/bin/python -c \\"import metor.client; print(\'metor-sdk ready\')\\" to verify the install."'
+    )
     return dedent(
         f"""\
         #!/usr/bin/env sh
@@ -155,75 +167,80 @@ def build_install_shell_script() -> str:
           exit 1
         fi
 
-                if ! "$python_bin" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"; then
-                    echo 'Python 3.11 or newer is required.' >&2
-                    exit 1
-                fi
+        if ! "$python_bin" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"; then
+            echo 'Python 3.11 or newer is required.' >&2
+            exit 1
+        fi
 
         "$python_bin" -m venv "$venv_dir"
-                "$venv_dir/bin/python" -m pip install --no-index --find-links "$script_dir/{WHEELHOUSE_DIRNAME}" --upgrade pip=={PIP_VERSION}
-        "$venv_dir/bin/python" -m pip install --no-index --find-links "$script_dir/{WHEELHOUSE_DIRNAME}" metor
+        "$venv_dir/bin/python" -m pip install --no-index --find-links "$script_dir/{WHEELHOUSE_DIRNAME}" --upgrade pip=={PIP_VERSION}
+        "$venv_dir/bin/python" -m pip install --no-index --find-links "$script_dir/{WHEELHOUSE_DIRNAME}" {package_name}
 
-        echo "Metor installed in $venv_dir"
-        echo "Run $venv_dir/bin/metor --help to verify the install."
+        echo "{package_name} installed in $venv_dir"
+        {verification_line}
         """
     )
 
 
-def build_install_windows_script() -> str:
+def build_install_windows_script(package_name: str = 'metor') -> str:
     """
     Builds the Windows batch installer shipped inside one release bundle.
 
     Args:
-        None
+        package_name (str): Name of the package to install.
 
     Returns:
         str: The Windows batch installer script.
     """
+    verification_line: str = (
+        f'echo Run "%VENV_DIR%\\Scripts\\{package_name}.exe --help" to verify the install.'
+        if package_name != 'metor-sdk'
+        else 'echo metor-sdk ready in "%VENV_DIR%"'
+    )
     return dedent(
         f"""\
         @echo off
         setlocal
         set "SCRIPT_DIR=%~dp0"
         set "VENV_DIR=%SCRIPT_DIR%.venv"
-                set "VERSION_CHECK=import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"
+        set "VERSION_CHECK=import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"
 
         if exist "%VENV_DIR%\\Scripts\\python.exe" goto install
 
         where py >nul 2>nul
         if %ERRORLEVEL%==0 (
-                    py -3.11 -c "%VERSION_CHECK%" >nul 2>nul
-                    if %ERRORLEVEL%==0 (
-                        py -3.11 -m venv "%VENV_DIR%" >nul 2>nul
-                        if exist "%VENV_DIR%\\Scripts\\python.exe" goto install
-                        rd /s /q "%VENV_DIR%" >nul 2>nul
-                    )
-                    py -3 -c "%VERSION_CHECK%" >nul 2>nul
-                    if %ERRORLEVEL%==0 (
-                        py -3 -m venv "%VENV_DIR%" >nul 2>nul
-                        if exist "%VENV_DIR%\\Scripts\\python.exe" goto install
-                        rd /s /q "%VENV_DIR%" >nul 2>nul
-                    )
+            py -3.11 -c "%VERSION_CHECK%" >nul 2>nul
+            if %ERRORLEVEL%==0 (
+                py -3.11 -m venv "%VENV_DIR%" >nul 2>nul
+                if exist "%VENV_DIR%\\Scripts\\python.exe" goto install
+                rd /s /q "%VENV_DIR%" >nul 2>nul
+            )
+            py -3 -c "%VERSION_CHECK%" >nul 2>nul
+            if %ERRORLEVEL%==0 (
+                py -3 -m venv "%VENV_DIR%" >nul 2>nul
+                if exist "%VENV_DIR%\\Scripts\\python.exe" goto install
+                rd /s /q "%VENV_DIR%" >nul 2>nul
+            )
         )
 
         where python >nul 2>nul
         if %ERRORLEVEL%==0 (
-                    python -c "%VERSION_CHECK%" >nul 2>nul
-                    if not %ERRORLEVEL%==0 goto wrong_python
-          python -m venv "%VENV_DIR%"
-          goto install
+            python -c "%VERSION_CHECK%" >nul 2>nul
+            if not %ERRORLEVEL%==0 goto wrong_python
+            python -m venv "%VENV_DIR%"
+            goto install
         )
 
-                :wrong_python
+        :wrong_python
         echo Python 3.11 or newer is required.
         exit /b 1
 
         :install
-                "%VENV_DIR%\\Scripts\\python.exe" -c "%VERSION_CHECK%" >nul 2>nul || goto wrong_python
-                "%VENV_DIR%\\Scripts\\python.exe" -m pip install --no-index --find-links "%SCRIPT_DIR%{WHEELHOUSE_DIRNAME}" --upgrade pip=={PIP_VERSION} || exit /b 1
-        "%VENV_DIR%\\Scripts\\python.exe" -m pip install --no-index --find-links "%SCRIPT_DIR%{WHEELHOUSE_DIRNAME}" metor || exit /b 1
+        "%VENV_DIR%\\Scripts\\python.exe" -c "%VERSION_CHECK%" >nul 2>nul || goto wrong_python
+        "%VENV_DIR%\\Scripts\\python.exe" -m pip install --no-index --find-links "%SCRIPT_DIR%{WHEELHOUSE_DIRNAME}" --upgrade pip=={PIP_VERSION} || exit /b 1
+        "%VENV_DIR%\\Scripts\\python.exe" -m pip install --no-index --find-links "%SCRIPT_DIR%{WHEELHOUSE_DIRNAME}" {package_name} || exit /b 1
         echo Metor installed in "%VENV_DIR%"
-        echo Run "%VENV_DIR%\\Scripts\\metor.exe --help" to verify the install.
+        {verification_line}
         endlocal
         """
     )
@@ -334,6 +351,7 @@ def archive_bundle(bundle_dir: Path) -> Path:
 def build_release_wheelhouse(
     output_dir: Path,
     skip_pip_upgrade: bool = False,
+    variant: str = 'full',
 ) -> Path:
     """
     Builds the platform-specific runtime wheel bundle in the target directory.
@@ -341,6 +359,7 @@ def build_release_wheelhouse(
     Args:
         output_dir (Path): The directory that should contain the bundle folder.
         skip_pip_upgrade (bool): Whether to skip upgrading pip first.
+        variant (str): The distribution variant ('full', 'daemon', or 'sdk').
 
     Returns:
         Path: The generated bundle directory.
@@ -351,6 +370,7 @@ def build_release_wheelhouse(
         platform.machine(),
         sys.version_info.major,
         sys.version_info.minor,
+        variant=variant,
     )
     bundle_dir: Path = output_dir / bundle_name
     wheelhouse_dir: Path = bundle_dir / WHEELHOUSE_DIRNAME
@@ -380,6 +400,19 @@ def build_release_wheelhouse(
         repo_root,
     )
 
+    if variant == 'sdk':
+        req_lock = 'requirements/sdk.lock'
+        wheel_src = 'packaging/sdk'
+        package_name = 'metor-sdk'
+    elif variant == 'daemon':
+        req_lock = 'requirements/daemon.lock'
+        wheel_src = 'packaging/daemon'
+        package_name = 'metor-daemon'
+    else:
+        req_lock = 'requirements/runtime.lock'
+        wheel_src = '.'
+        package_name = 'metor'
+
     run_command(
         [
             *pip_prefix,
@@ -387,10 +420,22 @@ def build_release_wheelhouse(
             '--wheel-dir',
             str(wheelhouse_dir),
             '-r',
-            'requirements/runtime.lock',
+            req_lock,
         ],
         repo_root,
     )
+    if variant == 'daemon':
+        run_command(
+            [
+                *pip_prefix,
+                'wheel',
+                '--wheel-dir',
+                str(wheelhouse_dir),
+                '--no-deps',
+                'packaging/sdk',
+            ],
+            repo_root,
+        )
     run_command(
         [
             *pip_prefix,
@@ -398,19 +443,22 @@ def build_release_wheelhouse(
             '--wheel-dir',
             str(wheelhouse_dir),
             '--no-deps',
-            '.',
+            wheel_src,
         ],
         repo_root,
     )
 
-    write_text_file(bundle_dir / INSTALL_GUIDE_NAME, build_install_guide(bundle_name))
+    write_text_file(
+        bundle_dir / INSTALL_GUIDE_NAME,
+        build_install_guide(bundle_name, package_name),
+    )
     write_executable_text_file(
         bundle_dir / INSTALL_SHELL_NAME,
-        build_install_shell_script(),
+        build_install_shell_script(package_name),
     )
     write_text_file(
         bundle_dir / INSTALL_WINDOWS_NAME,
-        build_install_windows_script(),
+        build_install_windows_script(package_name),
     )
     write_text_file(bundle_dir / CHECKSUM_FILE_NAME, build_sha256_manifest(bundle_dir))
     archive_path: Path = archive_bundle(bundle_dir)
@@ -444,6 +492,12 @@ def parse_args() -> argparse.Namespace:
         action='store_true',
         help='Skip upgrading pip before building wheels.',
     )
+    parser.add_argument(
+        '--variant',
+        choices=('full', 'daemon', 'sdk', 'all'),
+        default='full',
+        help='Distribution bundle variant to build.',
+    )
     return parser.parse_args()
 
 
@@ -458,4 +512,16 @@ def main() -> None:
         None
     """
     args = parse_args()
-    build_release_wheelhouse(args.output_dir, skip_pip_upgrade=args.skip_pip_upgrade)
+    if args.variant == 'all':
+        for variant in ('full', 'daemon', 'sdk'):
+            build_release_wheelhouse(
+                args.output_dir,
+                skip_pip_upgrade=args.skip_pip_upgrade,
+                variant=variant,
+            )
+    else:
+        build_release_wheelhouse(
+            args.output_dir,
+            skip_pip_upgrade=args.skip_pip_upgrade,
+            variant=args.variant,
+        )

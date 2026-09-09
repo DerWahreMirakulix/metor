@@ -17,6 +17,15 @@ class _ProfilesDispatcherProtocol(Protocol):
     _help: type[Help]
     _pm: ProfileManager
     _proxy: CliProxy
+    _exit_code: int
+
+    def _print_usage(self, cmd: str, sub: Optional[str] = None) -> None:
+        """Prints command usage help and flags a nonzero exit code."""
+        ...
+
+    def _emit(self, text: str) -> None:
+        """Prints one proxy result and flags a nonzero exit on rendered errors."""
+        ...
 
 
 class ProfilesDispatchMixin:
@@ -36,7 +45,7 @@ class ProfilesDispatchMixin:
         """
         if sub == 'add':
             if len(self._extra) < 1:
-                print(self._help.show_command_help('profiles'))
+                self._print_usage('profiles')
                 return
 
             security_mode: ProfileSecurityMode = (
@@ -44,12 +53,27 @@ class ProfilesDispatchMixin:
                 if getattr(self._args, 'plaintext', False)
                 else ProfileSecurityMode.ENCRYPTED
             )
-            print(
+            master_password: Optional[str] = None
+            if security_mode is ProfileSecurityMode.ENCRYPTED and not getattr(
+                self._args, 'remote', False
+            ):
+                import getpass
+
+                master_password = getpass.getpass('Enter new master password: ')
+                confirm_password = getpass.getpass('Confirm master password: ')
+                if not master_password:
+                    print('Error: master password must not be empty.')
+                    return
+                if master_password != confirm_password:
+                    print('Error: passwords do not match. Profile not created.')
+                    return
+            self._emit(
                 self._proxy.add_profile(
                     self._extra[0],
                     is_remote=getattr(self._args, 'remote', False),
                     port=getattr(self._args, 'port', None),
                     security_mode=security_mode,
+                    master_password=master_password,
                 )
             )
             return
@@ -65,16 +89,16 @@ class ProfilesDispatchMixin:
                     del profile_args[to_index : to_index + 2]
 
             if len(profile_args) != 1 or target_mode_value is None:
-                print(self._help.show_command_help('profiles', sub))
+                self._print_usage('profiles', sub)
                 return
 
             try:
                 target_mode = ProfileSecurityMode(target_mode_value.strip().lower())
             except ValueError:
-                print(self._help.show_command_help('profiles', sub))
+                self._print_usage('profiles', sub)
                 return
 
-            print(
+            self._emit(
                 CommandHandlers.handle_profile_security_migration(
                     self._proxy,
                     profile_args[0],
@@ -85,7 +109,7 @@ class ProfilesDispatchMixin:
 
         if sub in ('rm', 'remove'):
             if len(self._extra) < 1:
-                print(self._help.show_command_help('profiles'))
+                self._print_usage('profiles')
                 return
 
             target_profile: str = self._extra[0]
@@ -99,9 +123,10 @@ class ProfilesDispatchMixin:
                 )
                 if remotes and not CommandHandlers._nuke_remote_profiles(remotes):
                     print('Profile removal aborted.')
+                    self._exit_code = 1
                     return
 
-            print(
+            self._emit(
                 self._proxy.remove_profile(
                     target_profile,
                     active_profile=self._pm.profile_name,
@@ -111,31 +136,31 @@ class ProfilesDispatchMixin:
 
         if sub == 'rename':
             if len(self._extra) < 2:
-                print(self._help.show_command_help('profiles'))
+                self._print_usage('profiles')
                 return
 
-            print(self._proxy.rename_profile(self._extra[0], self._extra[1]))
+            self._emit(self._proxy.rename_profile(self._extra[0], self._extra[1]))
             return
 
         if sub == 'set-default':
             if len(self._extra) < 1:
-                print(self._help.show_command_help('profiles'))
+                self._print_usage('profiles')
                 return
 
-            print(self._proxy.set_default_profile(self._extra[0]))
+            self._emit(self._proxy.set_default_profile(self._extra[0]))
             return
 
         if sub == 'clear':
             if len(self._extra) < 1:
-                print(self._help.show_command_help('profiles'))
+                self._print_usage('profiles')
                 return
 
             target_proxy = CliProxy(ProfileManager(self._extra[0]))
-            print(target_proxy.clear_profile_db())
+            self._emit(target_proxy.clear_profile_db())
             return
 
         if sub in ('list', None):
-            print(self._proxy.list_profiles(self._pm.profile_name))
+            self._emit(self._proxy.list_profiles(self._pm.profile_name))
             return
 
-        print(self._help.show_command_help('profiles'))
+        self._print_usage('profiles')

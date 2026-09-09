@@ -435,6 +435,48 @@ class MessageRepository:
         with self._sql.transaction() as cursor:
             self._apply_message_status_update(cursor, receipt_id, new_status)
 
+    def mark_drop_delivered(
+        self,
+        contact_onion: str,
+        msg_id: str,
+    ) -> Optional[str]:
+        """
+        Marks one pending drop-visible outbound receipt as delivered.
+
+        Matches only outbound receipts whose transport kind is drop-visible and
+        whose status is still PENDING, so live-visible receipts and already
+        terminal rows are left untouched.
+
+        Args:
+            contact_onion (str): The peer onion identity.
+            msg_id (str): The stable logical message identifier.
+
+        Returns:
+            Optional[str]: The original receipt timestamp when a pending drop
+                row was marked delivered, or None if no pending drop row matched.
+        """
+        normalized_onion: str = clean_onion(contact_onion)
+        with self._sql.transaction() as cursor:
+            receipt: Optional[MessageReceiptRow] = self._get_receipt(
+                normalized_onion,
+                MessageDirection.OUT,
+                msg_id,
+                cursor,
+            )
+            if receipt is None:
+                return None
+            if receipt.transport_kind not in self._DROP_VISIBLE_TYPES:
+                return None
+            if receipt.status is not MessageStatus.PENDING:
+                return None
+
+            self._apply_message_status_update(
+                cursor,
+                receipt.receipt_id,
+                MessageStatus.DELIVERED,
+            )
+            return receipt.created_at
+
     def update_outbound_message_status(
         self,
         contact_onion: str,
@@ -529,7 +571,7 @@ class MessageRepository:
         self,
         contact_onion: str,
         ephemeral_messages: bool,
-    ) -> List[Tuple[int, str, str, str]]:
+    ) -> List[Tuple[int, str, str, str, Optional[str]]]:
         """
         Retrieves unread inbox rows and applies consume semantics atomically.
 
@@ -538,11 +580,11 @@ class MessageRepository:
             ephemeral_messages (bool): Whether consumed drop payloads should be shredded.
 
         Returns:
-            List[Tuple[int, str, str, str]]: The unread rows as receipt id, type, payload, timestamp.
+            List[Tuple[int, str, str, str, Optional[str]]]: The unread rows as receipt id, type, payload, timestamp, msg id.
         """
         normalized_onion: str = clean_onion(contact_onion)
         query = (
-            'SELECT r.id, r.transport_kind, s.payload, r.created_at '
+            'SELECT r.id, r.transport_kind, s.payload, r.created_at, r.msg_id '
             'FROM message_receipts AS r '
             'INNER JOIN inbound_spool AS s ON s.receipt_id = r.id '
             'WHERE r.peer_onion = ? AND r.direction = ? AND r.status = ? '
@@ -562,8 +604,14 @@ class MessageRepository:
                 ).fetchall(),
             )
 
-            messages: List[Tuple[int, str, str, str]] = [
-                (int(str(row[0])), str(row[1]), str(row[2]), str(row[3]))
+            messages: List[Tuple[int, str, str, str, Optional[str]]] = [
+                (
+                    int(str(row[0])),
+                    str(row[1]),
+                    str(row[2]),
+                    str(row[3]),
+                    str(row[4]) if row[4] is not None else None,
+                )
                 for row in rows
             ]
             if not messages:

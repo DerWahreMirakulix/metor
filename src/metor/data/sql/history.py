@@ -45,6 +45,7 @@ class HistoryRepository:
         detail_code: Optional[HistoryReasonCode],
         detail_text: str,
         flow_id: str,
+        transport: Optional[str] = None,
     ) -> None:
         """
         Persists one raw transport history ledger row.
@@ -59,14 +60,15 @@ class HistoryRepository:
             detail_code (Optional[HistoryReasonCode]): Optional machine-readable detail code.
             detail_text (str): Optional diagnostic detail text.
             flow_id (str): The durable flow identifier.
+            transport (Optional[str]): Optional transport channel label.
 
         Returns:
             None
         """
         self._sql.execute(
             'INSERT INTO history_ledger '
-            '(timestamp, family, event_code, peer_onion, actor, trigger, detail_code, detail_text, flow_id) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            '(timestamp, family, event_code, peer_onion, actor, trigger, detail_code, detail_text, flow_id, transport) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 timestamp,
                 family.value,
@@ -77,6 +79,7 @@ class HistoryRepository:
                 detail_code.value if detail_code is not None else None,
                 detail_text,
                 flow_id,
+                transport,
             ),
         )
 
@@ -103,6 +106,7 @@ class HistoryRepository:
             ),
             detail_text=str(row[7] or ''),
             flow_id=str(row[8]),
+            transport=str(row[9]) if row[9] is not None else None,
         )
 
     def get_entries(
@@ -123,7 +127,7 @@ class HistoryRepository:
         params: Tuple[SqlParam, ...] = ()
         query = (
             'SELECT timestamp, family, event_code, peer_onion, actor, trigger, '
-            'detail_code, detail_text, flow_id FROM history_ledger'
+            'detail_code, detail_text, flow_id, transport FROM history_ledger'
         )
         if filter_onion is not None:
             query += ' WHERE peer_onion = ?'

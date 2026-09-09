@@ -18,6 +18,7 @@ from metor.core.api import (
     AuthenticateSessionCommand,
     EventType,
     GetHistoryCommand,
+    RemoveContactCommand,
     InitCommand,
     IpcCommand,
     IpcEvent,
@@ -1364,6 +1365,107 @@ class UiIpcContractTests(unittest.TestCase):
         self.assertTrue(result)
         proxy.nuke_daemon_event.assert_called_once()
         prompt_mock.assert_not_called()
+
+    def test_async_event_with_matching_request_id_is_terminal(self) -> None:
+        """
+        Verifies that an async-typed event carrying the command request_id is
+        accepted as the terminal response.
+
+        Regression guard: events like CONTACT_REMOVED are both broadcast side
+        effects and the direct reply to RemoveContactCommand. The async filter
+        dropped them unconditionally, so `contacts rm` timed out with
+        'Failed to communicate with the daemon.' even though the removal ran.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        request_id = 'req-rm-own'
+        cmd = RemoveContactCommand(alias='testpeer', request_id=request_id)
+        socket_payload = ''.join(
+            event.to_json() + '\n'
+            for event in (
+                create_event(
+                    EventType.CONTACT_REMOVED,
+                    {
+                        'alias': 'testpeer',
+                        'onion': 'gqncaw2sjprzovtdquir4etnswg2eyvomid4bsbdld2p5roay5vmvtyd',
+                        'request_id': request_id,
+                    },
+                ),
+            )
+        ).encode('utf-8')
+        fake_socket = _RequestSessionSocket([socket_payload, b''])
+
+        session = IpcRequestSession(
+            cast(ProfileManager, _RequestSessionProfileManager()),
+            async_event_types={EventType.CONTACT_REMOVED},
+            format_event=lambda event: event.event_type.value,
+            format_message=lambda message: message,
+            prompt_password=lambda _prompt: 'secret',
+            send_socket_command=lambda sock, command: sock.sendall(
+                (command.to_json() + '\n').encode('utf-8')
+            ),
+        )
+
+        with patch(
+            'metor.ui.cli.ipc.request.session.socket.socket',
+            return_value=fake_socket,
+        ):
+            result = session.execute_result(4312, cmd, wait_for_response=True)
+
+        self.assertIsNotNone(result.event)
+        assert result.event is not None
+        self.assertIs(result.event.event_type, EventType.CONTACT_REMOVED)
+
+    def test_async_event_with_foreign_request_id_is_ignored(self) -> None:
+        """
+        Verifies that broadcast side effects from other commands stay filtered.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        request_id = 'req-rm-own'
+        cmd = RemoveContactCommand(alias='testpeer', request_id=request_id)
+        socket_payload = ''.join(
+            event.to_json() + '\n'
+            for event in (
+                create_event(
+                    EventType.CONTACT_REMOVED,
+                    {
+                        'alias': 'other-peer',
+                        'onion': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                        'request_id': 'req-foreign-broadcast',
+                    },
+                ),
+            )
+        ).encode('utf-8')
+        fake_socket = _RequestSessionSocket([socket_payload, b''])
+
+        session = IpcRequestSession(
+            cast(ProfileManager, _RequestSessionProfileManager()),
+            async_event_types={EventType.CONTACT_REMOVED},
+            format_event=lambda event: event.event_type.value,
+            format_message=lambda message: message,
+            prompt_password=lambda _prompt: 'secret',
+            send_socket_command=lambda sock, command: sock.sendall(
+                (command.to_json() + '\n').encode('utf-8')
+            ),
+        )
+
+        with patch(
+            'metor.ui.cli.ipc.request.session.socket.socket',
+            return_value=fake_socket,
+        ):
+            result = session.execute_result(4312, cmd, wait_for_response=True)
+
+        self.assertIsNone(result.event)
+        self.assertEqual(result.message, 'Command executed successfully.')
 
 
 if __name__ == '__main__':

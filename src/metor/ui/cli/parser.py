@@ -4,7 +4,7 @@ Isolates argparse configuration from the application execution logic.
 """
 
 import argparse
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from metor.data import ProfileManager
 
@@ -13,12 +13,14 @@ class CliParser:
     """Constructs and executes the command-line argument parser."""
 
     @staticmethod
-    def parse() -> Tuple[argparse.Namespace, List[str]]:
+    def parse(
+        argv: Optional[List[str]] = None,
+    ) -> Tuple[argparse.Namespace, List[str]]:
         """
-        Configures the argument parser and parses the sys.argv inputs.
+        Configures the argument parser and parses the given argv inputs.
 
         Args:
-            None
+            argv (Optional[List[str]]): The argument vector excluding the program name, or None to use sys.argv.
 
         Returns:
             Tuple[argparse.Namespace, List[str]]: The parsed known arguments and a list of extra/unknown arguments.
@@ -69,7 +71,7 @@ class CliParser:
 
         args: argparse.Namespace
         unknown: List[str]
-        args, unknown = parser.parse_known_args()
+        args, unknown = parser.parse_known_args(argv)
         args.extra.extend(unknown)
 
         return args, args.extra

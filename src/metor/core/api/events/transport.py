@@ -1,10 +1,10 @@
 """Transport, session, and live-lifecycle IPC event DTOs."""
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 # Local Package Imports
-from metor.core.api.base import IpcEvent
+from metor.core.api.base import IpcEvent, JsonValue
 from metor.core.api.codes import (
     ConnectionActor,
     ConnectionOrigin,
@@ -18,9 +18,12 @@ from metor.core.api.registry import register_event
 @register_event(EventType.INIT)
 @dataclass
 class InitEvent(IpcEvent):
-    """Initializes the UI with the local onion address."""
+    """Initializes the UI with the local onion address and protocol versions."""
 
     onion: Optional[str] = None
+    version: Optional[int] = None
+    min_supported: Optional[int] = None
+    profile: Optional[str] = None
     event_type: EventType = field(default=EventType.INIT, init=False)
 
 
@@ -77,6 +80,7 @@ class RemoteMsgEvent(IpcEvent):
     text: str
     onion: Optional[str] = None
     timestamp: Optional[str] = None
+    msg_id: Optional[str] = None
     event_type: EventType = field(default=EventType.REMOTE_MSG, init=False)
 
 
@@ -97,6 +101,7 @@ class DropFailedEvent(IpcEvent):
     """Marks an asynchronous drop as failed."""
 
     msg_id: str
+    reason: Optional[str] = None
     event_type: EventType = field(default=EventType.DROP_FAILED, init=False)
 
 
@@ -437,3 +442,29 @@ class RetunnelFailedEvent(IpcEvent):
     error_code: Optional[RuntimeErrorCode] = None
     error_detail: Optional[str] = None
     event_type: EventType = field(default=EventType.RETUNNEL_FAILED, init=False)
+
+
+@register_event(EventType.TRANSPORT_STATE)
+@dataclass
+class TransportStateEvent(IpcEvent):
+    """Broadcasts the current transport state for one peer or the whole daemon."""
+
+    peer: str
+    session_state: str
+    onion: Optional[str] = None
+    drop_tunnel: Optional[Dict[str, JsonValue]] = None
+    focus_count: int = 0
+    pending_live_count: int = 0
+    auto_accept: bool = False
+    event_type: EventType = field(default=EventType.TRANSPORT_STATE, init=False)
+
+
+@register_event(EventType.READ_RECEIPT)
+@dataclass
+class ReadReceiptEvent(IpcEvent):
+    """Signals that the peer consumed one message and acknowledges it as read."""
+
+    alias: str
+    msg_id: str
+    onion: Optional[str] = None
+    event_type: EventType = field(default=EventType.READ_RECEIPT, init=False)

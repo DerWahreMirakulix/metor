@@ -79,8 +79,40 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
         self._extra: List[str] = extra
         self._pm: ProfileManager = pm
         self._proxy: CliProxy = CliProxy(pm)
+        self._exit_code: int = 0
 
-    def dispatch(self) -> None:
+    def _emit(self, text: str) -> None:
+        """
+        Prints one proxy result and flags a nonzero exit on rendered errors.
+
+        Args:
+            text (str): The rendered CLI text.
+
+        Returns:
+            None
+        """
+        print(text)
+        if self._proxy.consume_error_flag():
+            self._exit_code = 1
+
+    def _print_usage(self, cmd: str, sub: Optional[str] = None) -> None:
+        """
+        Prints the command usage help and flags a nonzero exit code.
+
+        Usage help printed as an error response (invalid arguments) is a
+        failure outcome, so the process must exit nonzero for scripts.
+
+        Args:
+            cmd (str): The command name to look up.
+            sub (Optional[str]): The optional subcommand name.
+
+        Returns:
+            None
+        """
+        print(self._help.show_command_help(cmd, sub))
+        self._exit_code = 1
+
+    def dispatch(self) -> int:
         """
         Evaluates the command string and executes the matching subsystem or proxy call.
 
@@ -88,7 +120,7 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
             None
 
         Returns:
-            None
+            int: The process exit code, 0 on success, 1 when an error was rendered.
         """
         cmd: str = self._args.command
         sub: Optional[str] = self._args.subcommand
@@ -107,7 +139,7 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                 print(self._help.show_command_help(cmd, sub))
             else:
                 print(self._help.show_main_help())
-            return
+            return 0
 
         if cmd == 'quickstart':
             print(self._help.show_quick_start())
@@ -117,7 +149,7 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
 
         elif cmd == 'daemon':
             if sub or self._extra:
-                print(self._help.show_command_help(cmd))
+                self._print_usage(cmd)
             else:
                 CommandHandlers.handle_daemon(
                     self._pm,
@@ -131,31 +163,35 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
 
         elif cmd == 'unlock':
             if sub or self._extra:
-                print(self._help.show_command_help(cmd))
+                self._print_usage(cmd)
             else:
-                print(self._proxy.unlock_daemon())
+                self._emit(self._proxy.unlock_daemon())
 
         elif cmd == 'settings':
             if sub == 'set' and len(self._extra) >= 2:
-                print(self._proxy.handle_settings_set(self._extra[0], self._extra[1]))
+                self._emit(
+                    self._proxy.handle_settings_set(self._extra[0], self._extra[1])
+                )
             elif sub == 'get' and len(self._extra) >= 1:
-                print(self._proxy.handle_settings_get(self._extra[0]))
+                self._emit(self._proxy.handle_settings_get(self._extra[0]))
             elif sub == 'list' or (sub is None and not self._extra):
-                print(self._proxy.handle_settings_list())
+                self._emit(self._proxy.handle_settings_list())
             else:
-                print(self._help.show_command_help(cmd))
+                self._print_usage(cmd)
 
         elif cmd == 'config':
             if sub == 'set' and len(self._extra) >= 2:
-                print(self._proxy.handle_config_set(self._extra[0], self._extra[1]))
+                self._emit(
+                    self._proxy.handle_config_set(self._extra[0], self._extra[1])
+                )
             elif sub == 'get' and len(self._extra) >= 1:
-                print(self._proxy.handle_config_get(self._extra[0]))
+                self._emit(self._proxy.handle_config_get(self._extra[0]))
             elif sub == 'list' or (sub is None and not self._extra):
-                print(self._proxy.handle_config_list())
+                self._emit(self._proxy.handle_config_list())
             elif sub == 'sync':
-                print(self._proxy.handle_config_sync())
+                self._emit(self._proxy.handle_config_sync())
             else:
-                print(self._help.show_command_help(cmd))
+                self._print_usage(cmd)
 
         elif cmd == 'chat':
             CommandHandlers.handle_chat(
@@ -173,7 +209,7 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                 token for token in cleanup_tokens if token != '--force'
             ]
             if invalid_tokens:
-                print(self._help.show_command_help(cmd))
+                self._print_usage(cmd)
             else:
                 CommandHandlers.handle_cleanup(force='--force' in cleanup_tokens)
 
@@ -185,12 +221,12 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
 
         elif cmd == 'send':
             if not sub or not self._extra:
-                print(self._help.show_command_help(cmd))
+                self._print_usage(cmd)
             else:
-                print(self._proxy.send_drop(sub, ' '.join(self._extra)))
+                self._emit(self._proxy.send_drop(sub, ' '.join(self._extra)))
 
         elif cmd == 'inbox':
-            print(self._proxy.handle_inbox(sub))
+            self._emit(self._proxy.handle_inbox(sub))
 
         elif cmd == 'messages':
             self._dispatch_messages(sub)
@@ -198,40 +234,55 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
         elif cmd == 'history':
             self._dispatch_history(sub)
 
+        elif cmd == 'transport':
+            transport_tokens: List[str] = []
+            if sub:
+                transport_tokens.append(sub)
+            transport_tokens.extend(self._extra)
+            if len(transport_tokens) > 1:
+                self._print_usage('transport')
+            else:
+                peer: Optional[str] = transport_tokens[0] if transport_tokens else None
+                self._emit(self._proxy.handle_transport(peer))
+
         elif cmd == 'address':
             if sub in (None, 'show', 'generate'):
-                print(self._proxy.get_address(generate=(sub == 'generate')))
+                self._emit(self._proxy.get_address(generate=(sub == 'generate')))
             else:
-                print(self._help.show_command_help(cmd))
+                self._print_usage(cmd)
 
         elif cmd == 'contacts':
             if sub == 'add':
                 if len(self._extra) < 1:
-                    print(self._help.show_command_help(cmd))
+                    self._print_usage(cmd)
                 else:
                     onion: Optional[str] = (
                         self._extra[1] if len(self._extra) > 1 else None
                     )
-                    print(self._proxy.contacts_add(self._extra[0], onion))
+                    self._emit(self._proxy.contacts_add(self._extra[0], onion))
             elif sub in ('rm', 'remove'):
                 if len(self._extra) < 1:
-                    print(self._help.show_command_help(cmd))
+                    self._print_usage(cmd)
                 else:
-                    print(self._proxy.contacts_rm(self._extra[0]))
+                    self._emit(self._proxy.contacts_rm(self._extra[0]))
             elif sub == 'rename':
                 if len(self._extra) < 2:
-                    print(self._help.show_command_help(cmd))
+                    self._print_usage(cmd)
                 else:
-                    print(self._proxy.contacts_rename(self._extra[0], self._extra[1]))
+                    self._emit(
+                        self._proxy.contacts_rename(self._extra[0], self._extra[1])
+                    )
             elif sub == 'clear':
-                print(self._proxy.contacts_clear())
+                self._emit(self._proxy.contacts_clear())
             elif sub in ('list', None):
-                print(self._proxy.contacts_list())
+                self._emit(self._proxy.contacts_list())
             else:
-                print(self._help.show_command_help(cmd))
+                self._print_usage(cmd)
 
         elif cmd == 'profiles':
             self._dispatch_profiles(sub)
 
         else:
             print("Unknown command. Use 'metor help' to see available commands.")
+            self._exit_code = 1
+        return self._exit_code

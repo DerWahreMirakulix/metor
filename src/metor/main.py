@@ -1,23 +1,65 @@
 """
 Module serving as the main entry point for the Metor application.
-Executes the CLI parser, validates systemic configuration integrity,
-and delegates to the command dispatcher.
+Resolves the active frontend from the --ui argument, the METOR_UI environment
+variable, or the default terminal frontend, then delegates execution.
 """
 
-import argparse
+import os
 import sys
-from typing import List
+from typing import List, Optional, Tuple
 
-from metor.data.settings import Settings
-from metor.data.profile import ProfileManager
-from metor.ui import Theme
-from metor.ui.cli import CliParser, CliDispatcher
+from metor.ui import get_frontend, get_registered_frontends
+
+
+def _extract_ui_argument(argv: List[str]) -> Tuple[Optional[str], List[str]]:
+    """
+    Strips --ui / --ui=<id> tokens from argv and returns the requested id.
+
+    Args:
+        argv (List[str]): The raw argument vector excluding the program name.
+
+    Returns:
+        Tuple[Optional[str], List[str]]: The requested frontend id (or None when absent) and the filtered argv.
+    """
+    ui_id: Optional[str] = None
+    filtered: List[str] = []
+    index: int = 0
+    while index < len(argv):
+        token: str = argv[index]
+        if token == '--ui':
+            if index + 1 < len(argv):
+                ui_id = argv[index + 1]
+                index += 2
+                continue
+            index += 1
+            continue
+        if token.startswith('--ui='):
+            ui_id = token[len('--ui=') :]
+            index += 1
+            continue
+        filtered.append(token)
+        index += 1
+    return ui_id, filtered
+
+
+def _resolve_frontend_id(ui_argument: Optional[str]) -> str:
+    """
+    Resolves the effective frontend identifier with env fallback to 'terminal'.
+
+    Args:
+        ui_argument (Optional[str]): The --ui flag value, or None when absent.
+
+    Returns:
+        str: The effective frontend identifier.
+    """
+    if ui_argument is not None:
+        return ui_argument
+    return os.environ.get('METOR_UI', 'terminal')
 
 
 def main() -> None:
     """
-    Invokes the Metor application. Validates configuration integrity before dispatch.
-    Implements Fail-Fast architecture to prevent runtime crashes on corrupted JSON.
+    Selects the active frontend and delegates the filtered argv to it.
 
     Args:
         None
@@ -25,32 +67,22 @@ def main() -> None:
     Returns:
         None
     """
-    args: argparse.Namespace
-    extra: List[str]
-    args, extra = CliParser.parse()
+    ui_argument: Optional[str]
+    argv: List[str]
+    ui_argument, argv = _extract_ui_argument(sys.argv[1:])
+
+    ui_id: str = _resolve_frontend_id(ui_argument)
 
     try:
-        Settings.validate_integrity()
-    except ValueError as e:
-        sys.stderr.write(f'{Theme.RED}Global Settings Error:{Theme.RESET} {e}\n')
-        sys.exit(1)
-
-    pm: ProfileManager = ProfileManager(args.profile)
-
-    try:
-        pm.validate_integrity()
-    except ValueError as e:
+        frontend = get_frontend(ui_id)
+    except KeyError:
+        registered: str = ', '.join(sorted(get_registered_frontends())) or 'none'
         sys.stderr.write(
-            f"{Theme.RED}Profile '{pm.profile_name}' Error:{Theme.RESET} {e}\n"
+            f"Unknown frontend '{ui_id}'. Registered frontends: {registered}\n"
         )
-        sys.exit(1)
+        sys.exit(2)
 
-    dispatcher: CliDispatcher = CliDispatcher(args, extra, pm)
-    try:
-        dispatcher.dispatch()
-    except (EOFError, KeyboardInterrupt):
-        sys.stderr.write('\n')
-        sys.exit(130)
+    sys.exit(frontend(argv))
 
 
 if __name__ == '__main__':

@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from metor.core.api import AuthRequiredEvent, InvalidPasswordEvent, IpcEvent
+from metor.client.auth import extract_session_auth_prompt
 from metor.data import ProfileManager
 from metor.utils import build_session_auth_proof
 
@@ -10,22 +10,11 @@ from metor.utils import build_session_auth_proof
 from metor.ui.prompt import prompt_hidden_optional
 from metor.ui.theme import Theme
 
-
-def extract_session_auth_prompt(event: IpcEvent) -> Optional[tuple[str, str]]:
-    """
-    Extracts the daemon-issued challenge payload from one auth-gate event.
-
-    Args:
-        event (IpcEvent): The incoming IPC event.
-
-    Returns:
-        Optional[tuple[str, str]]: The challenge and salt, or None when unavailable.
-    """
-    if isinstance(event, (AuthRequiredEvent, InvalidPasswordEvent)):
-        if event.challenge is not None and event.salt is not None:
-            return event.challenge, event.salt
-
-    return None
+__all__ = [
+    'extract_session_auth_prompt',
+    'get_session_auth_prompt',
+    'prompt_session_auth_proof',
+]
 
 
 def prompt_session_auth_proof(

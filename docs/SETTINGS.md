@@ -16,16 +16,16 @@ It is the canonical reference for supported user-facing settings and structural 
 
 - [Configuration Model](#configuration-model)
 - [Cascading Settings](#cascading-settings)
-  - [User Interface](#user-interface)
+  - [Client](#client)
   - [Core Daemon](#core-daemon)
   - [Advanced Network Resilience](#advanced-network-resilience)
 - [Structural Profile Config](#structural-profile-config)
 
 ## Cascading Settings
 
-### User Interface
+### Client
 
-#### `ui.default_profile`
+#### `client.default_profile`
 
 Selects the profile used when the CLI is started without `-p`.
 
@@ -33,151 +33,19 @@ Selects the profile used when the CLI is started without `-p`.
 | ---------------- | ----------------------------------------------------------- |
 | Type             | `str`                                                       |
 | Default          | `default`                                                   |
-| Category         | `User Interface`                                            |
+| Category         | `Client`                                                    |
 | Scope            | `UI client-local`                                           |
 | Profile Override | `No`                                                        |
 | Constraints      | Non-empty profile name using letters, numbers, `-`, or `_`. |
 
 **CLI Examples**
 
-- `metor settings get ui.default_profile`
-- `metor settings set ui.default_profile default`
+- `metor settings get client.default_profile`
+- `metor settings set client.default_profile default`
 
 ---
 
-#### `ui.prompt_sign`
-
-Sets the prompt prefix shown in the interactive chat UI.
-
-| Property         | Value             |
-| ---------------- | ----------------- |
-| Type             | `str`             |
-| Default          | `$`               |
-| Category         | `User Interface`  |
-| Scope            | `UI client-local` |
-| Profile Override | `Yes`             |
-| Constraints      | Non-empty string. |
-
-**CLI Examples**
-
-- `metor settings get ui.prompt_sign`
-- `metor settings set ui.prompt_sign $`
-- `metor -p <profile> config get ui.prompt_sign`
-- `metor -p <profile> config set ui.prompt_sign $`
-
----
-
-#### `ui.chat_limit`
-
-Limits the number of rendered chat lines kept in volatile UI memory.
-
-| Property         | Value             |
-| ---------------- | ----------------- |
-| Type             | `int`             |
-| Default          | `50`              |
-| Category         | `User Interface`  |
-| Scope            | `UI client-local` |
-| Profile Override | `Yes`             |
-| Constraints      | Integer >= 1.     |
-
-**CLI Examples**
-
-- `metor settings get ui.chat_limit`
-- `metor settings set ui.chat_limit 50`
-- `metor -p <profile> config get ui.chat_limit`
-- `metor -p <profile> config set ui.chat_limit 50`
-
----
-
-#### `ui.history_limit`
-
-Default number of history events shown per request.
-
-| Property         | Value             |
-| ---------------- | ----------------- |
-| Type             | `int`             |
-| Default          | `50`              |
-| Category         | `User Interface`  |
-| Scope            | `UI client-local` |
-| Profile Override | `Yes`             |
-| Constraints      | Integer >= 1.     |
-
-**CLI Examples**
-
-- `metor settings get ui.history_limit`
-- `metor settings set ui.history_limit 50`
-- `metor -p <profile> config get ui.history_limit`
-- `metor -p <profile> config set ui.history_limit 50`
-
----
-
-#### `ui.messages_limit`
-
-Default number of stored messages shown per request.
-
-| Property         | Value             |
-| ---------------- | ----------------- |
-| Type             | `int`             |
-| Default          | `50`              |
-| Category         | `User Interface`  |
-| Scope            | `UI client-local` |
-| Profile Override | `Yes`             |
-| Constraints      | Integer >= 1.     |
-
-**CLI Examples**
-
-- `metor settings get ui.messages_limit`
-- `metor settings set ui.messages_limit 50`
-- `metor -p <profile> config get ui.messages_limit`
-- `metor -p <profile> config set ui.messages_limit 50`
-
----
-
-#### `ui.chat_buffer_padding`
-
-Keeps extra renderer lines around the viewport to reduce redraw churn.
-
-| Property         | Value             |
-| ---------------- | ----------------- |
-| Type             | `int`             |
-| Default          | `20`              |
-| Category         | `User Interface`  |
-| Scope            | `UI client-local` |
-| Profile Override | `Yes`             |
-| Constraints      | Integer >= 0.     |
-
-**CLI Examples**
-
-- `metor settings get ui.chat_buffer_padding`
-- `metor settings set ui.chat_buffer_padding 20`
-- `metor -p <profile> config get ui.chat_buffer_padding`
-- `metor -p <profile> config set ui.chat_buffer_padding 20`
-
----
-
-#### `ui.inbox_notification_delay`
-
-Delays and aggregates unread-message notifications while the peer is unfocused. `0` disables buffering.
-
-| Property         | Value               |
-| ---------------- | ------------------- |
-| Type             | `float`             |
-| Default          | `10.0`              |
-| Category         | `User Interface`    |
-| Scope            | `UI client-local`   |
-| Profile Override | `Yes`               |
-| Constraints      | Float >= 0 seconds. |
-
-**CLI Examples**
-
-- `metor settings get ui.inbox_notification_delay`
-- `metor settings set ui.inbox_notification_delay 10.0`
-- `metor -p <profile> config get ui.inbox_notification_delay`
-- `metor -p <profile> config set ui.inbox_notification_delay 10.0`
-
----
-
-#### `ui.ipc_timeout`
+#### `client.ipc_timeout`
 
 Client-side timeout for CLI and chat IPC requests.
 
@@ -185,21 +53,21 @@ Client-side timeout for CLI and chat IPC requests.
 | ---------------- | --------------------- |
 | Type             | `float`               |
 | Default          | `15.0`                |
-| Category         | `User Interface`      |
+| Category         | `Client`              |
 | Scope            | `UI client-local`     |
 | Profile Override | `Yes`                 |
 | Constraints      | Float >= 0.1 seconds. |
 
 **CLI Examples**
 
-- `metor settings get ui.ipc_timeout`
-- `metor settings set ui.ipc_timeout 15.0`
-- `metor -p <profile> config get ui.ipc_timeout`
-- `metor -p <profile> config set ui.ipc_timeout 15.0`
+- `metor settings get client.ipc_timeout`
+- `metor settings set client.ipc_timeout 15.0`
+- `metor -p <profile> config get client.ipc_timeout`
+- `metor -p <profile> config set client.ipc_timeout 15.0`
 
 ---
 
-#### `ui.chat_daemon_autostart`
+#### `client.chat_daemon_autostart`
 
 Controls whether `metor chat` should refuse, confirm, or automatically perform local daemon startup when no local daemon is running.
 
@@ -207,17 +75,61 @@ Controls whether `metor chat` should refuse, confirm, or automatically perform l
 | ---------------- | --------------------------------- |
 | Type             | `str`                             |
 | Default          | `ask`                             |
-| Category         | `User Interface`                  |
+| Category         | `Client`                          |
 | Scope            | `UI client-local`                 |
 | Profile Override | `Yes`                             |
 | Constraints      | One of: `never`, `ask`, `always`. |
 
 **CLI Examples**
 
-- `metor settings get ui.chat_daemon_autostart`
-- `metor settings set ui.chat_daemon_autostart ask`
-- `metor -p <profile> config get ui.chat_daemon_autostart`
-- `metor -p <profile> config set ui.chat_daemon_autostart ask`
+- `metor settings get client.chat_daemon_autostart`
+- `metor settings set client.chat_daemon_autostart ask`
+- `metor -p <profile> config get client.chat_daemon_autostart`
+- `metor -p <profile> config set client.chat_daemon_autostart ask`
+
+---
+
+#### `client.history_limit`
+
+Default number of history events shown per request.
+
+| Property         | Value             |
+| ---------------- | ----------------- |
+| Type             | `int`             |
+| Default          | `50`              |
+| Category         | `Client`          |
+| Scope            | `UI client-local` |
+| Profile Override | `Yes`             |
+| Constraints      | Integer >= 1.     |
+
+**CLI Examples**
+
+- `metor settings get client.history_limit`
+- `metor settings set client.history_limit 50`
+- `metor -p <profile> config get client.history_limit`
+- `metor -p <profile> config set client.history_limit 50`
+
+---
+
+#### `client.messages_limit`
+
+Default number of stored messages shown per request.
+
+| Property         | Value             |
+| ---------------- | ----------------- |
+| Type             | `int`             |
+| Default          | `50`              |
+| Category         | `Client`          |
+| Scope            | `UI client-local` |
+| Profile Override | `Yes`             |
+| Constraints      | Integer >= 1.     |
+
+**CLI Examples**
+
+- `metor settings get client.messages_limit`
+- `metor settings set client.messages_limit 50`
+- `metor -p <profile> config get client.messages_limit`
+- `metor -p <profile> config set client.messages_limit 50`
 
 ### Core Daemon
 
@@ -693,6 +605,50 @@ Caps unread crash-safe live backlog per peer. `0` disables headless live backlog
 - `metor -p <profile> config get daemon.max_unseen_live_msgs`
 - `metor -p <profile> config set daemon.max_unseen_live_msgs 20`
 
+---
+
+#### `daemon.expose_drop_rejection`
+
+Sends a typed rejection reason when inbound drops are refused, instead of closing the socket silently. Disabled by default to avoid disclosing local policy to peers.
+
+| Property         | Value            |
+| ---------------- | ---------------- |
+| Type             | `bool`           |
+| Default          | `False`          |
+| Category         | `Core Daemon`    |
+| Scope            | `Daemon runtime` |
+| Profile Override | `Yes`            |
+| Constraints      | Boolean.         |
+
+**CLI Examples**
+
+- `metor settings get daemon.expose_drop_rejection`
+- `metor settings set daemon.expose_drop_rejection false`
+- `metor -p <profile> config get daemon.expose_drop_rejection`
+- `metor -p <profile> config set daemon.expose_drop_rejection false`
+
+---
+
+#### `daemon.notification_sink`
+
+JSON sink configuration for detached notifications, e.g. `{"type": "file", "path": "/tmp/metor-notify.jsonl"}` or `{"type": "webhook", "url": "https://..."}`. Empty disables the notification sink.
+
+| Property         | Value                 |
+| ---------------- | --------------------- |
+| Type             | `str`                 |
+| Default          | ``                    |
+| Category         | `Core Daemon`         |
+| Scope            | `Daemon runtime`      |
+| Profile Override | `Yes`                 |
+| Constraints      | JSON string or empty. |
+
+**CLI Examples**
+
+- `metor settings get daemon.notification_sink`
+- `metor settings set daemon.notification_sink `
+- `metor -p <profile> config get daemon.notification_sink`
+- `metor -p <profile> config set daemon.notification_sink `
+
 ### Advanced Network Resilience
 
 #### `daemon.max_concurrent_connections`
@@ -891,6 +847,50 @@ Additional delayed retunnel recovery retries after a transient reject or early c
 - `metor -p <profile> config get daemon.retunnel_recovery_retries`
 - `metor -p <profile> config set daemon.retunnel_recovery_retries 2`
 
+---
+
+#### `daemon.reuse_live_for_drops`
+
+Routes queued drop messages over an existing live session channel when available, avoiding a second circuit.
+
+| Property         | Value                         |
+| ---------------- | ----------------------------- |
+| Type             | `bool`                        |
+| Default          | `True`                        |
+| Category         | `Advanced Network Resilience` |
+| Scope            | `Daemon runtime`              |
+| Profile Override | `Yes`                         |
+| Constraints      | Boolean.                      |
+
+**CLI Examples**
+
+- `metor settings get daemon.reuse_live_for_drops`
+- `metor settings set daemon.reuse_live_for_drops true`
+- `metor -p <profile> config get daemon.reuse_live_for_drops`
+- `metor -p <profile> config set daemon.reuse_live_for_drops true`
+
+---
+
+#### `daemon.live_idle_timeout`
+
+Closes a live session automatically after it stays unfocused and idle for this many seconds. `0` disables idle closing.
+
+| Property         | Value                         |
+| ---------------- | ----------------------------- |
+| Type             | `float`                       |
+| Default          | `0.0`                         |
+| Category         | `Advanced Network Resilience` |
+| Scope            | `Daemon runtime`              |
+| Profile Override | `Yes`                         |
+| Constraints      | Float >= 0 seconds.           |
+
+**CLI Examples**
+
+- `metor settings get daemon.live_idle_timeout`
+- `metor settings set daemon.live_idle_timeout 0.0`
+- `metor -p <profile> config get daemon.live_idle_timeout`
+- `metor -p <profile> config set daemon.live_idle_timeout 0.0`
+
 ## Structural Profile Config
 
 ### `is_remote`
@@ -946,3 +946,52 @@ Declares whether the local profile stores keys and the database encrypted or pla
 
 - `metor profiles add <name> --plaintext`
 - `metor profiles migrate <name> --to <encrypted|plaintext>`
+
+<!-- manual: Drop-Policy Group — preserved across regeneration -->
+
+## Manual Reference: Drop-Policy Group
+
+Drop delivery while a live session is active is governed by ONE policy decision
+with two axes. The combination table is canonical:
+
+| `daemon.reuse_live_for_drops` | `daemon.allow_drop_standby_on_live` | Behavior while live is active                                                |
+| ----------------------------- | ----------------------------------- | ---------------------------------------------------------------------------- |
+| `true` (default)              | `false` (default)                   | Drops ride the session channel; no second circuit.                           |
+| `false`                       | `true`                              | Drops use a warm cached drop tunnel; no drop traffic on the session channel. |
+| `true`                        | `true`                              | Drops ride the session; a tunnel stays warm as fallback (redundant).         |
+| `false`                       | `false`                             | Drops wait in the outbox or use a fresh tunnel.                              |
+
+`reuse` is a description (drop-over-session), never an enum value and never a
+fourth connection type. Connection types are `session`, `tunnel`, `direct`.
+
+<!-- /manual -->
+
+<!-- manual: No-Trace Package — preserved across regeneration -->
+
+## Manual Reference: No-Trace Package
+
+The combination that minimizes local traces:
+
+- `daemon.record_live_history = false`
+- `daemon.record_drop_history = false`
+- `daemon.ephemeral_messages = true`
+
+Live payloads are already ephemeral by construction (never in chat history,
+shredded after consume); this package removes the remaining transport-ledger
+metadata for both worlds.
+
+<!-- /manual -->
+
+<!-- manual: Ledger transport field — preserved across regeneration -->
+
+## Manual Reference: Ledger `transport` Field
+
+The history ledger row carries an optional `transport` value of
+`session`, `tunnel`, or `direct`.
+
+**OPSEC rule:** when `daemon.record_live_history` is `false`, the `transport`
+field is omitted from ALL ledger rows — including drop rows — so its uniform
+absence never reveals that a session channel existed. Selective absence would
+be a disclosure; uniform absence is not.
+
+<!-- /manual -->

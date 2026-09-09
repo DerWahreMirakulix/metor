@@ -16,6 +16,7 @@ from metor.core.api import (
     ProfileOperationResultEvent,
     ProfilesDataEvent,
     SettingsListDataEvent,
+    TransportStateEvent,
     UnreadMessagesEvent,
 )
 from metor.ui import UIPresenter
@@ -30,6 +31,7 @@ class CliProxyEventRenderer:
         *,
         translate_event: Callable[[EventType, Optional[Dict[str, JsonValue]]], str],
         prefix_remote: Callable[[str], str],
+        mark_error: Callable[[], None],
     ) -> None:
         """
         Initializes the event renderer.
@@ -37,12 +39,14 @@ class CliProxyEventRenderer:
         Args:
             translate_event (Callable[[EventType, Optional[Dict[str, JsonValue]]], str]): Event translator callback.
             prefix_remote (Callable[[str], str]): Remote-prefix renderer callback.
+            mark_error (Callable[[], None]): Flags a nonzero process exit for rendered error results.
 
         Returns:
             None
         """
         self._translate_event = translate_event
         self._prefix_remote = prefix_remote
+        self._mark_error = mark_error
 
     def format_ipc_event(
         self,
@@ -61,6 +65,8 @@ class CliProxyEventRenderer:
             str: The rendered CLI text.
         """
         if isinstance(event, ProfileOperationResultEvent):
+            if not event.success:
+                self._mark_error()
             profile_text = format_profile_result_payload(
                 event.success,
                 event.operation_type,
@@ -82,6 +88,7 @@ class CliProxyEventRenderer:
                 ProfilesDataEvent,
                 SettingsListDataEvent,
                 ConfigListDataEvent,
+                TransportStateEvent,
             ),
         ):
             text_fmt: str = UIPresenter.format_response(event, chat_mode=False)

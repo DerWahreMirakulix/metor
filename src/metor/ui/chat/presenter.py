@@ -8,6 +8,7 @@ from metor.core.api import (
     ConnectionOrigin,
     PendingConnectionEntry,
     PendingConnectionReasonCode,
+    TransportStateEvent,
     UnreadInboxSummaryEntry,
 )
 from metor.ui import Theme, UIPresenter
@@ -204,6 +205,19 @@ class ChatPresenter:
                 else len(timestamp_visible) + 6 + prompt_len
             )
         return 0
+
+    @staticmethod
+    def format_transport_state(event: TransportStateEvent) -> str:
+        """
+        Formats one transport state DTO for the chat status line.
+
+        Args:
+            event (TransportStateEvent): The transport state DTO.
+
+        Returns:
+            str: The formatted transport state lines.
+        """
+        return UIPresenter.format_transport_state(event)
 
     @staticmethod
     def format_msg(

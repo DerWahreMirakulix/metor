@@ -215,7 +215,7 @@ def format_history(event: HistoryDataEvent) -> str:
         return f'No history available for {scope_label}.'
 
     header_text: str = f'History for {scope_label} (Last {len(event.entries)})'
-    out: str = f'{get_header_string(header_text)}\n'
+    out: str = f'{get_header_string(header_text)}'
     for entry in event.entries:
         prefix, prefix_visible = build_timestamp_prefix(entry.timestamp)
         out += f'{format_prefixed_message(prefix, prefix_visible, _describe_summary_entry(entry))}\n'
@@ -237,7 +237,7 @@ def format_raw_history(event: HistoryRawDataEvent) -> str:
         return f'No raw history available for {scope_label}.'
 
     header_text: str = f'Raw History for {scope_label} (Last {len(event.entries)})'
-    out: str = f'{get_header_string(header_text)}\n'
+    out: str = f'{get_header_string(header_text)}'
     for entry in event.entries:
         prefix, prefix_visible = build_timestamp_prefix(entry.timestamp)
         peer_label: str = _format_raw_peer_label(entry)
@@ -259,6 +259,11 @@ def format_raw_history(event: HistoryRawDataEvent) -> str:
             line += (
                 f'{Theme.DARK_GREY}detail:{Theme.RESET} '
                 f'{Theme.CYAN}{entry.detail_text}{Theme.RESET}\n'
+            )
+        if entry.transport:
+            line += (
+                f'{Theme.DARK_GREY}transport:{Theme.RESET} '
+                f'{Theme.PURPLE}{entry.transport}{Theme.RESET}\n'
             )
         out += f'{format_prefixed_message(prefix, prefix_visible, line)}\n'
     return out

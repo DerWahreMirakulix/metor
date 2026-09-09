@@ -38,6 +38,10 @@ from metor.ui import Theme, UIPresenter
 from metor.ui.cli.ipc.request.models import IpcRequestResult
 from metor.ui.cli.proxy.settings import CliProxySettingsActions
 from metor.ui.cli.proxy.transport import CliProxyTransport
+from metor.data.settings_registry import (
+    get_ui_setting_spec,
+    validate_ui_setting_value,
+)
 
 
 class _DummyPaths:
@@ -541,10 +545,12 @@ class SettingsContractTests(unittest.TestCase):
             with patch.object(
                 Settings, 'get_global_settings_path', return_value=settings_path
             ):
-                result = actions.handle_settings_set(SettingKey.PROMPT_SIGN.value, '!')
+                result = actions.handle_settings_set('ui.terminal.prompt_sign', '!')
 
                 self.assertIn('updated successfully', result)
-                self.assertEqual(Settings.get_str(SettingKey.PROMPT_SIGN), '!')
+                self.assertEqual(
+                    Settings.get_namespace_str('ui.terminal.prompt_sign'), '!'
+                )
                 self.assertFalse(pm.config._paths.get_config_file().exists())
 
     def test_ui_default_profile_can_be_set_globally_via_settings_command(self) -> None:
@@ -681,12 +687,12 @@ class SettingsContractTests(unittest.TestCase):
             with patch.object(
                 Settings, 'get_global_settings_path', return_value=settings_path
             ):
-                Settings.set(SettingKey.PROMPT_SIGN, '!')
+                Settings.set_namespace('ui.terminal.prompt_sign', '!')
 
                 result = actions.handle_settings_list()
 
-        self.assertIn('Global UI Settings', result)
-        self.assertIn('ui.prompt_sign', result)
+        self.assertIn('Global Client Settings', result)
+        self.assertIn('ui.terminal.prompt_sign', result)
         self.assertIn('Global Daemon Settings', result)
 
     def test_live_disconnect_linger_default_stays_above_retunnel_reconnect_delay(
@@ -861,19 +867,19 @@ class SettingsContractTests(unittest.TestCase):
 
         rendered = UIPresenter.format_response(
             SettingsListDataEvent(
-                scope='ui',
+                scope='client',
                 entries=[
                     SettingSnapshotEntry(
-                        key=SettingKey.PROMPT_SIGN.value,
+                        key='ui.terminal.prompt_sign',
                         value='!',
                         source='global',
-                        category='User Interface',
+                        category='Terminal UI',
                     ),
                     SettingSnapshotEntry(
-                        key=SettingKey.CHAT_LIMIT.value,
+                        key='ui.terminal.chat_limit',
                         value='50',
                         source='default',
-                        category='User Interface',
+                        category='Terminal UI',
                     ),
                 ],
             )
@@ -895,19 +901,19 @@ class SettingsContractTests(unittest.TestCase):
 
         rendered = UIPresenter.format_response(
             SettingsListDataEvent(
-                scope='ui',
+                scope='client',
                 entries=[
                     SettingSnapshotEntry(
-                        key=SettingKey.PROMPT_SIGN.value,
+                        key='ui.terminal.prompt_sign',
                         value='!',
                         source='global',
-                        category='User Interface',
+                        category='Terminal UI',
                     )
                 ],
             )
         )
 
-        self.assertIn('Global UI Settings:\n\n[User Interface]', rendered)
+        self.assertIn('Global Client Settings:\n\n[Terminal UI]', rendered)
 
     def test_config_snapshot_keeps_global_marker(self) -> None:
         """
@@ -1000,7 +1006,7 @@ class SettingsContractTests(unittest.TestCase):
             ):
                 result = actions.handle_settings_list()
 
-        self.assertTrue(result.startswith('\nGlobal UI Settings:\n\n[User Interface]'))
+        self.assertTrue(result.startswith('\nGlobal Client Settings:\n\n[Client]'))
         self.assertIn('\n\nGlobal Daemon Settings:\n\n[Core Daemon]', result)
         self.assertNotIn('\n\n\nGlobal Daemon Settings', result)
         self.assertTrue(result.endswith('\n'))
@@ -1032,7 +1038,7 @@ class SettingsContractTests(unittest.TestCase):
             ):
                 result = actions.handle_settings_list()
 
-        self.assertTrue(result.startswith('\nGlobal UI Settings:\n\n[User Interface]'))
+        self.assertTrue(result.startswith('\nGlobal Client Settings:\n\n[Client]'))
         self.assertIn(
             'Daemon settings were not shown because local daemon authentication failed. '
             'Too many invalid local authentication attempts. Retry in 30s.',
@@ -1104,8 +1110,8 @@ class SettingsContractTests(unittest.TestCase):
             with patch.object(
                 Settings, 'get_global_settings_path', return_value=settings_path
             ):
-                Settings.set(SettingKey.PROMPT_SIGN, '$')
-                pm.config.set(SettingKey.PROMPT_SIGN, '!')
+                Settings.set_namespace('ui.terminal.prompt_sign', '$')
+                pm.config.set_namespace('ui.terminal.prompt_sign', '!')
 
                 result = actions.handle_config_list()
 
@@ -1133,13 +1139,13 @@ class SettingsContractTests(unittest.TestCase):
             with patch.object(
                 Settings, 'get_global_settings_path', return_value=settings_path
             ):
-                Settings.set(SettingKey.PROMPT_SIGN, '$')
-                pm.config.set(SettingKey.PROMPT_SIGN, '!')
+                Settings.set_namespace('ui.terminal.prompt_sign', '$')
+                pm.config.set_namespace('ui.terminal.prompt_sign', '!')
 
                 result = actions.handle_config_list()
 
         self.assertTrue(
-            result.startswith("\nEffective UI Config for profile 'alpha':\n\n")
+            result.startswith("\nEffective Client Config for profile 'alpha':\n\n")
         )
         self.assertIn(
             'Daemon config values were not shown because local daemon authentication failed. '
@@ -1222,15 +1228,17 @@ class SettingsContractTests(unittest.TestCase):
             with patch.object(
                 Settings, 'get_global_settings_path', return_value=settings_path
             ):
-                Settings.set(SettingKey.PROMPT_SIGN, '$')
+                Settings.set_namespace('ui.terminal.prompt_sign', '$')
                 Settings.set(SettingKey.DAEMON_IPC_TIMEOUT, 15.0)
-                pm.config.set(SettingKey.PROMPT_SIGN, '!')
+                pm.config.set_namespace('ui.terminal.prompt_sign', '!')
                 pm.config.set(SettingKey.DAEMON_IPC_TIMEOUT, 21.0)
 
                 result = actions.handle_config_sync()
 
                 self.assertEqual(result, 'Invalid master password.')
-                self.assertEqual(pm.config.get_str(SettingKey.PROMPT_SIGN), '!')
+                self.assertEqual(
+                    pm.config.get_namespace_str('ui.terminal.prompt_sign'), '!'
+                )
                 self.assertEqual(
                     pm.config.get_str(SettingKey.DAEMON_IPC_TIMEOUT), '21.0'
                 )
@@ -1255,13 +1263,15 @@ class SettingsContractTests(unittest.TestCase):
             with patch.object(
                 Settings, 'get_global_settings_path', return_value=settings_path
             ):
-                Settings.set(SettingKey.PROMPT_SIGN, '$')
-                pm.config.set(SettingKey.PROMPT_SIGN, '!')
+                Settings.set_namespace('ui.terminal.prompt_sign', '$')
+                pm.config.set_namespace('ui.terminal.prompt_sign', '!')
 
                 result = actions.handle_config_sync()
 
                 self.assertEqual(result, success_msg)
-                self.assertEqual(pm.config.get_str(SettingKey.PROMPT_SIGN), '$')
+                self.assertEqual(
+                    pm.config.get_namespace_str('ui.terminal.prompt_sign'), '$'
+                )
 
     def test_config_list_combines_ui_structural_and_daemon_sections(self) -> None:
         """
@@ -1293,13 +1303,13 @@ class SettingsContractTests(unittest.TestCase):
             with patch.object(
                 Settings, 'get_global_settings_path', return_value=settings_path
             ):
-                Settings.set(SettingKey.PROMPT_SIGN, '$')
-                pm.config.set(SettingKey.PROMPT_SIGN, '!')
+                Settings.set_namespace('ui.terminal.prompt_sign', '$')
+                pm.config.set_namespace('ui.terminal.prompt_sign', '!')
 
                 result = actions.handle_config_list()
 
-        self.assertIn("Effective UI Config for profile 'alpha'", result)
-        self.assertIn('ui.prompt_sign', result)
+        self.assertIn("Effective Client Config for profile 'alpha'", result)
+        self.assertIn('ui.terminal.prompt_sign', result)
         self.assertIn("Structural Profile Config for profile 'alpha'", result)
         self.assertIn('security_mode', result)
         self.assertIn("Effective Daemon Config for profile 'alpha'", result)
@@ -1345,9 +1355,9 @@ class SettingsContractTests(unittest.TestCase):
             with patch.object(
                 Settings, 'get_global_settings_path', return_value=settings_path
             ):
-                Settings.set(SettingKey.PROMPT_SIGN, '$')
+                Settings.set_namespace('ui.terminal.prompt_sign', '$')
                 Settings.set(SettingKey.DAEMON_IPC_TIMEOUT, 15.0)
-                pm.config.set(SettingKey.PROMPT_SIGN, '!')
+                pm.config.set_namespace('ui.terminal.prompt_sign', '!')
                 pm.config.set(SettingKey.DAEMON_IPC_TIMEOUT, 21.0)
 
                 event = ConfigCommandHandler(cast(ProfileManager, pm)).handle(
@@ -1355,10 +1365,31 @@ class SettingsContractTests(unittest.TestCase):
                 )
 
                 self.assertIs(event.event_type, EventType.CONFIG_SYNCED)
-                self.assertEqual(pm.config.get_str(SettingKey.PROMPT_SIGN), '!')
+                self.assertEqual(
+                    pm.config.get_namespace_str('ui.terminal.prompt_sign'), '!'
+                )
                 self.assertEqual(
                     pm.config.get_str(SettingKey.DAEMON_IPC_TIMEOUT), '15.0'
                 )
+
+    def test_ui_chat_limit_rejects_value_below_minimum(self) -> None:
+        """
+        Verifies that ui.terminal.chat_limit enforces its minimum value.
+
+        Regression guard: the constraint 'Integer >= 1' was documented but not
+        enforced, so `settings set ui.terminal.chat_limit 0` was accepted.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        spec = get_ui_setting_spec('terminal', 'chat_limit')
+        self.assertIsNotNone(spec)
+        with self.assertRaises(SettingValidationError):
+            validate_ui_setting_value(spec, 0)
+        self.assertEqual(validate_ui_setting_value(spec, 1), 1)
 
 
 if __name__ == '__main__':

@@ -59,6 +59,7 @@ class ContactOperationType(str, Enum):
     CONTACTS_CLEARED = 'contacts_cleared'
     CONTACTS_CLEAR_FAILED = 'contacts_clear_failed'
     DISCOVERED_PEER_NOT_FOUND = 'discovered_peer_not_found'
+    INVALID_ONION = 'invalid_onion'
     ONION_IN_USE = 'onion_in_use'
     PEER_ANONYMIZED = 'peer_anonymized'
     PEER_CANT_DELETE_ACTIVE = 'peer_cant_delete_active'

@@ -3,7 +3,7 @@
 from metor.data.sql.backends import SqlCipherCursor
 
 
-SCHEMA_VERSION: int = 2
+SCHEMA_VERSION: int = 3
 
 PEER_TABLE_QUERY: str = """
 CREATE TABLE IF NOT EXISTS peers (
@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS history_ledger (
     trigger TEXT,
     detail_code TEXT,
     detail_text TEXT NOT NULL DEFAULT '',
-    flow_id TEXT NOT NULL CHECK (flow_id <> '')
+    flow_id TEXT NOT NULL CHECK (flow_id <> ''),
+    transport TEXT
 )
 """
 
@@ -92,4 +93,13 @@ def ensure_core_schema(cursor: SqlCipherCursor) -> None:
     cursor.execute(MESSAGE_ARCHIVE_TABLE_QUERY)
     for index_query in INDEX_QUERIES:
         cursor.execute(index_query)
+
+    # Catch up pre-transport databases: CREATE TABLE IF NOT EXISTS leaves existing
+    # tables untouched, so the column is added explicitly. The table_info check
+    # prevents a duplicate-column error on freshly created databases.
+    cursor.execute('PRAGMA table_info(history_ledger)')
+    has_transport_column: bool = any(row[1] == 'transport' for row in cursor.fetchall())
+    if not has_transport_column:
+        cursor.execute('ALTER TABLE history_ledger ADD COLUMN transport TEXT')
+
     cursor.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')

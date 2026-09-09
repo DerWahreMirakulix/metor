@@ -4,7 +4,6 @@ import socket
 import threading
 from typing import Optional, Protocol
 
-from metor.core import KeyManager
 from metor.core.api import IpcCommand, IpcEvent
 from metor.core.daemon.handlers import (
     ConfigCommandHandler,
@@ -12,6 +11,7 @@ from metor.core.daemon.handlers import (
     ProfileCommandHandler,
     SystemCommandHandler,
 )
+from metor.core.key import KeyManager
 from metor.data.profile import ProfileManager
 
 

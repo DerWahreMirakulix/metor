@@ -164,7 +164,11 @@ def format_prefixed_message(
 
 def get_header_string(text: str) -> str:
     """
-    Creates a simple header string with the given text.
+    Creates a plain first-line header string with the given text.
+
+    Terminal output convention: the header is the first content line (no
+    leading blank line) and uses no decorative separators such as `---`,
+    keeping multi-line command output visually consistent with the chat UI.
 
     Args:
         text (str): The header text.
@@ -172,21 +176,4 @@ def get_header_string(text: str) -> str:
     Returns:
         str: The formatted header string.
     """
-    return f'\n--- {text} ---\n'
-
-
-def get_divider_string(length: int = 30, add_spaces: bool = False) -> str:
-    """
-    Generates a divider string consisting of dashes.
-
-    Args:
-        length (int): The number of dashes.
-        add_spaces (bool): Whether to add spaces between dashes.
-
-    Returns:
-        str: The divider string.
-    """
-    divider: str = '-' * length
-    if add_spaces:
-        divider = ' '.join(divider)
-    return divider
+    return f'{text}\n'

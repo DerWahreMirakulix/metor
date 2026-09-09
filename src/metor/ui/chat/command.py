@@ -11,6 +11,7 @@ from metor.core.api import (
     GetConnectionsCommand,
     GetContactsListCommand,
     GetInboxCommand,
+    GetTransportStateCommand,
     MarkReadCommand,
     RejectCommand,
     RemoveContactCommand,
@@ -23,27 +24,29 @@ from metor.ui.models import StatusTone
 
 from metor.ui.chat.ipc import IpcClient
 from metor.ui.chat.models import ChatMessageType
-from metor.ui.chat.renderer import Renderer
+from metor.ui.chat.renderer import ChatRenderer
 from metor.ui.chat.session import Session
 
 
 class CommandDispatcher:
     """Parses raw text input and dispatches corresponding IPC commands."""
 
-    def __init__(self, ipc: IpcClient, session: Session, renderer: Renderer) -> None:
+    def __init__(
+        self, ipc: IpcClient, session: Session, renderer: ChatRenderer
+    ) -> None:
         """Initializes the dispatcher with required dependencies.
 
         Args:
             ipc (IpcClient): The active IPC client connection.
             session (Session): The current UI state manager.
-            renderer (Renderer): The UI renderer for printing errors and usage.
+            renderer (ChatRenderer): The chat UI renderer for printing errors and usage.
 
         Returns:
             None
         """
         self._ipc: IpcClient = ipc
         self._session: Session = session
-        self._renderer: Renderer = renderer
+        self._renderer: ChatRenderer = renderer
 
     def _remember_pending_connect_focus(self, target: str) -> None:
         """
@@ -183,6 +186,8 @@ class CommandDispatcher:
                 self._ipc.send_command(GetInboxCommand())
         elif cmd == '/sessions':
             self._ipc.send_command(GetConnectionsCommand())
+        elif cmd == '/transport':
+            self._ipc.send_command(GetTransportStateCommand(peer=arg))
         elif cmd.startswith('/contacts'):
             self._dispatch_contacts(cmd, parts)
         else:

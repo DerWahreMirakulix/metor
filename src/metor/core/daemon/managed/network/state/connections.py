@@ -7,7 +7,7 @@ import time
 from typing import Dict, List, Optional, Set, Tuple
 
 from metor.core.api import ConnectionOrigin
-from metor.core.daemon.managed.models import LiveTransportState
+from metor.core.daemon.managed.models import SessionState
 from metor.core.daemon.managed.network.state.types import PendingConnectionReason
 from metor.utils import Constants
 
@@ -58,6 +58,7 @@ class StateTrackerConnectionsMixin:
     _live_reconnect_grace: Dict[str, float]
     _local_recovery_opt_outs: Dict[str, float]
     _retunnel_in_progress: Set[str]
+    _session_last_activity: Dict[str, float]
 
     def get_active_onions(self) -> List[str]:
         """
@@ -126,7 +127,7 @@ class StateTrackerConnectionsMixin:
         with self._lock:
             return onion in self._connections
 
-    def get_live_state(self, onion: str) -> LiveTransportState:
+    def get_live_state(self, onion: str) -> SessionState:
         """
         Derives the current live transport lifecycle state for one peer.
 
@@ -134,18 +135,18 @@ class StateTrackerConnectionsMixin:
             onion (str): The peer onion identity.
 
         Returns:
-            LiveTransportState: The derived live transport lifecycle state.
+            SessionState: The derived live transport lifecycle state.
         """
         with self._lock:
             if onion in self._connections:
-                return LiveTransportState.CONNECTED
+                return SessionState.CONNECTED
             if onion in self._pending_connections:
-                return LiveTransportState.PENDING
+                return SessionState.PENDING
             if onion in self._retunnel_in_progress:
-                return LiveTransportState.RETUNNELING
+                return SessionState.RETUNNELING
             if onion in self._outbound_attempts:
-                return LiveTransportState.CONNECTING
-            return LiveTransportState.DISCONNECTED
+                return SessionState.CONNECTING
+            return SessionState.DISCONNECTED
 
     def has_outbound_attempt(self, onion: str) -> bool:
         """
@@ -676,6 +677,7 @@ class StateTrackerConnectionsMixin:
             self._pending_connection_origins.pop(onion, None)
             self._pending_connection_deadlines.pop(onion, None)
             self._expired_pending_connections.pop(onion, None)
+            self._session_last_activity.pop(onion, None)
 
         conn: Optional[socket.socket] = active_conn or pending_conn
         if (

@@ -5,7 +5,7 @@ Parses incoming data streams and delegates payloads to the Application Layer (Ro
 
 import socket
 import threading
-from typing import Optional, Callable, List, cast, TYPE_CHECKING
+from typing import Optional, Callable, cast, TYPE_CHECKING
 
 from metor.core.api import (
     ConnectionActor,
@@ -319,6 +319,10 @@ class StreamReceiver:
                 if not msg:
                     break
 
+                touch_activity = getattr(self._state, 'touch_session_activity', None)
+                if callable(touch_activity):
+                    touch_activity(onion)
+
                 if msg == TorCommand.ACCEPTED.value:
                     effective_origin: ConnectionOrigin = (
                         self._state.consume_outbound_connected_origin(onion)
@@ -395,8 +399,16 @@ class StreamReceiver:
                     if ack_msg_id is not None:
                         self._router.process_incoming_ack(onion, ack_msg_id)
 
+                    elif msg.startswith(f'{TorCommand.READ.value} '):
+                        parts = msg.split(' ', 1)
+                        if len(parts) == 2:
+                            self._router.process_incoming_read_receipt(
+                                onion,
+                                parts[1],
+                            )
+
                     elif msg.startswith(f'{TorCommand.MSG.value} '):
-                        parts: List[str] = msg.split(' ', 2)
+                        parts = msg.split(' ', 2)
                         if len(parts) == 3:
                             msg_id = parts[1]
                             content: str = parts[2]
@@ -414,6 +426,16 @@ class StreamReceiver:
                                     connection_origin,
                                 )
                                 break
+
+                    elif msg.startswith(f'{TorCommand.DROP.value} '):
+                        parts = msg.split(' ', 2)
+                        if len(parts) == 3:
+                            self._router.process_incoming_drop_over_session(
+                                conn,
+                                onion,
+                                parts[1],
+                                parts[2],
+                            )
         except Exception:
             pass
         finally:

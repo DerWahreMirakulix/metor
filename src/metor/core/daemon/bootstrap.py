@@ -1,6 +1,6 @@
 """Shared password-verification helpers for daemon runtimes."""
 
-from metor.core import KeyManager
+from metor.core.key import KeyManager
 
 
 class InvalidMasterPasswordError(Exception):

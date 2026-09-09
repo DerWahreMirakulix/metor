@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "metor"
-dynamic = ["version"]
+version = "0.2.0"
 description = "A Tor Messenger Framework."
 readme = "README.md"
 authors = [{ name = "LuRex" }]
@@ -25,6 +25,7 @@ dev = ["ruff==0.15.8", "mypy==1.19.1"]
 
 [project.scripts]
 metor = "metor.main:main"
+metor-daemon = "metor.daemon_main:main"
 
 [tool.setuptools]
 include-package-data = true
@@ -35,9 +36,6 @@ include-package-data = true
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["metor*"]
-
-[tool.setuptools.dynamic]
-version = { attr = "metor.__version__" }
 
 [tool.ruff]
 line-length = 88
@@ -50,6 +48,8 @@ strict = true
 disallow_untyped_defs = true
 disallow_any_generics = true
 warn_return_any = true
+explicit_package_bases = true
+mypy_path = "src"
 
 [[tool.mypy.overrides]]
 module = [

@@ -164,7 +164,10 @@ class IpcRequestSession:
                         self._send_socket_command(sock, cmd)
                     continue
 
-                if event.event_type in self._async_event_types:
+                if (
+                    event.event_type in self._async_event_types
+                    and event.request_id != request_id
+                ):
                     continue
 
                 return IpcRequestResult(

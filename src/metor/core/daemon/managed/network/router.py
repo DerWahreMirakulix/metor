@@ -19,6 +19,8 @@ from metor.core.api import (
     AckEvent,
     InboxNotificationEvent,
     JsonValue,
+    ReadReceiptEvent,
+    RemoteMsgEvent,
     get_current_request_id,
 )
 from metor.core.daemon.managed.models import TorCommand
@@ -38,6 +40,7 @@ from metor.data import (
 # Local Package Imports
 from metor.core.daemon.managed.network.state import StateTracker
 from metor.core.daemon.managed.network.stream import TcpStreamReader
+from metor.core.daemon.managed.notify import NotificationPayload
 
 if TYPE_CHECKING:
     from metor.data.profile import Config
@@ -55,6 +58,7 @@ class MessageRouter:
         broadcast_callback: Callable[[IpcEvent], None],
         has_clients_callback: Callable[[], bool],
         has_live_consumers_callback: Callable[[], bool],
+        notify_callback: Callable[[NotificationPayload], None],
         config: 'Config',
     ) -> None:
         """
@@ -68,6 +72,7 @@ class MessageRouter:
             broadcast_callback (Callable[[IpcEvent], None]): Callback to emit IPC events.
             has_clients_callback (Callable[[], bool]): Callback to check for active UI clients.
             has_live_consumers_callback (Callable[[], bool]): Callback to check for interactive live consumers.
+            notify_callback (Callable[[NotificationPayload], None]): Callback delivering detached notifications.
             config (Config): The profile configuration instance.
 
         Returns:
@@ -82,6 +87,7 @@ class MessageRouter:
         self._has_live_consumers_callback: Callable[[], bool] = (
             has_live_consumers_callback
         )
+        self._notify_callback: Callable[[NotificationPayload], None] = notify_callback
         self._config: 'Config' = config
 
     def _remember_message_request_id(
@@ -449,6 +455,9 @@ class MessageRouter:
         try:
             self._queue_pending_live_message(onion, msg, msg_id, timestamp)
             self._send_live_envelope(conn, msg_id, msg, timestamp)
+            touch_activity = getattr(self._state, 'touch_session_activity', None)
+            if callable(touch_activity):
+                touch_activity(onion)
         except Exception:
             pass
 
@@ -517,16 +526,55 @@ class MessageRouter:
         if queue_result.was_duplicate:
             return False
 
-        if alias and has_clients:
-            self._broadcast(
-                InboxNotificationEvent(
-                    alias=alias,
-                    onion=onion,
-                    count=1,
-                )
-            )
+        if alias:
+            if has_clients:
+                if has_live_consumers:
+                    self._broadcast(
+                        RemoteMsgEvent(
+                            alias=alias,
+                            onion=onion,
+                            text=content,
+                            timestamp=timestamp,
+                            msg_id=msg_id,
+                        )
+                    )
+                else:
+                    self._broadcast(
+                        InboxNotificationEvent(
+                            alias=alias,
+                            onion=onion,
+                            count=1,
+                        )
+                    )
+            else:
+                self._notify_inbox(alias, onion)
 
         return False
+
+    def _notify_inbox(
+        self,
+        alias: str,
+        onion: Optional[str],
+    ) -> None:
+        """
+        Emits one detached inbox notification for a peer without connected clients.
+
+        Args:
+            alias (str): The peer alias.
+            onion (Optional[str]): The peer onion address.
+
+        Returns:
+            None
+        """
+        self._notify_callback(
+            NotificationPayload(
+                kind='inbox_notification',
+                peer_alias=alias,
+                peer_onion=onion,
+                count=1,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+        )
 
     def _decode_live_payload(
         self,
@@ -583,6 +631,28 @@ class MessageRouter:
         Returns:
             None
         """
+        drop_timestamp: Optional[str] = self._mm.mark_drop_delivered(onion, msg_id)
+        if drop_timestamp is not None:
+            # The ACK confirmed a drop sent over the session channel. The drop
+            # row was still PENDING, so it must be finalized here instead of
+            # being consumed by the live-ACK path below (which would also match
+            # any outbound receipt for the same message ID).
+            request_id: Optional[str] = self._pop_message_request_id(msg_id)
+            self._hm.log_event(
+                HistoryEvent.SENT,
+                onion,
+                actor=HistoryActor.LOCAL,
+                transport='session',
+            )
+            self._broadcast(
+                AckEvent(
+                    msg_id=msg_id,
+                    timestamp=drop_timestamp,
+                    request_id=request_id,
+                )
+            )
+            return
+
         acked_msg: Optional[Tuple[str, str]] = self._state.remove_unacked_message(
             onion, msg_id
         )
@@ -592,12 +662,35 @@ class MessageRouter:
             msg_id,
             MessageStatus.DELIVERED,
         )
-        request_id: Optional[str] = self._pop_message_request_id(msg_id)
+        request_id = self._pop_message_request_id(msg_id)
         self._broadcast(
             AckEvent(
                 msg_id=msg_id,
                 timestamp=timestamp,
                 request_id=request_id,
+            )
+        )
+
+    def process_incoming_read_receipt(self, onion: str, msg_id: str) -> None:
+        """
+        Broadcasts one transient read receipt for a message the peer consumed.
+
+        Read receipts are deliberately transient and never leave a ledger or
+        message-storage trace.
+
+        Args:
+            onion (str): The peer's onion identity.
+            msg_id (str): The consumed message identifier.
+
+        Returns:
+            None
+        """
+        alias: str = cast(str, self._cm.ensure_alias_for_onion(onion))
+        self._broadcast(
+            ReadReceiptEvent(
+                alias=alias,
+                msg_id=msg_id,
+                onion=onion,
             )
         )
 
@@ -668,6 +761,138 @@ class MessageRouter:
             timestamp,
         )
 
+    def _process_inbound_drop_frame(
+        self,
+        conn: socket.socket,
+        onion: str,
+        payload_id: str,
+        b64_payload: str,
+        transport: str,
+    ) -> bool:
+        """
+        Persists one inbound DROP frame durably and acknowledges it.
+
+        Shared by the drop-tunnel reader (process_async_drop) and the live
+        session reader (process_incoming_drop_over_session). Enforces strict
+        UUID deduplication, the unread drop backlog limit, and crash-safe
+        queueing before the peer is acknowledged.
+
+        Args:
+            conn (socket.socket): The authenticated channel socket.
+            onion (str): The peer's onion identity.
+            payload_id (str): The transport-level fallback identifier.
+            b64_payload (str): The received Base64 payload.
+            transport (str): The transport channel label ('tunnel' or 'session').
+
+        Returns:
+            bool: True when the caller should stop reading further drop frames
+                because the unread backlog limit was reached; False otherwise.
+        """
+        decoded_payload: Optional[Tuple[str, str, Optional[str]]] = (
+            self._decode_async_drop_payload(payload_id, b64_payload)
+        )
+        if decoded_payload is None:
+            return False
+
+        msg_id, content, timestamp = decoded_payload
+
+        if self._mm.has_inbound_message(onion, msg_id):
+            try:
+                conn.sendall(f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8'))
+            except Exception:
+                pass
+            return False
+
+        unread_drop_limit: int = self._config.get_int(SettingKey.MAX_UNSEEN_DROP_MSGS)
+        if (
+            unread_drop_limit != -1
+            and self._mm.get_unread_drop_count(onion) >= unread_drop_limit
+        ):
+            self._hm.log_event(
+                HistoryEvent.FAILED,
+                onion,
+                actor=HistoryActor.SYSTEM,
+                detail_text='Drop backlog limit reached.',
+            )
+            return True
+
+        queue_result = self._mm.queue_message(
+            contact_onion=onion,
+            direction=MessageDirection.IN,
+            msg_type=MessageType.DROP_TEXT,
+            payload=content,
+            status=MessageStatus.UNREAD,
+            msg_id=msg_id,
+            timestamp=timestamp,
+        )
+        try:
+            conn.sendall(f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8'))
+        except Exception:
+            pass
+
+        if queue_result.was_duplicate:
+            return False
+
+        # The OPSEC rule in log_event strips the transport label whenever live
+        # history retention is disabled, so the ledger never reveals that a
+        # live session channel existed.
+        self._hm.log_event(
+            HistoryEvent.RECEIVED,
+            onion,
+            actor=HistoryActor.REMOTE,
+            transport=transport,
+        )
+
+        alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
+        if alias:
+            if self._has_clients_callback():
+                self._broadcast(
+                    InboxNotificationEvent(
+                        alias=alias,
+                        onion=onion,
+                        count=1,
+                    )
+                )
+            else:
+                self._notify_inbox(alias, onion)
+        return False
+
+    def process_incoming_drop_over_session(
+        self,
+        conn: socket.socket,
+        onion: str,
+        payload_id: str,
+        b64_payload: str,
+    ) -> None:
+        """
+        Processes one inbound DROP frame arriving over an established live session.
+
+        The session stays open after processing; only the drop-tunnel reader
+        closes its dedicated channel.
+
+        Args:
+            conn (socket.socket): The active live session socket.
+            onion (str): The peer's onion identity.
+            payload_id (str): The transport-level fallback identifier.
+            b64_payload (str): The received Base64 payload.
+
+        Returns:
+            None
+        """
+        if not self._config.get_bool(SettingKey.ALLOW_DROPS):
+            # Drops are refused locally. Stay silent to avoid disclosing local
+            # policy over the live session channel (a REJECT frame would tear
+            # the session down on the sender side).
+            return
+
+        self._process_inbound_drop_frame(
+            conn,
+            onion,
+            payload_id,
+            b64_payload,
+            transport='session',
+        )
+
     def process_async_drop(
         self, conn: socket.socket, stream: TcpStreamReader, onion: str
     ) -> None:
@@ -683,14 +908,19 @@ class MessageRouter:
             None
         """
         if not self._config.get_bool(SettingKey.ALLOW_DROPS):
+            if self._config.get_bool(SettingKey.EXPOSE_DROP_REJECTION):
+                try:
+                    conn.sendall(
+                        f'{TorCommand.REJECT.value} drops_disabled\n'.encode('utf-8')
+                    )
+                except Exception:
+                    pass
             try:
                 conn.close()
             except Exception:
                 pass
             return
 
-        alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
-        unread_drop_limit: int = self._config.get_int(SettingKey.MAX_UNSEEN_DROP_MSGS)
         try:
             while True:
                 msg: Optional[str] = stream.read_line()
@@ -700,65 +930,15 @@ class MessageRouter:
                 if msg.startswith(f'{TorCommand.DROP.value} '):
                     parts: List[str] = msg.split(' ', 2)
                     if len(parts) == 3:
-                        payload_id: str = parts[1]
-
-                        decoded_payload: Optional[Tuple[str, str, Optional[str]]] = (
-                            self._decode_async_drop_payload(payload_id, parts[2])
-                        )
-                        if decoded_payload is None:
-                            continue
-
-                        msg_id, content, timestamp = decoded_payload
-
-                        if self._mm.has_inbound_message(onion, msg_id):
-                            conn.sendall(
-                                f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8')
-                            )
-                            continue
-
-                        if (
-                            unread_drop_limit != -1
-                            and self._mm.get_unread_drop_count(onion)
-                            >= unread_drop_limit
-                        ):
-                            self._hm.log_event(
-                                HistoryEvent.FAILED,
-                                onion,
-                                actor=HistoryActor.SYSTEM,
-                                detail_text='Drop backlog limit reached.',
-                            )
-                            break
-
-                        queue_result = self._mm.queue_message(
-                            contact_onion=onion,
-                            direction=MessageDirection.IN,
-                            msg_type=MessageType.DROP_TEXT,
-                            payload=content,
-                            status=MessageStatus.UNREAD,
-                            msg_id=msg_id,
-                            timestamp=timestamp,
-                        )
-                        conn.sendall(
-                            f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8')
-                        )
-
-                        if queue_result.was_duplicate:
-                            continue
-
-                        self._hm.log_event(
-                            HistoryEvent.RECEIVED,
+                        should_stop: bool = self._process_inbound_drop_frame(
+                            conn,
                             onion,
-                            actor=HistoryActor.REMOTE,
+                            parts[1],
+                            parts[2],
+                            transport='tunnel',
                         )
-
-                        if alias and self._has_clients_callback():
-                            self._broadcast(
-                                InboxNotificationEvent(
-                                    alias=alias,
-                                    onion=onion,
-                                    count=1,
-                                )
-                            )
+                        if should_stop:
+                            break
         except Exception:
             pass
         finally:

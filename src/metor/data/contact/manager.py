@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from metor.utils import clean_onion
+from metor.utils import clean_onion, decode_tor_v3_onion_public_key
 
 from metor.data.contact.models import (
     ContactAliasChange,
@@ -74,6 +74,15 @@ class ContactManager:
         """
         alias = alias.strip().lower()
         onion = clean_onion(onion)
+
+        try:
+            decode_tor_v3_onion_public_key(onion)
+        except ValueError:
+            return ContactOperationResult(
+                False,
+                ContactOperationType.INVALID_ONION,
+                {'target': onion},
+            )
 
         alias_row = self._peers.get_by_alias(alias)
         if alias_row is not None:

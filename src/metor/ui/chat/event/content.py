@@ -18,9 +18,13 @@ from metor.core.api import (
     InitEvent,
     IpcEvent,
     JsonValue,
+    MarkReadCommand,
     MessagesDataEvent,
     ProfilesDataEvent,
+    ReadReceiptEvent,
     RemoteMsgEvent,
+    TransportStateEvent,
+    UnreadMessageEntry,
     UnreadMessagesEvent,
 )
 from metor.ui import AliasPolicy, StatusTone, UIPresenter
@@ -28,6 +32,7 @@ from metor.ui import AliasPolicy, StatusTone, UIPresenter
 # Local Package Imports
 from metor.ui.chat.models import ChatMessageType
 from metor.ui.chat.event.protocols import EventHandlerProtocol
+from metor.ui.chat.presenter import ChatPresenter
 
 
 def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool:
@@ -92,21 +97,31 @@ def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool
         handler._cancel_buffered_notification(event.alias, event.onion)
         if event.messages:
             handler._remember_peer(event.alias, event.onion)
-            messages_data: List[Dict[str, JsonValue]] = [
-                {
-                    'id': '',
-                    'payload': message.payload,
-                    'timestamp': message.timestamp,
-                    'is_drop': message.is_drop,
-                }
-                for message in event.messages
-            ]
-            handler._renderer.print_messages_batch(
-                messages_data,
-                event.alias,
-                peer_onion=event.onion,
-                is_live_flush=False,
-            )
+            fresh_messages: List[UnreadMessageEntry] = []
+            pushed_msg_ids: List[str] = []
+            for message in event.messages:
+                if message.msg_id and handler._was_pushed_live_msg_id(message.msg_id):
+                    pushed_msg_ids.append(message.msg_id)
+                else:
+                    fresh_messages.append(message)
+            if pushed_msg_ids:
+                handler._consume_pushed_live_msg_ids(pushed_msg_ids)
+            if fresh_messages:
+                messages_data: List[Dict[str, JsonValue]] = [
+                    {
+                        'id': '',
+                        'payload': message.payload,
+                        'timestamp': message.timestamp,
+                        'is_drop': message.is_drop,
+                    }
+                    for message in fresh_messages
+                ]
+                handler._renderer.print_messages_batch(
+                    messages_data,
+                    event.alias,
+                    peer_onion=event.onion,
+                    is_live_flush=False,
+                )
         return True
 
     if isinstance(event, (AutoFallbackQueuedEvent, FallbackSuccessEvent)):
@@ -133,14 +148,38 @@ def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool
 
     if isinstance(event, RemoteMsgEvent):
         handler._remember_peer(event.alias, event.onion)
+        if event.alias and event.alias == handler._session.focused_alias:
+            if event.msg_id:
+                handler._remember_pushed_live_msg_id(event.msg_id)
+            handler._renderer.print_message(
+                event.text,
+                msg_type=ChatMessageType.REMOTE,
+                alias=event.alias,
+                peer_onion=event.onion,
+                alias_policy=(
+                    AliasPolicy.DYNAMIC if event.onion else AliasPolicy.STATIC
+                ),
+                timestamp=event.timestamp,
+                is_drop=False,
+            )
+            handler._ipc.send_command(MarkReadCommand(target=event.alias))
+        else:
+            handler._queue_buffered_notification(event.alias, event.onion, 1)
+        return True
+
+    if isinstance(event, TransportStateEvent):
         handler._renderer.print_message(
-            event.text,
-            msg_type=ChatMessageType.REMOTE,
-            alias=event.alias,
-            peer_onion=event.onion,
-            alias_policy=(AliasPolicy.DYNAMIC if event.onion else AliasPolicy.STATIC),
-            timestamp=event.timestamp,
-            is_drop=False,
+            ChatPresenter.format_transport_state(event),
+            msg_type=ChatMessageType.STATUS,
+            tone=StatusTone.SYSTEM,
+        )
+        return True
+
+    if isinstance(event, ReadReceiptEvent):
+        handler._renderer.print_message(
+            f'{event.alias} read the message.',
+            msg_type=ChatMessageType.STATUS,
+            tone=StatusTone.SYSTEM,
         )
         return True
 

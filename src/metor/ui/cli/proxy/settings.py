@@ -23,6 +23,7 @@ from metor.data import (
     Settings,
     SettingKey,
     SettingSnapshotRow,
+    SettingValidationError,
 )
 from metor.ui import Theme, UIPresenter
 from metor.ui.cli.ipc.request.models import IpcRequestResult
@@ -209,14 +210,22 @@ class CliProxySettingsActions:
         Returns:
             str: The formatted status message.
         """
-        try:
-            key_enum: SettingKey = SettingKey(key)
-        except ValueError:
-            return self._translate_event(EventType.INVALID_SETTING_KEY)
-
         parsed_value: Union[str, int, float, bool] = TypeCaster.infer_from_string(value)
 
-        if key_enum.is_ui:
+        if key.startswith('daemon.'):
+            try:
+                SettingKey(key)
+            except ValueError:
+                return self._translate_event(EventType.INVALID_SETTING_KEY)
+            return self._request_ipc(
+                SetSettingCommand(setting_key=key, setting_value=parsed_value)
+            )
+
+        if key.startswith('client.'):
+            try:
+                key_enum: SettingKey = SettingKey(key)
+            except ValueError:
+                return self._translate_event(EventType.INVALID_SETTING_KEY)
             try:
                 self._settings_cls.set(key_enum, parsed_value)
                 return (
@@ -229,9 +238,27 @@ class CliProxySettingsActions:
                     {'key': key, 'reason': str(exc)},
                 )
 
-        return self._request_ipc(
-            SetSettingCommand(setting_key=key, setting_value=parsed_value)
-        )
+        if key.startswith('ui.'):
+            try:
+                self._settings_cls.set_namespace(key, parsed_value)
+            except SettingValidationError as exc:
+                return self._translate_event(
+                    EventType.SETTING_TYPE_ERROR,
+                    {'key': key, 'reason': str(exc)},
+                )
+            except ValueError:
+                return self._translate_event(EventType.INVALID_SETTING_KEY)
+            except TypeError as exc:
+                return self._translate_event(
+                    EventType.SETTING_TYPE_ERROR,
+                    {'key': key, 'reason': str(exc)},
+                )
+            return (
+                f"Global setting '{Theme.YELLOW}{key}{Theme.RESET}' updated "
+                'successfully.'
+            )
+
+        return self._translate_event(EventType.INVALID_SETTING_KEY)
 
     def handle_settings_get(self, key: str) -> str:
         """
@@ -243,19 +270,35 @@ class CliProxySettingsActions:
         Returns:
             str: The formatted setting output.
         """
-        try:
-            key_enum: SettingKey = SettingKey(key)
-        except ValueError:
-            return self._translate_event(EventType.INVALID_SETTING_KEY)
+        if key.startswith('daemon.'):
+            try:
+                SettingKey(key)
+            except ValueError:
+                return self._translate_event(EventType.INVALID_SETTING_KEY)
+            return self._request_ipc(GetSettingCommand(setting_key=key))
 
-        if key_enum.is_ui:
+        if key.startswith('client.'):
+            try:
+                key_enum = SettingKey(key)
+            except ValueError:
+                return self._translate_event(EventType.INVALID_SETTING_KEY)
             val: str = self._settings_cls.get_str(key_enum)
             return self._translate_event(
                 EventType.SETTING_DATA,
                 {'key': key, 'value': val},
             )
 
-        return self._request_ipc(GetSettingCommand(setting_key=key))
+        if key.startswith('ui.'):
+            try:
+                val = self._settings_cls.get_namespace_str(key)
+            except ValueError:
+                return self._translate_event(EventType.INVALID_SETTING_KEY)
+            return self._translate_event(
+                EventType.SETTING_DATA,
+                {'key': key, 'value': val},
+            )
+
+        return self._translate_event(EventType.INVALID_SETTING_KEY)
 
     def handle_settings_list(self) -> str:
         """
@@ -270,7 +313,7 @@ class CliProxySettingsActions:
         local_sections: list[str] = [
             UIPresenter.format_response(
                 SettingsListDataEvent(
-                    scope='ui',
+                    scope='client',
                     entries=_build_snapshot_entries(
                         self._settings_cls.get_snapshots(domain='ui')
                     ),
@@ -308,32 +351,70 @@ class CliProxySettingsActions:
                 'cannot be changed after profile creation.'
             )
 
-        try:
-            key_enum: Union[SettingKey, ProfileConfigKey] = SettingKey(key)
-        except ValueError:
-            try:
-                key_enum = ProfileConfigKey(key)
-            except ValueError:
-                return self._translate_event(EventType.INVALID_CONFIG_KEY)
-
         parsed_value: Union[str, int, float, bool] = TypeCaster.infer_from_string(value)
 
-        if isinstance(key_enum, ProfileConfigKey) or key_enum.is_ui:
+        if key.startswith('daemon.'):
+            try:
+                SettingKey(key)
+            except ValueError:
+                return self._translate_event(EventType.INVALID_CONFIG_KEY)
+            return self._request_ipc(
+                SetConfigCommand(setting_key=key, setting_value=parsed_value)
+            )
+
+        if key.startswith('client.'):
+            try:
+                key_enum = SettingKey(key)
+            except ValueError:
+                return self._translate_event(EventType.INVALID_CONFIG_KEY)
             try:
                 self._pm.config.set(key_enum, parsed_value)
-                return (
-                    f"Profile configuration override for '{Theme.YELLOW}{key}{Theme.RESET}' "
-                    'updated successfully.'
-                )
             except (TypeError, ValueError) as exc:
                 return self._translate_event(
                     EventType.SETTING_TYPE_ERROR,
                     {'key': key, 'reason': str(exc)},
                 )
+            return (
+                f"Profile configuration override for '{Theme.YELLOW}{key}{Theme.RESET}' "
+                'updated successfully.'
+            )
 
-        return self._request_ipc(
-            SetConfigCommand(setting_key=key, setting_value=parsed_value)
-        )
+        if key.startswith('ui.'):
+            try:
+                self._pm.config.set_namespace(key, parsed_value)
+            except SettingValidationError as exc:
+                return self._translate_event(
+                    EventType.SETTING_TYPE_ERROR,
+                    {'key': key, 'reason': str(exc)},
+                )
+            except ValueError:
+                return self._translate_event(EventType.INVALID_CONFIG_KEY)
+            except TypeError as exc:
+                return self._translate_event(
+                    EventType.SETTING_TYPE_ERROR,
+                    {'key': key, 'reason': str(exc)},
+                )
+            return (
+                f"Profile configuration override for '{Theme.YELLOW}{key}{Theme.RESET}' "
+                'updated successfully.'
+            )
+
+        try:
+            config_key_enum = ProfileConfigKey(key)
+        except ValueError:
+            return self._translate_event(EventType.INVALID_CONFIG_KEY)
+
+        try:
+            self._pm.config.set(config_key_enum, parsed_value)
+            return (
+                f"Profile configuration override for '{Theme.YELLOW}{key}{Theme.RESET}' "
+                'updated successfully.'
+            )
+        except (TypeError, ValueError) as exc:
+            return self._translate_event(
+                EventType.SETTING_TYPE_ERROR,
+                {'key': key, 'reason': str(exc)},
+            )
 
     def handle_config_get(self, key: str) -> str:
         """
@@ -345,22 +426,44 @@ class CliProxySettingsActions:
         Returns:
             str: The formatted config output.
         """
-        try:
-            key_enum: Union[SettingKey, ProfileConfigKey] = SettingKey(key)
-        except ValueError:
+        if key.startswith('daemon.'):
             try:
-                key_enum = ProfileConfigKey(key)
+                SettingKey(key)
             except ValueError:
                 return self._translate_event(EventType.INVALID_CONFIG_KEY)
+            return self._request_ipc(GetConfigCommand(setting_key=key))
 
-        if isinstance(key_enum, ProfileConfigKey) or key_enum.is_ui:
-            val: str = self._pm.config.get_str(key_enum)
+        if key.startswith('client.'):
+            try:
+                key_enum = SettingKey(key)
+            except ValueError:
+                return self._translate_event(EventType.INVALID_CONFIG_KEY)
+            val = self._pm.config.get_str(key_enum)
             return self._translate_event(
                 EventType.CONFIG_DATA,
                 {'key': key, 'value': val},
             )
 
-        return self._request_ipc(GetConfigCommand(setting_key=key))
+        if key.startswith('ui.'):
+            try:
+                val = self._pm.config.get_namespace_str(key)
+            except ValueError:
+                return self._translate_event(EventType.INVALID_CONFIG_KEY)
+            return self._translate_event(
+                EventType.CONFIG_DATA,
+                {'key': key, 'value': val},
+            )
+
+        try:
+            config_key_enum = ProfileConfigKey(key)
+        except ValueError:
+            return self._translate_event(EventType.INVALID_CONFIG_KEY)
+
+        val = self._pm.config.get_str(config_key_enum)
+        return self._translate_event(
+            EventType.CONFIG_DATA,
+            {'key': key, 'value': val},
+        )
 
     def handle_config_list(self) -> str:
         """
@@ -375,7 +478,7 @@ class CliProxySettingsActions:
         local_sections: list[str] = [
             UIPresenter.format_response(
                 ConfigListDataEvent(
-                    scope='ui',
+                    scope='client',
                     profile=self._pm.profile_name,
                     entries=_build_snapshot_entries(
                         self._pm.config.get_setting_snapshots(domain='ui')

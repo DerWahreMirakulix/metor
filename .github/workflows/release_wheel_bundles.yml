@@ -38,35 +38,99 @@ jobs:
           python -m pip install --upgrade pip==26.0.1
           pip install setuptools==80.10.2 wheel==0.46.3
 
-      - name: Build Release Wheel Bundle
+      - name: Build Release Wheel Bundles
         shell: bash
-        run: python scripts/build_release_wheelhouse.py --output-dir dist/release --skip-pip-upgrade
+        run: python scripts/build_release_wheelhouse.py --output-dir dist/release --skip-pip-upgrade --variant all
 
-      - name: Smoke-Test Linux Bundle Installer
+      - name: Smoke-Test Linux Bundle Installers
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -e
-          archive_path="$(find dist/release -maxdepth 1 -type f -name 'metor-wheelhouse-*.zip' | head -n 1)"
           extract_dir='dist/release-smoke'
-          python -m zipfile -e "$archive_path" "$extract_dir"
-          bundle_dir="$(find "$extract_dir" -mindepth 1 -maxdepth 1 -type d -name 'metor-wheelhouse-*' | head -n 1)"
-          sh "$bundle_dir/install.sh"
-          "$bundle_dir/.venv/bin/python" -m pip check
-          "$bundle_dir/.venv/bin/python" -c "import metor; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
 
-      - name: Smoke-Test Windows Bundle Installer
+          # 1. Full bundle (metor)
+          full_zip="$(find dist/release -maxdepth 1 -type f -name 'metor-wheelhouse-*.zip' ! -name 'metor-daemon*' ! -name 'metor-sdk*' | head -n 1)"
+          python -m zipfile -e "$full_zip" "$extract_dir/full"
+          full_dir="$(find "$extract_dir/full" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          sh "$full_dir/install.sh"
+          "$full_dir/.venv/bin/python" -m pip check
+          "$full_dir/.venv/bin/python" -c "import metor; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
+          "$full_dir/.venv/bin/metor" --help
+
+          # 2. Daemon bundle (metor-daemon)
+          daemon_zip="$(find dist/release -maxdepth 1 -type f -name 'metor-daemon-wheelhouse-*.zip' | head -n 1)"
+          python -m zipfile -e "$daemon_zip" "$extract_dir/daemon"
+          daemon_dir="$(find "$extract_dir/daemon" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          sh "$daemon_dir/install.sh"
+          "$daemon_dir/.venv/bin/python" -m pip check
+          "$daemon_dir/.venv/bin/python" -c "import metor.daemon_main; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
+          "$daemon_dir/.venv/bin/metor-daemon" --help
+          "$daemon_dir/.venv/bin/python" -c "
+          try:
+              import metor.ui
+              raise SystemExit(1)
+          except ModuleNotFoundError:
+              pass
+          "
+
+          # 3. SDK bundle (metor-sdk)
+          sdk_zip="$(find dist/release -maxdepth 1 -type f -name 'metor-sdk-wheelhouse-*.zip' | head -n 1)"
+          python -m zipfile -e "$sdk_zip" "$extract_dir/sdk"
+          sdk_dir="$(find "$extract_dir/sdk" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          sh "$sdk_dir/install.sh"
+          "$sdk_dir/.venv/bin/python" -m pip check
+          "$sdk_dir/.venv/bin/python" -c "from metor.client import MetorClient; print(MetorClient)"
+          "$sdk_dir/.venv/bin/python" -c "
+          try:
+              import sqlcipher3
+              raise SystemExit(1)
+          except ModuleNotFoundError:
+              pass
+          "
+          "$sdk_dir/.venv/bin/python" -c "
+          try:
+              import metor.data
+              raise SystemExit(1)
+          except ModuleNotFoundError:
+              pass
+          "
+
+      - name: Smoke-Test Windows Bundle Installers
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $archivePath = (Get-ChildItem 'dist/release' -Filter 'metor-wheelhouse-*.zip' | Select-Object -First 1).FullName
           $extractDir = Join-Path $PWD 'dist/release-smoke'
-          python -m zipfile -e $archivePath $extractDir
-          $bundleDir = (Get-ChildItem $extractDir -Directory -Filter 'metor-wheelhouse-*' | Select-Object -First 1).FullName
-          & "$bundleDir\install.cmd"
-          & "$bundleDir\.venv\Scripts\python.exe" -m pip check
-          & "$bundleDir\.venv\Scripts\python.exe" -c "import metor; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
+
+          # 1. Full bundle
+          $fullZip = (Get-ChildItem 'dist/release' -Filter 'metor-wheelhouse-*.zip' | Where-Object { $_.Name -notlike 'metor-daemon*' -and $_.Name -notlike 'metor-sdk*' } | Select-Object -First 1).FullName
+          python -m zipfile -e $fullZip (Join-Path $extractDir 'full')
+          $fullDir = (Get-ChildItem (Join-Path $extractDir 'full') -Directory | Select-Object -First 1).FullName
+          & "$fullDir\install.cmd"
+          & "$fullDir\.venv\Scripts\python.exe" -m pip check
+          & "$fullDir\.venv\Scripts\python.exe" -c "import metor; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
+          & "$fullDir\.venv\Scripts\metor.exe" --help
+
+          # 2. Daemon bundle
+          $daemonZip = (Get-ChildItem 'dist/release' -Filter 'metor-daemon-wheelhouse-*.zip' | Select-Object -First 1).FullName
+          python -m zipfile -e $daemonZip (Join-Path $extractDir 'daemon')
+          $daemonDir = (Get-ChildItem (Join-Path $extractDir 'daemon') -Directory | Select-Object -First 1).FullName
+          & "$daemonDir\install.cmd"
+          & "$daemonDir\.venv\Scripts\python.exe" -m pip check
+          & "$daemonDir\.venv\Scripts\python.exe" -c "import metor.daemon_main; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
+          & "$daemonDir\.venv\Scripts\metor-daemon.exe" --help
+          & "$daemonDir\.venv\Scripts\python.exe" -c "try:`n    import metor.ui`n    raise SystemExit(1)`nexcept ModuleNotFoundError:`n    pass"
+
+          # 3. SDK bundle
+          $sdkZip = (Get-ChildItem 'dist/release' -Filter 'metor-sdk-wheelhouse-*.zip' | Select-Object -First 1).FullName
+          python -m zipfile -e $sdkZip (Join-Path $extractDir 'sdk')
+          $sdkDir = (Get-ChildItem (Join-Path $extractDir 'sdk') -Directory | Select-Object -First 1).FullName
+          & "$sdkDir\install.cmd"
+          & "$sdkDir\.venv\Scripts\python.exe" -m pip check
+          & "$sdkDir\.venv\Scripts\python.exe" -c "from metor.client import MetorClient; print(MetorClient)"
+          & "$sdkDir\.venv\Scripts\python.exe" -c "try:`n    import sqlcipher3`n    raise SystemExit(1)`nexcept ModuleNotFoundError:`n    pass"
+          & "$sdkDir\.venv\Scripts\python.exe" -c "try:`n    import metor.data`n    raise SystemExit(1)`nexcept ModuleNotFoundError:`n    pass"
 
       - name: Upload Release Bundle Artifact
         if: github.event_name != 'pull_request'

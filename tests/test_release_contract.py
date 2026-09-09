@@ -217,6 +217,19 @@ class _RecordingCursor:
         return []
 
 
+def _raise_system_exit(code: int) -> None:
+    """
+    Raises SystemExit like the real sys.exit for patched exit points.
+
+    Args:
+        code (int): The process exit code.
+
+    Returns:
+        None
+    """
+    raise SystemExit(code)
+
+
 class ReleaseContractTests(unittest.TestCase):
     """
     Covers release contract regression scenarios.
@@ -307,12 +320,17 @@ class ReleaseContractTests(unittest.TestCase):
                 return_value='ok',
             ) as add_profile,
             patch('builtins.print'),
+            patch('getpass.getpass', side_effect=['test-pw-123', 'test-pw-123']),
         ):
             dispatcher.dispatch()
 
         self.assertIs(
             add_profile.call_args.kwargs['security_mode'],
             ProfileSecurityMode.ENCRYPTED,
+        )
+        self.assertEqual(
+            add_profile.call_args.kwargs['master_password'],
+            'test-pw-123',
         )
 
     def test_require_local_auth_defaults_to_enabled(self) -> None:
@@ -588,6 +606,22 @@ class ReleaseContractTests(unittest.TestCase):
 
         self.assertEqual(bundle_name, 'metor-wheelhouse-windows-x86_64-py311')
 
+    def test_release_bundle_name_supports_daemon_and_sdk_variants(self) -> None:
+        """
+        Verifies that release bundle names distinguish daemon and SDK variants.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        daemon_bundle = build_bundle_name('Linux', 'x86_64', 3, 11, variant='daemon')
+        sdk_bundle = build_bundle_name('Linux', 'x86_64', 3, 11, variant='sdk')
+
+        self.assertEqual(daemon_bundle, 'metor-daemon-wheelhouse-linux-x86_64-py311')
+        self.assertEqual(sdk_bundle, 'metor-sdk-wheelhouse-linux-x86_64-py311')
+
     def test_release_install_guide_uses_offline_bundle_install(self) -> None:
         """
         Verifies that release install guide uses offline bundle install.
@@ -707,6 +741,102 @@ class ReleaseContractTests(unittest.TestCase):
                 and '--only-binary=:all:' in command
                 and f'pip=={PIP_VERSION}' in command
                 for command in commands
+            )
+        )
+
+    def test_release_builder_supports_sdk_and_daemon_variants(self) -> None:
+        """
+        Verifies that release builder targets variant-specific lockfiles and packages.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        commands_sdk: list[list[str]] = []
+        commands_daemon: list[list[str]] = []
+
+        def fake_run_sdk(command: Sequence[str], cwd: Path) -> None:
+            """
+            Records fake commands executed for the SDK variant.
+
+            Args:
+                command (Sequence[str]): The executed command.
+                cwd (Path): Working directory.
+
+            Returns:
+                None
+            """
+            del cwd
+            commands_sdk.append(list(command))
+
+        def fake_run_daemon(command: Sequence[str], cwd: Path) -> None:
+            """
+            Records fake commands executed for the Daemon variant.
+
+            Args:
+                command (Sequence[str]): The executed command.
+                cwd (Path): Working directory.
+
+            Returns:
+                None
+            """
+            del cwd
+            commands_daemon.append(list(command))
+
+        with TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            with (
+                patch(
+                    'metor.utils.release_bundle.run_command',
+                    side_effect=fake_run_sdk,
+                ),
+                patch(
+                    'metor.utils.release_bundle.archive_bundle',
+                    return_value=output_dir / 'bundle.zip',
+                ),
+            ):
+                build_release_wheelhouse(
+                    output_dir, skip_pip_upgrade=True, variant='sdk'
+                )
+
+            with (
+                patch(
+                    'metor.utils.release_bundle.run_command',
+                    side_effect=fake_run_daemon,
+                ),
+                patch(
+                    'metor.utils.release_bundle.archive_bundle',
+                    return_value=output_dir / 'bundle.zip',
+                ),
+            ):
+                build_release_wheelhouse(
+                    output_dir, skip_pip_upgrade=True, variant='daemon'
+                )
+
+        self.assertTrue(
+            any(
+                'requirements/sdk.lock' in command and 'wheel' in command
+                for command in commands_sdk
+            )
+        )
+        self.assertTrue(
+            any(
+                'packaging/sdk' in command and 'wheel' in command
+                for command in commands_sdk
+            )
+        )
+        self.assertTrue(
+            any(
+                'requirements/daemon.lock' in command and 'wheel' in command
+                for command in commands_daemon
+            )
+        )
+        self.assertTrue(
+            any(
+                'packaging/daemon' in command and 'wheel' in command
+                for command in commands_daemon
             )
         )
 
@@ -924,6 +1054,221 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn('sqlcipher3-binary on Linux', message)
         self.assertIn('sqlcipher3 on Windows', message)
         self.assertIn('pysqlcipher3', message)
+
+    def test_unknown_command_exits_nonzero(self) -> None:
+        """
+        Verifies that an unknown CLI command exits with code 1.
+
+        Regression guard: unknown commands printed a clean message but exited 0,
+        breaking script error detection.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        args = self._build_args()
+        args.command = 'gibtsnicht'
+        args.subcommand = None
+        dispatcher = CliDispatcher(
+            args,
+            [],
+            cast(ProfileManager, _DummyProfileManager()),
+        )
+        with patch('builtins.print'):
+            exit_code = dispatcher.dispatch()
+        self.assertEqual(exit_code, 1)
+
+    def test_send_without_arguments_exits_nonzero(self) -> None:
+        """
+        Verifies that usage errors exit with code 1.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        args = self._build_args()
+        args.command = 'send'
+        args.subcommand = None
+        dispatcher = CliDispatcher(
+            args,
+            [],
+            cast(ProfileManager, _DummyProfileManager()),
+        )
+        with patch('builtins.print'):
+            exit_code = dispatcher.dispatch()
+        self.assertEqual(exit_code, 1)
+
+    def test_unknown_frontend_flag_exits_with_code_2(self) -> None:
+        """
+        Verifies that an unknown --ui frontend id exits with code 2.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        from metor.main import main as frontend_main
+
+        with (
+            patch('sys.argv', ['metor', '--ui', 'unbekannt', 'help']),
+            patch('sys.stderr'),
+            patch('sys.exit', side_effect=_raise_system_exit),
+        ):
+            with self.assertRaises(SystemExit) as ctx:
+                frontend_main()
+
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_daemon_main_unlock_guard_exits_with_code_1(self) -> None:
+        """
+        Verifies that metor-daemon unlock delegates to the terminal UI.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        from metor import daemon_main
+
+        with (
+            patch('sys.argv', ['metor-daemon', 'unlock']),
+            patch('sys.stderr'),
+            patch('sys.exit', side_effect=_raise_system_exit),
+        ):
+            with self.assertRaises(SystemExit) as ctx:
+                daemon_main.main()
+
+        self.assertEqual(ctx.exception.code, 1)
+
+    def test_daemon_main_missing_profile_exits_with_code_1(self) -> None:
+        """
+        Verifies that metor-daemon rejects a non-existent profile cleanly.
+
+        Regression guard: the encrypted-startup guard fired before the
+        profile-existence check, producing a misleading error message.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        from metor import daemon_main
+
+        with (
+            patch(
+                'metor.daemon_main.ProfileManager.load_default_profile',
+                return_value='default',
+            ),
+            patch('sys.argv', ['metor-daemon', '-p', 'existiert-nicht', 'daemon']),
+            patch('builtins.print') as print_mock,
+            patch('sys.exit', side_effect=_raise_system_exit),
+        ):
+            with self.assertRaises(SystemExit) as ctx:
+                daemon_main.main()
+
+        self.assertEqual(ctx.exception.code, 1)
+        printed = ' '.join(str(call) for call in print_mock.call_args_list)
+        self.assertIn('does not exist', printed)
+
+    def test_daemon_main_parser_parity_with_daemon_launch_command(self) -> None:
+        """
+        Verifies that daemon_main CLI parser supports all flags produced by daemon launch.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        from metor import daemon_main
+
+        parser = daemon_main._build_parser()
+        for start_locked in (True, False):
+            for startup_session_auth_stdin in (True, False):
+                argv: list[str] = ['-p', 'test_profile']
+                if start_locked:
+                    argv.append('--locked')
+                if startup_session_auth_stdin:
+                    argv.append('--startup-session-auth-stdin')
+                argv.append('daemon')
+
+                args = parser.parse_args(argv)
+                self.assertEqual(args.profile, 'test_profile')
+                self.assertEqual(args.locked, start_locked)
+                self.assertEqual(
+                    args.startup_session_auth_stdin, startup_session_auth_stdin
+                )
+                self.assertEqual(args.command, 'daemon')
+
+    def test_messages_show_error_rendering_exits_nonzero(self) -> None:
+        """
+        Verifies that messages show consumes the proxy error flag via _emit.
+
+        Regression guard: the messages mixin rendered proxy results with print,
+        so rendered errors (e.g. 'Target not found') exited 0.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        args = self._build_args()
+        args.command = 'messages'
+        args.subcommand = 'show'
+        dispatcher = CliDispatcher(
+            args,
+            ['nichtda'],
+            cast(ProfileManager, _DummyProfileManager()),
+        )
+        with (
+            patch.object(
+                dispatcher._proxy,
+                'get_messages',
+                return_value="Target 'nichtda' not found.",
+            ),
+            patch.object(dispatcher._proxy, 'consume_error_flag', return_value=True),
+            patch('builtins.print'),
+        ):
+            exit_code = dispatcher.dispatch()
+        self.assertEqual(exit_code, 1)
+
+    def test_history_show_error_rendering_exits_nonzero(self) -> None:
+        """
+        Verifies that history show consumes the proxy error flag via _emit.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        args = self._build_args()
+        args.command = 'history'
+        args.subcommand = 'show'
+        dispatcher = CliDispatcher(
+            args,
+            ['nichtda'],
+            cast(ProfileManager, _DummyProfileManager()),
+        )
+        with (
+            patch.object(
+                dispatcher._proxy,
+                'get_history',
+                return_value="Target 'nichtda' not found.",
+            ),
+            patch.object(dispatcher._proxy, 'consume_error_flag', return_value=True),
+            patch('builtins.print'),
+        ):
+            exit_code = dispatcher.dispatch()
+        self.assertEqual(exit_code, 1)
 
 
 if __name__ == '__main__':

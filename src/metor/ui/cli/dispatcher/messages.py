@@ -12,6 +12,15 @@ class _MessagesDispatcherProtocol(Protocol):
     _extra: List[str]
     _help: type[Help]
     _proxy: CliProxy
+    _exit_code: int
+
+    def _print_usage(self, cmd: str, sub: Optional[str] = None) -> None:
+        """Prints command usage help and flags a nonzero exit code."""
+        ...
+
+    def _emit(self, text: str) -> None:
+        """Prints one proxy result and flags a nonzero exit on rendered errors."""
+        ...
 
     def _collect_command_args(
         self,
@@ -48,15 +57,15 @@ class MessagesDispatchMixin:
 
         if sub == 'clear':
             if len(clean_args) > 1:
-                print(self._help.show_command_help('messages'))
+                self._print_usage('messages')
                 return
 
             target: Optional[str] = clean_args[0] if clean_args else None
-            print(self._proxy.clear_messages(target, non_contacts_only))
+            self._emit(self._proxy.clear_messages(target, non_contacts_only))
             return
 
         if non_contacts_only:
-            print(self._help.show_command_help('messages'))
+            self._print_usage('messages')
             return
 
         message_args: List[str] = self._collect_command_args(
@@ -65,14 +74,14 @@ class MessagesDispatchMixin:
             ('show', 'clear'),
         )
         if not message_args or len(message_args) > 2:
-            print(self._help.show_command_help('messages'))
+            self._print_usage('messages')
             return
 
         limit: Optional[int] = None
         if len(message_args) == 2:
             limit = self._parse_optional_limit(message_args[1])
             if limit is None:
-                print(self._help.show_command_help('messages'))
+                self._print_usage('messages')
                 return
 
-        print(self._proxy.get_messages(message_args[0], limit))
+        self._emit(self._proxy.get_messages(message_args[0], limit))

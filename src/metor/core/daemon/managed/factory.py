@@ -2,8 +2,8 @@
 
 from typing import Callable, Dict, Optional, Union
 
-from metor.core import TorManager
 from metor.core.api import EventType, JsonValue
+from metor.core.tor import TorManager
 from metor.data import SqlManager, SettingKey
 from metor.data.profile import ProfileManager
 
