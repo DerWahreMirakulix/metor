@@ -335,6 +335,18 @@ def _read_migration_journal(journal_path: Path, profile_name: str) -> str:
     return cast(str, typed_document['state'])
 
 
+def _close_generation_database(generation_path: Path) -> None:
+    """Closes the pooled database handle owned by one profile generation.
+
+    Args:
+        generation_path (Path): Source, staged, or backup profile directory.
+
+    Returns:
+        None
+    """
+    SqlManager.close_connection(generation_path / Constants.DB_FILE)
+
+
 def recover_profile_security_migration(profile_name: str) -> None:
     """Recovers a staged profile migration according to its explicit journal state.
 
@@ -361,7 +373,10 @@ def recover_profile_security_migration(profile_name: str) -> None:
     source_path = Constants.DATA / safe_name
 
     if state == _MIGRATION_PREPARED:
+        _close_generation_database(staged_path)
+        _close_generation_database(backup_path)
         secure_remove_path(staged_path)
+        secure_remove_path(backup_path)
         journal_path.unlink(missing_ok=True)
         _fsync_directory(journal_path.parent)
         return
@@ -369,11 +384,14 @@ def recover_profile_security_migration(profile_name: str) -> None:
     if not source_path.exists():
         if not staged_path.exists():
             raise ValueError('Committed profile migration is missing its target.')
+        _close_generation_database(staged_path)
         staged_path.replace(source_path)
         _fsync_directory(source_path.parent)
     elif staged_path.exists():
         if backup_path.exists():
             raise ValueError('Committed profile migration has conflicting generations.')
+        _close_generation_database(source_path)
+        _close_generation_database(staged_path)
         source_path.replace(backup_path)
         _fsync_directory(source_path.parent)
         staged_path.replace(source_path)
@@ -381,6 +399,7 @@ def recover_profile_security_migration(profile_name: str) -> None:
 
     try:
         _migration_checkpoint('during_old_state_cleanup')
+        _close_generation_database(backup_path)
         secure_remove_path(backup_path)
     except OSError:
         return
@@ -625,6 +644,8 @@ def migrate_profile_security(
 
     try:
         _write_migration_journal(journal_path, safe_name, _MIGRATION_PREPARED)
+        _close_generation_database(staged_path)
+        _close_generation_database(backup_path)
         secure_remove_path(staged_path)
         secure_remove_path(backup_path)
         shutil.copytree(pm.paths.get_config_dir(), staged_path, symlinks=True)
@@ -704,16 +725,18 @@ def migrate_profile_security(
                     else None
                 )
                 _migration_checkpoint('during_validation')
-                validation_sql = SqlManager(
-                    staged_db_path,
-                    staged_pm.config,
-                    validated_key,
-                )
-                _validate_database_blob_references(
-                    validation_sql,
-                    migrated_blob_ids,
-                )
-                SqlManager.close_connection(staged_db_path)
+                try:
+                    validation_sql = SqlManager(
+                        staged_db_path,
+                        staged_pm.config,
+                        validated_key,
+                    )
+                    _validate_database_blob_references(
+                        validation_sql,
+                        migrated_blob_ids,
+                    )
+                finally:
+                    SqlManager.close_connection(staged_db_path)
                 if validation_key_manager.has_metor_key():
                     validation_key_manager.get_metor_key()
                 validation_blob_key: Optional[bytes] = (

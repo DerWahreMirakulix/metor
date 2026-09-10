@@ -964,7 +964,20 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                         current_password='source-password',
                     )
                 self.assertFalse(result.success)
+                tampered_staged_path = (
+                    Constants.DATA / '.tampered-source.security-migration.staged'
+                )
+                tampered_staged_db = tampered_staged_path / Constants.DB_FILE
+                self.assertNotIn(
+                    str(tampered_staged_db.absolute()), SqlManager._connections
+                )
                 recovered_encrypted = ProfileManager('tampered-source')
+                self.assertFalse(tampered_staged_path.exists())
+                self.assertFalse(
+                    (
+                        Constants.DATA / '.tampered-source.security-migration.json'
+                    ).exists()
+                )
                 self.assertTrue(recovered_encrypted.uses_encrypted_storage())
                 KeyManager(recovered_encrypted, 'source-password').get_blob_key()
                 self.assertEqual(blob_path.read_bytes(), bytes(tampered))
@@ -986,14 +999,41 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                     'INSERT INTO blob_reference VALUES (?)', (missing_id,)
                 )
                 SqlManager.close_connection(plaintext_pm.paths.get_db_file())
+                plaintext_store = PlaintextBlobStore(
+                    plaintext_pm.paths.get_persistent_blob_dir(),
+                    plaintext_pm.paths.get_temporary_blob_dir(),
+                )
+                readable_blob_id = plaintext_store.put(b'readable source blob')
+                plaintext_store.close()
                 result = ProfileManager.migrate_profile_security(
                     'missing-reference',
                     ProfileSecurityMode.ENCRYPTED,
                     new_password='target-password',
                 )
                 self.assertFalse(result.success)
+                staged_path = (
+                    Constants.DATA / '.missing-reference.security-migration.staged'
+                )
+                staged_db_path = staged_path / Constants.DB_FILE
+                self.assertNotIn(
+                    str(staged_db_path.absolute()), SqlManager._connections
+                )
                 recovered_plaintext = ProfileManager('missing-reference')
+                self.assertFalse(staged_path.exists())
+                self.assertFalse(
+                    (
+                        Constants.DATA / '.missing-reference.security-migration.json'
+                    ).exists()
+                )
                 self.assertTrue(recovered_plaintext.uses_plaintext_storage())
+                recovered_store = PlaintextBlobStore(
+                    recovered_plaintext.paths.get_persistent_blob_dir(),
+                    recovered_plaintext.paths.get_temporary_blob_dir(),
+                )
+                self.assertEqual(
+                    recovered_store.read(readable_blob_id), b'readable source blob'
+                )
+                recovered_store.close()
                 recovered_sql = SqlManager(
                     recovered_plaintext.paths.get_db_file(),
                     recovered_plaintext.config,
