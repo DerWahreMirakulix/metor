@@ -1,22 +1,12 @@
-"""Lifecycle operations for local profile creation, mutation, cleanup, and recovery."""
+"""Public profile lifecycle operations and compatibility entry points."""
 
-import json
-import os
-import secrets
-import shutil
-from pathlib import Path
-from typing import Optional, cast
+from typing import Optional
 
-from metor.data import DatabaseCorruptedError, SettingKey, Settings, SqlManager
-from metor.data.blob import (
-    BlobStore,
-    EncryptedBlobStore,
-    InvalidBlobIdError,
-    PlaintextBlobStore,
-)
-from metor.utils import Constants, secure_remove_path, secure_shred_file
+from metor.data import SettingKey, Settings, SqlManager
+from metor.utils import Constants, secure_remove_path
 
 # Local Package Imports
+from metor.data.profile import migration
 from metor.data.profile.models import (
     ProfileConfigKey,
     ProfileOperationResult,
@@ -25,386 +15,17 @@ from metor.data.profile.models import (
 )
 from metor.data.profile.support import normalize_profile_name
 
-_MIGRATION_JOURNAL_VERSION = 1
-_MIGRATION_PREPARED = 'prepared'
-_MIGRATION_COMMITTED = 'committed'
-_BLOB_FILE_SUFFIX = '.blob'
-
-
-def _migration_checkpoint(_stage: str) -> None:
-    """Provides a private no-op boundary for deterministic lifecycle fault tests.
-
-    Args:
-        _stage (str): Named migration transition.
-
-    Returns:
-        None
-    """
-
-
-def _blob_store(
-    profile_manager: object,
-    mode: ProfileSecurityMode,
-    blob_key: Optional[bytes],
-) -> BlobStore:
-    """Creates the mode-appropriate logical blob store for one profile generation.
-
-    Args:
-        profile_manager (object): Profile manager exposing storage paths.
-        mode (ProfileSecurityMode): Profile storage security mode.
-        blob_key (Optional[bytes]): PMK-derived key for encrypted storage.
-
-    Returns:
-        BlobStore: Mode-appropriate external-object store.
-    """
-    from metor.data.profile.manager import ProfileManager
-
-    typed_manager = cast(ProfileManager, profile_manager)
-    if mode is ProfileSecurityMode.ENCRYPTED:
-        if blob_key is None:
-            raise ValueError('Encrypted blob migration requires a blob key.')
-        return EncryptedBlobStore(
-            typed_manager.paths.get_persistent_blob_dir(),
-            typed_manager.paths.get_temporary_blob_dir(),
-            blob_key,
-        )
-    return PlaintextBlobStore(
-        typed_manager.paths.get_persistent_blob_dir(),
-        typed_manager.paths.get_temporary_blob_dir(),
-    )
-
-
-def _persistent_blob_ids(persistent_dir: Path) -> list[str]:
-    """Enumerates every canonical persistent blob without following directories.
-
-    Args:
-        persistent_dir (Path): Source persistent-object directory.
-
-    Returns:
-        list[str]: Sorted canonical logical blob identifiers.
-    """
-    if not persistent_dir.exists():
-        return []
-    blob_ids: list[str] = []
-    for path in persistent_dir.iterdir():
-        if not path.is_file() or path.is_symlink() or path.suffix != _BLOB_FILE_SUFFIX:
-            raise InvalidBlobIdError(
-                'Persistent blob storage contains an invalid entry.'
-            )
-        blob_id = path.stem
-        if path.name != f'{blob_id}{_BLOB_FILE_SUFFIX}':
-            raise InvalidBlobIdError('Persistent blob filename is invalid.')
-        EncryptedBlobStore._validate_blob_id(blob_id)
-        blob_ids.append(blob_id)
-    if len(blob_ids) != len(set(blob_ids)):
-        raise InvalidBlobIdError('Persistent blob IDs conflict.')
-    return sorted(blob_ids)
-
-
-def _migrate_persistent_blobs(
-    source_pm: object,
-    staged_pm: object,
-    source_mode: ProfileSecurityMode,
-    target_mode: ProfileSecurityMode,
-    source_blob_key: Optional[bytes],
-    target_blob_key: Optional[bytes],
-) -> list[str]:
-    """Transforms all persistent blobs inside the staged profile generation.
-
-    Temporary blobs are non-durable runtime spool state and are intentionally
-    discarded while the profile is offline.
-
-    Args:
-        source_pm (object): Active source profile manager.
-        staged_pm (object): Prepared target profile manager.
-        source_mode (ProfileSecurityMode): Active source storage mode.
-        target_mode (ProfileSecurityMode): Prepared target storage mode.
-        source_blob_key (Optional[bytes]): Source PMK-derived blob key.
-        target_blob_key (Optional[bytes]): Target PMK-derived blob key.
-
-    Returns:
-        list[str]: Migrated logical blob identifiers.
-    """
-    from metor.data.profile.manager import ProfileManager
-
-    typed_source = cast(ProfileManager, source_pm)
-    typed_target = cast(ProfileManager, staged_pm)
-    blob_ids = _persistent_blob_ids(typed_source.paths.get_persistent_blob_dir())
-    secure_remove_path(typed_target.paths.get_persistent_blob_dir())
-    secure_remove_path(typed_target.paths.get_temporary_blob_dir())
-    source_store = _blob_store(typed_source, source_mode, source_blob_key)
-    target_store = _blob_store(typed_target, target_mode, target_blob_key)
-    try:
-        for index, blob_id in enumerate(blob_ids):
-            _migration_checkpoint(f'before_blob_read:{index}')
-            plaintext = source_store.read(blob_id)
-            _migration_checkpoint(f'before_blob_write:{index}')
-            target_store.put_with_id(blob_id, plaintext)
-            _migration_checkpoint(f'after_blob_write:{index}')
-            if target_store.read(blob_id) != plaintext:
-                raise ValueError('Migrated blob validation failed.')
-            _migration_checkpoint(f'after_blob_validation:{index}')
-        if (
-            _persistent_blob_ids(typed_target.paths.get_persistent_blob_dir())
-            != blob_ids
-        ):
-            raise ValueError('Migrated persistent blob set is incomplete.')
-        _migration_checkpoint('after_all_blob_writes')
-        return blob_ids
-    finally:
-        source_store.close()
-        target_store.close()
-
-
-def _quote_sql_identifier(identifier: str) -> str:
-    """Quotes one database-owned SQLite identifier safely.
-
-    Args:
-        identifier (str): Identifier loaded from SQLite schema metadata.
-
-    Returns:
-        str: Double-quoted SQLite identifier.
-    """
-    return f'"{identifier.replace(chr(34), chr(34) * 2)}"'
-
-
-def _validate_database_blob_references(
-    sql_manager: SqlManager,
-    persistent_blob_ids: list[str],
-) -> None:
-    """Rejects invalid or missing persistent blob references in the target DB.
-
-    Args:
-        sql_manager (SqlManager): Open staged target database.
-        persistent_blob_ids (list[str]): Complete migrated persistent blob set.
-
-    Returns:
-        None
-    """
-    available_ids = set(persistent_blob_ids)
-    tables = sql_manager.fetchall(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-    )
-    for (table_name,) in tables:
-        if not isinstance(table_name, str):
-            raise ValueError('Target database contains an invalid table name.')
-        quoted_table = _quote_sql_identifier(table_name)
-        columns = sql_manager.fetchall(f'PRAGMA table_info({quoted_table})')
-        if not any(len(column) > 1 and column[1] == 'blob_id' for column in columns):
-            continue
-        references = sql_manager.fetchall(
-            f'SELECT {_quote_sql_identifier("blob_id")} FROM {quoted_table}'
-        )
-        for (blob_id,) in references:
-            if blob_id is None:
-                continue
-            if not isinstance(blob_id, str):
-                raise InvalidBlobIdError('Database blob reference is invalid.')
-            EncryptedBlobStore._validate_blob_id(blob_id)
-            if blob_id not in available_ids:
-                raise ValueError('Target database references a missing blob.')
-
-
-def _migration_paths(profile_name: str) -> tuple[Path, Path, Path]:
-    """Returns the durable journal and sibling generation paths for one profile.
-
-    Args:
-        profile_name (str): Validated local profile name.
-
-    Returns:
-        tuple[Path, Path, Path]: Journal, staged target, and source-backup paths.
-    """
-    prefix = f'.{profile_name}.security-migration'
-    return (
-        Constants.DATA / f'{prefix}.json',
-        Constants.DATA / f'{prefix}.staged',
-        Constants.DATA / f'{prefix}.backup',
-    )
-
-
-def _fsync_directory(directory: Path) -> None:
-    """Best-effort syncs one directory after a durable filesystem transition.
-
-    Args:
-        directory (Path): Existing directory to synchronize.
-
-    Returns:
-        None
-    """
-    if os.name == 'nt':
-        return
-    try:
-        directory_fd = os.open(directory, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-    except OSError:
-        pass
-
-
-def _fsync_tree(path: Path) -> None:
-    """Best-effort syncs regular files and directories in a staged profile tree.
-
-    Args:
-        path (Path): Staged profile root or child path.
-
-    Returns:
-        None
-    """
-    if path.is_symlink():
-        return
-    if path.is_file():
-        try:
-            with path.open('rb') as handle:
-                os.fsync(handle.fileno())
-        except OSError:
-            pass
-        return
-    if path.is_dir():
-        for child in path.iterdir():
-            _fsync_tree(child)
-        _fsync_directory(path)
-
-
-def _write_migration_journal(journal_path: Path, profile_name: str, state: str) -> None:
-    """Atomically persists one explicit security-migration journal state.
-
-    Args:
-        journal_path (Path): Sibling journal path.
-        profile_name (str): Validated local profile name.
-        state (str): Prepared or committed migration state.
-
-    Returns:
-        None
-    """
-    document = json.dumps(
-        {
-            'profile': profile_name,
-            'state': state,
-            'version': _MIGRATION_JOURNAL_VERSION,
-        },
-        sort_keys=True,
-        separators=(',', ':'),
-    ).encode('utf-8')
-    journal_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    temp_path = journal_path.parent / f'.{journal_path.name}.{secrets.token_hex(8)}.tmp'
-    try:
-        with temp_path.open('xb') as handle:
-            handle.write(document)
-            handle.flush()
-            os.fsync(handle.fileno())
-        temp_path.chmod(0o600)
-        temp_path.replace(journal_path)
-        journal_path.chmod(0o600)
-        _fsync_directory(journal_path.parent)
-    finally:
-        temp_path.unlink(missing_ok=True)
-
-
-def _read_migration_journal(journal_path: Path, profile_name: str) -> str:
-    """Reads one strict migration journal without trusting path-like metadata.
-
-    Args:
-        journal_path (Path): Existing sibling journal path.
-        profile_name (str): Expected validated local profile name.
-
-    Raises:
-        ValueError: If the durable migration journal is malformed or unexpected.
-
-    Returns:
-        str: The validated migration state.
-    """
-    try:
-        document = json.loads(journal_path.read_text('utf-8'))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError('Profile security migration journal is unreadable.') from exc
-    if not isinstance(document, dict) or set(document) != {
-        'profile',
-        'state',
-        'version',
-    }:
-        raise ValueError('Profile security migration journal is invalid.')
-    typed_document = cast(dict[str, object], document)
-    if (
-        typed_document['version'] != _MIGRATION_JOURNAL_VERSION
-        or typed_document['profile'] != profile_name
-        or typed_document['state'] not in (_MIGRATION_PREPARED, _MIGRATION_COMMITTED)
-    ):
-        raise ValueError('Profile security migration journal is unsupported.')
-    return cast(str, typed_document['state'])
-
-
-def _close_generation_database(generation_path: Path) -> None:
-    """Closes the pooled database handle owned by one profile generation.
-
-    Args:
-        generation_path (Path): Source, staged, or backup profile directory.
-
-    Returns:
-        None
-    """
-    SqlManager.close_connection(generation_path / Constants.DB_FILE)
-
 
 def recover_profile_security_migration(profile_name: str) -> None:
-    """Recovers a staged profile migration according to its explicit journal state.
-
-    A prepared journal means the source remains authoritative and its staged target
-    is discarded. A committed journal means the staged target is authoritative and
-    activation is completed before any profile is opened.
+    """Recovers an interrupted profile security migration before profile access.
 
     Args:
         profile_name (str): Local profile name whose sibling journal is checked.
 
-    Raises:
-        ValueError: If committed migration state cannot be completed safely.
-
     Returns:
         None
     """
-    safe_name = normalize_profile_name(profile_name)
-    if not safe_name:
-        return
-    journal_path, staged_path, backup_path = _migration_paths(safe_name)
-    if not journal_path.exists():
-        return
-    state = _read_migration_journal(journal_path, safe_name)
-    source_path = Constants.DATA / safe_name
-
-    if state == _MIGRATION_PREPARED:
-        _close_generation_database(staged_path)
-        _close_generation_database(backup_path)
-        secure_remove_path(staged_path)
-        secure_remove_path(backup_path)
-        journal_path.unlink(missing_ok=True)
-        _fsync_directory(journal_path.parent)
-        return
-
-    if not source_path.exists():
-        if not staged_path.exists():
-            raise ValueError('Committed profile migration is missing its target.')
-        _close_generation_database(staged_path)
-        staged_path.replace(source_path)
-        _fsync_directory(source_path.parent)
-    elif staged_path.exists():
-        if backup_path.exists():
-            raise ValueError('Committed profile migration has conflicting generations.')
-        _close_generation_database(source_path)
-        _close_generation_database(staged_path)
-        source_path.replace(backup_path)
-        _fsync_directory(source_path.parent)
-        staged_path.replace(source_path)
-        _fsync_directory(source_path.parent)
-
-    try:
-        _migration_checkpoint('during_old_state_cleanup')
-        _close_generation_database(backup_path)
-        secure_remove_path(backup_path)
-    except OSError:
-        return
-    journal_path.unlink(missing_ok=True)
-    _fsync_directory(journal_path.parent)
+    migration.recover_profile_security_migration(profile_name)
 
 
 def add_profile_folder(
@@ -414,8 +35,7 @@ def add_profile_folder(
     security_mode: ProfileSecurityMode = ProfileSecurityMode.ENCRYPTED,
     master_password: Optional[str] = None,
 ) -> ProfileOperationResult:
-    """
-    Creates one new profile directory safely.
+    """Creates one new profile directory safely.
 
     Args:
         name (str): The requested profile name.
@@ -429,24 +49,17 @@ def add_profile_folder(
     """
     from metor.data.profile.manager import ProfileManager
 
-    safe_name: str = normalize_profile_name(name)
+    safe_name = normalize_profile_name(name)
     if not safe_name:
         return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
-
     if is_remote and not port:
         return ProfileOperationResult(
-            False,
-            ProfileOperationType.REMOTE_PORT_REQUIRED,
-            {},
+            False, ProfileOperationType.REMOTE_PORT_REQUIRED, {}
         )
-
     if is_remote and security_mode is ProfileSecurityMode.PLAINTEXT:
         return ProfileOperationResult(
-            False,
-            ProfileOperationType.PASSWORDLESS_REMOTE_NOT_ALLOWED,
-            {},
+            False, ProfileOperationType.PASSWORDLESS_REMOTE_NOT_ALLOWED, {}
         )
-
     if security_mode is ProfileSecurityMode.PLAINTEXT and not Settings.get_bool(
         SettingKey.ALLOW_PLAINTEXT_PROFILES
     ):
@@ -456,18 +69,14 @@ def add_profile_folder(
             {'profile': safe_name},
         )
 
-    target_dir: Path = Constants.DATA / safe_name
+    target_dir = Constants.DATA / safe_name
     if target_dir.exists():
         return ProfileOperationResult(
-            False,
-            ProfileOperationType.PROFILE_EXISTS,
-            {'profile': safe_name},
+            False, ProfileOperationType.PROFILE_EXISTS, {'profile': safe_name}
         )
-
     recover_profile_security_migration(safe_name)
     pm = ProfileManager(safe_name)
     pm.initialize()
-
     if security_mode is not ProfileSecurityMode.ENCRYPTED:
         pm.config.set(
             ProfileConfigKey.SECURITY_MODE,
@@ -508,8 +117,7 @@ def add_profile_folder(
             )
         if port:
             pm.config.set(ProfileConfigKey.DAEMON_PORT, port)
-
-        remote_tag: str = 'Remote ' if is_remote else 'Static '
+        remote_tag = 'Remote ' if is_remote else 'Static '
         return ProfileOperationResult(
             True,
             ProfileOperationType.PROFILE_CREATED_WITH_PORT,
@@ -520,7 +128,6 @@ def add_profile_folder(
                 'security_mode': security_mode.value,
             },
         )
-
     return ProfileOperationResult(
         True,
         ProfileOperationType.PROFILE_CREATED,
@@ -534,8 +141,7 @@ def migrate_profile_security(
     current_password: Optional[str] = None,
     new_password: Optional[str] = None,
 ) -> ProfileOperationResult:
-    """
-    Migrates one local profile between encrypted and plaintext storage modes.
+    """Migrates one local profile between encrypted and plaintext storage modes.
 
     Args:
         name (str): The target profile name.
@@ -546,247 +152,11 @@ def migrate_profile_security(
     Returns:
         ProfileOperationResult: Structured local outcome for the CLI layer.
     """
-    from metor.core.daemon import (
-        InvalidMasterPasswordError,
-        verify_master_password,
-    )
-    from metor.core.key import KeyManager
-    from metor.data.profile.manager import ProfileManager
-
-    safe_name: str = normalize_profile_name(name)
-    if not safe_name:
-        return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
-
-    pm = ProfileManager(safe_name)
-    if not pm.exists():
-        return ProfileOperationResult(
-            False,
-            ProfileOperationType.PROFILE_NOT_FOUND,
-            {'profile': safe_name},
-        )
-
-    if pm.is_remote():
-        return ProfileOperationResult(
-            False,
-            ProfileOperationType.SECURITY_MIGRATION_REMOTE_NOT_ALLOWED,
-            {'profile': safe_name},
-        )
-
-    if pm.is_daemon_running():
-        return ProfileOperationResult(
-            False,
-            ProfileOperationType.CANNOT_MIGRATE_RUNNING,
-            {'profile': safe_name},
-        )
-
-    if target_mode is ProfileSecurityMode.PLAINTEXT and not Settings.get_bool(
-        SettingKey.ALLOW_PLAINTEXT_PROFILES
-    ):
-        return ProfileOperationResult(
-            False,
-            ProfileOperationType.PLAINTEXT_PROFILES_DISABLED,
-            {'profile': safe_name},
-        )
-
-    current_mode: ProfileSecurityMode = pm.get_security_mode()
-    if current_mode is target_mode:
-        return ProfileOperationResult(
-            True,
-            ProfileOperationType.SECURITY_MODE_UNCHANGED,
-            {'profile': safe_name, 'security_mode': current_mode.value},
-        )
-
-    old_password: Optional[str] = (
-        current_password if current_mode is ProfileSecurityMode.ENCRYPTED else None
-    )
-    target_password: Optional[str] = (
-        new_password if target_mode is ProfileSecurityMode.ENCRYPTED else None
-    )
-
-    db_path: Path = pm.paths.get_db_file()
-    journal_path, staged_path, backup_path = _migration_paths(safe_name)
-    key_manager = KeyManager(pm, old_password)
-
-    if current_mode is ProfileSecurityMode.ENCRYPTED and (
-        key_manager.has_any_key_material() or db_path.exists()
-    ):
-        if not old_password:
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                {
-                    'profile': safe_name,
-                    'reason': 'Current master password is required for encrypted profiles.',
-                },
-            )
-
-        try:
-            verify_master_password(key_manager)
-        except InvalidMasterPasswordError:
-            return ProfileOperationResult(
-                False,
-                ProfileOperationType.SECURITY_MIGRATION_FAILED,
-                {
-                    'profile': safe_name,
-                    'reason': 'Current master password is invalid.',
-                },
-            )
-
-    if target_mode is ProfileSecurityMode.ENCRYPTED and not target_password:
-        return ProfileOperationResult(
-            False,
-            ProfileOperationType.SECURITY_MIGRATION_FAILED,
-            {
-                'profile': safe_name,
-                'reason': 'A new master password is required when migrating to encrypted storage.',
-            },
-        )
-
-    try:
-        _write_migration_journal(journal_path, safe_name, _MIGRATION_PREPARED)
-        _close_generation_database(staged_path)
-        _close_generation_database(backup_path)
-        secure_remove_path(staged_path)
-        secure_remove_path(backup_path)
-        shutil.copytree(pm.paths.get_config_dir(), staged_path, symlinks=True)
-
-        staged_pm = ProfileManager(staged_path.name)
-        staged_db_path = staged_pm.paths.get_db_file()
-        _migration_checkpoint('before_target_db_creation')
-        secure_shred_file(staged_db_path)
-        current_db_key: Optional[bytes] = (
-            key_manager.get_database_key()
-            if current_mode is ProfileSecurityMode.ENCRYPTED and db_path.exists()
-            else None
-        )
-        staged_key_manager = KeyManager(staged_pm, old_password)
-        try:
-            _migration_checkpoint('during_secret_transformation')
-            if target_mode is ProfileSecurityMode.ENCRYPTED:
-                staged_key_manager.rewrite_password_protection(target_password or '')
-                staged_pm.config.set(
-                    ProfileConfigKey.SECURITY_MODE,
-                    target_mode.value,
-                    allow_mutating_structural_keys=True,
-                )
-                target_db_key: Optional[bytes] = staged_key_manager.get_database_key()
-                _migration_checkpoint('after_target_keyslot_creation')
-            else:
-                if staged_key_manager.has_metor_key():
-                    staged_key_manager.rewrite_password_protection(None)
-                else:
-                    staged_key_manager.clear_sensitive_state()
-                    secure_shred_file(staged_pm.paths.get_keyslot_file())
-                staged_pm.config.set(
-                    ProfileConfigKey.SECURITY_MODE,
-                    target_mode.value,
-                    allow_mutating_structural_keys=True,
-                )
-                target_db_key = None
-
-            source_blob_key: Optional[bytes] = (
-                key_manager.get_blob_key()
-                if current_mode is ProfileSecurityMode.ENCRYPTED
-                else None
-            )
-            target_blob_key: Optional[bytes] = (
-                staged_key_manager.get_blob_key()
-                if target_mode is ProfileSecurityMode.ENCRYPTED
-                else None
-            )
-            _migration_checkpoint('before_blob_migration')
-            migrated_blob_ids = _migrate_persistent_blobs(
-                pm,
-                staged_pm,
-                current_mode,
-                target_mode,
-                source_blob_key,
-                target_blob_key,
-            )
-            _migration_checkpoint('after_blob_migration')
-
-            if db_path.exists():
-                _migration_checkpoint('during_db_copy')
-                SqlManager.export_database_copy(
-                    db_path,
-                    staged_db_path,
-                    current_key=current_db_key,
-                    target_key=target_db_key,
-                )
-            SqlManager.close_connection(staged_db_path)
-            _migration_checkpoint('after_target_db_creation')
-
-            validation_key_manager = KeyManager(staged_pm, target_password)
-            try:
-                _migration_checkpoint('before_validation')
-                validated_key: Optional[bytes] = (
-                    validation_key_manager.get_database_key()
-                    if target_mode is ProfileSecurityMode.ENCRYPTED
-                    else None
-                )
-                _migration_checkpoint('during_validation')
-                try:
-                    validation_sql = SqlManager(
-                        staged_db_path,
-                        staged_pm.config,
-                        validated_key,
-                    )
-                    _validate_database_blob_references(
-                        validation_sql,
-                        migrated_blob_ids,
-                    )
-                finally:
-                    SqlManager.close_connection(staged_db_path)
-                if validation_key_manager.has_metor_key():
-                    validation_key_manager.get_metor_key()
-                validation_blob_key: Optional[bytes] = (
-                    validation_key_manager.get_blob_key()
-                    if target_mode is ProfileSecurityMode.ENCRYPTED
-                    else None
-                )
-                validation_blob_store = _blob_store(
-                    staged_pm,
-                    target_mode,
-                    validation_blob_key,
-                )
-                try:
-                    for index, blob_id in enumerate(migrated_blob_ids):
-                        _migration_checkpoint(f'during_blob_validation:{index}')
-                        validation_blob_store.read(blob_id)
-                finally:
-                    validation_blob_store.close()
-                staged_pm.validate_integrity()
-            finally:
-                validation_key_manager.clear_sensitive_state()
-        finally:
-            staged_key_manager.clear_sensitive_state()
-
-        _fsync_tree(staged_path)
-        _migration_checkpoint('immediately_before_commit')
-        _write_migration_journal(journal_path, safe_name, _MIGRATION_COMMITTED)
-        _migration_checkpoint('immediately_after_commit')
-        recover_profile_security_migration(safe_name)
-    except DatabaseCorruptedError as exc:
-        key_manager.clear_sensitive_state()
-        return ProfileOperationResult(
-            False,
-            ProfileOperationType.SECURITY_MIGRATION_FAILED,
-            {'profile': safe_name, 'reason': str(exc)},
-        )
-    except Exception as exc:
-        key_manager.clear_sensitive_state()
-        return ProfileOperationResult(
-            False,
-            ProfileOperationType.SECURITY_MIGRATION_FAILED,
-            {'profile': safe_name, 'reason': str(exc) or 'Migration failed.'},
-        )
-
-    key_manager.clear_sensitive_state()
-
-    return ProfileOperationResult(
-        True,
-        ProfileOperationType.SECURITY_MODE_MIGRATED,
-        {'profile': safe_name, 'security_mode': target_mode.value},
+    return migration.migrate_profile_security(
+        name,
+        target_mode,
+        current_password,
+        new_password,
     )
 
 
@@ -794,8 +164,7 @@ def remove_profile_folder(
     name: str,
     active_profile: Optional[str] = None,
 ) -> ProfileOperationResult:
-    """
-    Removes one profile completely.
+    """Removes one profile completely.
 
     Args:
         name (str): The target profile name.
@@ -807,33 +176,24 @@ def remove_profile_folder(
     from metor.data.profile.catalog import load_default_profile
     from metor.data.profile.manager import ProfileManager
 
-    default: str = load_default_profile()
-    active: str = active_profile if active_profile else default
-    safe_name: str = normalize_profile_name(name)
-
+    default = load_default_profile()
+    active = active_profile if active_profile else default
+    safe_name = normalize_profile_name(name)
     if not safe_name:
         return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
-
-    target_dir: Path = Constants.DATA / safe_name
+    target_dir = Constants.DATA / safe_name
     if active == safe_name:
         return ProfileOperationResult(
-            False,
-            ProfileOperationType.CANNOT_REMOVE_ACTIVE,
-            {},
+            False, ProfileOperationType.CANNOT_REMOVE_ACTIVE, {}
         )
     if default == safe_name:
         return ProfileOperationResult(
-            False,
-            ProfileOperationType.CANNOT_REMOVE_DEFAULT,
-            {},
+            False, ProfileOperationType.CANNOT_REMOVE_DEFAULT, {}
         )
     if not target_dir.exists():
         return ProfileOperationResult(
-            False,
-            ProfileOperationType.PROFILE_NOT_FOUND,
-            {'profile': safe_name},
+            False, ProfileOperationType.PROFILE_NOT_FOUND, {'profile': safe_name}
         )
-
     pm = ProfileManager(safe_name)
     if pm.is_daemon_running() and not pm.is_remote():
         return ProfileOperationResult(
@@ -841,20 +201,16 @@ def remove_profile_folder(
             ProfileOperationType.CANNOT_REMOVE_RUNNING,
             {'profile': safe_name},
         )
-
     from metor.core.profile_destruction import destroy_profile_storage
 
     destroy_profile_storage(pm)
     return ProfileOperationResult(
-        True,
-        ProfileOperationType.PROFILE_REMOVED,
-        {'profile': safe_name},
+        True, ProfileOperationType.PROFILE_REMOVED, {'profile': safe_name}
     )
 
 
 def rename_profile_folder(old_name: str, new_name: str) -> ProfileOperationResult:
-    """
-    Renames one existing profile directory.
+    """Renames one existing profile directory.
 
     Args:
         old_name (str): The current profile name.
@@ -865,25 +221,18 @@ def rename_profile_folder(old_name: str, new_name: str) -> ProfileOperationResul
     """
     from metor.data.profile.manager import ProfileManager
 
-    safe_old: str = normalize_profile_name(old_name)
-    safe_new: str = normalize_profile_name(new_name)
-
-    old_dir: Path = Constants.DATA / safe_old
-    new_dir: Path = Constants.DATA / safe_new
-
+    safe_old = normalize_profile_name(old_name)
+    safe_new = normalize_profile_name(new_name)
+    old_dir = Constants.DATA / safe_old
+    new_dir = Constants.DATA / safe_new
     if not old_dir.exists():
         return ProfileOperationResult(
-            False,
-            ProfileOperationType.PROFILE_NOT_FOUND,
-            {'profile': safe_old},
+            False, ProfileOperationType.PROFILE_NOT_FOUND, {'profile': safe_old}
         )
     if new_dir.exists():
         return ProfileOperationResult(
-            False,
-            ProfileOperationType.PROFILE_EXISTS,
-            {'profile': safe_new},
+            False, ProfileOperationType.PROFILE_EXISTS, {'profile': safe_new}
         )
-
     pm = ProfileManager(safe_old)
     if pm.is_daemon_running() and not pm.is_remote():
         return ProfileOperationResult(
@@ -891,7 +240,6 @@ def rename_profile_folder(old_name: str, new_name: str) -> ProfileOperationResul
             ProfileOperationType.CANNOT_RENAME_RUNNING,
             {'old_profile': safe_old},
         )
-
     old_dir.rename(new_dir)
     return ProfileOperationResult(
         True,
@@ -904,8 +252,7 @@ def clear_profile_db(
     name: str,
     master_password: Optional[str] = None,
 ) -> ProfileOperationResult:
-    """
-    Clears the SQLite database for one profile.
+    """Clears the SQLite database for one profile.
 
     Args:
         name (str): The target profile name.
@@ -916,36 +263,28 @@ def clear_profile_db(
     """
     from metor.data.profile.manager import ProfileManager
 
-    safe_name: str = normalize_profile_name(name)
+    safe_name = normalize_profile_name(name)
     if not safe_name:
         return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
-
     pm = ProfileManager(safe_name)
     if not pm.exists():
         return ProfileOperationResult(
-            False,
-            ProfileOperationType.PROFILE_NOT_FOUND,
-            {'profile': safe_name},
+            False, ProfileOperationType.PROFILE_NOT_FOUND, {'profile': safe_name}
         )
-
     if pm.is_daemon_running() and not pm.is_remote():
         return ProfileOperationResult(
             False,
             ProfileOperationType.CANNOT_CLEAR_RUNNING_DB,
             {'profile': safe_name},
         )
-
-    db_path: Path = pm.paths.get_db_file()
+    db_path = pm.paths.get_db_file()
     if not db_path.exists():
         return ProfileOperationResult(
-            False,
-            ProfileOperationType.DATABASE_NOT_FOUND,
-            {'profile': safe_name},
+            False, ProfileOperationType.DATABASE_NOT_FOUND, {'profile': safe_name}
         )
-
     key_manager = None
     try:
-        encryption_key: Optional[bytes] = None
+        encryption_key = None
         if pm.uses_encrypted_storage():
             from metor.core.key import KeyManager
 
@@ -955,16 +294,12 @@ def clear_profile_db(
         sql.clear_all_profile_data()
         SqlManager.close_connection(db_path)
         return ProfileOperationResult(
-            True,
-            ProfileOperationType.DATABASE_CLEARED,
-            {'profile': safe_name},
+            True, ProfileOperationType.DATABASE_CLEARED, {'profile': safe_name}
         )
     except Exception:
         SqlManager.close_connection(db_path)
         return ProfileOperationResult(
-            False,
-            ProfileOperationType.DATABASE_CLEAR_FAILED,
-            {},
+            False, ProfileOperationType.DATABASE_CLEAR_FAILED, {}
         )
     finally:
         if key_manager is not None:

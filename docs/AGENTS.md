@@ -16,6 +16,8 @@ Metor is a highly secure, Tor-based terminal messenger using a strict Client-Dae
 
 - **Auto-Correction:** Whenever you analyze, modify, or rewrite a file, you MUST proactively and silently fix any existing code in that file that violates the rules defined in [CONTRIBUTE.md](./CONTRIBUTE.md) or [AUDIT.md](./AUDIT.md) (e.g., missing type hints, legacy `os.path` usage, unprotected thread dictionaries, missing docstring args, raw numeric timeouts).
 - **Exceptions:** Do this alongside your requested task UNLESS the user explicitly instructs you to "do not refactor" or "only modify the specified lines".
+- **God-File Prevention:** Proactively enforce the canonical Module Cohesion & Size policy in [CONTRIBUTE.md](./CONTRIBUTE.md): do not add substantial behavior to an oversized production module without evaluating a cohesive, domain-boundary extraction.
+- **Package-Structure Enforcement:** God-File extraction MUST preserve or improve subsystem ownership. Do not solve file-size problems by creating flat `<concept>_*.py` siblings; promote cohesive multi-module concepts into dedicated subpackages according to [CONTRIBUTE.md](./CONTRIBUTE.md).
 
 ## 3. Reference Material
 

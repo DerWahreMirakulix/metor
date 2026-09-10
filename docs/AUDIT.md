@@ -49,3 +49,10 @@ Every Pull Request, AI code generation, or architectural change MUST be audited 
 - [ ] **Modern Python Standards:** Are modern standard libraries used appropriately? (e.g., `pathlib.Path` MUST be used over legacy `os.path`).
 - [ ] **Strict Typing:** Are all variables, arguments, and return types explicitly typed with their inner payloads? (e.g., `Dict[str, JsonValue]`, not just `Dict`).
 - [ ] **Docstrings:** Does every class and method have a complete Google-style docstring containing descriptions, `Args:`, and `Returns:` blocks?
+- [ ] **Module Cohesion:** Does each production module have one cohesive primary responsibility, rather than mixing unrelated domain behavior into a God Module?
+- [ ] **Oversized Module Review:** If a production module exceeds approximately 500 logical lines and receives substantial functionality, was a real domain-boundary extraction evaluated? Are modules above approximately 800 lines limited to justified generated or declarative exceptions?
+- [ ] **Thin Facades:** Do package facades only expose the intended API, without gaining implementation behavior or cross-domain orchestration?
+- [ ] **Subsystem Packaging:** When several modified modules belong to one cohesive subsystem, are they grouped in a meaningful subpackage rather than represented as prefixed siblings in a flat package?
+- [ ] **Naming & Ownership:** Do paths and module names express ownership without redundant prefixes, generic helper files, or artificial underscore aliases for normal cross-module APIs?
+- [ ] **Package Promotion:** If several `<concept>_*.py` modules exist, was package promotion explicitly evaluated?
+- [ ] **Structural Refactor Quality:** Did a God-File refactor improve subsystem ownership rather than merely redistribute implementation across flat files?

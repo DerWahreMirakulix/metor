@@ -41,7 +41,7 @@ from metor.data.blob import (
     PlaintextBlobStore,
 )
 from metor.data.profile import ProfileConfigKey, ProfileManager, ProfileSecurityMode
-from metor.data.profile import lifecycle as profile_lifecycle
+from metor.data.profile.migration import orchestrator as profile_migration
 from metor.data.sql import DatabaseCorruptedError, SqlManager
 from metor.data import Settings
 from metor.utils import Constants
@@ -852,7 +852,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                             with (
                                 patch.object(Settings, 'get_bool', return_value=True),
                                 patch.object(
-                                    profile_lifecycle,
+                                    profile_migration,
                                     '_migration_checkpoint',
                                     side_effect=lambda checkpoint, expected=stage: (
                                         (_ for _ in ()).throw(OSError(expected))
@@ -1067,8 +1067,8 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                 with (
                     patch.object(Settings, 'get_bool', return_value=True),
                     patch.object(
-                        profile_lifecycle,
-                        '_fsync_tree',
+                        profile_migration,
+                        'fsync_tree',
                         side_effect=OSError('injected before commit'),
                     ),
                 ):
@@ -1123,7 +1123,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                         with (
                             patch.object(Settings, 'get_bool', return_value=True),
                             patch.object(
-                                profile_lifecycle,
+                                profile_migration,
                                 '_migration_checkpoint',
                                 side_effect=lambda checkpoint, expected=stage: (
                                     (_ for _ in ()).throw(OSError(expected))
@@ -1166,7 +1166,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                     allow_mutating_structural_keys=True,
                 )
                 with patch.object(
-                    profile_lifecycle,
+                    profile_migration,
                     '_migration_checkpoint',
                     side_effect=lambda stage: (
                         (_ for _ in ()).throw(OSError(stage))
@@ -1226,7 +1226,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                         with (
                             patch.object(Settings, 'get_bool', return_value=True),
                             patch.object(
-                                profile_lifecycle,
+                                profile_migration,
                                 '_migration_checkpoint',
                                 side_effect=lambda checkpoint, expected=stage: (
                                     (_ for _ in ()).throw(OSError(expected))
@@ -1282,7 +1282,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                 blob_id = source_store.put(b'encrypted after recovery')
                 source_store.close()
                 with patch.object(
-                    profile_lifecycle,
+                    profile_migration,
                     '_migration_checkpoint',
                     side_effect=lambda stage: (
                         (_ for _ in ()).throw(OSError(stage))

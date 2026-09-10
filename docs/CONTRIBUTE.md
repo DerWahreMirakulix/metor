@@ -38,13 +38,32 @@ When contributing to this repository, you MUST strictly adhere to the following 
 - **Cryptography:** Never use `os.urandom` or `random` for key generation; exclusively use a cryptographically secure module (like `secrets`).
 - **Data-at-Rest (SQL Integrity):** Always use parameterized queries (`?`) for user data operations. Because SQL engines (like SQLite) do not support parameterization for structural commands (like `PRAGMA` or table names), f-strings may only be used there if the injected value is deeply sanitized, mathematically escaped, or a strict system constant. Under no circumstances may raw user input be formatted directly into an SQL string.
 
-## 6. Code Formatting (Ruff)
+## 6. Module Cohesion & Size
+
+- **One Primary Responsibility:** Every production module MUST have one cohesive primary responsibility. God Modules that mix unrelated orchestration, persistence, crypto, validation, migration, recovery, or filesystem concerns are prohibited.
+- **Size as a Guardrail:** Prefer modules below approximately 400 logical lines. Line count alone is never a reason for artificial splitting: extraction boundaries MUST represent real architectural or domain boundaries.
+- **Mandatory Review:** When substantial functionality is added to a production module already above approximately 500 logical lines, contributors MUST proactively evaluate and document a cohesive extraction. Modules above approximately 800 logical lines are unacceptable except for clearly justified generated or declarative exceptional files.
+- **Thin Facades:** Package facades expose intended public symbols only; they MUST remain thin and MUST NOT accumulate implementation behavior.
+- **Oversized Modules:** Substantially modifying an already oversized module requires proactive decomposition review, even when the requested feature itself is small.
+
+### Package Structure & Subsystem Boundaries
+
+- **Packages Represent Subsystems:** When a cohesive feature or domain grows into multiple implementation modules, group those modules in a dedicated subpackage instead of adding prefixed siblings to a broad parent package.
+- **Package Promotion:** If two or more closely related modules share one domain concept and are expected to evolve together, contributors MUST evaluate promoting that concept to a subpackage. Three or more `<concept>_*.py` siblings are a strong signal for promotion, not an automatic rule.
+- **Avoid Flat Module Sprawl:** For one migration subsystem, `migration.py`, `migration_journal.py`, `migration_validation.py`, and `migration_blobs.py` should normally become `migration/orchestrator.py`, `migration/journal.py`, `migration/validation.py`, and `migration/blobs.py`.
+- **Name by Local Ownership:** Inside a focused package, avoid repeating package context: prefer `migration/journal.py` over `migration/migration_journal.py` unless repetition is genuinely needed for clarity.
+- **Thin Package Facades:** A package `__init__.py` may expose the intentional subsystem API, but MUST remain free of implementation and orchestration behavior.
+- **Private Names Have Meaning:** A leading underscore denotes genuine implementation privacy. Do not alias ordinary cross-module or facade imports to underscore-prefixed names merely to make them appear internal.
+- **No Generic Extraction Buckets:** Do not use vague modules such as `helpers.py`, `misc.py`, or `common.py` to satisfy size rules. Each extraction must name a stable, concrete responsibility.
+- **Meaningful Depth:** One additional meaningful subsystem directory is preferable to a broad flat directory of prefixed sibling modules. Do not introduce arbitrary nesting.
+
+## 7. Code Formatting (Ruff)
 
 - **Imports First:** All `import` statements MUST (unless a runtime import is absolutely necessary) be located at the very top of the file (immediately following the module docstring).
 - **Import Delimiters:** Standard library and external domain imports MUST be separated from same-domain internal imports using exactly the `# Local Package Imports` comment. This comment MUST NOT be placed above imports from higher-level Metor domains.
 - **Single Quotes:** Always use single quotes (`'`) for strings unless the string itself contains a single quote. Double quotes are strictly for docstrings (`"""`).
 
-## 7. IPC Contract Evolution & Glossary
+## 8. IPC Contract Evolution & Glossary
 
 The IPC contract is versioned and additive-only within a major version. Follow these rules whenever the wire contract changes:
 
