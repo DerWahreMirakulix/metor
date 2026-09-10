@@ -111,14 +111,20 @@ Start **Release Metor** manually in GitHub Actions and select:
 - cryptographic migration acknowledgement only when applicable; and
 - dry-run or publish.
 
-The workflow discovers the latest `vMAJOR.MINOR.PATCH` public tag, calculates
-and writes `APP_VERSION`, then runs Ruff, Ruff format, Mypy, the complete test
-suite, IPC/schema generation, compatibility-manifest generation, compatibility
+The workflow discovers every non-draft GitHub Release and selects the highest
+valid stable `vMAJOR.MINOR.PATCH` tag through parsed SemVer ordering. Prerelease
+tags do not establish the normal stable release baseline. It calculates and
+writes `APP_VERSION`, then runs Ruff, Ruff format, Mypy, the complete test
+suite, all generated-document producers twice for reproducibility, compatibility
 gates, Linux and Windows jobs, all three package builds, and wheel-metadata
-validation. Only after both operating-system jobs pass can it commit the
-generated baseline, create the application release tag, and publish a GitHub
-Release containing the generated compatibility matrix. A dry run performs the
-same gates without repository or release writes.
+validation. The canonical generated outputs are `API.md`, `SETTINGS.md`,
+`api.schema.json`, and `compatibility.json`. Only a non-dry-run request from
+`main` can commit those release changes, create the application release tag,
+and publish a GitHub Release containing the generated compatibility matrix. A
+dry run performs the same gates from any branch without repository or release
+writes. When a first `current` release already has the correct registry and
+generated outputs, no release commit is created; the validated checked-out
+commit is tagged directly.
 
 The tag convention is `v0.2.0`, `v0.3.0`, or `v1.0.0`. Protocol and format
 generations are metadata in each product release, not separate tags.

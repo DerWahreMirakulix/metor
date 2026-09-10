@@ -13,7 +13,7 @@ sys.path.insert(0, str(PROJECT_ROOT / 'src'))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from metor.versioning import APP_VERSION
-from scripts.release.semver import calculate_next_version
+from scripts.release.semver import calculate_next_version, select_latest_stable_release
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -27,19 +27,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        '--release-type', choices=('current', 'patch', 'minor', 'major'), required=True
+        '--release-type', choices=('current', 'patch', 'minor', 'major')
     )
     parser.add_argument(
         '--prerelease', choices=('none', 'alpha', 'beta', 'rc'), default='none'
     )
     parser.add_argument('--previous-release')
+    parser.add_argument('--available-release', action='append', default=[])
+    parser.add_argument('--select-baseline', action='store_true')
     args = parser.parse_args(argv)
+    selected_baseline: str | None = select_latest_stable_release(args.available_release)
+    if args.select_baseline:
+        if selected_baseline is not None:
+            sys.stdout.write(selected_baseline + '\n')
+        return 0
+    if args.release_type is None:
+        parser.error('--release-type is required unless --select-baseline is used')
+    previous_release: str | None = args.previous_release or selected_baseline
     try:
         version: str = calculate_next_version(
             APP_VERSION,
             args.release_type,
             args.prerelease,
-            args.previous_release,
+            previous_release,
         )
     except ValueError as exc:
         sys.stderr.write(f'{exc}\n')

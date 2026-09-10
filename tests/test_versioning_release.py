@@ -51,7 +51,7 @@ from scripts.release.paths import (
     GENERATED_DOCS_DIR,
     SETTINGS_DOC_PATH,
 )
-from scripts.release.semver import calculate_next_version
+from scripts.release.semver import calculate_next_version, select_latest_stable_release
 from scripts.validate_wheel_versions import validate_wheel_versions
 
 
@@ -537,6 +537,23 @@ class ReleaseCompatibilityTests(unittest.TestCase):
             '0.3.0',
         )
 
+    def test_release_baseline_uses_highest_stable_semver(self) -> None:
+        """Verifies release publication order cannot select an older backport.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self.assertEqual(
+            select_latest_stable_release(
+                ('v0.4.3', 'v0.5.0', 'v0.6.0-rc.1', 'not-a-release')
+            ),
+            'v0.5.0',
+        )
+        self.assertIsNone(select_latest_stable_release(('v0.6.0-beta.1',)))
+
     def test_ipc_addition_is_compatible_without_protocol_bump(self) -> None:
         """Verifies an optional field remains additive.
 
@@ -784,6 +801,58 @@ class DocumentationReleaseArchitectureTests(unittest.TestCase):
         self.assertNotIn('git push ', validation_jobs)
         self.assertNotIn('gh release create ', validation_jobs)
         self.assertIn('if: inputs.dry_run == false', workflow)
+
+    def test_release_workflow_scopes_writes_and_generates_all_artifacts(
+        self,
+    ) -> None:
+        """Verifies publishing guards and generated-document release inputs.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        root: Path = Path(__file__).resolve().parents[1]
+        workflow: str = (root / '.github' / 'workflows' / 'release.yml').read_text(
+            encoding='utf-8'
+        )
+        validation_jobs, publish_job = workflow.split('\n  publish:', maxsplit=1)
+        self.assertNotIn('\npermissions:\n  contents: write', workflow)
+        self.assertIn('Reject non-main publish requests', validation_jobs)
+        self.assertIn("$GITHUB_REF_NAME\" != 'main'", validation_jobs)
+        self.assertIn('contents: read', validation_jobs)
+        self.assertIn('contents: write', publish_job)
+        self.assertIn("github.ref_name == 'main'", publish_job)
+        self.assertIn('actions/setup-node@v6', validation_jobs)
+        self.assertIn('node-version: "22.17.1"', validation_jobs)
+        self.assertIn('npm ci', validation_jobs)
+        self.assertIn('python scripts/validate_generated_docs.py', validation_jobs)
+        self.assertIn('docs/generated/SETTINGS.md', workflow)
+        self.assertIn('if ! git diff --cached --quiet; then', publish_job)
+        self.assertIn('--select-baseline', validation_jobs)
+
+    def test_generated_docs_workflow_uses_canonical_allowlist(self) -> None:
+        """Verifies generated-document automation cannot stage authored docs.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        root: Path = Path(__file__).resolve().parents[1]
+        workflow: str = (
+            root / '.github' / 'workflows' / 'generate_api_docs.yml'
+        ).read_text(encoding='utf-8')
+        self.assertIn('python scripts/validate_generated_docs.py', workflow)
+        self.assertIn('"scripts/validate_generated_docs.py"', workflow)
+        self.assertIn(
+            'git add docs/generated/API.md docs/generated/SETTINGS.md '
+            'docs/generated/api.schema.json docs/generated/compatibility.json',
+            workflow,
+        )
+        self.assertIn('if ! git diff --cached --quiet; then', workflow)
 
 
 if __name__ == '__main__':

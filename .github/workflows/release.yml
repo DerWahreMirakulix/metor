@@ -43,12 +43,11 @@ on:
         type: boolean
         default: true
 
-permissions:
-  contents: write
-
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       latest_tag: ${{ steps.version.outputs.latest_tag }}
       next_version: ${{ steps.version.outputs.next_version }}
@@ -57,13 +56,32 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Reject non-main publish requests
+        shell: bash
+        run: |
+          if [[ '${{ inputs.dry_run }}' == 'false' && "$GITHUB_REF_NAME" != 'main' ]]; then
+            echo 'Public releases may only be published from main.' >&2
+            exit 1
+          fi
+
       - name: Calculate application version
         id: version
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          latest_tag="$(gh release list --exclude-drafts --limit 100 --json tagName --jq '[.[].tagName | select(test("^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\\.(0|[1-9][0-9]*))?$"))][0] // ""')"
+          release_tags="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[] | select(.draft | not) | .tag_name')"
+          baseline_args=()
+          while IFS= read -r release_tag; do
+            if [[ -n "$release_tag" ]]; then
+              baseline_args+=(--available-release "$release_tag")
+            fi
+          done <<< "$release_tags"
+          latest_tag="$(python scripts/calculate_release_version.py --select-baseline "${baseline_args[@]}")"
           args=(--release-type '${{ inputs.release_type }}' --prerelease '${{ inputs.prerelease }}')
           if [ -n "$latest_tag" ]; then
             args+=(--previous-release "$latest_tag")
@@ -83,6 +101,8 @@ jobs:
         os:
           - ubuntu-latest
           - windows-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
         with:
@@ -101,11 +121,20 @@ jobs:
           mypy-paths: "src/metor/ scripts/"
           run-tests: "true"
 
-      - name: Generate IPC schema and compatibility manifest
+      - name: Set up Node.js for documentation generators
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22.17.1"
+          cache: "npm"
+
+      - name: Install pinned documentation tooling
+        shell: bash
+        run: npm ci
+
+      - name: Generate and validate release documentation
         shell: bash
         run: |
-          python scripts/generate_api_docs.py
-          python scripts/generate_compatibility_manifest.py
+          python scripts/validate_generated_docs.py
           python scripts/versioning.py validate
 
       - name: Load previous public compatibility baseline
@@ -152,6 +181,7 @@ jobs:
           name: release-compatibility-baseline
           path: |
             docs/generated/API.md
+            docs/generated/SETTINGS.md
             docs/generated/api.schema.json
             docs/generated/compatibility.json
           if-no-files-found: error
@@ -161,7 +191,9 @@ jobs:
       - prepare
       - quality
     runs-on: ubuntu-latest
-    if: inputs.dry_run == false
+    if: inputs.dry_run == false && github.ref_name == 'main'
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -183,12 +215,15 @@ jobs:
         run: |
           python scripts/versioning.py set-app '${{ needs.prepare.outputs.next_version }}'
           cp release-state/API.md docs/generated/API.md
+          cp release-state/SETTINGS.md docs/generated/SETTINGS.md
           cp release-state/api.schema.json docs/generated/api.schema.json
           cp release-state/compatibility.json docs/generated/compatibility.json
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git config user.name 'github-actions[bot]'
-          git add src/metor/versioning.py docs/generated/API.md docs/generated/api.schema.json docs/generated/compatibility.json
-          git commit -m 'release: v${{ needs.prepare.outputs.next_version }}'
+          git add src/metor/versioning.py docs/generated/API.md docs/generated/SETTINGS.md docs/generated/api.schema.json docs/generated/compatibility.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'release: v${{ needs.prepare.outputs.next_version }}'
+          fi
           git tag -a 'v${{ needs.prepare.outputs.next_version }}' -m 'Metor v${{ needs.prepare.outputs.next_version }}'
           git push origin HEAD:${GITHUB_REF_NAME} 'refs/tags/v${{ needs.prepare.outputs.next_version }}'
 

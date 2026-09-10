@@ -1,7 +1,8 @@
-"""Semantic Version calculation for explicit Metor releases."""
+"""Semantic Version calculation and baseline selection for Metor releases."""
 
 import re
 from dataclasses import dataclass
+from typing import Iterable
 
 
 SEMVER_RE: re.Pattern[str] = re.compile(
@@ -71,6 +72,31 @@ class SemVer:
         if self.prerelease is not None:
             value += f'-{self.prerelease}.{self.prerelease_number}'
         return value
+
+
+def select_latest_stable_release(tags: Iterable[str]) -> str | None:
+    """Selects the highest valid stable release tag independent of source order.
+
+    Prerelease tags do not establish the baseline for the normal stable release
+    train. Invalid or unrelated tags are ignored.
+
+    Args:
+        tags (Iterable[str]): Candidate release tags from a repository or API.
+
+    Returns:
+        str | None: Canonical stable release tag, or ``None`` when absent.
+    """
+    stable_versions: list[SemVer] = []
+    for tag in tags:
+        try:
+            version: SemVer = SemVer.parse(tag)
+        except ValueError:
+            continue
+        if version.prerelease is None:
+            stable_versions.append(version)
+    if not stable_versions:
+        return None
+    return f'v{max(stable_versions)}'
 
 
 def calculate_next_version(
