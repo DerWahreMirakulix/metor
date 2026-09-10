@@ -27,7 +27,7 @@ class DaemonLockLifecycleTests(unittest.TestCase):
         command = IpcCommand.from_dict({'command_type': CommandType.LOCK.value})
         self.assertIsInstance(command, LockCommand)
 
-    @patch('metor.core.daemon.managed.engine.SqlManager.close_connection')
+    @patch('metor.core.daemon.managed.engine.daemon.SqlManager.close_connection')
     def test_lock_releases_runtime_without_stopping_daemon(
         self,
         close_connection: Mock,
@@ -44,13 +44,11 @@ class DaemonLockLifecycleTests(unittest.TestCase):
         daemon._lifecycle = DaemonLifecycle.UNLOCKED
         daemon._stop_flag = threading.Event()
         daemon._runtime_stop_flag = threading.Event()
-        daemon._client_state_lock = threading.Lock()
-        daemon._authenticated_clients = {Mock()}
-        daemon._session_consumers = {Mock()}
-        daemon._local_auth = Mock()
+        daemon._session_access = Mock()
         daemon._outbox = Mock()
-        daemon._network_handler = Mock()
+        daemon._command_dispatcher = Mock()
         daemon._network = Mock()
+        daemon._session_maintenance = Mock()
         daemon._tm = Mock()
         key_manager = Mock()
         blob_store = Mock()
@@ -59,8 +57,6 @@ class DaemonLockLifecycleTests(unittest.TestCase):
         daemon._pm = Mock()
         daemon._pm.paths.get_db_file.return_value = Path('/tmp/metor-lock-test.db')
         daemon._pm.paths.get_config_dir.return_value = Path('/tmp')
-        daemon._db_handler = Mock()
-        daemon._sys_handler = Mock()
         daemon._crypto = Mock()
         daemon._cm = Mock()
         daemon._hm = Mock()
@@ -71,15 +67,15 @@ class DaemonLockLifecycleTests(unittest.TestCase):
         self.assertIs(daemon._lifecycle, DaemonLifecycle.LOCKED)
         self.assertFalse(daemon._stop_flag.is_set())
         self.assertTrue(daemon._runtime_stop_flag.is_set())
-        self.assertEqual(daemon._authenticated_clients, set())
-        self.assertEqual(daemon._session_consumers, set())
+        daemon._session_access.clear_all.assert_called_once_with()
+        daemon._command_dispatcher.clear_runtime_handlers.assert_called_once_with()
         close_connection.assert_called_once()
         key_manager.clear_sensitive_state.assert_called_once_with()
         blob_store.close.assert_called_once_with()
         self.assertIsNone(daemon._km)
         self.assertIsNone(daemon._blob_store)
         self.assertIsNone(daemon._network)
-        self.assertIsNone(daemon._db_handler)
+        self.assertIsNone(daemon._session_maintenance)
 
 
 if __name__ == '__main__':

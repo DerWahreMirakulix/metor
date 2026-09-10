@@ -449,9 +449,7 @@ def disconnect(
     outbound_socket_to_close: Optional[socket.socket] = None
 
     if cancel_retunnel_flow:
-        pop_outbound_socket = getattr(controller._state, 'pop_outbound_socket', None)
-        if callable(pop_outbound_socket):
-            outbound_socket_to_close = pop_outbound_socket(onion)
+        outbound_socket_to_close = controller._state.pop_outbound_socket(onion)
         controller._state.clear_retunnel_flow(onion)
 
     if initiated_by_self:

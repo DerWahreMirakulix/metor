@@ -1,11 +1,10 @@
 """Inbound drop-message persistence and tunnel-stream processing."""
 
-# mypy: disable-error-code=attr-defined
-
 import socket
-from typing import Optional, Tuple
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Callable, Optional, Tuple
 
-from metor.core.api import ContentType, Delivery, InboxNotificationEvent
+from metor.core.api import ContentType, Delivery, InboxNotificationEvent, IpcEvent
 from metor.core.daemon.managed.models import TorCommand
 from metor.data import (
     HistoryActor,
@@ -16,12 +15,49 @@ from metor.data import (
 )
 
 # Local Package Imports
+from ...notify import NotificationPayload
 from ..stream import TcpStreamReader
 from .codec import decode_drop_payload
 
+if TYPE_CHECKING:
+    from metor.data import ContactManager, HistoryManager, MessageManager
+    from metor.data.profile import Config
 
-class DropMessageRouting:
+
+class DropMessageRouter:
     """Owns durable inbound DROP acceptance for tunnel and session channels."""
+
+    def __init__(
+        self,
+        cm: 'ContactManager',
+        hm: 'HistoryManager',
+        mm: 'MessageManager',
+        broadcast_callback: Callable[[IpcEvent], None],
+        has_clients_callback: Callable[[], bool],
+        notify_callback: Callable[[NotificationPayload], None],
+        config: 'Config',
+    ) -> None:
+        """Initializes drop routing with its explicit collaborators.
+
+        Args:
+            cm (ContactManager): Address book manager.
+            hm (HistoryManager): Event history manager.
+            mm (MessageManager): Message persistence manager.
+            broadcast_callback (Callable[[IpcEvent], None]): IPC event broadcaster.
+            has_clients_callback (Callable[[], bool]): Connected-client check.
+            notify_callback (Callable[[NotificationPayload], None]): Detached notifier.
+            config (Config): Profile configuration.
+
+        Returns:
+            None
+        """
+        self._cm: 'ContactManager' = cm
+        self._hm: 'HistoryManager' = hm
+        self._mm: 'MessageManager' = mm
+        self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
+        self._has_clients_callback: Callable[[], bool] = has_clients_callback
+        self._notify_callback: Callable[[NotificationPayload], None] = notify_callback
+        self._config: 'Config' = config
 
     def _process_inbound_drop_frame(
         self,
@@ -90,7 +126,15 @@ class DropMessageRouting:
                     InboxNotificationEvent(alias=alias, onion=onion, count=1)
                 )
             else:
-                self._notify_inbox(alias, onion)
+                self._notify_callback(
+                    NotificationPayload(
+                        kind='inbox_notification',
+                        peer_alias=alias,
+                        peer_onion=onion,
+                        count=1,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                    )
+                )
         return False
 
     @staticmethod

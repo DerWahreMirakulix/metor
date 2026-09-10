@@ -1,5 +1,5 @@
 """
-Module defining the primary background daemon engine.
+Module defining the primary background daemon engine lifecycle.
 Orchestrates Network, IPC API, and Outbox routing seamlessly.
 Handles Unlock operations, Nuke/Purge protocols, and Local Authentication constraints.
 Enforces the Zero-Text Policy by emitting structured Domain-Driven payloads directly to the IPC interface.
@@ -15,53 +15,17 @@ import os
 import signal
 import types
 from enum import Enum
-from typing import List, Set, Optional, Callable, Dict, Union
+from typing import Optional, Callable, Dict, Union
 from pathlib import Path
 
 from metor.core.api import (
-    AuthenticateSessionCommand,
     ChangePasswordCommand,
     create_event,
     IpcEvent,
     IpcCommand,
-    InitCommand,
-    GetChatStartupStateCommand,
-    GetConnectionsCommand,
-    GetContactsListCommand,
-    ConnectCommand,
-    DisconnectCommand,
-    AcceptCommand,
-    RejectCommand,
     LockCommand,
-    RegisterLiveConsumerCommand,
-    AddContactCommand,
-    RemoveContactCommand,
-    RenameContactCommand,
-    ClearContactsCommand,
-    SwitchCommand,
-    SendMessageCommand,
-    GetTransportStateCommand,
-    GetInboxCommand,
-    MarkReadCommand,
-    FallbackCommand,
-    GetHistoryCommand,
-    GetRawHistoryCommand,
-    ClearHistoryCommand,
-    GetMessagesCommand,
-    ClearMessagesCommand,
-    GetAddressCommand,
-    GenerateAddressCommand,
-    ClearProfileDbCommand,
-    SetSettingCommand,
-    GetSettingCommand,
-    GetSettingsListCommand,
-    SetConfigCommand,
-    GetConfigCommand,
-    GetConfigListCommand,
-    SyncConfigCommand,
     SelfDestructCommand,
     UnlockCommand,
-    RetunnelCommand,
     EventType,
     JsonValue,
     request_context,
@@ -84,7 +48,6 @@ from metor.utils import Constants, clean_onion, secure_shred_file
 
 # Local Package Imports
 from metor.core.daemon.managed.crypto import Crypto
-from metor.core.daemon.managed.models import SessionState, TorCommand
 from metor.core.daemon.managed.bootstrap import (
     build_runtime,
     CorruptedStorageError,
@@ -96,18 +59,17 @@ from metor.core.daemon.managed.outbox import OutboxWorker
 from metor.core.daemon.managed.network import NetworkManager, StateTracker
 from metor.core.daemon.managed.notify import NotificationService
 from metor.core.daemon import InvalidMasterPasswordError
-from metor.core.daemon.managed.local_auth import (
-    LocalAuthTracker,
-    SessionAuthAttemptResult,
-    SessionAuthContext,
-    SessionAuthPrompt,
-)
+from metor.core.daemon.managed.local_auth import SessionAuthContext
 from metor.core.daemon.managed.status import DaemonStatus
 from metor.core.daemon.handlers import (
     ConfigCommandHandler,
     DatabaseCommandHandler,
     SystemCommandHandler,
 )
+
+from .command_dispatch import DaemonCommandDispatcher
+from .session_access import SessionAccessController
+from .session_maintenance import SessionMaintenance
 
 
 class DaemonLifecycle(str, Enum):
@@ -170,16 +132,12 @@ class Daemon:
 
         self._stop_flag: threading.Event = threading.Event()
         self._stop_lock: threading.Lock = threading.Lock()
-        self._client_state_lock: threading.Lock = threading.Lock()
         self._lifecycle: DaemonLifecycle = (
             DaemonLifecycle.LOCKED if start_locked else DaemonLifecycle.UNLOCKED
         )
         self._is_stopping: bool = False
         self._runtime_stop_flag: threading.Event = threading.Event()
         self._require_session_auth: bool = require_session_auth
-        self._authenticated_clients: Set[socket.socket] = set()
-        self._session_consumers: Set[socket.socket] = set()
-        self._local_auth: LocalAuthTracker = LocalAuthTracker()
         self._transport_state: StateTracker = StateTracker()
 
         self._crypto: Optional[Crypto] = None
@@ -195,11 +153,19 @@ class Daemon:
         )
         self._outbox: Optional[OutboxWorker] = None
         self._network: Optional[NetworkManager] = None
+        self._session_maintenance: Optional[SessionMaintenance] = None
 
-        self._config_handler: ConfigCommandHandler = ConfigCommandHandler(self._pm)
-        self._db_handler: Optional[DatabaseCommandHandler] = None
-        self._sys_handler: Optional[SystemCommandHandler] = None
-        self._network_handler: Optional[NetworkCommandHandler] = None
+        self._command_dispatcher: DaemonCommandDispatcher = DaemonCommandDispatcher(
+            ConfigCommandHandler(self._pm),
+            self._send_to_client,
+        )
+        self._session_access: SessionAccessController = SessionAccessController(
+            require_auth=require_session_auth,
+            send_callback=self._send_to_client,
+            lockout_timeout_callback=self._get_local_auth_lockout_timeout,
+            failure_limit_callback=self._get_local_auth_failure_limit,
+            live_consumer_available_callback=self._on_live_consumer_available,
+        )
 
         if (
             km is not None
@@ -246,7 +212,7 @@ class Daemon:
         self._mm = runtime.mm
         self._blob_store = runtime.blob_store
         self._transport_state = StateTracker()
-        self._local_auth.install_context(runtime.session_auth)
+        self._session_access.install_context(runtime.session_auth)
 
         self._crypto = Crypto(runtime.km)
         self._network = NetworkManager(
@@ -257,7 +223,7 @@ class Daemon:
             self._crypto,
             self._broadcast_ipc_event,
             self._ipc.has_active_clients,
-            self._has_session_consumers,
+            self._session_access.has_session_consumers,
             self._notification_service.dispatch,
             self._runtime_stop_flag,
             config=self._pm.config,
@@ -274,17 +240,23 @@ class Daemon:
             state=self._transport_state,
             error_callback=self._on_runtime_internal_error,
         )
-        self._db_handler = DatabaseCommandHandler(
+        self._session_maintenance = SessionMaintenance(
+            network=self._network,
+            state=self._transport_state,
+            mm=runtime.mm,
+            config=self._pm.config,
+        )
+        database_handler = DatabaseCommandHandler(
             self._pm,
             runtime.cm,
             runtime.hm,
             runtime.mm,
             self._network.get_active_onions,
             self._broadcast_ipc_event,
-            self._send_read_receipts,
+            self._session_maintenance.send_read_receipts,
         )
-        self._sys_handler = SystemCommandHandler(self._pm, runtime.tm)
-        self._network_handler = NetworkCommandHandler(
+        system_handler = SystemCommandHandler(self._pm, runtime.tm)
+        network_handler = NetworkCommandHandler(
             runtime.tm,
             runtime.cm,
             runtime.hm,
@@ -293,8 +265,13 @@ class Daemon:
             self._outbox,
             self._broadcast_ipc_event,
             self._send_to_client,
-            self._register_session_consumer,
+            self._session_access.register_session_consumer,
             config=self._pm.config,
+        )
+        self._command_dispatcher.install_runtime_handlers(
+            network=network_handler,
+            database=database_handler,
+            system=system_handler,
         )
 
     def _on_runtime_internal_error(self, message: str) -> None:
@@ -328,10 +305,10 @@ class Daemon:
             None
         """
         stamp_request_id(event)
-        if self._requires_session_auth():
-            with self._client_state_lock:
-                recipients: set[socket.socket] = set(self._authenticated_clients)
-
+        if self._session_access.requires_auth():
+            recipients: set[socket.socket] = (
+                self._session_access.authenticated_recipients()
+            )
             if not recipients:
                 return
 
@@ -340,34 +317,16 @@ class Daemon:
 
         self._ipc.broadcast(event)
 
-    def _has_session_consumers(self) -> bool:
-        """
-        Checks whether an interactive chat session is currently attached.
+    def _on_live_consumer_available(self) -> None:
+        """Notifies the active network runtime about its first live consumer.
 
         Args:
             None
 
         Returns:
-            bool: True if at least one live consumer is connected.
-        """
-        with self._client_state_lock:
-            return bool(self._session_consumers)
-
-    def _register_session_consumer(self, conn: socket.socket) -> None:
-        """
-        Marks one IPC session as an interactive live-message consumer.
-
-        Args:
-            conn (socket.socket): The IPC session socket.
-
-        Returns:
             None
         """
-        with self._client_state_lock:
-            had_consumers: bool = bool(self._session_consumers)
-            self._session_consumers.add(conn)
-
-        if not had_consumers and self._network is not None:
+        if self._network is not None:
             self._network.on_live_consumer_available()
 
     def _send_to_client(self, conn: socket.socket, event: IpcEvent) -> None:
@@ -383,33 +342,6 @@ class Daemon:
         """
         stamp_request_id(event)
         self._ipc.send_to(conn, event)
-
-    def _send_read_receipts(self, onion: str, msg_ids: List[str]) -> None:
-        """
-        Sends one transient read-receipt frame per consumed message over the live session.
-
-        Read receipts are best-effort and strictly transient: failures are
-        swallowed silently because a read receipt must never crash the daemon.
-
-        Args:
-            onion (str): The peer onion identity.
-            msg_ids (List[str]): The locally consumed message identifiers.
-
-        Returns:
-            None
-        """
-        if not self._transport_state.is_live_active(onion):
-            return
-
-        conn: Optional[socket.socket] = self._transport_state.get_connection(onion)
-        if conn is None:
-            return
-
-        try:
-            for msg_id in msg_ids:
-                conn.sendall(f'{TorCommand.READ.value} {msg_id}\n'.encode('utf-8'))
-        except Exception:
-            pass
 
     def _sig_handler(self, signum: int, frame: Optional[types.FrameType]) -> None:
         """
@@ -444,74 +376,12 @@ class Daemon:
 
             while not self._stop_flag.is_set():
                 time.sleep(Constants.WORKER_SLEEP_SEC)
-                self._check_live_idle_timeouts()
+                if self._session_maintenance is not None:
+                    self._session_maintenance.check_idle_timeouts()
         except KeyboardInterrupt:
             pass
         finally:
             self.stop()
-
-    def _check_live_idle_timeouts(self) -> None:
-        """
-        Closes stable CONNECTED live sessions that stayed unfocused and idle.
-
-        Only fully connected sessions without pending live messages are
-        considered; sessions inside grace, retunnel, or auto-reconnect flows are
-        never touched. The disconnect reuses the existing controller machinery,
-        so DisconnectedEvent emission and pending-live-to-drop promotion follow
-        the established rules.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-        if self._network is None or self._mm is None:
-            return
-
-        idle_timeout: float = self._pm.config.get_float(SettingKey.LIVE_IDLE_TIMEOUT)
-        if idle_timeout <= 0:
-            return
-
-        now: float = time.time()
-        for onion in self._transport_state.get_active_connections_keys():
-            if (
-                self._transport_state.get_live_state(onion)
-                is not SessionState.CONNECTED
-            ):
-                continue
-
-            if self._transport_state.get_focus_count(onion) > 0:
-                continue
-
-            if self._transport_state.is_retunneling(onion):
-                continue
-
-            if self._transport_state.has_live_reconnect_grace(onion):
-                continue
-
-            if self._transport_state.has_scheduled_auto_reconnect(onion):
-                continue
-
-            if self._transport_state.has_outbound_attempt(onion):
-                continue
-
-            if self._transport_state.has_unacked_messages(onion):
-                continue
-
-            if self._mm.get_pending_live_outbox(onion):
-                continue
-
-            last_activity: Optional[float] = (
-                self._transport_state.get_session_last_activity(onion)
-            )
-            if last_activity is None:
-                continue
-
-            if now - last_activity <= idle_timeout:
-                continue
-
-            self._network.disconnect(onion, initiated_by_self=True)
 
     def _start_subsystems(self) -> bool:
         """
@@ -572,10 +442,7 @@ class Daemon:
             self._is_stopping = True
             self._stop_flag.set()
             self._runtime_stop_flag.set()
-            with self._client_state_lock:
-                self._authenticated_clients.clear()
-                self._session_consumers.clear()
-            self._local_auth.install_context(None)
+            self._session_access.clear_all()
 
         try:
             if self._outbox is not None:
@@ -654,10 +521,7 @@ class Daemon:
 
         # Revoke access first, then tear down decrypted resources.  The locked
         # event is emitted only after this method completes.
-        with self._client_state_lock:
-            self._authenticated_clients.clear()
-            self._session_consumers.clear()
-        self._local_auth.install_context(None)
+        self._session_access.clear_all()
 
         try:
             if self._outbox is not None:
@@ -665,8 +529,7 @@ class Daemon:
         except Exception:
             cleanup_succeeded = False
         try:
-            if self._network_handler is not None:
-                self._network_handler.clear_all_focus()
+            self._command_dispatcher.clear_all_focus()
         except Exception:
             cleanup_succeeded = False
         try:
@@ -702,11 +565,10 @@ class Daemon:
         except Exception:
             cleanup_succeeded = False
 
-        self._network_handler = None
-        self._db_handler = None
-        self._sys_handler = None
+        self._command_dispatcher.clear_runtime_handlers()
         self._network = None
         self._outbox = None
+        self._session_maintenance = None
         self._crypto = None
         self._tm = None
         self._cm = None
@@ -752,61 +614,8 @@ class Daemon:
         Returns:
             None
         """
-        with self._client_state_lock:
-            self._authenticated_clients.discard(conn)
-            self._session_consumers.discard(conn)
-        self._local_auth.clear_connection(conn)
-
-        if self._network_handler is not None:
-            self._network_handler.clear_client_focus(conn)
-
-    def _requires_session_auth(self) -> bool:
-        """
-        Determines whether password-backed per-session IPC authentication is active.
-
-        Args:
-            None
-
-        Returns:
-            bool: True when local auth is enabled and a verifier context exists.
-        """
-        return self._require_session_auth and bool(self._local_auth.is_enabled())
-
-    def _build_session_auth_event(
-        self,
-        event_type: EventType,
-        prompt: SessionAuthPrompt,
-    ) -> IpcEvent:
-        """
-        Creates one IPC event carrying the current session-auth challenge payload.
-
-        Args:
-            event_type (EventType): The event type to create.
-            prompt (SessionAuthPrompt): The challenge payload.
-
-        Returns:
-            IpcEvent: The typed IPC event.
-        """
-        return create_event(
-            event_type,
-            {'challenge': prompt.challenge, 'salt': prompt.salt},
-        )
-
-    @staticmethod
-    def _build_local_auth_rate_limited_event(retry_after: int) -> IpcEvent:
-        """
-        Creates one IPC event describing the active local-auth cooldown window.
-
-        Args:
-            retry_after (int): Remaining whole seconds before retry is allowed.
-
-        Returns:
-            IpcEvent: The typed rate-limit event.
-        """
-        return create_event(
-            EventType.LOCAL_AUTH_RATE_LIMITED,
-            {'retry_after': retry_after},
-        )
+        self._session_access.disconnect(conn)
+        self._command_dispatcher.clear_client_focus(conn)
 
     def _get_local_auth_lockout_timeout(self) -> float:
         """
@@ -831,22 +640,6 @@ class Daemon:
             int: The maximum invalid attempts before disconnect.
         """
         return max(1, self._pm.config.get_int(SettingKey.LOCAL_AUTH_FAILURE_LIMIT))
-
-    @staticmethod
-    def _disconnect_ipc_client(conn: socket.socket) -> None:
-        """
-        Forcefully closes one IPC socket after too many invalid local auth attempts.
-
-        Args:
-            conn (socket.socket): The IPC client socket.
-
-        Returns:
-            None
-        """
-        try:
-            conn.close()
-        except OSError:
-            pass
 
     def _process_ui_command(self, cmd: IpcCommand, conn: socket.socket) -> None:
         """
@@ -878,108 +671,11 @@ class Daemon:
         Returns:
             None
         """
-        with self._client_state_lock:
-            is_authenticated: bool = conn in self._authenticated_clients
-
-        local_auth_retry_after: Optional[int] = (
-            self._local_auth.get_retry_after_seconds()
-        )
-        if (
-            not is_authenticated
-            and local_auth_retry_after is not None
-            and (
-                self._lifecycle is not DaemonLifecycle.UNLOCKED
-                or self._requires_session_auth()
-            )
+        if not self._session_access.authorize(
+            cmd,
+            conn,
+            runtime_unlocked=self._lifecycle is DaemonLifecycle.UNLOCKED,
         ):
-            self._ipc.send_to(
-                conn,
-                self._build_local_auth_rate_limited_event(local_auth_retry_after),
-            )
-            return
-
-        if (
-            self._requires_session_auth()
-            and self._lifecycle is DaemonLifecycle.UNLOCKED
-        ):
-            if not isinstance(cmd, AuthenticateSessionCommand):
-                if not is_authenticated:
-                    prompt: Optional[SessionAuthPrompt] = (
-                        self._local_auth.issue_session_challenge(conn)
-                    )
-                    if prompt is not None:
-                        self._ipc.send_to(
-                            conn,
-                            self._build_session_auth_event(
-                                EventType.AUTH_REQUIRED,
-                                prompt,
-                            ),
-                        )
-                    return
-
-        if isinstance(cmd, AuthenticateSessionCommand):
-            if self._lifecycle is not DaemonLifecycle.UNLOCKED:
-                self._ipc.send_to(conn, create_event(EventType.DAEMON_LOCKED))
-                return
-
-            if not self._requires_session_auth():
-                with self._client_state_lock:
-                    self._authenticated_clients.add(conn)
-                self._ipc.send_to(
-                    conn,
-                    create_event(EventType.SESSION_AUTHENTICATED),
-                )
-                return
-
-            with self._client_state_lock:
-                already_authenticated: bool = conn in self._authenticated_clients
-
-            if already_authenticated:
-                self._ipc.send_to(
-                    conn,
-                    create_event(EventType.SESSION_AUTHENTICATED),
-                )
-                return
-
-            result: SessionAuthAttemptResult = self._local_auth.verify_session_proof(
-                conn,
-                cmd.proof,
-                self._get_local_auth_lockout_timeout(),
-                self._get_local_auth_failure_limit(),
-            )
-
-            if result.authenticated:
-                with self._client_state_lock:
-                    self._authenticated_clients.add(conn)
-                self._ipc.send_to(
-                    conn,
-                    create_event(EventType.SESSION_AUTHENTICATED),
-                )
-                return
-
-            local_auth_retry_after = self._local_auth.get_retry_after_seconds()
-            if local_auth_retry_after is not None:
-                self._ipc.send_to(
-                    conn,
-                    self._build_local_auth_rate_limited_event(
-                        local_auth_retry_after,
-                    ),
-                )
-                return
-
-            if result.retry_prompt is not None:
-                self._ipc.send_to(
-                    conn,
-                    self._build_session_auth_event(
-                        EventType.INVALID_PASSWORD,
-                        result.retry_prompt,
-                    ),
-                )
-            else:
-                self._ipc.send_to(conn, create_event(EventType.INVALID_PASSWORD))
-
-            if result.should_disconnect:
-                self._disconnect_ipc_client(conn)
             return
 
         if (
@@ -1015,17 +711,16 @@ class Daemon:
                 )
             except InvalidMasterPasswordError:
                 self._lifecycle = DaemonLifecycle.LOCKED
-                should_disconnect: bool = self._local_auth.register_invalid_unlock(
-                    conn,
-                    self._get_local_auth_lockout_timeout(),
-                    self._get_local_auth_failure_limit(),
+                should_disconnect: bool = self._session_access.register_invalid_unlock(
+                    conn
                 )
-                local_auth_retry_after = self._local_auth.get_retry_after_seconds()
+                local_auth_retry_after = self._session_access.retry_after_seconds()
                 if local_auth_retry_after is not None:
                     self._ipc.send_to(
                         conn,
-                        self._build_local_auth_rate_limited_event(
-                            local_auth_retry_after,
+                        create_event(
+                            EventType.LOCAL_AUTH_RATE_LIMITED,
+                            {'retry_after': local_auth_retry_after},
                         ),
                     )
                     return
@@ -1034,7 +729,10 @@ class Daemon:
                     create_event(EventType.INVALID_PASSWORD),
                 )
                 if should_disconnect:
-                    self._disconnect_ipc_client(conn)
+                    try:
+                        conn.close()
+                    except OSError:
+                        pass
                 return
             except CorruptedStorageError:
                 self._lifecycle = DaemonLifecycle.LOCKED
@@ -1044,9 +742,8 @@ class Daemon:
             self._install_runtime(runtime)
 
             self._lifecycle = DaemonLifecycle.UNLOCKED
-            self._local_auth.clear_connection(conn)
-            with self._client_state_lock:
-                self._authenticated_clients.add(conn)
+            self._session_access.clear_connection_auth(conn)
+            self._session_access.mark_authenticated(conn)
             if not self._start_subsystems():
                 return
             self._ipc.send_to(conn, create_event(EventType.DAEMON_UNLOCKED))
@@ -1094,70 +791,4 @@ class Daemon:
             threading.Thread(target=self._nuke_data, daemon=True).start()
             return
 
-        # --- DELEGATION TO DEDICATED HANDLERS ---
-
-        if isinstance(
-            cmd,
-            (
-                SetSettingCommand,
-                GetSettingCommand,
-                GetSettingsListCommand,
-                SetConfigCommand,
-                GetConfigCommand,
-                GetConfigListCommand,
-                SyncConfigCommand,
-            ),
-        ):
-            self._ipc.send_to(conn, self._config_handler.handle(cmd))
-
-        elif isinstance(
-            cmd,
-            (
-                InitCommand,
-                GetChatStartupStateCommand,
-                GetConnectionsCommand,
-                ConnectCommand,
-                DisconnectCommand,
-                AcceptCommand,
-                RejectCommand,
-                SendMessageCommand,
-                RegisterLiveConsumerCommand,
-                FallbackCommand,
-                SwitchCommand,
-                RetunnelCommand,
-                GetTransportStateCommand,
-            ),
-        ):
-            if self._network_handler is None:
-                self._ipc.send_to(conn, create_event(EventType.DAEMON_OFFLINE))
-                return
-            self._network_handler.handle(cmd, conn)
-
-        elif isinstance(
-            cmd,
-            (
-                GetContactsListCommand,
-                AddContactCommand,
-                RemoveContactCommand,
-                RenameContactCommand,
-                ClearContactsCommand,
-                ClearProfileDbCommand,
-                GetHistoryCommand,
-                GetRawHistoryCommand,
-                ClearHistoryCommand,
-                GetMessagesCommand,
-                ClearMessagesCommand,
-                GetInboxCommand,
-                MarkReadCommand,
-            ),
-        ):
-            if self._db_handler is None:
-                self._ipc.send_to(conn, create_event(EventType.DAEMON_OFFLINE))
-                return
-            self._ipc.send_to(conn, self._db_handler.handle(cmd))
-
-        elif isinstance(cmd, (GetAddressCommand, GenerateAddressCommand)):
-            if self._sys_handler is None:
-                self._ipc.send_to(conn, create_event(EventType.DAEMON_OFFLINE))
-                return
-            self._ipc.send_to(conn, self._sys_handler.handle(cmd))
+        self._command_dispatcher.dispatch(cmd, conn)

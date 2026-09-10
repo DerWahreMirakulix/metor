@@ -1580,7 +1580,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         daemon.stop = Mock()
         daemon._on_runtime_internal_error = Mock()
         with patch(
-            'metor.core.daemon.managed.engine.destroy_profile_storage'
+            'metor.core.daemon.managed.engine.daemon.destroy_profile_storage'
         ) as destroy:
             daemon._nuke_data()
         destroy.assert_called_once_with(

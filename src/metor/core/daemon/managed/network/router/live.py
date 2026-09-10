@@ -1,16 +1,16 @@
 """Live-message routing, durable acceptance, and acknowledgement handling."""
 
-# mypy: disable-error-code=attr-defined
-
 import socket
 from datetime import datetime, timezone
-from typing import Optional, Tuple, cast
+from typing import TYPE_CHECKING, Callable, Optional, Tuple, cast
 
 from metor.core.api import (
     AckEvent,
+    AutoFallbackQueuedEvent,
     ContentType,
     Delivery,
     InboxNotificationEvent,
+    IpcEvent,
     MessageReceivedEvent,
     ReadReceiptEvent,
     TextContent,
@@ -27,11 +27,57 @@ from metor.data import (
 )
 
 # Local Package Imports
+from ..state import StateTracker
+from ...notify import NotificationPayload
 from .codec import build_message_frame, decode_live_payload
 
+if TYPE_CHECKING:
+    from metor.data import ContactManager, HistoryManager, MessageManager
+    from metor.data.profile import Config
 
-class LiveMessageRouting:
+
+class LiveMessageRouter:
     """Owns outbound live delivery and crash-safe inbound live acceptance."""
+
+    def __init__(
+        self,
+        cm: 'ContactManager',
+        hm: 'HistoryManager',
+        mm: 'MessageManager',
+        state: StateTracker,
+        broadcast_callback: Callable[[IpcEvent], None],
+        has_clients_callback: Callable[[], bool],
+        has_live_consumers_callback: Callable[[], bool],
+        notify_callback: Callable[[NotificationPayload], None],
+        config: 'Config',
+    ) -> None:
+        """Initializes live routing with its explicit collaborators.
+
+        Args:
+            cm (ContactManager): Address book manager.
+            hm (HistoryManager): Event history manager.
+            mm (MessageManager): Message persistence manager.
+            state (StateTracker): Connection and pending-message state.
+            broadcast_callback (Callable[[IpcEvent], None]): IPC event broadcaster.
+            has_clients_callback (Callable[[], bool]): Connected-client check.
+            has_live_consumers_callback (Callable[[], bool]): Live-consumer check.
+            notify_callback (Callable[[NotificationPayload], None]): Detached notifier.
+            config (Config): Profile configuration.
+
+        Returns:
+            None
+        """
+        self._cm: 'ContactManager' = cm
+        self._hm: 'HistoryManager' = hm
+        self._mm: 'MessageManager' = mm
+        self._state: StateTracker = state
+        self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
+        self._has_clients_callback: Callable[[], bool] = has_clients_callback
+        self._has_live_consumers_callback: Callable[[], bool] = (
+            has_live_consumers_callback
+        )
+        self._notify_callback: Callable[[NotificationPayload], None] = notify_callback
+        self._config: 'Config' = config
 
     def _should_defer_live_message(self, onion: str) -> bool:
         """Checks whether one outbound live message should stay recoverable.
@@ -42,26 +88,12 @@ class LiveMessageRouting:
         Returns:
             bool: True if live recovery is still plausible.
         """
-        has_live_reconnect_grace = getattr(
-            self._state, 'has_live_reconnect_grace', None
-        )
-        is_retunneling = getattr(self._state, 'is_retunneling', None)
-        has_outbound_attempt = getattr(self._state, 'has_outbound_attempt', None)
-        has_scheduled_auto_reconnect = getattr(
-            self._state, 'has_scheduled_auto_reconnect', None
-        )
-        is_connected_or_pending = getattr(self._state, 'is_connected_or_pending', None)
         return (
-            bool(callable(has_live_reconnect_grace) and has_live_reconnect_grace(onion))
-            or bool(callable(is_retunneling) and is_retunneling(onion))
-            or bool(callable(has_outbound_attempt) and has_outbound_attempt(onion))
-            or bool(
-                callable(has_scheduled_auto_reconnect)
-                and has_scheduled_auto_reconnect(onion)
-            )
-            or bool(
-                callable(is_connected_or_pending) and is_connected_or_pending(onion)
-            )
+            self._state.has_live_reconnect_grace(onion)
+            or self._state.is_retunneling(onion)
+            or self._state.has_outbound_attempt(onion)
+            or self._state.has_scheduled_auto_reconnect(onion)
+            or self._state.is_connected_or_pending(onion)
         )
 
     def _queue_pending_live_message(
@@ -106,7 +138,7 @@ class LiveMessageRouting:
             return
         alias, onion = resolved
         request_id: Optional[str] = get_current_request_id()
-        self._remember_message_request_id(msg_id, request_id)
+        self._state.remember_message_request_id(msg_id, request_id)
         conn: Optional[socket.socket] = self._state.get_connection(onion)
         timestamp: str = datetime.now(timezone.utc).isoformat()
 
@@ -132,7 +164,7 @@ class LiveMessageRouting:
                 detail_code=HistoryReasonCode.AUTO_FALLBACK_TO_DROP,
             )
             self._broadcast(
-                self._auto_fallback_event(
+                AutoFallbackQueuedEvent(
                     alias=alias,
                     onion=onion,
                     msg_id=msg_id,
@@ -148,9 +180,7 @@ class LiveMessageRouting:
                     'utf-8'
                 )
             )
-            touch_activity = getattr(self._state, 'touch_session_activity', None)
-            if callable(touch_activity):
-                touch_activity(onion)
+            self._state.touch_session_activity(onion)
         except Exception:
             pass
 
@@ -224,7 +254,15 @@ class LiveMessageRouting:
                     InboxNotificationEvent(alias=alias, onion=onion, count=1)
                 )
             else:
-                self._notify_inbox(alias, onion)
+                self._notify_callback(
+                    NotificationPayload(
+                        kind='inbox_notification',
+                        peer_alias=alias,
+                        peer_onion=onion,
+                        count=1,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                    )
+                )
         return False
 
     @staticmethod
@@ -262,7 +300,7 @@ class LiveMessageRouting:
                 AckEvent(
                     msg_id=msg_id,
                     timestamp=drop_timestamp,
-                    request_id=self._pop_message_request_id(msg_id),
+                    request_id=self._state.pop_message_request_id(msg_id),
                 )
             )
             return
@@ -275,7 +313,7 @@ class LiveMessageRouting:
             AckEvent(
                 msg_id=msg_id,
                 timestamp=acked_msg[1] if acked_msg else None,
-                request_id=self._pop_message_request_id(msg_id),
+                request_id=self._state.pop_message_request_id(msg_id),
             )
         )
 

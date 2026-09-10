@@ -1,15 +1,14 @@
 """Durable recovery and live-to-drop fallback for routed messages."""
 
-# mypy: disable-error-code=attr-defined
-
 import socket
-from typing import Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, Optional, Tuple
 
 from metor.core.api import (
     ContentType,
     Delivery,
     EventType,
     FallbackSuccessEvent,
+    IpcEvent,
     JsonValue,
     get_current_request_id,
 )
@@ -24,11 +23,45 @@ from metor.data import (
 )
 
 # Local Package Imports
+from ..state import StateTracker
 from .codec import build_message_frame
 
+if TYPE_CHECKING:
+    from metor.data import ContactManager, HistoryManager, MessageManager
+    from metor.data.profile import Config
 
-class FallbackRouting:
+
+class FallbackRouter:
     """Owns durable recovery, replay, and conversion of outbound live messages."""
+
+    def __init__(
+        self,
+        cm: 'ContactManager',
+        hm: 'HistoryManager',
+        mm: 'MessageManager',
+        state: StateTracker,
+        broadcast_callback: Callable[[IpcEvent], None],
+        config: 'Config',
+    ) -> None:
+        """Initializes fallback routing with its explicit collaborators.
+
+        Args:
+            cm (ContactManager): Address book manager.
+            hm (HistoryManager): Event history manager.
+            mm (MessageManager): Message persistence manager.
+            state (StateTracker): Pending-message and connection state.
+            broadcast_callback (Callable[[IpcEvent], None]): IPC event broadcaster.
+            config (Config): Profile configuration.
+
+        Returns:
+            None
+        """
+        self._cm: 'ContactManager' = cm
+        self._hm: 'HistoryManager' = hm
+        self._mm: 'MessageManager' = mm
+        self._state: StateTracker = state
+        self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
+        self._config: 'Config' = config
 
     def _get_pending_live_messages(
         self,

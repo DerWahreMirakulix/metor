@@ -29,8 +29,8 @@ from metor.data.settings_registry import (
 from metor.utils import FileLock, TypeCaster, validate_json_file
 
 # Local Package Imports
-from metor.data.profile.paths import Paths
-from metor.data.profile.models import (
+from ..paths import Paths
+from ..models import (
     ProfileConfigKey,
     ProfileConfigValue,
     NestedConfigDict,
@@ -40,6 +40,7 @@ from metor.data.profile.models import (
     ProfileConfigValidationError,
     validate_profile_config_value,
 )
+from .validation import validate_profile_config_values
 
 
 class Config:
@@ -77,68 +78,9 @@ class Config:
         """
         config_file: Path = self._paths.get_config_file()
         validate_json_file(config_file)
-
         if not config_file.exists():
             return
-
-        raw_data: Dict[str, ProfileConfigValue] = self._load_raw_data()
-
-        for key_str, raw_value in raw_data.items():
-            if key_str.startswith('ui.'):
-                try:
-                    frontend_id: str
-                    spec_key: str
-                    frontend_id, spec_key = split_namespace_key(key_str)
-                except ValueError as exc:
-                    raise ValueError(
-                        f"'{config_file.name}' contains an unknown config key '{key_str}'."
-                    ) from exc
-
-                spec = get_ui_setting_spec(frontend_id, spec_key)
-                if spec is None:
-                    raise ValueError(
-                        f"'{config_file.name}' contains an unknown config key '{key_str}'."
-                    )
-
-                try:
-                    validate_ui_setting_value(
-                        spec,
-                        cast(SettingValue, raw_value),
-                    )
-                except (SettingValidationError, TypeError) as exc:
-                    raise ValueError(
-                        f"'{config_file.name}' contains an invalid value for '{key_str}': {exc}"
-                    ) from exc
-                continue
-
-            try:
-                setting_key: SettingKey = SettingKey(key_str)
-            except ValueError:
-                try:
-                    profile_key: ProfileConfigKey = ProfileConfigKey(key_str)
-                except ValueError as exc:
-                    raise ValueError(
-                        f"'{config_file.name}' contains an unknown config key '{key_str}'."
-                    ) from exc
-
-                try:
-                    validate_profile_config_value(profile_key, raw_value)
-                except (ProfileConfigValidationError, TypeError) as exc:
-                    raise ValueError(
-                        f"'{config_file.name}' contains an invalid value for '{key_str}': {exc}"
-                    ) from exc
-                continue
-
-            try:
-                Settings.validate_value(
-                    setting_key,
-                    cast(SettingValue, raw_value),
-                    for_profile_override=True,
-                )
-            except (SettingValidationError, TypeError) as exc:
-                raise ValueError(
-                    f"'{config_file.name}' contains an invalid value for '{key_str}': {exc}"
-                ) from exc
+        validate_profile_config_values(config_file, self._load_raw_data())
 
     @staticmethod
     def _flatten_nested_data(

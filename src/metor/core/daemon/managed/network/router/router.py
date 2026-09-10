@@ -1,24 +1,31 @@
 """Thin composition root for application-layer message routing."""
 
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Callable, Optional, cast
+import socket
+from typing import TYPE_CHECKING, Callable, Dict, Optional, Tuple
 
-from metor.core.api import AutoFallbackQueuedEvent, IpcEvent
-from metor.data import ContactManager, HistoryManager, MessageManager
+from metor.core.api import EventType, IpcEvent, JsonValue
+from metor.data import (
+    ContactManager,
+    HistoryActor,
+    HistoryManager,
+    HistoryReasonCode,
+    MessageManager,
+)
 
 # Local Package Imports
-from ..state import StateTracker
 from ...notify import NotificationPayload
-from .drop import DropMessageRouting
-from .fallback import FallbackRouting
-from .live import LiveMessageRouting
+from ..state import StateTracker
+from ..stream import TcpStreamReader
+from .drop import DropMessageRouter
+from .fallback import FallbackRouter
+from .live import LiveMessageRouter
 
 if TYPE_CHECKING:
     from metor.data.profile import Config
 
 
-class MessageRouter(FallbackRouting, LiveMessageRouting, DropMessageRouting):
-    """Composes routing policies while keeping integration ownership explicit."""
+class MessageRouter:
+    """Exposes one routing boundary backed by explicit route components."""
 
     def __init__(
         self,
@@ -32,7 +39,7 @@ class MessageRouter(FallbackRouting, LiveMessageRouting, DropMessageRouting):
         notify_callback: Callable[[NotificationPayload], None],
         config: 'Config',
     ) -> None:
-        """Initializes the composed message-routing subsystem.
+        """Composes the live, drop, and fallback routing components.
 
         Args:
             cm (ContactManager): Address book manager.
@@ -48,81 +55,185 @@ class MessageRouter(FallbackRouting, LiveMessageRouting, DropMessageRouting):
         Returns:
             None
         """
-        self._cm: ContactManager = cm
-        self._hm: HistoryManager = hm
-        self._mm: MessageManager = mm
-        self._state: StateTracker = state
-        self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
-        self._has_clients_callback: Callable[[], bool] = has_clients_callback
-        self._has_live_consumers_callback: Callable[[], bool] = (
-            has_live_consumers_callback
+        self._live: LiveMessageRouter = LiveMessageRouter(
+            cm=cm,
+            hm=hm,
+            mm=mm,
+            state=state,
+            broadcast_callback=broadcast_callback,
+            has_clients_callback=has_clients_callback,
+            has_live_consumers_callback=has_live_consumers_callback,
+            notify_callback=notify_callback,
+            config=config,
         )
-        self._notify_callback: Callable[[NotificationPayload], None] = notify_callback
-        self._config: 'Config' = config
+        self._drop: DropMessageRouter = DropMessageRouter(
+            cm=cm,
+            hm=hm,
+            mm=mm,
+            broadcast_callback=broadcast_callback,
+            has_clients_callback=has_clients_callback,
+            notify_callback=notify_callback,
+            config=config,
+        )
+        self._fallback: FallbackRouter = FallbackRouter(
+            cm=cm,
+            hm=hm,
+            mm=mm,
+            state=state,
+            broadcast_callback=broadcast_callback,
+            config=config,
+        )
 
-    def _remember_message_request_id(
-        self, msg_id: str, request_id: Optional[str]
+    def send_message(self, target: str, msg: str, msg_id: str) -> None:
+        """Delegates outbound live delivery to the live router.
+
+        Args:
+            target (str): The target alias or onion.
+            msg (str): The message content.
+            msg_id (str): The unique message identifier.
+
+        Returns:
+            None
+        """
+        self._live.send_message(target, msg, msg_id)
+
+    def process_incoming_msg(
+        self, conn: socket.socket, onion: str, payload_id: str, b64_payload: str
+    ) -> bool:
+        """Delegates inbound live-message acceptance to the live router.
+
+        Args:
+            conn (socket.socket): The active session socket.
+            onion (str): The peer onion identity.
+            payload_id (str): The transport fallback message identifier.
+            b64_payload (str): The Base64-encoded message envelope.
+
+        Returns:
+            bool: True when the session must close for backlog pressure.
+        """
+        return self._live.process_incoming_msg(conn, onion, payload_id, b64_payload)
+
+    def process_incoming_ack(self, onion: str, msg_id: str) -> None:
+        """Delegates incoming acknowledgement handling to the live router.
+
+        Args:
+            onion (str): The peer onion identity.
+            msg_id (str): The acknowledged message identifier.
+
+        Returns:
+            None
+        """
+        self._live.process_incoming_ack(onion, msg_id)
+
+    def process_incoming_read_receipt(self, onion: str, msg_id: str) -> None:
+        """Delegates incoming read-receipt handling to the live router.
+
+        Args:
+            onion (str): The peer onion identity.
+            msg_id (str): The consumed message identifier.
+
+        Returns:
+            None
+        """
+        self._live.process_incoming_read_receipt(onion, msg_id)
+
+    def process_incoming_drop_over_session(
+        self, conn: socket.socket, onion: str, payload_id: str, b64_payload: str
     ) -> None:
-        """Stores optional request correlation in shared state.
+        """Delegates a session-carried drop frame to the drop router.
 
         Args:
-            msg_id (str): The logical message identifier.
-            request_id (Optional[str]): The originating IPC request identifier.
+            conn (socket.socket): The active session socket.
+            onion (str): The peer onion identity.
+            payload_id (str): The transport fallback message identifier.
+            b64_payload (str): The Base64-encoded message envelope.
 
         Returns:
             None
         """
-        remember = getattr(self._state, 'remember_message_request_id', None)
-        if callable(remember):
-            remember(msg_id, request_id)
-
-    def _pop_message_request_id(self, msg_id: str) -> Optional[str]:
-        """Retrieves and removes optional request correlation from shared state.
-
-        Args:
-            msg_id (str): The logical message identifier.
-
-        Returns:
-            Optional[str]: The originating request identifier, if present.
-        """
-        pop = getattr(self._state, 'pop_message_request_id', None)
-        return cast(Optional[str], pop(msg_id)) if callable(pop) else None
-
-    def _notify_inbox(self, alias: str, onion: Optional[str]) -> None:
-        """Emits one detached inbox notification without IPC clients.
-
-        Args:
-            alias (str): The peer alias.
-            onion (Optional[str]): The peer onion identity.
-
-        Returns:
-            None
-        """
-        self._notify_callback(
-            NotificationPayload(
-                kind='inbox_notification',
-                peer_alias=alias,
-                peer_onion=onion,
-                count=1,
-                timestamp=datetime.now(timezone.utc).isoformat(),
-            )
+        self._drop.process_incoming_drop_over_session(
+            conn, onion, payload_id, b64_payload
         )
 
-    @staticmethod
-    def _auto_fallback_event(
-        alias: str, onion: str, msg_id: str, request_id: Optional[str]
-    ) -> AutoFallbackQueuedEvent:
-        """Builds the IPC event for automatic live-to-drop fallback.
+    def process_async_drop(
+        self, conn: socket.socket, stream: TcpStreamReader, onion: str
+    ) -> None:
+        """Delegates a dedicated drop-tunnel stream to the drop router.
+
+        Args:
+            conn (socket.socket): The dedicated drop-tunnel socket.
+            stream (TcpStreamReader): The constrained tunnel stream.
+            onion (str): The peer onion identity.
+
+        Returns:
+            None
+        """
+        self._drop.process_async_drop(conn, stream, onion)
+
+    def convert_unacked_messages_to_drop(
+        self,
+        alias: str,
+        onion: str,
+        request_id: Optional[str] = None,
+        emit_event: bool = True,
+        history_actor: HistoryActor = HistoryActor.SYSTEM,
+        history_reason_code: HistoryReasonCode = (
+            HistoryReasonCode.UNACKED_LIVE_CONVERTED_TO_DROP
+        ),
+    ) -> Dict[str, Tuple[str, str]]:
+        """Delegates terminal live-to-drop conversion to the fallback router.
 
         Args:
             alias (str): The peer alias.
             onion (str): The peer onion identity.
-            msg_id (str): The stable logical message identifier.
-            request_id (Optional[str]): The originating IPC request identifier.
+            request_id (Optional[str]): Optional request correlation identifier.
+            emit_event (bool): Whether to emit a fallback-success event.
+            history_actor (HistoryActor): The history actor for queued-drop logging.
+            history_reason_code (HistoryReasonCode): The queued-drop history reason.
 
         Returns:
-            AutoFallbackQueuedEvent: The fallback notification event.
+            Dict[str, Tuple[str, str]]: The converted unacknowledged messages.
         """
-        return AutoFallbackQueuedEvent(
-            alias=alias, onion=onion, msg_id=msg_id, request_id=request_id
+        return self._fallback.convert_unacked_messages_to_drop(
+            alias,
+            onion,
+            request_id=request_id,
+            emit_event=emit_event,
+            history_actor=history_actor,
+            history_reason_code=history_reason_code,
         )
+
+    def replay_unacked_messages(self, onion: str) -> list[str]:
+        """Delegates pending live replay to the fallback router.
+
+        Args:
+            onion (str): The peer onion identity.
+
+        Returns:
+            list[str]: The message IDs replayed successfully.
+        """
+        return self._fallback.replay_unacked_messages(onion)
+
+    def force_fallback(
+        self, target: str
+    ) -> Tuple[bool, EventType, Dict[str, JsonValue]]:
+        """Delegates explicit live-to-drop fallback to the fallback router.
+
+        Args:
+            target (str): The target alias or onion address.
+
+        Returns:
+            Tuple[bool, EventType, Dict[str, JsonValue]]: The operation result.
+        """
+        return self._fallback.force_fallback(target)
+
+    def finalize_pending_live_messages(self) -> None:
+        """Delegates shutdown fallback finalization to the fallback router.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self._fallback.finalize_pending_live_messages()

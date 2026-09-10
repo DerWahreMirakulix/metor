@@ -128,25 +128,10 @@ class StreamReceiver:
         if not awaiting_acceptance:
             return False
 
-        is_current_outbound_socket = getattr(
-            self._state,
-            'is_current_outbound_socket',
-            None,
-        )
-        is_connected_or_pending = getattr(
-            self._state,
-            'is_connected_or_pending',
-            None,
-        )
-        if not callable(is_current_outbound_socket) or not callable(
-            is_connected_or_pending
-        ):
+        if self._state.is_current_outbound_socket(onion, conn):
             return False
 
-        if is_current_outbound_socket(onion, conn):
-            return False
-
-        return bool(is_connected_or_pending(onion))
+        return self._state.is_connected_or_pending(onion)
 
     def __init__(
         self,
@@ -319,9 +304,7 @@ class StreamReceiver:
                 if not msg:
                     break
 
-                touch_activity = getattr(self._state, 'touch_session_activity', None)
-                if callable(touch_activity):
-                    touch_activity(onion)
+                self._state.touch_session_activity(onion)
 
                 if msg == TorCommand.ACCEPTED.value:
                     effective_origin: ConnectionOrigin = (
@@ -439,12 +422,7 @@ class StreamReceiver:
         except Exception:
             pass
         finally:
-            consume_local_termination = getattr(
-                self._state,
-                'consume_locally_terminated_socket',
-                None,
-            )
-            if callable(consume_local_termination) and consume_local_termination(conn):
+            if self._state.consume_locally_terminated_socket(conn):
                 return
 
             if self._is_stale_pending_acceptance_socket(

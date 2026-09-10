@@ -80,6 +80,7 @@ from metor.core.daemon.managed.network.state import (
     StateTracker,
 )
 from metor.core.daemon.managed.outbox import OutboxWorker
+from metor.core.daemon.managed.outbox.delivery import is_expected_ack_line
 from metor.core.daemon.managed.network.stream import TcpStreamReader
 from metor.data import (
     ContactManager,
@@ -1289,6 +1290,55 @@ class _DummyState:
     Provides a dummy state test double.
     """
 
+    def touch_session_activity(self, _onion: str) -> None:
+        """Records test-session activity without side effects.
+
+        Args:
+            _onion (str): The peer onion identity.
+
+        Returns:
+            None
+        """
+
+        return None
+
+    def consume_locally_terminated_socket(self, _conn: socket.socket) -> bool:
+        """Reports that the test socket was not terminated locally.
+
+        Args:
+            _conn (socket.socket): The receiver socket.
+
+        Returns:
+            bool: Always False for the base test state.
+        """
+
+        return False
+
+    def is_current_outbound_socket(self, _onion: str, _conn: socket.socket) -> bool:
+        """Reports that the base test socket remains the current attempt.
+
+        Args:
+            _onion (str): The peer onion identity.
+            _conn (socket.socket): The receiver socket.
+
+        Returns:
+            bool: Always True for the base test state.
+        """
+
+        return True
+
+    def is_connected_or_pending(self, _onion: str) -> bool:
+        """Reports no competing connection in the base test state.
+
+        Args:
+            _onion (str): The peer onion identity.
+
+        Returns:
+            bool: Always False for the base test state.
+        """
+
+        return False
+
     def consume_outbound_connected_origin(self, _onion: str) -> None:
         """
         Consumes outbound connected origin from the helper state.
@@ -2064,8 +2114,8 @@ class DaemonHardeningTests(unittest.TestCase):
         """
 
         with (
-            patch('metor.core.daemon.managed.engine.atexit.register'),
-            patch('metor.core.daemon.managed.engine.signal.signal'),
+            patch('metor.core.daemon.managed.engine.daemon.atexit.register'),
+            patch('metor.core.daemon.managed.engine.daemon.signal.signal'),
         ):
             return Daemon(
                 cast(ProfileManager, _DummyProfileManager()),
@@ -2202,12 +2252,14 @@ class DaemonHardeningTests(unittest.TestCase):
         authenticated_conn, peer = socket.socketpair()
 
         try:
-            with daemon._client_state_lock:
-                daemon._authenticated_clients.add(authenticated_conn)
+            daemon._session_access.install_context(
+                create_session_auth_context('secret')
+            )
+            daemon._session_access.mark_authenticated(authenticated_conn)
 
             event = create_event(EventType.INTERNAL_ERROR)
-            with patch.object(Daemon, '_requires_session_auth', return_value=True):
-                daemon._broadcast_ipc_event(event)
+            daemon._session_access._require_auth = True
+            daemon._broadcast_ipc_event(event)
 
             daemon._ipc.broadcast_to.assert_called_once_with(
                 event,
@@ -2255,9 +2307,9 @@ class DaemonHardeningTests(unittest.TestCase):
         """
 
         daemon = self._build_daemon(require_session_auth=False)
-        daemon._local_auth.install_context(create_session_auth_context('secret'))
+        daemon._session_access.install_context(create_session_auth_context('secret'))
 
-        self.assertFalse(daemon._requires_session_auth())
+        self.assertFalse(daemon._session_access.requires_auth())
 
     def test_create_managed_daemon_rejects_plaintext_locked_mode(self) -> None:
         """
@@ -2399,7 +2451,7 @@ class DaemonHardeningTests(unittest.TestCase):
 
         try:
             with patch(
-                'metor.core.daemon.managed.engine.threading.Thread'
+                'metor.core.daemon.managed.engine.daemon.threading.Thread'
             ) as thread_cls:
                 daemon._process_ui_command(SelfDestructCommand(), conn)
 
@@ -2426,7 +2478,9 @@ class DaemonHardeningTests(unittest.TestCase):
         conn, peer = socket.socketpair()
 
         try:
-            with patch('metor.core.daemon.managed.engine.threading.Thread') as thread:
+            with patch(
+                'metor.core.daemon.managed.engine.daemon.threading.Thread'
+            ) as thread:
                 daemon._process_ui_command(SelfDestructCommand(), conn)
 
             thread.assert_called_once()
@@ -2485,31 +2539,18 @@ class DaemonHardeningTests(unittest.TestCase):
             None
         """
 
-        daemon = self._build_daemon()
+        daemon = self._build_daemon(require_session_auth=True)
         daemon._ipc = Mock()
+        daemon._session_access.install_context(create_session_auth_context('secret'))
         conn, peer = socket.socketpair()
 
         try:
-            with (
-                patch.object(Daemon, '_requires_session_auth', return_value=True),
-                patch.object(
-                    daemon._local_auth,
-                    'issue_session_challenge',
-                    return_value=object(),
-                ),
-                patch.object(
-                    daemon,
-                    '_build_session_auth_event',
-                    return_value=create_event(EventType.AUTH_REQUIRED),
-                ) as build_auth_event,
-                patch(
-                    'metor.core.daemon.managed.engine.threading.Thread'
-                ) as thread_cls,
-            ):
+            with patch(
+                'metor.core.daemon.managed.engine.daemon.threading.Thread'
+            ) as thread_cls:
                 daemon._process_ui_command(SelfDestructCommand(), conn)
 
             thread_cls.assert_not_called()
-            build_auth_event.assert_called_once()
             daemon._ipc.send_to.assert_called_once()
             sent_event = daemon._ipc.send_to.call_args.args[1]
             self.assertIs(sent_event.event_type, EventType.AUTH_REQUIRED)
@@ -2528,35 +2569,23 @@ class DaemonHardeningTests(unittest.TestCase):
             None
         """
 
-        daemon = self._build_daemon()
+        daemon = self._build_daemon(require_session_auth=True)
         daemon._ipc = Mock()
-        daemon._network_handler = Mock()
+        daemon._session_access.install_context(create_session_auth_context('secret'))
+        network_handler = Mock()
+        daemon._command_dispatcher._network_handler = network_handler
         conn, peer = socket.socketpair()
 
         try:
-            with (
-                patch.object(Daemon, '_requires_session_auth', return_value=True),
-                patch.object(
-                    daemon._local_auth,
-                    'issue_session_challenge',
-                    return_value=object(),
+            daemon._process_ui_command(
+                InitCommand(
+                    current_version=IPC_PROTOCOL_VERSION,
+                    min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
                 ),
-                patch.object(
-                    daemon,
-                    '_build_session_auth_event',
-                    return_value=create_event(EventType.AUTH_REQUIRED),
-                ) as build_auth_event,
-            ):
-                daemon._process_ui_command(
-                    InitCommand(
-                        current_version=IPC_PROTOCOL_VERSION,
-                        min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
-                    ),
-                    conn,
-                )
+                conn,
+            )
 
-            build_auth_event.assert_called_once()
-            daemon._network_handler.handle.assert_not_called()
+            network_handler.handle.assert_not_called()
             daemon._ipc.send_to.assert_called_once()
             sent_event = daemon._ipc.send_to.call_args.args[1]
             self.assertIs(sent_event.event_type, EventType.AUTH_REQUIRED)
@@ -2577,27 +2606,14 @@ class DaemonHardeningTests(unittest.TestCase):
             None
         """
 
-        daemon = self._build_daemon()
+        daemon = self._build_daemon(require_session_auth=True)
         daemon._ipc = Mock()
+        daemon._session_access.install_context(create_session_auth_context('secret'))
         conn, peer = socket.socketpair()
 
         try:
-            with (
-                patch.object(Daemon, '_requires_session_auth', return_value=True),
-                patch.object(
-                    daemon._local_auth,
-                    'issue_session_challenge',
-                    return_value=object(),
-                ),
-                patch.object(
-                    daemon,
-                    '_build_session_auth_event',
-                    return_value=create_event(EventType.AUTH_REQUIRED),
-                ) as build_auth_event,
-            ):
-                daemon._process_ui_command(UnlockCommand(password='secret'), conn)
+            daemon._process_ui_command(UnlockCommand(password='secret'), conn)
 
-            build_auth_event.assert_called_once()
             daemon._ipc.send_to.assert_called_once()
             sent_event = daemon._ipc.send_to.call_args.args[1]
             self.assertIs(sent_event.event_type, EventType.AUTH_REQUIRED)
@@ -2695,7 +2711,7 @@ class DaemonHardeningTests(unittest.TestCase):
 
         try:
             with patch.object(
-                daemon._local_auth,
+                daemon._session_access._local_auth,
                 'get_retry_after_seconds',
                 return_value=12,
             ):
@@ -2740,10 +2756,13 @@ class DaemonHardeningTests(unittest.TestCase):
             broadcast_callback=lambda _event: None,
             stop_flag=stop_flag,
             config=cast(Config, _DummyConfig()),
+            state=StateTracker(),
             error_callback=lambda message: errors.append(message),
         )
 
-        with patch('metor.core.daemon.managed.outbox.time.sleep', return_value=None):
+        with patch(
+            'metor.core.daemon.managed.outbox.worker.time.sleep', return_value=None
+        ):
             worker._loop()
 
         self.assertEqual(
@@ -2764,14 +2783,10 @@ class DaemonHardeningTests(unittest.TestCase):
             None
         """
 
-        self.assertTrue(OutboxWorker._is_expected_ack_line('msg-1', '/ack msg-1'))
-        self.assertFalse(
-            OutboxWorker._is_expected_ack_line('msg-1', '/ack msg-1 extra')
-        )
-        self.assertFalse(OutboxWorker._is_expected_ack_line('msg-1', '/ack other'))
-        self.assertFalse(
-            OutboxWorker._is_expected_ack_line('msg-1', 'prefix /ack msg-1')
-        )
+        self.assertTrue(is_expected_ack_line('msg-1', '/ack msg-1'))
+        self.assertFalse(is_expected_ack_line('msg-1', '/ack msg-1 extra'))
+        self.assertFalse(is_expected_ack_line('msg-1', '/ack other'))
+        self.assertFalse(is_expected_ack_line('msg-1', 'prefix /ack msg-1'))
 
     def test_chat_ipc_client_applies_timeout_and_ignores_read_timeouts(self) -> None:
         """
@@ -3452,29 +3467,11 @@ class DaemonHardeningTests(unittest.TestCase):
 
                 return 'peer', 'peer-onion'
 
-        class _NoLiveState:
-            """
-            Provides a no live state helper for test scenarios.
-            """
-
-            def get_connection(self, _onion: str) -> None:
-                """
-                Returns connection for the test scenario.
-
-                Args:
-                    _onion (str): The onion.
-
-                Returns:
-                    None
-                """
-
-                return None
-
         router = MessageRouter(
             cm=cast(ContactManager, _ResolvedContactManager()),
             hm=cast(HistoryManager, history_manager),
             mm=cast(MessageManager, message_manager),
-            state=cast(StateTracker, _NoLiveState()),
+            state=StateTracker(),
             broadcast_callback=broadcasted.append,
             has_clients_callback=lambda: False,
             has_live_consumers_callback=lambda: False,
@@ -3784,14 +3781,14 @@ class DaemonHardeningTests(unittest.TestCase):
         conn = _NetworkSocket()
 
         with patch.object(
-            worker,
-            '_establish_tunnel',
+            worker._tunnels,
+            'establish',
             return_value=(
                 cast(socket.socket, conn),
                 cast(TcpStreamReader, _FakeStream(['/ack msg-1'])),
             ),
         ):
-            worker._send_single_drop(
+            worker._delivery.send_single_drop(
                 'peer-onion',
                 (
                     1,
@@ -6684,6 +6681,7 @@ class DaemonHardeningTests(unittest.TestCase):
             broadcast_callback=lambda _event: None,
             stop_flag=threading.Event(),
             config=cast(Config, _DummyConfig()),
+            state=StateTracker(),
         )
 
         class _InvalidChallengeStream:
@@ -6718,10 +6716,10 @@ class DaemonHardeningTests(unittest.TestCase):
                 return '/msg invalid'
 
         with patch(
-            'metor.core.daemon.managed.outbox.TcpStreamReader',
+            'metor.core.daemon.managed.outbox.tunnel.TcpStreamReader',
             _InvalidChallengeStream,
         ):
-            result = worker._establish_tunnel('peer-onion')
+            result = worker._tunnels.establish('peer-onion')
 
         self.assertIsNone(result)
         self.assertTrue(conn.closed)
@@ -6742,13 +6740,14 @@ class DaemonHardeningTests(unittest.TestCase):
         """
         daemon = self._build_daemon()
         daemon._ipc = Mock()
-        daemon._network_handler = Mock()
+        network_handler = Mock()
+        daemon._command_dispatcher._network_handler = network_handler
         conn, peer = socket.socketpair()
 
         try:
             daemon._process_ui_command(GetChatStartupStateCommand(), conn)
-            daemon._network_handler.handle.assert_called_once()
-            routed_cmd = daemon._network_handler.handle.call_args.args[0]
+            network_handler.handle.assert_called_once()
+            routed_cmd = network_handler.handle.call_args.args[0]
             self.assertIsInstance(routed_cmd, GetChatStartupStateCommand)
         finally:
             conn.close()
