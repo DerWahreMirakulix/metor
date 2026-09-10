@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.data.profile import ProfileManager
+from metor.versioning import IPC_PROTOCOL_MIN_SUPPORTED, IPC_PROTOCOL_VERSION
 from metor.core.api import (
     AcceptCommand,
     AutoFallbackQueuedEvent,
@@ -281,7 +282,12 @@ class ChatContractTests(unittest.TestCase):
         chat = self._build_chat(renderer)
         chat._ipc = Mock()
         chat._ipc.read_event.side_effect = [
-            InitEvent(onion='abc123'),
+            InitEvent(
+                negotiated_version=IPC_PROTOCOL_VERSION,
+                daemon_current_version=IPC_PROTOCOL_VERSION,
+                daemon_min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
+                onion='abc123',
+            ),
             ChatStartupStateEvent(
                 active=['alice'],
                 pending=[
@@ -350,7 +356,12 @@ class ChatContractTests(unittest.TestCase):
                 },
             ),
             create_event(EventType.SESSION_AUTHENTICATED),
-            InitEvent(onion='abc123'),
+            InitEvent(
+                negotiated_version=IPC_PROTOCOL_VERSION,
+                daemon_current_version=IPC_PROTOCOL_VERSION,
+                daemon_min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
+                onion='abc123',
+            ),
         ]
 
         with (
@@ -362,7 +373,13 @@ class ChatContractTests(unittest.TestCase):
                 'metor.ui.terminal.chat.engine.prompt_session_auth_proof'
             ) as prompt_mock,
         ):
-            result = chat._request_prechat_event(InitCommand(), InitEvent)
+            result = chat._request_prechat_event(
+                InitCommand(
+                    current_version=IPC_PROTOCOL_VERSION,
+                    min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
+                ),
+                InitEvent,
+            )
 
         self.assertIsNotNone(result)
         build_proof_mock.assert_called_once_with(

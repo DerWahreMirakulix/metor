@@ -19,7 +19,11 @@ from metor.data import (
     HistoryReasonCode,
     SettingKey,
 )
-from metor.utils import Constants
+from metor.versioning import (
+    PEER_PROTOCOL_MIN_SUPPORTED,
+    PEER_PROTOCOL_VERSION,
+    negotiate_protocol_generation,
+)
 
 # Local Package Imports
 from metor.core.daemon.managed.network.handshake import HandshakeProtocol
@@ -147,11 +151,17 @@ def connect_to(
                 if not challenge_line:
                     raise ConnectionError('Handshake incomplete.')
 
-                challenge, peer_version = HandshakeProtocol.parse_challenge_line(
-                    challenge_line
+                challenge, peer_current, peer_minimum = (
+                    HandshakeProtocol.parse_challenge_line(challenge_line)
                 )
-                if peer_version < Constants.PEER_PROTOCOL_MIN_SUPPORTED:
-                    raise ValueError(f'Peer protocol version {peer_version} is too old')
+                negotiated_version: int | None = negotiate_protocol_generation(
+                    PEER_PROTOCOL_VERSION,
+                    PEER_PROTOCOL_MIN_SUPPORTED,
+                    peer_current,
+                    peer_minimum,
+                )
+                if negotiated_version is None:
+                    raise ValueError('Peer protocol ranges do not overlap')
                 signature: Optional[str] = controller._crypto.sign_challenge(challenge)
 
                 if not signature:

@@ -20,11 +20,12 @@ from metor.core.api.registry import register_event
 @register_event(EventType.INIT)
 @dataclass
 class InitEvent(IpcEvent):
-    """Initializes the UI with the local onion address and protocol versions."""
+    """Initializes the UI after successful IPC generation negotiation."""
 
+    negotiated_version: int
+    daemon_current_version: int
+    daemon_min_supported: int
     onion: Optional[str] = None
-    version: Optional[int] = None
-    min_supported: Optional[int] = None
     profile: Optional[str] = None
     capabilities: List[str] = field(default_factory=list)
     event_type: EventType = field(default=EventType.INIT, init=False)

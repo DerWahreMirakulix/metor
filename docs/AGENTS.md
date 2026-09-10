@@ -5,7 +5,7 @@ Metor is a highly secure, Tor-based terminal messenger using a strict Client-Dae
 
 ## 1. Core Directives & Architecture
 
-- **Read the Guidelines:** Before writing or modifying any code, you MUST read and strictly enforce all rules defined in [CONTRIBUTE.md](./CONTRIBUTE.md) and [AUDIT.md](./AUDIT.md).
+- **Read the Guidelines:** Before writing or modifying code, read and enforce [CONTRIBUTE.md](./CONTRIBUTE.md), then load only the additional task-specific references routed below.
 - **Domain-Driven Design (DDD):** The UI (Client) is completely stateless. You MUST NEVER write code where the UI directly accesses the SQLite database, Tor keys, or daemon settings. All interactions MUST be routed via strictly typed IPC Data Transfer Objects (DTOs).
 - **No Magic Numbers:** You MUST NEVER hardcode timeouts, buffer sizes, or retry limits. Always use the centralized `Constants`, `Settings`, or `Config` classes.
 - **Centralized Parsing:** Never write custom string-to-type parsing logic. Always use `metor.utils.TypeCaster`.
@@ -14,14 +14,35 @@ Metor is a highly secure, Tor-based terminal messenger using a strict Client-Dae
 
 ## 2. Proactive Refactoring (The Boy Scout Rule)
 
-- **Auto-Correction:** Whenever you analyze, modify, or rewrite a file, you MUST proactively and silently fix any existing code in that file that violates the rules defined in [CONTRIBUTE.md](./CONTRIBUTE.md) or [AUDIT.md](./AUDIT.md) (e.g., missing type hints, legacy `os.path` usage, unprotected thread dictionaries, missing docstring args, raw numeric timeouts).
+- **Auto-Correction:** Whenever you analyze, modify, or rewrite a file, you MUST proactively and silently fix any existing code in that file that violates the relevant rules in [CONTRIBUTE.md](./CONTRIBUTE.md) or the task-specific [audit checklist](./governance/AUDIT.md) (e.g., missing type hints, legacy `os.path` usage, unprotected thread dictionaries, missing docstring args, raw numeric timeouts).
 - **Exceptions:** Do this alongside your requested task UNLESS the user explicitly instructs you to "do not refactor" or "only modify the specified lines".
 - **God-File Prevention:** Proactively enforce the canonical Module Cohesion & Size policy in [CONTRIBUTE.md](./CONTRIBUTE.md): do not add substantial behavior to an oversized production module without evaluating a cohesive, domain-boundary extraction.
 - **Package-Structure Enforcement:** God-File extraction MUST preserve or improve subsystem ownership. Do not solve file-size problems by creating flat `<concept>_*.py` siblings; promote cohesive multi-module concepts into dedicated subpackages according to [CONTRIBUTE.md](./CONTRIBUTE.md).
 
 ## 3. Reference Material
 
-Always cross-reference your architectural decisions with:
+Load the minimum relevant context for the task:
 
-- [CONTRIBUTE.md](./CONTRIBUTE.md) (Coding standards, import architecture, and design boundaries)
-- [AUDIT.md](./AUDIT.md) (Vulnerability checklists, thread-safety, and OPSEC requirements)
+- General code changes: [CONTRIBUTE.md](./CONTRIBUTE.md).
+- Architecture changes: [CONTRIBUTE.md](./CONTRIBUTE.md) and [ARCHITECTURE.md](./ARCHITECTURE.md).
+- IPC/API work: the IPC sections of [ARCHITECTURE.md](./ARCHITECTURE.md), generated [API.md](./generated/API.md), and [api.schema.json](./generated/api.schema.json).
+- Settings work: generated [SETTINGS.md](./generated/SETTINGS.md), [GLOSSARY.md](./GLOSSARY.md), and the settings implementation.
+- Release/versioning work: [RELEASING.md](./RELEASING.md), `src/metor/versioning.py`, and generated [compatibility.json](./generated/compatibility.json) where relevant.
+- Embedded UI work: [EMBEDDED_UI.md](./contracts/EMBEDDED_UI.md).
+- Security, persistence, concurrency, or audit work: [AUDIT.md](./governance/AUDIT.md).
+
+For work affecting release automation, packaging, version values, wire
+contracts, database schemas, keyslot/blob persistence, cryptographic derivation,
+or compatibility, inspect `src/metor/versioning.py` and [RELEASING.md](./RELEASING.md),
+then determine whether an explicit compatibility-axis bump is required. Never
+automatically bump a compatibility generation.
+
+## 4. Documentation Changes
+
+Before creating a document, determine its ownership class and check whether an
+existing canonical document should be extended. Never edit
+`docs/generated/*` manually; update its source or generator and regenerate it.
+Route durable documentation through the existing README or AGENTS entry point,
+preserve useful cross-links, and update scripts and workflows whenever generated
+paths move. Do not leave temporary reports at `docs/` root, and do not create
+`docs/README.md`.

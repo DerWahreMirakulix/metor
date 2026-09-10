@@ -2,7 +2,6 @@
 
 from metor.data.blob.store import (
     BLOB_FORMAT_MAGIC,
-    BLOB_FORMAT_VERSION,
     BlobAuthenticationError,
     BlobFormatError,
     BlobLifecycle,
@@ -13,6 +12,7 @@ from metor.data.blob.store import (
     InvalidBlobIdError,
     PlaintextBlobStore,
 )
+from metor.versioning import BLOB_FORMAT_VERSION
 
 __all__ = [
     'BLOB_FORMAT_MAGIC',

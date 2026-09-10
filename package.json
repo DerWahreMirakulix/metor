@@ -8,7 +8,7 @@
     "lint": "python -m ruff check --fix src/metor/ scripts/ tests/",
     "typecheck": "python -m mypy src scripts/",
     "bundle:wheelhouse": "python scripts/build_release_wheelhouse.py",
-    "docs": "python scripts/generate_api_docs.py && python scripts/generate_settings_docs.py",
+    "docs": "python scripts/generate_api_docs.py && python scripts/generate_settings_docs.py && python scripts/generate_compatibility_manifest.py",
     "ready": "npm run format:py && npm run format:md && npm run lint && npm run typecheck && npm run docs"
   },
   "repository": {

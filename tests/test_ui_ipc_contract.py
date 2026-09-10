@@ -31,6 +31,7 @@ from metor.ui.terminal.cli.handlers import CommandHandlers
 from metor.client import BufferedIpcEventReader, IpcAuthExchange
 from metor.ui.terminal import get_session_auth_prompt
 from metor.utils import Constants
+from metor.versioning import IPC_PROTOCOL_MIN_SUPPORTED, IPC_PROTOCOL_VERSION
 
 
 class _ChunkSocket:
@@ -444,7 +445,11 @@ class UiIpcContractTests(unittest.TestCase):
         challenge = 'ab' * Constants.SESSION_AUTH_CHALLENGE_BYTES
         salt = 'cd' * nacl.pwhash.argon2i.SALTBYTES
         request_id = 'req-session-1'
-        cmd = InitCommand(request_id=request_id)
+        cmd = InitCommand(
+            current_version=IPC_PROTOCOL_VERSION,
+            min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
+            request_id=request_id,
+        )
         sent_commands: list[object] = []
         socket_payload = ''.join(
             event.to_json() + '\n'
@@ -596,7 +601,11 @@ class UiIpcContractTests(unittest.TestCase):
         challenge = 'ab' * Constants.SESSION_AUTH_CHALLENGE_BYTES
         salt = 'cd' * nacl.pwhash.argon2i.SALTBYTES
         request_id = 'req-init-2'
-        cmd = InitCommand(request_id=request_id)
+        cmd = InitCommand(
+            current_version=IPC_PROTOCOL_VERSION,
+            min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
+            request_id=request_id,
+        )
         socket_payload = ''.join(
             event.to_json() + '\n'
             for event in (
@@ -656,7 +665,11 @@ class UiIpcContractTests(unittest.TestCase):
         challenge = 'ab' * Constants.SESSION_AUTH_CHALLENGE_BYTES
         salt = 'cd' * nacl.pwhash.argon2i.SALTBYTES
         request_id = 'req-empty-auth-1'
-        cmd = InitCommand(request_id=request_id)
+        cmd = InitCommand(
+            current_version=IPC_PROTOCOL_VERSION,
+            min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
+            request_id=request_id,
+        )
         socket_payload = ''.join(
             event.to_json() + '\n'
             for event in (

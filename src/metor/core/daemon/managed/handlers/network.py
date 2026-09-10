@@ -61,7 +61,12 @@ from metor.data import (
     MessageStatus,
     SettingKey,
 )
-from metor.utils import Constants, clean_onion
+from metor.utils import clean_onion
+from metor.versioning import (
+    IPC_PROTOCOL_MIN_SUPPORTED,
+    IPC_PROTOCOL_VERSION,
+    negotiate_protocol_generation,
+)
 
 # Local Package Imports
 from metor.core.daemon.managed.outbox import OutboxWorker
@@ -499,16 +504,20 @@ class NetworkCommandHandler:
         resolved: Optional[Tuple[str, str]]
 
         if isinstance(cmd, InitCommand):
-            if (
-                cmd.protocol_version is not None
-                and cmd.protocol_version < Constants.IPC_PROTOCOL_MIN_SUPPORTED
-            ):
+            negotiated_version: Optional[int] = negotiate_protocol_generation(
+                IPC_PROTOCOL_VERSION,
+                IPC_PROTOCOL_MIN_SUPPORTED,
+                cmd.current_version,
+                cmd.min_supported,
+            )
+            if negotiated_version is None:
                 self._send_event(
                     conn,
                     ProtocolMismatchEvent(
-                        daemon_version=Constants.IPC_PROTOCOL_VERSION,
-                        min_supported=Constants.IPC_PROTOCOL_MIN_SUPPORTED,
-                        client_version=cmd.protocol_version,
+                        daemon_current_version=IPC_PROTOCOL_VERSION,
+                        daemon_min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
+                        client_current_version=cmd.current_version,
+                        client_min_supported=cmd.min_supported,
                     ),
                 )
             else:
@@ -516,8 +525,9 @@ class NetworkCommandHandler:
                     conn,
                     InitEvent(
                         onion=self._tm.onion,
-                        version=Constants.IPC_PROTOCOL_VERSION,
-                        min_supported=Constants.IPC_PROTOCOL_MIN_SUPPORTED,
+                        negotiated_version=negotiated_version,
+                        daemon_current_version=IPC_PROTOCOL_VERSION,
+                        daemon_min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
                         profile=self._config._paths.profile_name,
                         capabilities=['text_content', 'runtime_lock'],
                     ),

@@ -17,10 +17,10 @@ from metor.client import (
 )
 from metor.core.api import IpcEvent
 from metor.utils import (
-    Constants,
     create_session_auth_challenge,
     create_session_auth_salt,
 )
+from metor.versioning import IPC_PROTOCOL_MIN_SUPPORTED, IPC_PROTOCOL_VERSION
 
 
 class RawClientContractTests(unittest.TestCase):
@@ -103,8 +103,9 @@ class RawClientContractTests(unittest.TestCase):
                             'event_type': 'INIT',
                             'request_id': init_cmd.get('request_id'),
                             'onion': 'abcdefghijklmnop7654321',
-                            'version': 1,
-                            'min_supported': 1,
+                            'negotiated_version': IPC_PROTOCOL_VERSION,
+                            'daemon_current_version': IPC_PROTOCOL_VERSION,
+                            'daemon_min_supported': IPC_PROTOCOL_MIN_SUPPORTED,
                             'profile': 'default',
                         }
                     )
@@ -149,8 +150,8 @@ class RawClientContractTests(unittest.TestCase):
                     {
                         'command_type': 'INIT',
                         'request_id': init_req_id,
-                        'protocol_version': Constants.IPC_PROTOCOL_VERSION,
-                        'client_version': '0.2.0',
+                        'current_version': IPC_PROTOCOL_VERSION,
+                        'min_supported': IPC_PROTOCOL_MIN_SUPPORTED,
                     }
                 )
                 + '\n'
@@ -388,8 +389,9 @@ class RawClientContractTests(unittest.TestCase):
                             'event_type': 'init',
                             'request_id': req_id,
                             'onion': 'testonionaddress123456789',
-                            'version': 1,
-                            'min_supported': 1,
+                            'negotiated_version': IPC_PROTOCOL_VERSION,
+                            'daemon_current_version': IPC_PROTOCOL_VERSION,
+                            'daemon_min_supported': IPC_PROTOCOL_MIN_SUPPORTED,
                             'profile': 'default',
                         }
                     )

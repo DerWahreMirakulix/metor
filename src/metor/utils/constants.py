@@ -39,12 +39,6 @@ class Constants:
     SERVER_BACKLOG: int = 5  # Standard socket backlog for daemon IPC and listeners
     SERVER_BACKLOG_HEADLESS: int = 1  # Minimal socket backlog for ephemeral daemons
 
-    # Protocol Versions
-    IPC_PROTOCOL_VERSION: int = 2  # Current IPC wire protocol version
-    IPC_PROTOCOL_MIN_SUPPORTED: int = 2  # Oldest accepted IPC wire protocol version
-    PEER_PROTOCOL_VERSION: int = 1  # Current peer-wire handshake version
-    PEER_PROTOCOL_MIN_SUPPORTED: int = 1  # Oldest accepted peer-wire handshake version
-
     # Tor Bootstrapping
     UNIX_TOR_TIMEOUT: int = 45  # Process launch timeout for Unix Tor binaries
     TOR_BOOTSTRAP_POLL_SEC: float = 1.0

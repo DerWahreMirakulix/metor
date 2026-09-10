@@ -19,7 +19,6 @@ from metor.core.profile_keys import (
     BLOB_KEY_CONTEXT,
     DB_KEY_CONTEXT,
     KEYSLOT_FORMAT,
-    KEYSLOT_VERSION,
     MIN_PASSWORD_KDF_MEMLIMIT,
     MIN_PASSWORD_KDF_OPSLIMIT,
     PROFILE_MASTER_KEY_BYTES,
@@ -45,6 +44,7 @@ from metor.data.profile.migration import orchestrator as profile_migration
 from metor.data.sql import DatabaseCorruptedError, SqlManager
 from metor.data import Settings
 from metor.utils import Constants
+from metor.versioning import KEYSLOT_FORMAT_VERSION
 
 
 class ProfileStorageSecurityTests(unittest.TestCase):
@@ -185,7 +185,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
             raw = path.read_bytes()
             document = json.loads(raw)
             self.assertEqual(document['format'], KEYSLOT_FORMAT)
-            self.assertEqual(document['version'], KEYSLOT_VERSION)
+            self.assertEqual(document['version'], KEYSLOT_FORMAT_VERSION)
             self.assertEqual(document['kdf']['algorithm'], 'argon2id')
             self.assertNotIn(password.encode(), raw)
             self.assertNotIn(pmk, raw)
@@ -248,12 +248,12 @@ class ProfileStorageSecurityTests(unittest.TestCase):
 
             path = root / 'keyslot.json'
             document = json.loads(path.read_text())
-            document['version'] = KEYSLOT_VERSION + 1
+            document['version'] = KEYSLOT_FORMAT_VERSION + 1
             path.write_text(json.dumps(document))
             with self.assertRaises(InvalidKeyslotError):
                 protector.unprotect('correct')
 
-            document['version'] = KEYSLOT_VERSION
+            document['version'] = KEYSLOT_FORMAT_VERSION
             ciphertext = document['wrap']['ciphertext']
             document['wrap']['ciphertext'] = (
                 'A' if ciphertext[0] != 'A' else 'B'

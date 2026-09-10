@@ -7,6 +7,14 @@ on:
       - "src/metor/data/settings.py"
       - "src/metor/data/profile/models.py"
       - "scripts/generate_api_docs.py"
+      - "scripts/generate_compatibility_manifest.py"
+      - "scripts/release/**"
+      - "src/metor/versioning.py"
+      - "src/metor/core/daemon/managed/models.py"
+      - "src/metor/core/daemon/managed/network/handshake.py"
+      - "src/metor/data/sql/schema.py"
+      - "src/metor/core/profile_keys.py"
+      - "src/metor/data/blob/store.py"
       - "scripts/generate_settings_docs.py"
       - ".github/workflows/generate_api_docs.yml"
       - "pyproject.toml"
@@ -48,13 +56,14 @@ jobs:
         run: |
           python scripts/generate_api_docs.py
           python scripts/generate_settings_docs.py
+          python scripts/generate_compatibility_manifest.py
 
       - name: Commit and Push Changes
         run: |
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
 
-          git add docs/
+          git add docs/generated/
 
           # Evaluate diff; commit and push only if the generation resulted in changes
           if ! git diff --cached --quiet; then

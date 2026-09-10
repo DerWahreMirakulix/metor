@@ -1,0 +1,219 @@
+name: Release Metor
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Application SemVer bump (use current only for the first release)
+        required: true
+        type: choice
+        default: patch
+        options:
+          - current
+          - patch
+          - minor
+          - major
+      prerelease:
+        description: Optional prerelease label
+        required: true
+        type: choice
+        default: none
+        options:
+          - none
+          - alpha
+          - beta
+          - rc
+      peer_compatibility:
+        description: Explicit peer-wire compatibility review
+        required: true
+        type: choice
+        default: unchanged
+        options:
+          - unchanged
+          - additive
+          - breaking
+      crypto_migration_reviewed:
+        description: Confirm migration/support review when derivation contexts changed
+        required: true
+        type: boolean
+        default: false
+      dry_run:
+        description: Validate and build without committing, tagging, or publishing
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      latest_tag: ${{ steps.version.outputs.latest_tag }}
+      next_version: ${{ steps.version.outputs.next_version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Calculate application version
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest_tag="$(gh release list --exclude-drafts --limit 100 --json tagName --jq '[.[].tagName | select(test("^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\\.(0|[1-9][0-9]*))?$"))][0] // ""')"
+          args=(--release-type '${{ inputs.release_type }}' --prerelease '${{ inputs.prerelease }}')
+          if [ -n "$latest_tag" ]; then
+            args+=(--previous-release "$latest_tag")
+          fi
+          next_version="$(python scripts/calculate_release_version.py "${args[@]}")"
+          echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
+          echo "next_version=$next_version" >> "$GITHUB_OUTPUT"
+          echo "Candidate release: v$next_version"
+
+  quality:
+    needs: prepare
+    name: Release Quality (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Apply candidate application version
+        shell: bash
+        run: python scripts/versioning.py set-app '${{ needs.prepare.outputs.next_version }}'
+
+      - name: Run Linux and Windows quality gates
+        uses: ./.github/actions/python-quality
+        with:
+          python-version: "3.11"
+          ruff-check-paths: "src/metor/ scripts/ tests/"
+          ruff-format-paths: "src/metor/ scripts/ tests/"
+          mypy-paths: "src/metor/ scripts/"
+          run-tests: "true"
+
+      - name: Generate IPC schema and compatibility manifest
+        shell: bash
+        run: |
+          python scripts/generate_api_docs.py
+          python scripts/generate_compatibility_manifest.py
+          python scripts/versioning.py validate
+
+      - name: Load previous public compatibility baseline
+        if: needs.prepare.outputs.latest_tag != ''
+        shell: bash
+        run: git show '${{ needs.prepare.outputs.latest_tag }}:docs/generated/compatibility.json' > previous-compatibility.json
+
+      - name: Check release compatibility
+        shell: bash
+        run: |
+          args=(--current docs/generated/compatibility.json --peer-classification '${{ inputs.peer_compatibility }}')
+          if [ -n '${{ needs.prepare.outputs.latest_tag }}' ]; then
+            args+=(--previous previous-compatibility.json)
+          fi
+          if [ '${{ inputs.crypto_migration_reviewed }}' = 'true' ]; then
+            args+=(--crypto-migration-reviewed)
+          fi
+          python scripts/check_release_compatibility.py "${args[@]}"
+
+      - name: Build all package variants
+        shell: bash
+        run: |
+          mkdir -p dist/wheels
+          python -m pip wheel --no-deps --no-build-isolation . -w dist/wheels
+          python -m pip wheel --no-deps --no-build-isolation packaging/daemon -w dist/wheels
+          python -m pip wheel --no-deps --no-build-isolation packaging/sdk -w dist/wheels
+          python scripts/validate_wheel_versions.py dist/wheels/*.whl
+
+      - name: Build platform release bundles
+        shell: bash
+        run: python scripts/build_release_wheelhouse.py --output-dir dist/release --skip-pip-upgrade --variant all
+
+      - name: Preserve platform release bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: metor-release-bundles-${{ matrix.os }}
+          path: dist/release/*.zip
+          if-no-files-found: error
+
+      - name: Preserve generated release baseline
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-compatibility-baseline
+          path: |
+            docs/generated/API.md
+            docs/generated/api.schema.json
+            docs/generated/compatibility.json
+          if-no-files-found: error
+
+  publish:
+    needs:
+      - prepare
+      - quality
+    runs-on: ubuntu-latest
+    if: inputs.dry_run == false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-compatibility-baseline
+          path: release-state
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: metor-release-bundles-*
+          path: dist/release-assets
+          merge-multiple: true
+
+      - name: Create release commit and tag
+        shell: bash
+        run: |
+          python scripts/versioning.py set-app '${{ needs.prepare.outputs.next_version }}'
+          cp release-state/API.md docs/generated/API.md
+          cp release-state/api.schema.json docs/generated/api.schema.json
+          cp release-state/compatibility.json docs/generated/compatibility.json
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config user.name 'github-actions[bot]'
+          git add src/metor/versioning.py docs/generated/API.md docs/generated/api.schema.json docs/generated/compatibility.json
+          git commit -m 'release: v${{ needs.prepare.outputs.next_version }}'
+          git tag -a 'v${{ needs.prepare.outputs.next_version }}' -m 'Metor v${{ needs.prepare.outputs.next_version }}'
+          git push origin HEAD:${GITHUB_REF_NAME} 'refs/tags/v${{ needs.prepare.outputs.next_version }}'
+
+      - name: Publish GitHub release with compatibility matrix
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo '## Compatibility matrix'
+            echo
+            echo '```text'
+            python scripts/versioning.py status
+            echo '```'
+          } > release-notes.md
+          gh release create 'v${{ needs.prepare.outputs.next_version }}' --verify-tag --generate-notes --notes-file release-notes.md ${{ inputs.prerelease != 'none' && '--prerelease' || '' }}
+          while IFS= read -r -d '' archive_path; do
+            gh release upload 'v${{ needs.prepare.outputs.next_version }}' "$archive_path"
+          done < <(find dist/release-assets -type f -name '*.zip' -print0)
+
+  dry-run-result:
+    needs:
+      - prepare
+      - quality
+    runs-on: ubuntu-latest
+    if: inputs.dry_run == true
+    steps:
+      - run: echo 'Dry run passed for v${{ needs.prepare.outputs.next_version }}; no repository or release state was changed.'

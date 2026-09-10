@@ -167,11 +167,12 @@ class UnknownCommandEvent(IpcEvent):
 @register_event(EventType.PROTOCOL_MISMATCH)
 @dataclass
 class ProtocolMismatchEvent(IpcEvent):
-    """Signals that the client IPC protocol version is too old."""
+    """Signals that the client and daemon IPC ranges do not overlap."""
 
-    daemon_version: int
-    min_supported: int
-    client_version: Optional[int] = None
+    daemon_current_version: int
+    daemon_min_supported: int
+    client_current_version: int
+    client_min_supported: int
     event_type: EventType = field(
         default=EventType.PROTOCOL_MISMATCH,
         init=False,

@@ -31,7 +31,7 @@ from metor.data.profile import (
 from metor.data.profile.config import Config
 from metor.data.profile.models import ProfileSecurityMode
 from metor.data.sql import SqlCipherDbApi, _load_sqlcipher_dbapi
-from metor.data.sql.schema import ensure_core_schema
+from metor.data.sql.schema import create_core_schema
 from metor.data.settings import Settings, SettingKey
 from metor.ui.terminal.cli.dispatcher import CliDispatcher
 from metor.ui.terminal.cli.proxy import CliProxy
@@ -500,7 +500,7 @@ class ReleaseContractTests(unittest.TestCase):
 
         cursor = _RecordingCursor()
 
-        ensure_core_schema(cursor)
+        create_core_schema(cursor)
 
         self.assertFalse(
             any('DROP TABLE IF EXISTS' in query for query in cursor.queries)

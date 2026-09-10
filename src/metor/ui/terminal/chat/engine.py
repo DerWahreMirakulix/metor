@@ -40,6 +40,7 @@ from metor.ui.terminal import (
 )
 from metor.ui.terminal.models import AliasPolicy, StatusTone
 from metor.utils import build_session_auth_proof, clean_onion, Constants
+from metor.versioning import IPC_PROTOCOL_MIN_SUPPORTED, IPC_PROTOCOL_VERSION
 
 # Local Package Imports
 from metor.ui.terminal.chat.models import ChatMessageType
@@ -559,7 +560,10 @@ class Chat:
 
         self._init_event.clear()
         init_event: Optional[InitEvent] = self._request_prechat_event(
-            InitCommand(),
+            InitCommand(
+                current_version=IPC_PROTOCOL_VERSION,
+                min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
+            ),
             InitEvent,
         )
         if init_event is None:

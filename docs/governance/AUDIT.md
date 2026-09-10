@@ -56,3 +56,13 @@ Every Pull Request, AI code generation, or architectural change MUST be audited 
 - [ ] **Naming & Ownership:** Do paths and module names express ownership without redundant prefixes, generic helper files, or artificial underscore aliases for normal cross-module APIs?
 - [ ] **Package Promotion:** If several `<concept>_*.py` modules exist, was package promotion explicitly evaluated?
 - [ ] **Structural Refactor Quality:** Did a God-File refactor improve subsystem ownership rather than merely redistribute implementation across flat files?
+
+## 7. Versioning and Release Integrity
+
+- [ ] **Central Authority:** Do all application and compatibility version values come from `src/metor/versioning.py`?
+- [ ] **Persistent Schema:** Did every SQL schema change explicitly bump `DB_SCHEMA_VERSION` and provide every advertised migration step?
+- [ ] **Wire Compatibility:** Did breaking IPC or peer-wire behavior explicitly bump its protocol generation?
+- [ ] **Storage Compatibility:** Did incompatible keyslot, blob, or cryptographic derivation changes explicitly bump their own generation and address migration?
+- [ ] **Minimum Support:** Did `MIN_SUPPORTED` change only with actual reader/negotiation support, and does implementation coverage prove every claimed generation?
+- [ ] **Release SemVer:** Did `APP_VERSION` change only through the explicit release process, independently of compatibility generations?
+- [ ] **Generated Baseline:** Are `docs/generated/api.schema.json` and `docs/generated/compatibility.json` regenerated and consistent with authoritative code?

@@ -96,6 +96,12 @@ from metor.data.profile.config import Config
 from metor.ui.terminal.cli.handlers import CommandHandlers
 from metor.ui.terminal.theme import Theme
 from metor.utils import Constants
+from metor.versioning import (
+    IPC_PROTOCOL_MIN_SUPPORTED,
+    IPC_PROTOCOL_VERSION,
+    PEER_PROTOCOL_MIN_SUPPORTED,
+    PEER_PROTOCOL_VERSION,
+)
 
 
 class _DummyConfig:
@@ -2541,7 +2547,13 @@ class DaemonHardeningTests(unittest.TestCase):
                     return_value=create_event(EventType.AUTH_REQUIRED),
                 ) as build_auth_event,
             ):
-                daemon._process_ui_command(InitCommand(), conn)
+                daemon._process_ui_command(
+                    InitCommand(
+                        current_version=IPC_PROTOCOL_VERSION,
+                        min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
+                    ),
+                    conn,
+                )
 
             build_auth_event.assert_called_once()
             daemon._network_handler.handle.assert_not_called()
@@ -2687,7 +2699,13 @@ class DaemonHardeningTests(unittest.TestCase):
                 'get_retry_after_seconds',
                 return_value=12,
             ):
-                daemon._process_ui_command(InitCommand(), conn)
+                daemon._process_ui_command(
+                    InitCommand(
+                        current_version=IPC_PROTOCOL_VERSION,
+                        min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
+                    ),
+                    conn,
+                )
 
             daemon._ipc.send_to.assert_called_once()
             sent_event = daemon._ipc.send_to.call_args.args[1]
@@ -3057,7 +3075,10 @@ class DaemonHardeningTests(unittest.TestCase):
                     str: The computed return value.
                 """
 
-                return f'/challenge {"ab" * Constants.TOR_HANDSHAKE_CHALLENGE_BYTES}'
+                return (
+                    f'/challenge {"ab" * Constants.TOR_HANDSHAKE_CHALLENGE_BYTES} '
+                    f'{PEER_PROTOCOL_VERSION} {PEER_PROTOCOL_MIN_SUPPORTED}'
+                )
 
             def get_buffer(self) -> bytes:
                 """
@@ -3091,7 +3112,10 @@ class DaemonHardeningTests(unittest.TestCase):
 
         self.assertEqual(
             conn.sent,
-            [b'/auth self-onion signature RECOVER\n'],
+            [
+                b'/auth self-onion signature '
+                + f'{PEER_PROTOCOL_VERSION} {PEER_PROTOCOL_MIN_SUPPORTED} RECOVER\n'.encode()
+            ],
         )
 
     def test_connect_helper_closes_socket_after_handshake_failure(self) -> None:
@@ -3906,7 +3930,7 @@ class DaemonHardeningTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             HandshakeProtocol.parse_challenge_line(
-                f'/challenge {"ab" * (Constants.TOR_HANDSHAKE_CHALLENGE_BYTES - 1)}'
+                f'/challenge {"ab" * (Constants.TOR_HANDSHAKE_CHALLENGE_BYTES - 1)} 1 1'
             )
 
     def test_handshake_protocol_rejects_auth_frame_with_extra_tokens(self) -> None:
@@ -3948,7 +3972,7 @@ class DaemonHardeningTests(unittest.TestCase):
 
             self.assertEqual(
                 parsed,
-                ('peer-onion', 'signature', False, True),
+                ('peer-onion', 'signature', 1, 1, False, True),
             )
 
     def test_handshake_protocol_rejects_unsupported_recovery_hint(self) -> None:
@@ -3964,7 +3988,7 @@ class DaemonHardeningTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             HandshakeProtocol.parse_auth_line(
-                f'/auth peer sig {ConnectionOrigin.MANUAL.value}'
+                f'/auth peer sig 1 1 {ConnectionOrigin.MANUAL.value}'
             )
 
     def test_crypto_verify_signature_rejects_invalid_onion_checksum(self) -> None:

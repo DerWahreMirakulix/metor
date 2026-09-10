@@ -66,7 +66,12 @@ class MessageArchitectureContractTests(unittest.TestCase):
         Returns:
             None
         """
-        schema_path = Path(__file__).resolve().parents[1] / 'docs' / 'api.schema.json'
+        schema_path = (
+            Path(__file__).resolve().parents[1]
+            / 'docs'
+            / 'generated'
+            / 'api.schema.json'
+        )
         schema = json.loads(schema_path.read_text(encoding='utf-8'))
         command_schema = schema['definitions']['SendMessageCommand']['properties']
         self.assertIn('delivery', command_schema)

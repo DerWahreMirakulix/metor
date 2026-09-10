@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 
 from metor.core.api import ConnectionActor
+from metor.versioning import APP_VERSION, IPC_PROTOCOL_VERSION
 from metor.ui.embedded.contracts import (
     CapabilityInfo,
     DaemonHealth,
@@ -14,9 +15,9 @@ from metor.ui.embedded.contracts import (
     LiveSessionSummary,
 )
 
-FIXTURE_TIME = datetime(2026, 1, 1, tzinfo=timezone.utc)
+FIXTURE_TIME: datetime = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
-LOCKED_STARTUP = EmbeddedStartupSnapshot(
+LOCKED_STARTUP: EmbeddedStartupSnapshot = EmbeddedStartupSnapshot(
     revision=1,
     lock_state=DaemonLockState.LOCKED,
     health=DaemonHealth.ONLINE,
@@ -25,10 +26,14 @@ LOCKED_STARTUP = EmbeddedStartupSnapshot(
     active_live_count=0,
     pending_live_count=0,
     incoming_request_count=0,
-    capability_info=CapabilityInfo(2, '0.2.0', ('text', 'lock')),
+    capability_info=CapabilityInfo(
+        IPC_PROTOCOL_VERSION,
+        APP_VERSION,
+        ('text', 'lock'),
+    ),
 )
 
-READY_STARTUP = EmbeddedStartupSnapshot(
+READY_STARTUP: EmbeddedStartupSnapshot = EmbeddedStartupSnapshot(
     revision=10,
     lock_state=DaemonLockState.READY,
     health=DaemonHealth.ONLINE,
@@ -37,10 +42,14 @@ READY_STARTUP = EmbeddedStartupSnapshot(
     active_live_count=1,
     pending_live_count=1,
     incoming_request_count=1,
-    capability_info=CapabilityInfo(2, '0.2.0', ('text', 'lock')),
+    capability_info=CapabilityInfo(
+        IPC_PROTOCOL_VERSION,
+        APP_VERSION,
+        ('text', 'lock'),
+    ),
 )
 
-DROP_CONVERSATIONS = (
+DROP_CONVERSATIONS: tuple[DropConversationSummary, ...] = (
     DropConversationSummary(
         peer_id='alice.onion',
         alias='alice',
@@ -52,7 +61,7 @@ DROP_CONVERSATIONS = (
     ),
 )
 
-LIVE_SESSIONS = (
+LIVE_SESSIONS: tuple[LiveSessionSummary, ...] = (
     LiveSessionSummary(
         peer_id='alice.onion',
         alias='alice',

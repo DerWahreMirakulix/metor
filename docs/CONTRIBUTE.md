@@ -65,11 +65,27 @@ When contributing to this repository, you MUST strictly adhere to the following 
 
 ## 8. IPC Contract Evolution & Glossary
 
-The IPC contract is versioned and additive-only within a major version. Follow these rules whenever the wire contract changes:
+The IPC contract is versioned and additive-only within one IPC protocol generation. Follow these rules whenever the wire contract changes:
 
-- **Additive-Only Within a Major Version:** New commands, events, and payload fields are allowed, but every new field MUST have a default so writers from older versions stay valid. Removing or renaming a field, event, or command is a major-version bump.
+- **Additive-Only Within an IPC Generation:** New commands, events, and payload fields are allowed, but every new field MUST have a default so writers from older versions stay valid. Removing or renaming a field, event, or command requires an incompatible IPC protocol generation bump.
 - **No Aliases:** Renamed symbols are never kept as aliases or compatibility shims; every caller migrates in the same release.
-- **Version Bumps:** When the wire contract changes incompatibly, bump `Constants.IPC_PROTOCOL_VERSION` (IPC socket) or `Constants.PEER_PROTOCOL_VERSION` (Tor peer handshake) and keep the matching `*_MIN_SUPPORTED` constant honest. Never reuse a retired wire value.
+- **Independent Versions:** Application releases and compatibility generations are independent. Version values come only from `src/metor/versioning.py`; application SemVer changes during releases, while compatibility-breaking changes require an explicit, semantically reviewed axis bump. Keep each `*_MIN_SUPPORTED` claim honest and never reuse or automatically bump a retired wire or storage value. Follow [RELEASING.md](./RELEASING.md).
 - **Unknown Fields Stay Strict:** Payloads with unknown fields are rejected, never silently ignored. Drift is surfaced as the typed `ProtocolMismatchEvent` via the `InitCommand`/`InitEvent` handshake.
-- **Generated References:** Every command/event DTO must be registered through `register_command` / `register_event` so `scripts/generate_api_docs.py` picks it up. Never hand-edit the generated [API.md](./API.md) or [api.schema.json](./api.schema.json).
+- **Generated References:** Every command/event DTO must be registered through `register_command` / `register_event` so `scripts/generate_api_docs.py` picks it up. Never hand-edit the generated [API.md](./generated/API.md) or [api.schema.json](./generated/api.schema.json).
 - **Glossary Obligation:** New or renamed symbols (settings keys, events, enums, fields, IPC payloads) MUST follow the canonical terminology in [GLOSSARY.md](./GLOSSARY.md). When in doubt, extend that file instead of inventing a parallel term. Settings keys MUST use one of the three namespaces (`client.*`, `daemon.*`, `ui.<frontend>.*`) documented there.
+
+## 9. Documentation Ownership
+
+The root `README.md` is the human entry point and `docs/AGENTS.md` is the
+coding-agent entry point; do not create `docs/README.md`. Global canonical docs
+stay at `docs/` root, while governance, contracts, generated references, and
+lasting historical audits belong to their named ownership directories. Every
+new document must have one of those ownership classes; temporary agent reports
+do not automatically become canonical documentation.
+
+Files under `docs/generated/` are valuable, first-class references whose source
+ownership is code and generators. Never edit them manually: update the source
+definition or generator, regenerate, and commit the result. Authored documents
+should link readers to deeper generated references instead of duplicating them,
+and relevant links must remain reachable from the existing human or agent entry
+point.

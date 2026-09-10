@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Optional, TYPE_CHECKING, Tuple, cast
 
 from metor.utils import secure_clear_buffer
+from metor.versioning import DB_SCHEMA_MIN_SUPPORTED, DB_SCHEMA_VERSION
 
 # Local Package Imports
 from metor.data.sql.backends import (
@@ -15,7 +16,13 @@ from metor.data.sql.backends import (
     sqlite3,
 )
 from metor.data.sql.history import HistoryRepository
+from metor.data.sql.errors import (
+    DatabaseCorruptedError,
+    LegacyDatabaseSchemaError,
+    NewerDatabaseSchemaError,
+)
 from metor.data.sql.message import MessageRepository
+from metor.data.sql.migrations import migrate_schema
 from metor.data.sql.peer import PeerRepository
 from metor.data.sql.runtime_mirror import (
     capture_sqlcipher_stderr,
@@ -23,14 +30,14 @@ from metor.data.sql.runtime_mirror import (
     get_runtime_db_path,
     refresh_runtime_mirror,
 )
-from metor.data.sql.schema import ensure_core_schema
+from metor.data.sql.schema import (
+    has_user_schema,
+    initialize_database,
+    read_schema_version,
+)
 
 if TYPE_CHECKING:
     from metor.data.profile import Config
-
-
-class DatabaseCorruptedError(ValueError):
-    """Raised when the profile database cannot be opened safely."""
 
 
 class SqlManager:
@@ -144,6 +151,7 @@ class SqlManager:
             )
             try:
                 cursor.execute("SELECT sqlcipher_export('migrated')")
+                cursor.execute(f'PRAGMA migrated.user_version = {DB_SCHEMA_VERSION}')
             finally:
                 try:
                     cursor.execute('DETACH DATABASE migrated')
@@ -239,27 +247,62 @@ class SqlManager:
             with capture_sqlcipher_stderr(self._config, SqlManager._log_callback):
                 conn = self._get_connection()
                 with SqlManager._db_lock:
-                    with conn:
-                        cursor = conn.cursor()
-                        cursor.execute('PRAGMA foreign_keys = ON')
-                        cursor.execute('SELECT count(*) FROM sqlite_master;')
-                        cursor.fetchone()
+                    cursor = conn.cursor()
+                    cursor.execute('PRAGMA foreign_keys = ON')
+                    cursor.execute('SELECT count(*) FROM sqlite_master;')
+                    cursor.fetchone()
+                    schema_version: int = read_schema_version(cursor)
 
-                        ensure_core_schema(cursor)
+                    if schema_version == 0:
+                        if has_user_schema(cursor):
+                            raise LegacyDatabaseSchemaError(
+                                'Populated development database has schema version 0. '
+                                'Recreate it before the first public release.'
+                            )
+                        initialize_database(conn)
+                    elif schema_version > DB_SCHEMA_VERSION:
+                        raise NewerDatabaseSchemaError(
+                            'Database schema '
+                            f'{schema_version} is newer than supported schema '
+                            f'{DB_SCHEMA_VERSION}.'
+                        )
+                    elif schema_version < DB_SCHEMA_MIN_SUPPORTED:
+                        raise LegacyDatabaseSchemaError(
+                            'Database schema '
+                            f'{schema_version} predates minimum supported schema '
+                            f'{DB_SCHEMA_MIN_SUPPORTED}.'
+                        )
+                    elif schema_version < DB_SCHEMA_VERSION:
+                        migrate_schema(conn, schema_version)
 
-                        try:
-                            refresh_runtime_mirror(
-                                conn,
-                                self.db_path,
-                                self._uses_sqlcipher_key,
-                                self._config,
-                            )
-                        except Exception:
-                            SqlManager._report_runtime_mirror_error(
-                                'Failed to refresh the runtime database mirror.'
-                            )
-        except (sqlite3.DatabaseError, sqlite3.OperationalError, MemoryError) as exc:
+                    try:
+                        refresh_runtime_mirror(
+                            conn,
+                            self.db_path,
+                            self._uses_sqlcipher_key,
+                            self._config,
+                        )
+                    except Exception:
+                        SqlManager._report_runtime_mirror_error(
+                            'Failed to refresh the runtime database mirror.'
+                        )
+        except DatabaseCorruptedError:
             path_str: str = str(self.db_path.absolute())
+            with SqlManager._pool_lock:
+                if path_str in SqlManager._connections:
+                    try:
+                        SqlManager._connections[path_str].close()
+                    except Exception:
+                        pass
+                    del SqlManager._connections[path_str]
+            raise
+        except (
+            sqlite3.DatabaseError,
+            sqlite3.OperationalError,
+            MemoryError,
+            ValueError,
+        ) as exc:
+            path_str = str(self.db_path.absolute())
             with SqlManager._pool_lock:
                 if path_str in SqlManager._connections:
                     try:

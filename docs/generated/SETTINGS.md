@@ -1,3 +1,5 @@
+<!-- GENERATED FILE. DO NOT EDIT MANUALLY. -->
+
 # Metor Settings Documentation
 
 This document is auto-generated from setting metadata in `metor.data.settings` and `metor.data.profile.models`.
@@ -988,52 +990,3 @@ Declares whether the local profile stores keys and the database encrypted or pla
 
 - `metor profiles add <name> --plaintext`
 - `metor profiles migrate <name> --to <encrypted|plaintext>`
-
-<!-- manual: Drop-Policy Group — preserved across regeneration -->
-
-## Manual Reference: Drop-Policy Group
-
-Drop delivery while a live session is active is governed by ONE policy decision
-with two axes. The combination table is canonical:
-
-| `daemon.reuse_live_for_drops` | `daemon.allow_drop_standby_on_live` | Behavior while live is active                                                |
-| ----------------------------- | ----------------------------------- | ---------------------------------------------------------------------------- |
-| `true` (default)              | `false` (default)                   | Drops ride the session channel; no second circuit.                           |
-| `false`                       | `true`                              | Drops use a warm cached drop tunnel; no drop traffic on the session channel. |
-| `true`                        | `true`                              | Drops ride the session; a tunnel stays warm as fallback (redundant).         |
-| `false`                       | `false`                             | Drops wait in the outbox or use a fresh tunnel.                              |
-
-`reuse` is a description (drop-over-session), never an enum value and never a
-fourth connection type. Connection types are `session`, `tunnel`, `direct`.
-
-<!-- /manual -->
-
-<!-- manual: No-Trace Package — preserved across regeneration -->
-
-## Manual Reference: No-Trace Package
-
-The combination that minimizes local traces:
-
-- `daemon.record_live_history = false`
-- `daemon.record_drop_history = false`
-- `daemon.ephemeral_messages = true`
-
-Live payloads are already ephemeral by construction (never in chat history,
-shredded after consume); this package removes the remaining transport-ledger
-metadata for both worlds.
-
-<!-- /manual -->
-
-<!-- manual: Ledger transport field — preserved across regeneration -->
-
-## Manual Reference: Ledger `transport` Field
-
-The history ledger row carries an optional `transport` value of
-`session`, `tunnel`, or `direct`.
-
-**OPSEC rule:** when `daemon.record_live_history` is `false`, the `transport`
-field is omitted from ALL ledger rows — including drop rows — so its uniform
-absence never reveals that a session channel existed. Selective absence would
-be a disclosure; uniform absence is not.
-
-<!-- /manual -->

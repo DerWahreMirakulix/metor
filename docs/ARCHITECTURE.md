@@ -307,12 +307,12 @@ Use this document when you need to answer one of these questions:
 ## Document Map
 
 - [README.md](../README.md): Master entry point for installation, usage, and repository navigation.
-- [SETTINGS.md](./SETTINGS.md): Generated reference for user-facing settings and structural profile config keys.
-- [API.md](./API.md): Generated reference for the typed IPC contract.
-- [api.schema.json](./api.schema.json): Generated JSON Schema wire contract for the typed IPC DTOs.
+- [SETTINGS.md](./generated/SETTINGS.md): Generated, first-class reference for user-facing settings and structural profile config keys.
+- [API.md](./generated/API.md): Generated, first-class reference for the typed IPC contract.
+- [api.schema.json](./generated/api.schema.json): Generated JSON Schema wire contract for the typed IPC DTOs.
 - [GLOSSARY.md](./GLOSSARY.md): Canonical terminology reference for settings namespaces, transport fields, and renamed symbols.
-- [EMBEDDED_UI_CONTRACTS.md](./EMBEDDED_UI_CONTRACTS.md): Embedded frontend ownership, platform ports, projections, recovery rules, and contract matrix.
-- [AUDIT.md](./AUDIT.md): Review checklist for security, OPSEC, concurrency, and architecture risks.
+- [EMBEDDED_UI.md](./contracts/EMBEDDED_UI.md): Embedded frontend ownership, platform ports, projections, recovery rules, and contract matrix.
+- [AUDIT.md](./governance/AUDIT.md): Review checklist for security, OPSEC, concurrency, and architecture risks.
 - [CONTRIBUTE.md](./CONTRIBUTE.md): Coding rules, import boundaries, typing requirements, and formatting standards.
 
 ## Core System Boundaries
@@ -382,7 +382,7 @@ ledger rows, including drop rows — uniform absence, never selective absence.
 
 Configuration should follow these rules:
 
-- User-relevant runtime behavior belongs in documented settings metadata and appears in [SETTINGS.md](./SETTINGS.md).
+- User-relevant runtime behavior belongs in documented settings metadata and appears in the generated [settings reference](./generated/SETTINGS.md).
 - Hard anti-DoS and protocol guardrails may stay in constants when exposing them would weaken safety or contract clarity.
 - Every persisted setting should have one canonical validator and one canonical documentation source.
 - Structural profile metadata must stay immutable through generic `config set` flows; changes such as storage security mode require a dedicated migration workflow.
@@ -408,18 +408,21 @@ The IPC boundary is typed on purpose. Future changes should extend that contract
 The typed IPC contract is versioned so client/daemon drift becomes a typed error
 instead of silent misbehavior. Two version axes exist:
 
-1. IPC wire protocol (`Constants.IPC_PROTOCOL_VERSION` / `IPC_PROTOCOL_MIN_SUPPORTED`):
+1. IPC wire protocol (`IPC_PROTOCOL_VERSION` / `IPC_PROTOCOL_MIN_SUPPORTED` from
+   `metor.versioning`):
    negotiated over the local IPC socket between UI clients and the daemon.
 
-2. Peer wire protocol (`Constants.PEER_PROTOCOL_VERSION` / `PEER_PROTOCOL_MIN_SUPPORTED`):
+2. Peer wire protocol (`PEER_PROTOCOL_VERSION` / `PEER_PROTOCOL_MIN_SUPPORTED`
+   from `metor.versioning`):
    negotiated between daemons inside the Tor peer handshake.
 
-### Additive-Only Within a Major Version
+### Additive-Only Within an IPC Generation
 
-- New commands, events, and payload fields may be added within the same major
-  version, but every new field MUST have a default so writers from older
+- New commands, events, and payload fields may be added within the same IPC
+  generation, but every new field MUST have a default so writers from older
   versions stay valid.
-- Removing or renaming a field, event, or command is a major-version bump.
+- Removing or renaming a field, event, or command requires an incompatible IPC
+  protocol generation bump.
   Renames are never aliased; every caller migrates in the same release.
 - Strict unknown-field rejection stays in place: a payload with an unknown field
   is a hard error, never a silent ignore. The version handshake converts
@@ -428,13 +431,16 @@ instead of silent misbehavior. Two version axes exist:
 
 ### IPC Version Handshake (UI -> Daemon)
 
-1. The client sends `InitCommand` with its `protocol_version`.
-2. If `protocol_version` is below `IPC_PROTOCOL_MIN_SUPPORTED`, the daemon
-   replies with `ProtocolMismatchEvent(daemon_version, min_supported, client_version)`
-   and the session is rejected.
-3. Otherwise the daemon replies with `InitEvent(onion, version, min_supported, profile)`.
-   A client whose own `protocol_version` is below the announced `min_supported`
-   must treat the session as incompatible.
+1. The client sends `InitCommand(current_version, min_supported)` to advertise
+   its inclusive IPC support range.
+2. The daemon intersects that range with
+   `[IPC_PROTOCOL_MIN_SUPPORTED, IPC_PROTOCOL_VERSION]`. If there is no overlap,
+   it returns `ProtocolMismatchEvent` containing both ranges.
+3. Otherwise the daemon selects the highest common generation and returns it as
+   `InitEvent.negotiated_version`, alongside its advertised range. The client
+   independently validates that result before accepting the session.
+
+For the complete generated command/event reference, see [API.md](./generated/API.md).
 
 ### Canonical Client Lifecycle and Wire Sequence (Track 1 & Track 2)
 
@@ -446,7 +452,7 @@ Metor provides two complementary client integration surfaces:
 The canonical wire sequence is:
 
 1. **Connect:** Connect to the daemon's local IPC listener (`127.0.0.1:<daemon_port>`). When connecting to a remote VPS daemon, the port is forwarded locally via SSH tunnel, keeping remote transparent.
-2. **Handshake:** Send `InitCommand(client_version, protocol_version)` with a unique `request_id`. Await `InitEvent`.
+2. **Handshake:** Send `InitCommand(current_version, min_supported)` with a unique `request_id`. Await `InitEvent(negotiated_version)`.
 3. **Auth & Unlock Gate:**
    - If the daemon responds with `DaemonLockedEvent`, send `UnlockCommand(password=...)` and await `DaemonUnlockedEvent`.
    - If the daemon responds with `AuthRequiredEvent(challenge, salt)`, compute `proof = HMAC-SHA256(Argon2i(password, salt), challenge)` and send `AuthenticateSessionCommand(proof=...)`, awaiting `SessionAuthenticatedEvent`.
@@ -455,12 +461,13 @@ The canonical wire sequence is:
 
 ### Peer Wire Version (Daemon -> Daemon)
 
-- The authenticated handshake CHALLENGE frame carries the peer's
-  `PEER_PROTOCOL_VERSION` as an explicit token; legacy frames without the token
-  default to version 1.
-- Each side validates the announced version against `PEER_PROTOCOL_MIN_SUPPORTED`
-  before accepting the connection. A too-old peer is rejected with a typed
-  handshake error instead of failing later on an unparseable payload.
+- The CHALLENGE and authenticated AUTH frames each advertise the sender's
+  inclusive current/minimum peer-generation range.
+- Each daemon intersects the two ranges and selects the highest common
+  generation. Either future-only or legacy-only non-overlap rejects the
+  connection before peer payloads are accepted.
+
+For application releases and every compatibility axis, see [RELEASING.md](./RELEASING.md).
 
 ### Delivery-Only Connect Hint (deliberately not implemented)
 
@@ -839,8 +846,8 @@ When you add a new architecture-relevant behavior:
 
 1. Decide whether it belongs in fixed guardrails, cascading settings, or structural profile config.
 2. Extend the typed IPC contract if the UI must observe or control it.
-3. Update [SETTINGS.md](./SETTINGS.md) or [API.md](./API.md) via the generators instead of hand-editing generated references; the IPC contract schema in [api.schema.json](./api.schema.json) is regenerated by `scripts/generate_api_docs.py` as well.
-4. Update [AUDIT.md](./AUDIT.md) and [CONTRIBUTE.md](./CONTRIBUTE.md) if the new behavior changes review or implementation rules.
+3. Update the generated [settings](./generated/SETTINGS.md) or [IPC API](./generated/API.md) references through their generators; [api.schema.json](./generated/api.schema.json) is generated with the API reference.
+4. Update the [audit checklist](./governance/AUDIT.md) and [contribution guide](./CONTRIBUTE.md) if the new behavior changes review or implementation rules.
 
 ## Terminal UI Design Guidelines
 

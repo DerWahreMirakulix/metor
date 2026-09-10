@@ -56,8 +56,9 @@ class EmbeddedContractTests(unittest.TestCase):
             None
         """
         event = InitEvent(
-            version=2,
-            min_supported=2,
+            negotiated_version=2,
+            daemon_current_version=2,
+            daemon_min_supported=2,
             profile='primary',
             capabilities=['text_content', 'runtime_lock'],
         )

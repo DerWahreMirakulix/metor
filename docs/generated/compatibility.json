@@ -1,0 +1,5918 @@
+{
+  "application_version": "0.2.0",
+  "blob": {
+    "contract": {
+      "authentication_bytes": 16,
+      "framing": "magic || version || nonce || ciphertext-and-tag",
+      "magic_hex": "4d45544f52423031",
+      "nonce_bytes": 24,
+      "version_bytes": 1
+    },
+    "current": 1,
+    "minimum_supported": 1
+  },
+  "database": {
+    "current": 1,
+    "minimum_supported": 1,
+    "schema": {
+      "tables": [
+        {
+          "columns": [
+            [
+              0,
+              "id",
+              "INTEGER",
+              0,
+              null,
+              1,
+              0
+            ],
+            [
+              1,
+              "timestamp",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ],
+            [
+              2,
+              "family",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ],
+            [
+              3,
+              "event_code",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ],
+            [
+              4,
+              "peer_onion",
+              "TEXT",
+              0,
+              null,
+              0,
+              0
+            ],
+            [
+              5,
+              "actor",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ],
+            [
+              6,
+              "trigger",
+              "TEXT",
+              0,
+              null,
+              0,
+              0
+            ],
+            [
+              7,
+              "detail_code",
+              "TEXT",
+              0,
+              null,
+              0,
+              0
+            ],
+            [
+              8,
+              "detail_text",
+              "TEXT",
+              1,
+              "''",
+              0,
+              0
+            ],
+            [
+              9,
+              "flow_id",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ],
+            [
+              10,
+              "transport",
+              "TEXT",
+              0,
+              null,
+              0,
+              0
+            ]
+          ],
+          "foreign_keys": [
+            [
+              0,
+              0,
+              "peers",
+              "peer_onion",
+              "onion",
+              "NO ACTION",
+              "RESTRICT",
+              "NONE"
+            ]
+          ],
+          "indexes": [
+            {
+              "columns": [
+                [
+                  0,
+                  9,
+                  "flow_id",
+                  0,
+                  "BINARY",
+                  1
+                ],
+                [
+                  1,
+                  -1,
+                  null,
+                  0,
+                  "BINARY",
+                  0
+                ]
+              ],
+              "name": "idx_history_ledger_flow",
+              "origin": "c",
+              "partial": 0,
+              "unique": 0
+            },
+            {
+              "columns": [
+                [
+                  0,
+                  4,
+                  "peer_onion",
+                  0,
+                  "BINARY",
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  "timestamp",
+                  0,
+                  "BINARY",
+                  1
+                ],
+                [
+                  2,
+                  -1,
+                  null,
+                  0,
+                  "BINARY",
+                  0
+                ]
+              ],
+              "name": "idx_history_ledger_peer",
+              "origin": "c",
+              "partial": 0,
+              "unique": 0
+            }
+          ],
+          "name": "history_ledger",
+          "sql": "CREATE TABLE history_ledger (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    timestamp TEXT NOT NULL CHECK (timestamp <> ''),\n    family TEXT NOT NULL CHECK (family <> ''),\n    event_code TEXT NOT NULL CHECK (event_code <> ''),\n    peer_onion TEXT CHECK (peer_onion IS NULL OR peer_onion <> '') REFERENCES peers(onion) ON DELETE RESTRICT,\n    actor TEXT NOT NULL CHECK (actor <> ''),\n    trigger TEXT,\n    detail_code TEXT,\n    detail_text TEXT NOT NULL DEFAULT '',\n    flow_id TEXT NOT NULL CHECK (flow_id <> ''),\n    transport TEXT\n)"
+        },
+        {
+          "columns": [
+            [
+              0,
+              "receipt_id",
+              "INTEGER",
+              0,
+              null,
+              1,
+              0
+            ],
+            [
+              1,
+              "payload",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ]
+          ],
+          "foreign_keys": [
+            [
+              0,
+              0,
+              "message_receipts",
+              "receipt_id",
+              "id",
+              "NO ACTION",
+              "CASCADE",
+              "NONE"
+            ]
+          ],
+          "indexes": [],
+          "name": "inbound_spool",
+          "sql": "CREATE TABLE inbound_spool (\n    receipt_id INTEGER PRIMARY KEY REFERENCES message_receipts(id) ON DELETE CASCADE,\n    payload TEXT NOT NULL\n)"
+        },
+        {
+          "columns": [
+            [
+              0,
+              "receipt_id",
+              "INTEGER",
+              0,
+              null,
+              1,
+              0
+            ],
+            [
+              1,
+              "payload",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ]
+          ],
+          "foreign_keys": [
+            [
+              0,
+              0,
+              "message_receipts",
+              "receipt_id",
+              "id",
+              "NO ACTION",
+              "CASCADE",
+              "NONE"
+            ]
+          ],
+          "indexes": [],
+          "name": "message_archive",
+          "sql": "CREATE TABLE message_archive (\n    receipt_id INTEGER PRIMARY KEY REFERENCES message_receipts(id) ON DELETE CASCADE,\n    payload TEXT NOT NULL\n)"
+        },
+        {
+          "columns": [
+            [
+              0,
+              "id",
+              "INTEGER",
+              0,
+              null,
+              1,
+              0
+            ],
+            [
+              1,
+              "msg_id",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ],
+            [
+              2,
+              "peer_onion",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ],
+            [
+              3,
+              "direction",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ],
+            [
+              4,
+              "delivery",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ],
+            [
+              5,
+              "content_type",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ],
+            [
+              6,
+              "status",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ],
+            [
+              7,
+              "visible_in_history",
+              "INTEGER",
+              1,
+              "0",
+              0,
+              0
+            ],
+            [
+              8,
+              "created_at",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ],
+            [
+              9,
+              "updated_at",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ]
+          ],
+          "foreign_keys": [
+            [
+              0,
+              0,
+              "peers",
+              "peer_onion",
+              "onion",
+              "NO ACTION",
+              "RESTRICT",
+              "NONE"
+            ]
+          ],
+          "indexes": [
+            {
+              "columns": [
+                [
+                  0,
+                  2,
+                  "peer_onion",
+                  0,
+                  "BINARY",
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  "msg_id",
+                  0,
+                  "BINARY",
+                  1
+                ],
+                [
+                  2,
+                  3,
+                  "direction",
+                  0,
+                  "BINARY",
+                  1
+                ],
+                [
+                  3,
+                  -1,
+                  null,
+                  0,
+                  "BINARY",
+                  0
+                ]
+              ],
+              "name": "idx_message_receipts_identity",
+              "origin": "c",
+              "partial": 0,
+              "unique": 1
+            },
+            {
+              "columns": [
+                [
+                  0,
+                  3,
+                  "direction",
+                  0,
+                  "BINARY",
+                  1
+                ],
+                [
+                  1,
+                  6,
+                  "status",
+                  0,
+                  "BINARY",
+                  1
+                ],
+                [
+                  2,
+                  8,
+                  "created_at",
+                  0,
+                  "BINARY",
+                  1
+                ],
+                [
+                  3,
+                  -1,
+                  null,
+                  0,
+                  "BINARY",
+                  0
+                ]
+              ],
+              "name": "idx_message_receipts_outbox",
+              "origin": "c",
+              "partial": 0,
+              "unique": 0
+            },
+            {
+              "columns": [
+                [
+                  0,
+                  2,
+                  "peer_onion",
+                  0,
+                  "BINARY",
+                  1
+                ],
+                [
+                  1,
+                  3,
+                  "direction",
+                  0,
+                  "BINARY",
+                  1
+                ],
+                [
+                  2,
+                  6,
+                  "status",
+                  0,
+                  "BINARY",
+                  1
+                ],
+                [
+                  3,
+                  -1,
+                  null,
+                  0,
+                  "BINARY",
+                  0
+                ]
+              ],
+              "name": "idx_message_receipts_unread",
+              "origin": "c",
+              "partial": 0,
+              "unique": 0
+            }
+          ],
+          "name": "message_receipts",
+          "sql": "CREATE TABLE message_receipts (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    msg_id TEXT NOT NULL CHECK (msg_id <> ''),\n    peer_onion TEXT NOT NULL CHECK (peer_onion <> '') REFERENCES peers(onion) ON DELETE RESTRICT,\n    direction TEXT NOT NULL CHECK (direction IN ('in', 'out')),\n    delivery TEXT NOT NULL CHECK (delivery IN ('live', 'drop')),\n    content_type TEXT NOT NULL CHECK (content_type IN ('text')),\n    status TEXT NOT NULL CHECK (status IN ('pending', 'delivered', 'unread', 'read')),\n    visible_in_history INTEGER NOT NULL DEFAULT 0 CHECK (visible_in_history IN (0, 1)),\n    created_at TEXT NOT NULL CHECK (created_at <> ''),\n    updated_at TEXT NOT NULL CHECK (updated_at <> '')\n)"
+        },
+        {
+          "columns": [
+            [
+              0,
+              "receipt_id",
+              "INTEGER",
+              0,
+              null,
+              1,
+              0
+            ],
+            [
+              1,
+              "payload",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ]
+          ],
+          "foreign_keys": [
+            [
+              0,
+              0,
+              "message_receipts",
+              "receipt_id",
+              "id",
+              "NO ACTION",
+              "CASCADE",
+              "NONE"
+            ]
+          ],
+          "indexes": [],
+          "name": "outbox_spool",
+          "sql": "CREATE TABLE outbox_spool (\n    receipt_id INTEGER PRIMARY KEY REFERENCES message_receipts(id) ON DELETE CASCADE,\n    payload TEXT NOT NULL\n)"
+        },
+        {
+          "columns": [
+            [
+              0,
+              "onion",
+              "TEXT",
+              1,
+              null,
+              1,
+              0
+            ],
+            [
+              1,
+              "alias",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ],
+            [
+              2,
+              "alias_state",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ],
+            [
+              3,
+              "created_at",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ],
+            [
+              4,
+              "updated_at",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ]
+          ],
+          "foreign_keys": [],
+          "indexes": [
+            {
+              "columns": [
+                [
+                  0,
+                  0,
+                  "onion",
+                  0,
+                  "BINARY",
+                  1
+                ],
+                [
+                  1,
+                  -1,
+                  null,
+                  0,
+                  "BINARY",
+                  0
+                ]
+              ],
+              "name": "sqlite_autoindex_peers_1",
+              "origin": "pk",
+              "partial": 0,
+              "unique": 1
+            },
+            {
+              "columns": [
+                [
+                  0,
+                  1,
+                  "alias",
+                  0,
+                  "BINARY",
+                  1
+                ],
+                [
+                  1,
+                  -1,
+                  null,
+                  0,
+                  "BINARY",
+                  0
+                ]
+              ],
+              "name": "sqlite_autoindex_peers_2",
+              "origin": "u",
+              "partial": 0,
+              "unique": 1
+            }
+          ],
+          "name": "peers",
+          "sql": "CREATE TABLE peers (\n    onion TEXT PRIMARY KEY NOT NULL CHECK (onion <> ''),\n    alias TEXT UNIQUE NOT NULL CHECK (alias <> ''),\n    alias_state TEXT NOT NULL CHECK (alias_state IN ('saved', 'discovered')),\n    created_at TEXT NOT NULL CHECK (created_at <> ''),\n    updated_at TEXT NOT NULL CHECK (updated_at <> '')\n)"
+        }
+      ]
+    }
+  },
+  "derivation": {
+    "blob_object": {
+      "context_prefix_hex": "6d65746f722f626c6f622d6f626a6563742f763100",
+      "current": 1
+    },
+    "profile_key": {
+      "contexts_hex": {
+        "blob_root": "6d65746f722f626c6f62732f7631",
+        "database": "6d65746f722f64622f7631",
+        "identity_secret": "6d65746f722f736563726574732f7631"
+      },
+      "current": 1
+    }
+  },
+  "ipc": {
+    "current": 2,
+    "minimum_supported": 2,
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "commands": {
+        "accept": {
+          "$ref": "#/definitions/AcceptCommand"
+        },
+        "add_contact": {
+          "$ref": "#/definitions/AddContactCommand"
+        },
+        "add_profile": {
+          "$ref": "#/definitions/AddProfileCommand"
+        },
+        "authenticate_session": {
+          "$ref": "#/definitions/AuthenticateSessionCommand"
+        },
+        "change_password": {
+          "$ref": "#/definitions/ChangePasswordCommand"
+        },
+        "clear_contacts": {
+          "$ref": "#/definitions/ClearContactsCommand"
+        },
+        "clear_history": {
+          "$ref": "#/definitions/ClearHistoryCommand"
+        },
+        "clear_messages": {
+          "$ref": "#/definitions/ClearMessagesCommand"
+        },
+        "clear_profile_db": {
+          "$ref": "#/definitions/ClearProfileDbCommand"
+        },
+        "connect": {
+          "$ref": "#/definitions/ConnectCommand"
+        },
+        "disconnect": {
+          "$ref": "#/definitions/DisconnectCommand"
+        },
+        "fallback": {
+          "$ref": "#/definitions/FallbackCommand"
+        },
+        "generate_address": {
+          "$ref": "#/definitions/GenerateAddressCommand"
+        },
+        "get_address": {
+          "$ref": "#/definitions/GetAddressCommand"
+        },
+        "get_chat_startup_state": {
+          "$ref": "#/definitions/GetChatStartupStateCommand"
+        },
+        "get_config": {
+          "$ref": "#/definitions/GetConfigCommand"
+        },
+        "get_config_list": {
+          "$ref": "#/definitions/GetConfigListCommand"
+        },
+        "get_connections": {
+          "$ref": "#/definitions/GetConnectionsCommand"
+        },
+        "get_contacts_list": {
+          "$ref": "#/definitions/GetContactsListCommand"
+        },
+        "get_history": {
+          "$ref": "#/definitions/GetHistoryCommand"
+        },
+        "get_inbox": {
+          "$ref": "#/definitions/GetInboxCommand"
+        },
+        "get_messages": {
+          "$ref": "#/definitions/GetMessagesCommand"
+        },
+        "get_raw_history": {
+          "$ref": "#/definitions/GetRawHistoryCommand"
+        },
+        "get_setting": {
+          "$ref": "#/definitions/GetSettingCommand"
+        },
+        "get_settings_list": {
+          "$ref": "#/definitions/GetSettingsListCommand"
+        },
+        "get_transport_state": {
+          "$ref": "#/definitions/GetTransportStateCommand"
+        },
+        "init": {
+          "$ref": "#/definitions/InitCommand"
+        },
+        "lock": {
+          "$ref": "#/definitions/LockCommand"
+        },
+        "mark_read": {
+          "$ref": "#/definitions/MarkReadCommand"
+        },
+        "migrate_profile_security": {
+          "$ref": "#/definitions/MigrateProfileSecurityCommand"
+        },
+        "register_live_consumer": {
+          "$ref": "#/definitions/RegisterLiveConsumerCommand"
+        },
+        "reject": {
+          "$ref": "#/definitions/RejectCommand"
+        },
+        "remove_contact": {
+          "$ref": "#/definitions/RemoveContactCommand"
+        },
+        "remove_profile": {
+          "$ref": "#/definitions/RemoveProfileCommand"
+        },
+        "rename_contact": {
+          "$ref": "#/definitions/RenameContactCommand"
+        },
+        "rename_profile": {
+          "$ref": "#/definitions/RenameProfileCommand"
+        },
+        "retunnel": {
+          "$ref": "#/definitions/RetunnelCommand"
+        },
+        "self_destruct": {
+          "$ref": "#/definitions/SelfDestructCommand"
+        },
+        "send_message": {
+          "$ref": "#/definitions/SendMessageCommand"
+        },
+        "set_config": {
+          "$ref": "#/definitions/SetConfigCommand"
+        },
+        "set_default_profile": {
+          "$ref": "#/definitions/SetDefaultProfileCommand"
+        },
+        "set_setting": {
+          "$ref": "#/definitions/SetSettingCommand"
+        },
+        "switch": {
+          "$ref": "#/definitions/SwitchCommand"
+        },
+        "sync_config": {
+          "$ref": "#/definitions/SyncConfigCommand"
+        },
+        "unlock": {
+          "$ref": "#/definitions/UnlockCommand"
+        }
+      },
+      "definitions": {
+        "AcceptCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "title": "AcceptCommand",
+          "type": "object"
+        },
+        "AckEvent": {
+          "properties": {
+            "msg_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestamp": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "msg_id"
+          ],
+          "title": "AckEvent",
+          "type": "object"
+        },
+        "AddContactCommand": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "AddContactCommand",
+          "type": "object"
+        },
+        "AddProfileCommand": {
+          "properties": {
+            "is_remote": {
+              "type": "boolean"
+            },
+            "master_password": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "port": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "security_mode": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "title": "AddProfileCommand",
+          "type": "object"
+        },
+        "AddressCantGenerateRunningEvent": {
+          "properties": {
+            "profile": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "profile"
+          ],
+          "title": "AddressCantGenerateRunningEvent",
+          "type": "object"
+        },
+        "AddressCurrentEvent": {
+          "properties": {
+            "onion": {
+              "type": "string"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "profile",
+            "onion"
+          ],
+          "title": "AddressCurrentEvent",
+          "type": "object"
+        },
+        "AddressGeneratedEvent": {
+          "properties": {
+            "onion": {
+              "type": "string"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "profile",
+            "onion"
+          ],
+          "title": "AddressGeneratedEvent",
+          "type": "object"
+        },
+        "AddressNotGeneratedEvent": {
+          "properties": {
+            "profile": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "profile"
+          ],
+          "title": "AddressNotGeneratedEvent",
+          "type": "object"
+        },
+        "AliasInUseEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "AliasInUseEvent",
+          "type": "object"
+        },
+        "AliasNotFoundEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "AliasNotFoundEvent",
+          "type": "object"
+        },
+        "AliasRenamedEvent": {
+          "properties": {
+            "new_alias": {
+              "type": "string"
+            },
+            "old_alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "old_alias",
+            "new_alias"
+          ],
+          "title": "AliasRenamedEvent",
+          "type": "object"
+        },
+        "AliasSameEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "AliasSameEvent",
+          "type": "object"
+        },
+        "AlreadyUnlockedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "AlreadyUnlockedEvent",
+          "type": "object"
+        },
+        "AuthRequiredEvent": {
+          "properties": {
+            "challenge": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "salt": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "AuthRequiredEvent",
+          "type": "object"
+        },
+        "AuthenticateSessionCommand": {
+          "properties": {
+            "proof": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "proof"
+          ],
+          "title": "AuthenticateSessionCommand",
+          "type": "object"
+        },
+        "AutoFallbackQueuedEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "msg_id": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias",
+            "msg_id"
+          ],
+          "title": "AutoFallbackQueuedEvent",
+          "type": "object"
+        },
+        "AutoReconnectScheduledEvent": {
+          "properties": {
+            "actor": {
+              "enum": [
+                "local",
+                "remote",
+                "system"
+              ],
+              "type": "string"
+            },
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "origin": {
+              "enum": [
+                "manual",
+                "auto_reconnect",
+                "retunnel",
+                "incoming",
+                "grace_reconnect",
+                "mutual_connect",
+                "auto_accept_contact"
+              ],
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "AutoReconnectScheduledEvent",
+          "type": "object"
+        },
+        "CannotConnectSelfEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "CannotConnectSelfEvent",
+          "type": "object"
+        },
+        "CannotDropSelfEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "CannotDropSelfEvent",
+          "type": "object"
+        },
+        "CannotSwitchSelfEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "CannotSwitchSelfEvent",
+          "type": "object"
+        },
+        "ChangePasswordCommand": {
+          "properties": {
+            "current_password": {
+              "type": "string"
+            },
+            "new_password": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "current_password",
+            "new_password"
+          ],
+          "title": "ChangePasswordCommand",
+          "type": "object"
+        },
+        "ChatStartupStateEvent": {
+          "properties": {
+            "active": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "contacts": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "pending": {
+              "items": {},
+              "type": "array"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unread": {
+              "items": {},
+              "type": "array"
+            }
+          },
+          "required": [
+            "active",
+            "contacts"
+          ],
+          "title": "ChatStartupStateEvent",
+          "type": "object"
+        },
+        "ClearContactsCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "ClearContactsCommand",
+          "type": "object"
+        },
+        "ClearHistoryCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "ClearHistoryCommand",
+          "type": "object"
+        },
+        "ClearMessagesCommand": {
+          "properties": {
+            "non_contacts_only": {
+              "type": "boolean"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "ClearMessagesCommand",
+          "type": "object"
+        },
+        "ClearProfileDbCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "ClearProfileDbCommand",
+          "type": "object"
+        },
+        "ClientScopeKeyRejectedEvent": {
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "ClientScopeKeyRejectedEvent",
+          "type": "object"
+        },
+        "ConfigDataEvent": {
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "value"
+          ],
+          "title": "ConfigDataEvent",
+          "type": "object"
+        },
+        "ConfigListDataEvent": {
+          "properties": {
+            "entries": {
+              "items": {},
+              "type": "array"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scope": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "scope",
+            "profile"
+          ],
+          "title": "ConfigListDataEvent",
+          "type": "object"
+        },
+        "ConfigSyncedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "ConfigSyncedEvent",
+          "type": "object"
+        },
+        "ConfigUpdateFailedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "ConfigUpdateFailedEvent",
+          "type": "object"
+        },
+        "ConfigUpdatedEvent": {
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "title": "ConfigUpdatedEvent",
+          "type": "object"
+        },
+        "ConnectCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "title": "ConnectCommand",
+          "type": "object"
+        },
+        "ConnectedEvent": {
+          "properties": {
+            "actor": {
+              "enum": [
+                "local",
+                "remote",
+                "system"
+              ],
+              "type": "string"
+            },
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "type": "string"
+            },
+            "origin": {
+              "enum": [
+                "manual",
+                "auto_reconnect",
+                "retunnel",
+                "incoming",
+                "grace_reconnect",
+                "mutual_connect",
+                "auto_accept_contact"
+              ],
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias",
+            "onion"
+          ],
+          "title": "ConnectedEvent",
+          "type": "object"
+        },
+        "ConnectionAutoAcceptedEvent": {
+          "properties": {
+            "actor": {
+              "enum": [
+                "local",
+                "remote",
+                "system"
+              ],
+              "type": "string"
+            },
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "origin": {
+              "enum": [
+                "manual",
+                "auto_reconnect",
+                "retunnel",
+                "incoming",
+                "grace_reconnect",
+                "mutual_connect",
+                "auto_accept_contact"
+              ],
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "ConnectionAutoAcceptedEvent",
+          "type": "object"
+        },
+        "ConnectionConnectingEvent": {
+          "properties": {
+            "actor": {
+              "enum": [
+                "local",
+                "remote",
+                "system"
+              ],
+              "type": "string"
+            },
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "origin": {
+              "enum": [
+                "manual",
+                "auto_reconnect",
+                "retunnel",
+                "incoming",
+                "grace_reconnect",
+                "mutual_connect",
+                "auto_accept_contact"
+              ],
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "ConnectionConnectingEvent",
+          "type": "object"
+        },
+        "ConnectionFailedEvent": {
+          "properties": {
+            "actor": {
+              "enum": [
+                "local",
+                "remote",
+                "system"
+              ],
+              "type": "string"
+            },
+            "alias": {
+              "type": "string"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "origin": {
+              "enum": [
+                "manual",
+                "auto_reconnect",
+                "retunnel",
+                "incoming",
+                "grace_reconnect",
+                "mutual_connect",
+                "auto_accept_contact"
+              ],
+              "type": "string"
+            },
+            "reason_code": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "peer_ended_session",
+                    "retry_exhausted",
+                    "max_connections_reached",
+                    "retunnel_pending_connection_missing",
+                    "late_acceptance_timeout",
+                    "outbound_attempt_rejected",
+                    "outbound_attempt_closed_before_acceptance",
+                    "pending_acceptance_expired",
+                    "mutual_tiebreaker_loser",
+                    "duplicate_incoming_connected",
+                    "duplicate_incoming_pending"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "ConnectionFailedEvent",
+          "type": "object"
+        },
+        "ConnectionPendingEvent": {
+          "properties": {
+            "actor": {
+              "enum": [
+                "local",
+                "remote",
+                "system"
+              ],
+              "type": "string"
+            },
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "origin": {
+              "enum": [
+                "manual",
+                "auto_reconnect",
+                "retunnel",
+                "incoming",
+                "grace_reconnect",
+                "mutual_connect",
+                "auto_accept_contact"
+              ],
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "ConnectionPendingEvent",
+          "type": "object"
+        },
+        "ConnectionRejectedEvent": {
+          "properties": {
+            "actor": {
+              "enum": [
+                "local",
+                "remote",
+                "system"
+              ],
+              "type": "string"
+            },
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "origin": {
+              "enum": [
+                "manual",
+                "auto_reconnect",
+                "retunnel",
+                "incoming",
+                "grace_reconnect",
+                "mutual_connect",
+                "auto_accept_contact"
+              ],
+              "type": "string"
+            },
+            "reason_code": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "peer_ended_session",
+                    "retry_exhausted",
+                    "max_connections_reached",
+                    "retunnel_pending_connection_missing",
+                    "late_acceptance_timeout",
+                    "outbound_attempt_rejected",
+                    "outbound_attempt_closed_before_acceptance",
+                    "pending_acceptance_expired",
+                    "mutual_tiebreaker_loser",
+                    "duplicate_incoming_connected",
+                    "duplicate_incoming_pending"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "ConnectionRejectedEvent",
+          "type": "object"
+        },
+        "ConnectionRetryEvent": {
+          "properties": {
+            "actor": {
+              "enum": [
+                "local",
+                "remote",
+                "system"
+              ],
+              "type": "string"
+            },
+            "alias": {
+              "type": "string"
+            },
+            "attempt": {
+              "type": "integer"
+            },
+            "max_retries": {
+              "type": "integer"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "origin": {
+              "enum": [
+                "manual",
+                "auto_reconnect",
+                "retunnel",
+                "incoming",
+                "grace_reconnect",
+                "mutual_connect",
+                "auto_accept_contact"
+              ],
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias",
+            "attempt",
+            "max_retries"
+          ],
+          "title": "ConnectionRetryEvent",
+          "type": "object"
+        },
+        "ConnectionsStateEvent": {
+          "properties": {
+            "active": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "contacts": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "is_header": {
+              "type": "boolean"
+            },
+            "pending": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "active",
+            "pending",
+            "contacts"
+          ],
+          "title": "ConnectionsStateEvent",
+          "type": "object"
+        },
+        "ContactAddedEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "profile": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias",
+            "profile"
+          ],
+          "title": "ContactAddedEvent",
+          "type": "object"
+        },
+        "ContactAlreadySavedEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "ContactAlreadySavedEvent",
+          "type": "object"
+        },
+        "ContactDowngradedEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "ContactDowngradedEvent",
+          "type": "object"
+        },
+        "ContactRemovedDowngradedEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "new_alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias",
+            "new_alias"
+          ],
+          "title": "ContactRemovedDowngradedEvent",
+          "type": "object"
+        },
+        "ContactRemovedEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "profile": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "ContactRemovedEvent",
+          "type": "object"
+        },
+        "ContactsClearFailedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "ContactsClearFailedEvent",
+          "type": "object"
+        },
+        "ContactsClearedEvent": {
+          "properties": {
+            "preserved_peers": {
+              "type": "integer"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "profile"
+          ],
+          "title": "ContactsClearedEvent",
+          "type": "object"
+        },
+        "ContactsDataEvent": {
+          "properties": {
+            "discovered": {
+              "items": {},
+              "type": "array"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "saved": {
+              "items": {},
+              "type": "array"
+            }
+          },
+          "required": [
+            "saved",
+            "discovered",
+            "profile"
+          ],
+          "title": "ContactsDataEvent",
+          "type": "object"
+        },
+        "DaemonLockedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "DaemonLockedEvent",
+          "type": "object"
+        },
+        "DaemonOfflineEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "DaemonOfflineEvent",
+          "type": "object"
+        },
+        "DaemonUnlockedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "DaemonUnlockedEvent",
+          "type": "object"
+        },
+        "DatabaseClearFailedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "DatabaseClearFailedEvent",
+          "type": "object"
+        },
+        "DatabaseClearedEvent": {
+          "properties": {
+            "preserved_peers": {
+              "type": "integer"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "profile"
+          ],
+          "title": "DatabaseClearedEvent",
+          "type": "object"
+        },
+        "DatabaseCorruptedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "DatabaseCorruptedEvent",
+          "type": "object"
+        },
+        "DisconnectCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "title": "DisconnectCommand",
+          "type": "object"
+        },
+        "DisconnectedEvent": {
+          "properties": {
+            "actor": {
+              "enum": [
+                "local",
+                "remote",
+                "system"
+              ],
+              "type": "string"
+            },
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "origin": {
+              "enum": [
+                "manual",
+                "auto_reconnect",
+                "retunnel",
+                "incoming",
+                "grace_reconnect",
+                "mutual_connect",
+                "auto_accept_contact"
+              ],
+              "type": "string"
+            },
+            "reason_code": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "peer_ended_session",
+                    "retry_exhausted",
+                    "max_connections_reached",
+                    "retunnel_pending_connection_missing",
+                    "late_acceptance_timeout",
+                    "outbound_attempt_rejected",
+                    "outbound_attempt_closed_before_acceptance",
+                    "pending_acceptance_expired",
+                    "mutual_tiebreaker_loser",
+                    "duplicate_incoming_connected",
+                    "duplicate_incoming_pending"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "DisconnectedEvent",
+          "type": "object"
+        },
+        "DiscoveredPeerNotFoundEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "title": "DiscoveredPeerNotFoundEvent",
+          "type": "object"
+        },
+        "DropFailedEvent": {
+          "properties": {
+            "msg_id": {
+              "type": "string"
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "msg_id"
+          ],
+          "title": "DropFailedEvent",
+          "type": "object"
+        },
+        "DropQueuedEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "DropQueuedEvent",
+          "type": "object"
+        },
+        "DropsDisabledEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "DropsDisabledEvent",
+          "type": "object"
+        },
+        "FallbackCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "title": "FallbackCommand",
+          "type": "object"
+        },
+        "FallbackSuccessEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "count": {
+              "type": "integer"
+            },
+            "msg_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias",
+            "count",
+            "msg_ids"
+          ],
+          "title": "FallbackSuccessEvent",
+          "type": "object"
+        },
+        "GenerateAddressCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "GenerateAddressCommand",
+          "type": "object"
+        },
+        "GetAddressCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "GetAddressCommand",
+          "type": "object"
+        },
+        "GetChatStartupStateCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "GetChatStartupStateCommand",
+          "type": "object"
+        },
+        "GetConfigCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "setting_key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "setting_key"
+          ],
+          "title": "GetConfigCommand",
+          "type": "object"
+        },
+        "GetConfigListCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "GetConfigListCommand",
+          "type": "object"
+        },
+        "GetConnectionsCommand": {
+          "properties": {
+            "is_header": {
+              "type": "boolean"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "GetConnectionsCommand",
+          "type": "object"
+        },
+        "GetContactsListCommand": {
+          "properties": {
+            "chat_mode": {
+              "type": "boolean"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "GetContactsListCommand",
+          "type": "object"
+        },
+        "GetHistoryCommand": {
+          "properties": {
+            "limit": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "GetHistoryCommand",
+          "type": "object"
+        },
+        "GetInboxCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "GetInboxCommand",
+          "type": "object"
+        },
+        "GetMessagesCommand": {
+          "properties": {
+            "limit": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "GetMessagesCommand",
+          "type": "object"
+        },
+        "GetRawHistoryCommand": {
+          "properties": {
+            "limit": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "GetRawHistoryCommand",
+          "type": "object"
+        },
+        "GetSettingCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "setting_key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "setting_key"
+          ],
+          "title": "GetSettingCommand",
+          "type": "object"
+        },
+        "GetSettingsListCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "GetSettingsListCommand",
+          "type": "object"
+        },
+        "GetTransportStateCommand": {
+          "properties": {
+            "peer": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "GetTransportStateCommand",
+          "type": "object"
+        },
+        "HistoryClearFailedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "HistoryClearFailedEvent",
+          "type": "object"
+        },
+        "HistoryClearedAllEvent": {
+          "properties": {
+            "profile": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "profile"
+          ],
+          "title": "HistoryClearedAllEvent",
+          "type": "object"
+        },
+        "HistoryClearedEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "HistoryClearedEvent",
+          "type": "object"
+        },
+        "HistoryDataEvent": {
+          "properties": {
+            "alias": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "entries": {},
+            "peer_onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "profile": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "entries",
+            "profile"
+          ],
+          "title": "HistoryDataEvent",
+          "type": "object"
+        },
+        "HistoryRawDataEvent": {
+          "properties": {
+            "alias": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "entries": {},
+            "peer_onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "profile": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "entries",
+            "profile"
+          ],
+          "title": "HistoryRawDataEvent",
+          "type": "object"
+        },
+        "InboxCountsEvent": {
+          "properties": {
+            "inbox": {
+              "type": "object"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "inbox"
+          ],
+          "title": "InboxCountsEvent",
+          "type": "object"
+        },
+        "InboxDataEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "inbox_counts": {
+              "type": "object"
+            },
+            "is_live_flush": {
+              "type": "boolean"
+            },
+            "messages": {
+              "items": {},
+              "type": "array"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "InboxDataEvent",
+          "type": "object"
+        },
+        "InboxNotificationEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "count": {
+              "type": "integer"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "InboxNotificationEvent",
+          "type": "object"
+        },
+        "IncomingConnectionEvent": {
+          "properties": {
+            "actor": {
+              "enum": [
+                "local",
+                "remote",
+                "system"
+              ],
+              "type": "string"
+            },
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "origin": {
+              "enum": [
+                "manual",
+                "auto_reconnect",
+                "retunnel",
+                "incoming",
+                "grace_reconnect",
+                "mutual_connect",
+                "auto_accept_contact"
+              ],
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "IncomingConnectionEvent",
+          "type": "object"
+        },
+        "InitCommand": {
+          "properties": {
+            "current_version": {
+              "type": "integer"
+            },
+            "min_supported": {
+              "type": "integer"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "current_version",
+            "min_supported"
+          ],
+          "title": "InitCommand",
+          "type": "object"
+        },
+        "InitEvent": {
+          "properties": {
+            "capabilities": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "daemon_current_version": {
+              "type": "integer"
+            },
+            "daemon_min_supported": {
+              "type": "integer"
+            },
+            "negotiated_version": {
+              "type": "integer"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "profile": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "negotiated_version",
+            "daemon_current_version",
+            "daemon_min_supported"
+          ],
+          "title": "InitEvent",
+          "type": "object"
+        },
+        "InternalErrorEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "InternalErrorEvent",
+          "type": "object"
+        },
+        "InvalidConfigKeyEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "InvalidConfigKeyEvent",
+          "type": "object"
+        },
+        "InvalidNewPasswordEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "InvalidNewPasswordEvent",
+          "type": "object"
+        },
+        "InvalidPasswordEvent": {
+          "properties": {
+            "challenge": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "salt": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "InvalidPasswordEvent",
+          "type": "object"
+        },
+        "InvalidSettingKeyEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "InvalidSettingKeyEvent",
+          "type": "object"
+        },
+        "InvalidTargetEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "title": "InvalidTargetEvent",
+          "type": "object"
+        },
+        "IpcClientLimitReachedEvent": {
+          "properties": {
+            "max_clients": {
+              "type": "integer"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "max_clients"
+          ],
+          "title": "IpcClientLimitReachedEvent",
+          "type": "object"
+        },
+        "LocalAuthRateLimitedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "retry_after": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "retry_after"
+          ],
+          "title": "LocalAuthRateLimitedEvent",
+          "type": "object"
+        },
+        "LockCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "LockCommand",
+          "type": "object"
+        },
+        "MarkReadCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "title": "MarkReadCommand",
+          "type": "object"
+        },
+        "MaxConnectionsReachedEvent": {
+          "properties": {
+            "max_conn": {
+              "type": "integer"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "max_conn"
+          ],
+          "title": "MaxConnectionsReachedEvent",
+          "type": "object"
+        },
+        "MessageReceivedEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "content": {},
+            "delivery": {
+              "enum": [
+                "live",
+                "drop"
+              ],
+              "type": "string"
+            },
+            "msg_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timestamp": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias",
+            "delivery",
+            "content"
+          ],
+          "title": "MessageReceivedEvent",
+          "type": "object"
+        },
+        "MessagesClearFailedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "MessagesClearFailedEvent",
+          "type": "object"
+        },
+        "MessagesClearedAllEvent": {
+          "properties": {
+            "profile": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "profile"
+          ],
+          "title": "MessagesClearedAllEvent",
+          "type": "object"
+        },
+        "MessagesClearedEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "MessagesClearedEvent",
+          "type": "object"
+        },
+        "MessagesClearedNonContactsAllEvent": {
+          "properties": {
+            "profile": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "profile"
+          ],
+          "title": "MessagesClearedNonContactsAllEvent",
+          "type": "object"
+        },
+        "MessagesClearedNonContactsEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "MessagesClearedNonContactsEvent",
+          "type": "object"
+        },
+        "MessagesDataEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "messages": {
+              "items": {},
+              "type": "array"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "messages",
+            "alias"
+          ],
+          "title": "MessagesDataEvent",
+          "type": "object"
+        },
+        "MigrateProfileSecurityCommand": {
+          "properties": {
+            "current_password": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "new_password": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target_mode": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "target_mode"
+          ],
+          "title": "MigrateProfileSecurityCommand",
+          "type": "object"
+        },
+        "NoConnectionToDisconnectEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "NoConnectionToDisconnectEvent",
+          "type": "object"
+        },
+        "NoConnectionToRejectEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "NoConnectionToRejectEvent",
+          "type": "object"
+        },
+        "NoPendingConnectionEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "NoPendingConnectionEvent",
+          "type": "object"
+        },
+        "NoPendingLiveMessagesEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "NoPendingLiveMessagesEvent",
+          "type": "object"
+        },
+        "OnionInUseEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "OnionInUseEvent",
+          "type": "object"
+        },
+        "PasswordChangeFailedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "PasswordChangeFailedEvent",
+          "type": "object"
+        },
+        "PasswordChangeUnsupportedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "PasswordChangeUnsupportedEvent",
+          "type": "object"
+        },
+        "PasswordChangedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "PasswordChangedEvent",
+          "type": "object"
+        },
+        "PeerAnonymizedEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "new_alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias",
+            "new_alias"
+          ],
+          "title": "PeerAnonymizedEvent",
+          "type": "object"
+        },
+        "PeerCantDeleteActiveEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "PeerCantDeleteActiveEvent",
+          "type": "object"
+        },
+        "PeerNotFoundEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "title": "PeerNotFoundEvent",
+          "type": "object"
+        },
+        "PeerPromotedEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "PeerPromotedEvent",
+          "type": "object"
+        },
+        "PeerRemovedEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "PeerRemovedEvent",
+          "type": "object"
+        },
+        "PendingConnectionExpiredEvent": {
+          "properties": {
+            "actor": {
+              "enum": [
+                "local",
+                "remote",
+                "system"
+              ],
+              "type": "string"
+            },
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "origin": {
+              "enum": [
+                "manual",
+                "auto_reconnect",
+                "retunnel",
+                "incoming",
+                "grace_reconnect",
+                "mutual_connect",
+                "auto_accept_contact"
+              ],
+              "type": "string"
+            },
+            "reason_code": {
+              "enum": [
+                "peer_ended_session",
+                "retry_exhausted",
+                "max_connections_reached",
+                "retunnel_pending_connection_missing",
+                "late_acceptance_timeout",
+                "outbound_attempt_rejected",
+                "outbound_attempt_closed_before_acceptance",
+                "pending_acceptance_expired",
+                "mutual_tiebreaker_loser",
+                "duplicate_incoming_connected",
+                "duplicate_incoming_pending"
+              ],
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "PendingConnectionExpiredEvent",
+          "type": "object"
+        },
+        "ProfileOperationResultEvent": {
+          "properties": {
+            "operation_type": {
+              "enum": [
+                "invalid_name",
+                "default_set",
+                "remote_port_required",
+                "passwordless_remote_not_allowed",
+                "profile_exists",
+                "profile_created",
+                "profile_created_with_port",
+                "profile_creation_failed",
+                "security_migration_remote_not_allowed",
+                "cannot_migrate_running",
+                "security_mode_unchanged",
+                "security_mode_migrated",
+                "security_migration_failed",
+                "profile_not_found",
+                "cannot_remove_active",
+                "cannot_remove_default",
+                "cannot_remove_running",
+                "profile_removed",
+                "cannot_rename_running",
+                "profile_renamed",
+                "cannot_clear_running_db",
+                "database_not_found",
+                "database_cleared",
+                "database_clear_failed"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "type": "object"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "success": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "success",
+            "operation_type",
+            "params"
+          ],
+          "title": "ProfileOperationResultEvent",
+          "type": "object"
+        },
+        "ProfilesDataEvent": {
+          "properties": {
+            "profiles": {
+              "items": {},
+              "type": "array"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "profiles"
+          ],
+          "title": "ProfilesDataEvent",
+          "type": "object"
+        },
+        "ProtocolMismatchEvent": {
+          "properties": {
+            "client_current_version": {
+              "type": "integer"
+            },
+            "client_min_supported": {
+              "type": "integer"
+            },
+            "daemon_current_version": {
+              "type": "integer"
+            },
+            "daemon_min_supported": {
+              "type": "integer"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "daemon_current_version",
+            "daemon_min_supported",
+            "client_current_version",
+            "client_min_supported"
+          ],
+          "title": "ProtocolMismatchEvent",
+          "type": "object"
+        },
+        "ReadReceiptEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "msg_id": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias",
+            "msg_id"
+          ],
+          "title": "ReadReceiptEvent",
+          "type": "object"
+        },
+        "RegisterLiveConsumerCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "RegisterLiveConsumerCommand",
+          "type": "object"
+        },
+        "RejectCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "title": "RejectCommand",
+          "type": "object"
+        },
+        "RemoveContactCommand": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "RemoveContactCommand",
+          "type": "object"
+        },
+        "RemoveProfileCommand": {
+          "properties": {
+            "active_profile": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "title": "RemoveProfileCommand",
+          "type": "object"
+        },
+        "RenameContactCommand": {
+          "properties": {
+            "new_alias": {
+              "type": "string"
+            },
+            "old_alias": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "old_alias",
+            "new_alias"
+          ],
+          "title": "RenameContactCommand",
+          "type": "object"
+        },
+        "RenameProfileCommand": {
+          "properties": {
+            "new_name": {
+              "type": "string"
+            },
+            "old_name": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "old_name",
+            "new_name"
+          ],
+          "title": "RenameProfileCommand",
+          "type": "object"
+        },
+        "RenameSuccessEvent": {
+          "properties": {
+            "is_demotion": {
+              "type": "boolean"
+            },
+            "new_alias": {
+              "type": "string"
+            },
+            "old_alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "was_saved": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "old_alias",
+            "new_alias"
+          ],
+          "title": "RenameSuccessEvent",
+          "type": "object"
+        },
+        "RetunnelCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "title": "RetunnelCommand",
+          "type": "object"
+        },
+        "RetunnelFailedEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "error_code": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "no_cached_drop_tunnel",
+                    "no_active_connection_to_retunnel",
+                    "peer_ended_session",
+                    "peer_rejected_reconnect",
+                    "retunnel_reconnect_failed",
+                    "pending_acceptance_expired",
+                    "tor_launch_failed",
+                    "tor_binary_launch_failed",
+                    "tor_proxy_not_ready"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "error_detail": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "RetunnelFailedEvent",
+          "type": "object"
+        },
+        "RetunnelInitiatedEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "RetunnelInitiatedEvent",
+          "type": "object"
+        },
+        "RetunnelSuccessEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias"
+          ],
+          "title": "RetunnelSuccessEvent",
+          "type": "object"
+        },
+        "SelfDestructCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "SelfDestructCommand",
+          "type": "object"
+        },
+        "SelfDestructInitiatedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "SelfDestructInitiatedEvent",
+          "type": "object"
+        },
+        "SendMessageCommand": {
+          "properties": {
+            "content": {},
+            "delivery": {
+              "enum": [
+                "live",
+                "drop"
+              ],
+              "type": "string"
+            },
+            "msg_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "delivery",
+            "content",
+            "msg_id"
+          ],
+          "title": "SendMessageCommand",
+          "type": "object"
+        },
+        "SessionAuthenticatedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "SessionAuthenticatedEvent",
+          "type": "object"
+        },
+        "SetConfigCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "setting_key": {
+              "type": "string"
+            },
+            "setting_value": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            }
+          },
+          "required": [
+            "setting_key",
+            "setting_value"
+          ],
+          "title": "SetConfigCommand",
+          "type": "object"
+        },
+        "SetDefaultProfileCommand": {
+          "properties": {
+            "profile_name": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "profile_name"
+          ],
+          "title": "SetDefaultProfileCommand",
+          "type": "object"
+        },
+        "SetSettingCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "setting_key": {
+              "type": "string"
+            },
+            "setting_value": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            }
+          },
+          "required": [
+            "setting_key",
+            "setting_value"
+          ],
+          "title": "SetSettingCommand",
+          "type": "object"
+        },
+        "SettingDataEvent": {
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "value"
+          ],
+          "title": "SettingDataEvent",
+          "type": "object"
+        },
+        "SettingTypeErrorEvent": {
+          "properties": {
+            "key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "SettingTypeErrorEvent",
+          "type": "object"
+        },
+        "SettingUpdateFailedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "SettingUpdateFailedEvent",
+          "type": "object"
+        },
+        "SettingUpdatedEvent": {
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "title": "SettingUpdatedEvent",
+          "type": "object"
+        },
+        "SettingsListDataEvent": {
+          "properties": {
+            "entries": {
+              "items": {},
+              "type": "array"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scope": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "scope"
+          ],
+          "title": "SettingsListDataEvent",
+          "type": "object"
+        },
+        "SwitchCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "SwitchCommand",
+          "type": "object"
+        },
+        "SwitchSuccessEvent": {
+          "properties": {
+            "alias": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "SwitchSuccessEvent",
+          "type": "object"
+        },
+        "SyncConfigCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "SyncConfigCommand",
+          "type": "object"
+        },
+        "TorKeyDecryptFailedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "TorKeyDecryptFailedEvent",
+          "type": "object"
+        },
+        "TorKeyWriteFailedEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "TorKeyWriteFailedEvent",
+          "type": "object"
+        },
+        "TorProcessTerminatedEvent": {
+          "properties": {
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "error_code": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "no_cached_drop_tunnel",
+                    "no_active_connection_to_retunnel",
+                    "peer_ended_session",
+                    "peer_rejected_reconnect",
+                    "retunnel_reconnect_failed",
+                    "pending_acceptance_expired",
+                    "tor_launch_failed",
+                    "tor_binary_launch_failed",
+                    "tor_proxy_not_ready"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "error_detail": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "TorProcessTerminatedEvent",
+          "type": "object"
+        },
+        "TorStartFailedEvent": {
+          "properties": {
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "error_code": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "no_cached_drop_tunnel",
+                    "no_active_connection_to_retunnel",
+                    "peer_ended_session",
+                    "peer_rejected_reconnect",
+                    "retunnel_reconnect_failed",
+                    "pending_acceptance_expired",
+                    "tor_launch_failed",
+                    "tor_binary_launch_failed",
+                    "tor_proxy_not_ready"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "error_detail": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "TorStartFailedEvent",
+          "type": "object"
+        },
+        "TransportStateEvent": {
+          "properties": {
+            "auto_accept": {
+              "type": "boolean"
+            },
+            "drop_tunnel": {
+              "anyOf": [
+                {
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "focus_count": {
+              "type": "integer"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "peer": {
+              "type": "string"
+            },
+            "pending_live_count": {
+              "type": "integer"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "session_state": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "peer",
+            "session_state"
+          ],
+          "title": "TransportStateEvent",
+          "type": "object"
+        },
+        "UnknownCommandEvent": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "UnknownCommandEvent",
+          "type": "object"
+        },
+        "UnlockCommand": {
+          "properties": {
+            "password": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "password"
+          ],
+          "title": "UnlockCommand",
+          "type": "object"
+        },
+        "UnreadMessagesEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "messages": {
+              "items": {},
+              "type": "array"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "messages",
+            "alias"
+          ],
+          "title": "UnreadMessagesEvent",
+          "type": "object"
+        }
+      },
+      "events": {
+        "ack": {
+          "$ref": "#/definitions/AckEvent"
+        },
+        "address_cant_generate_running": {
+          "$ref": "#/definitions/AddressCantGenerateRunningEvent"
+        },
+        "address_current": {
+          "$ref": "#/definitions/AddressCurrentEvent"
+        },
+        "address_generated": {
+          "$ref": "#/definitions/AddressGeneratedEvent"
+        },
+        "address_not_generated": {
+          "$ref": "#/definitions/AddressNotGeneratedEvent"
+        },
+        "alias_in_use": {
+          "$ref": "#/definitions/AliasInUseEvent"
+        },
+        "alias_not_found": {
+          "$ref": "#/definitions/AliasNotFoundEvent"
+        },
+        "alias_renamed": {
+          "$ref": "#/definitions/AliasRenamedEvent"
+        },
+        "alias_same": {
+          "$ref": "#/definitions/AliasSameEvent"
+        },
+        "already_unlocked": {
+          "$ref": "#/definitions/AlreadyUnlockedEvent"
+        },
+        "auth_required": {
+          "$ref": "#/definitions/AuthRequiredEvent"
+        },
+        "auto_fallback_queued": {
+          "$ref": "#/definitions/AutoFallbackQueuedEvent"
+        },
+        "auto_reconnect_scheduled": {
+          "$ref": "#/definitions/AutoReconnectScheduledEvent"
+        },
+        "cannot_connect_self": {
+          "$ref": "#/definitions/CannotConnectSelfEvent"
+        },
+        "cannot_drop_self": {
+          "$ref": "#/definitions/CannotDropSelfEvent"
+        },
+        "cannot_switch_self": {
+          "$ref": "#/definitions/CannotSwitchSelfEvent"
+        },
+        "chat_startup_state": {
+          "$ref": "#/definitions/ChatStartupStateEvent"
+        },
+        "client_scope_key_rejected": {
+          "$ref": "#/definitions/ClientScopeKeyRejectedEvent"
+        },
+        "config_data": {
+          "$ref": "#/definitions/ConfigDataEvent"
+        },
+        "config_list_data": {
+          "$ref": "#/definitions/ConfigListDataEvent"
+        },
+        "config_synced": {
+          "$ref": "#/definitions/ConfigSyncedEvent"
+        },
+        "config_update_failed": {
+          "$ref": "#/definitions/ConfigUpdateFailedEvent"
+        },
+        "config_updated": {
+          "$ref": "#/definitions/ConfigUpdatedEvent"
+        },
+        "connected": {
+          "$ref": "#/definitions/ConnectedEvent"
+        },
+        "connection_auto_accepted": {
+          "$ref": "#/definitions/ConnectionAutoAcceptedEvent"
+        },
+        "connection_connecting": {
+          "$ref": "#/definitions/ConnectionConnectingEvent"
+        },
+        "connection_failed": {
+          "$ref": "#/definitions/ConnectionFailedEvent"
+        },
+        "connection_pending": {
+          "$ref": "#/definitions/ConnectionPendingEvent"
+        },
+        "connection_rejected": {
+          "$ref": "#/definitions/ConnectionRejectedEvent"
+        },
+        "connection_retry": {
+          "$ref": "#/definitions/ConnectionRetryEvent"
+        },
+        "connections_state": {
+          "$ref": "#/definitions/ConnectionsStateEvent"
+        },
+        "contact_added": {
+          "$ref": "#/definitions/ContactAddedEvent"
+        },
+        "contact_already_saved": {
+          "$ref": "#/definitions/ContactAlreadySavedEvent"
+        },
+        "contact_downgraded": {
+          "$ref": "#/definitions/ContactDowngradedEvent"
+        },
+        "contact_removed": {
+          "$ref": "#/definitions/ContactRemovedEvent"
+        },
+        "contact_removed_downgraded": {
+          "$ref": "#/definitions/ContactRemovedDowngradedEvent"
+        },
+        "contacts_clear_failed": {
+          "$ref": "#/definitions/ContactsClearFailedEvent"
+        },
+        "contacts_cleared": {
+          "$ref": "#/definitions/ContactsClearedEvent"
+        },
+        "contacts_data": {
+          "$ref": "#/definitions/ContactsDataEvent"
+        },
+        "daemon_locked": {
+          "$ref": "#/definitions/DaemonLockedEvent"
+        },
+        "daemon_offline": {
+          "$ref": "#/definitions/DaemonOfflineEvent"
+        },
+        "daemon_unlocked": {
+          "$ref": "#/definitions/DaemonUnlockedEvent"
+        },
+        "db_clear_failed": {
+          "$ref": "#/definitions/DatabaseClearFailedEvent"
+        },
+        "db_cleared": {
+          "$ref": "#/definitions/DatabaseClearedEvent"
+        },
+        "db_corrupted": {
+          "$ref": "#/definitions/DatabaseCorruptedEvent"
+        },
+        "disconnected": {
+          "$ref": "#/definitions/DisconnectedEvent"
+        },
+        "discovered_peer_not_found": {
+          "$ref": "#/definitions/DiscoveredPeerNotFoundEvent"
+        },
+        "drop_failed": {
+          "$ref": "#/definitions/DropFailedEvent"
+        },
+        "drop_queued": {
+          "$ref": "#/definitions/DropQueuedEvent"
+        },
+        "drops_disabled": {
+          "$ref": "#/definitions/DropsDisabledEvent"
+        },
+        "fallback_success": {
+          "$ref": "#/definitions/FallbackSuccessEvent"
+        },
+        "history_clear_failed": {
+          "$ref": "#/definitions/HistoryClearFailedEvent"
+        },
+        "history_cleared": {
+          "$ref": "#/definitions/HistoryClearedEvent"
+        },
+        "history_cleared_all": {
+          "$ref": "#/definitions/HistoryClearedAllEvent"
+        },
+        "history_data": {
+          "$ref": "#/definitions/HistoryDataEvent"
+        },
+        "history_raw_data": {
+          "$ref": "#/definitions/HistoryRawDataEvent"
+        },
+        "inbox_counts": {
+          "$ref": "#/definitions/InboxCountsEvent"
+        },
+        "inbox_data": {
+          "$ref": "#/definitions/InboxDataEvent"
+        },
+        "inbox_notification": {
+          "$ref": "#/definitions/InboxNotificationEvent"
+        },
+        "incoming_connection": {
+          "$ref": "#/definitions/IncomingConnectionEvent"
+        },
+        "init": {
+          "$ref": "#/definitions/InitEvent"
+        },
+        "internal_error": {
+          "$ref": "#/definitions/InternalErrorEvent"
+        },
+        "invalid_config_key": {
+          "$ref": "#/definitions/InvalidConfigKeyEvent"
+        },
+        "invalid_new_password": {
+          "$ref": "#/definitions/InvalidNewPasswordEvent"
+        },
+        "invalid_password": {
+          "$ref": "#/definitions/InvalidPasswordEvent"
+        },
+        "invalid_setting_key": {
+          "$ref": "#/definitions/InvalidSettingKeyEvent"
+        },
+        "invalid_target": {
+          "$ref": "#/definitions/InvalidTargetEvent"
+        },
+        "ipc_client_limit_reached": {
+          "$ref": "#/definitions/IpcClientLimitReachedEvent"
+        },
+        "local_auth_rate_limited": {
+          "$ref": "#/definitions/LocalAuthRateLimitedEvent"
+        },
+        "max_connections_reached": {
+          "$ref": "#/definitions/MaxConnectionsReachedEvent"
+        },
+        "message_received": {
+          "$ref": "#/definitions/MessageReceivedEvent"
+        },
+        "messages_clear_failed": {
+          "$ref": "#/definitions/MessagesClearFailedEvent"
+        },
+        "messages_cleared": {
+          "$ref": "#/definitions/MessagesClearedEvent"
+        },
+        "messages_cleared_all": {
+          "$ref": "#/definitions/MessagesClearedAllEvent"
+        },
+        "messages_cleared_non_contacts": {
+          "$ref": "#/definitions/MessagesClearedNonContactsEvent"
+        },
+        "messages_cleared_non_contacts_all": {
+          "$ref": "#/definitions/MessagesClearedNonContactsAllEvent"
+        },
+        "messages_data": {
+          "$ref": "#/definitions/MessagesDataEvent"
+        },
+        "no_connection_to_disconnect": {
+          "$ref": "#/definitions/NoConnectionToDisconnectEvent"
+        },
+        "no_connection_to_reject": {
+          "$ref": "#/definitions/NoConnectionToRejectEvent"
+        },
+        "no_pending_connection": {
+          "$ref": "#/definitions/NoPendingConnectionEvent"
+        },
+        "no_pending_live_msgs": {
+          "$ref": "#/definitions/NoPendingLiveMessagesEvent"
+        },
+        "onion_in_use": {
+          "$ref": "#/definitions/OnionInUseEvent"
+        },
+        "password_change_failed": {
+          "$ref": "#/definitions/PasswordChangeFailedEvent"
+        },
+        "password_change_unsupported": {
+          "$ref": "#/definitions/PasswordChangeUnsupportedEvent"
+        },
+        "password_changed": {
+          "$ref": "#/definitions/PasswordChangedEvent"
+        },
+        "peer_anonymized": {
+          "$ref": "#/definitions/PeerAnonymizedEvent"
+        },
+        "peer_cant_delete_active": {
+          "$ref": "#/definitions/PeerCantDeleteActiveEvent"
+        },
+        "peer_not_found": {
+          "$ref": "#/definitions/PeerNotFoundEvent"
+        },
+        "peer_promoted": {
+          "$ref": "#/definitions/PeerPromotedEvent"
+        },
+        "peer_removed": {
+          "$ref": "#/definitions/PeerRemovedEvent"
+        },
+        "pending_connection_expired": {
+          "$ref": "#/definitions/PendingConnectionExpiredEvent"
+        },
+        "profile_operation_result": {
+          "$ref": "#/definitions/ProfileOperationResultEvent"
+        },
+        "profiles_data": {
+          "$ref": "#/definitions/ProfilesDataEvent"
+        },
+        "protocol_mismatch": {
+          "$ref": "#/definitions/ProtocolMismatchEvent"
+        },
+        "read_receipt": {
+          "$ref": "#/definitions/ReadReceiptEvent"
+        },
+        "rename_success": {
+          "$ref": "#/definitions/RenameSuccessEvent"
+        },
+        "retunnel_failed": {
+          "$ref": "#/definitions/RetunnelFailedEvent"
+        },
+        "retunnel_initiated": {
+          "$ref": "#/definitions/RetunnelInitiatedEvent"
+        },
+        "retunnel_success": {
+          "$ref": "#/definitions/RetunnelSuccessEvent"
+        },
+        "self_destruct_initiated": {
+          "$ref": "#/definitions/SelfDestructInitiatedEvent"
+        },
+        "session_authenticated": {
+          "$ref": "#/definitions/SessionAuthenticatedEvent"
+        },
+        "setting_data": {
+          "$ref": "#/definitions/SettingDataEvent"
+        },
+        "setting_type_error": {
+          "$ref": "#/definitions/SettingTypeErrorEvent"
+        },
+        "setting_update_failed": {
+          "$ref": "#/definitions/SettingUpdateFailedEvent"
+        },
+        "setting_updated": {
+          "$ref": "#/definitions/SettingUpdatedEvent"
+        },
+        "settings_list_data": {
+          "$ref": "#/definitions/SettingsListDataEvent"
+        },
+        "switch_success": {
+          "$ref": "#/definitions/SwitchSuccessEvent"
+        },
+        "tor_key_decrypt_failed": {
+          "$ref": "#/definitions/TorKeyDecryptFailedEvent"
+        },
+        "tor_key_write_failed": {
+          "$ref": "#/definitions/TorKeyWriteFailedEvent"
+        },
+        "tor_process_terminated": {
+          "$ref": "#/definitions/TorProcessTerminatedEvent"
+        },
+        "tor_start_failed": {
+          "$ref": "#/definitions/TorStartFailedEvent"
+        },
+        "transport_state": {
+          "$ref": "#/definitions/TransportStateEvent"
+        },
+        "unknown_command": {
+          "$ref": "#/definitions/UnknownCommandEvent"
+        },
+        "unread_messages": {
+          "$ref": "#/definitions/UnreadMessagesEvent"
+        }
+      },
+      "title": "Metor IPC Contract"
+    }
+  },
+  "keyslot": {
+    "contract": {
+      "format": "metor-password-keyslot",
+      "kdf_algorithm": "argon2id",
+      "kdf_fields": [
+        "algorithm",
+        "memlimit",
+        "opslimit",
+        "salt"
+      ],
+      "top_level_fields": [
+        "format",
+        "kdf",
+        "version",
+        "wrap"
+      ],
+      "wrap_algorithm": "xsalsa20-poly1305-secretbox",
+      "wrap_fields": [
+        "algorithm",
+        "ciphertext",
+        "nonce"
+      ]
+    },
+    "current": 1,
+    "minimum_supported": 1
+  },
+  "manifest_version": 1,
+  "peer": {
+    "contract": {
+      "auth": "/auth <onion> <signature> <current-generation> <minimum-supported-generation> [mode]",
+      "challenge": "/challenge <hex-nonce> <current-generation> <minimum-supported-generation>",
+      "commands": [
+        "/accepted",
+        "/ack",
+        "/auth",
+        "/challenge",
+        "/disconnect",
+        "/drop",
+        "/msg",
+        "/pending",
+        "/read",
+        "/reject"
+      ],
+      "framing": "newline-delimited UTF-8 command frames",
+      "negotiation": "highest generation in the inclusive range overlap"
+    },
+    "current": 1,
+    "minimum_supported": 1
+  }
+}

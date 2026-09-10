@@ -12,9 +12,10 @@ from metor.core.api.registry import register_command
 @register_command(CommandType.INIT)
 @dataclass
 class InitCommand(IpcCommand):
-    """Requests daemon-session initialization."""
+    """Requests initialization and advertises the client IPC support range."""
 
-    protocol_version: Optional[int] = None
+    current_version: int
+    min_supported: int
     command_type: CommandType = field(default=CommandType.INIT, init=False)
 
 

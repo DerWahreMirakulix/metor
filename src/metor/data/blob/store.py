@@ -14,16 +14,18 @@ import nacl.utils
 from nacl.encoding import RawEncoder
 
 from metor.utils import secure_clear_buffer
+from metor.versioning import BLOB_FORMAT_VERSION, BLOB_OBJECT_DERIVATION_VERSION
 
 BLOB_FORMAT_MAGIC = b'METORB01'
-BLOB_FORMAT_VERSION = 1
 BLOB_ID_BYTES = 32
 BLOB_ID_PATTERN = re.compile(r'^[0-9a-f]{64}$')
 BLOB_KEY_BYTES = nacl.bindings.crypto_aead_xchacha20poly1305_ietf_KEYBYTES
 BLOB_NONCE_BYTES = nacl.bindings.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES
 BLOB_AUTH_BYTES = nacl.bindings.crypto_aead_xchacha20poly1305_ietf_ABYTES
 MAX_BLOB_PLAINTEXT_BYTES = 64 * 1024 * 1024
-PER_BLOB_CONTEXT = b'metor/blob-object/v1\x00'
+PER_BLOB_CONTEXT = f'metor/blob-object/v{BLOB_OBJECT_DERIVATION_VERSION}\x00'.encode(
+    'ascii'
+)
 BLOB_HEADER_BYTES = len(BLOB_FORMAT_MAGIC) + 1 + BLOB_NONCE_BYTES
 
 

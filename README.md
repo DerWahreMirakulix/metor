@@ -4,16 +4,19 @@
 
 Built on a robust **Client-Daemon Architecture** and structured via **Domain-Driven Design (DDD)**, the user interface is completely stateless. You can manage multiple secure connections simultaneously, maintain an address book, queue offline messages, and view connection history — all seamlessly from the console, whether running locally or remotely.
 
-## 📚 Repository Guide
+## 📚 Documentation
 
-Use this README as the landing page, then jump to the specialized documents below:
+This README is the human starting point. Follow the architecture guide for the
+system model, then use the focused references when you need exact contracts.
 
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md): Canonical architecture decisions guide covering system boundaries, config routing, IPC contracts, OPSEC guardrails, and transport invariants.
-- [GLOSSARY.md](docs/GLOSSARY.md): Canonical terminology — the two dimensions (message semantics `live`/`drop`, connection types `session`/`tunnel`/`direct`) and the settings namespaces.
-- [SETTINGS.md](docs/SETTINGS.md): Generated reference for all supported `settings` and profile `config` keys, including defaults, constraints, and security notes.
-- [API.md](docs/API.md): Generated IPC contract reference for all daemon commands and events.
-- [AUDIT.md](docs/AUDIT.md): Security and architecture audit checklist used for every critical change.
-- [CONTRIBUTE.md](docs/CONTRIBUTE.md): Coding standards, import rules, docstring requirements, and security-focused contribution constraints.
+- Understand Metor through the [architecture guide](docs/ARCHITECTURE.md) and
+  [canonical terminology](docs/GLOSSARY.md).
+- Build against the daemon with the generated [IPC API reference](docs/generated/API.md)
+  and [settings reference](docs/generated/SETTINGS.md).
+- Work on an embedded frontend through the [embedded UI contract](docs/contracts/EMBEDDED_UI.md).
+- Contribute using the [contribution guide](docs/CONTRIBUTE.md) and
+  [security audit checklist](docs/governance/AUDIT.md).
+- Prepare a release with the [release and versioning guide](docs/RELEASING.md).
 
 ## 🌟 Key Features
 
@@ -48,9 +51,9 @@ Metor strictly separates presentation (UI) from domain logic (Core/Data). Commun
 Recommended reading order:
 
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) for the high-level design and long-lived decisions.
-- [SETTINGS.md](docs/SETTINGS.md) for all supported settings, defaults, constraints, and security notes.
-- [API.md](docs/API.md) for the exact IPC schema used between UI and daemon.
-- [AUDIT.md](docs/AUDIT.md) and [CONTRIBUTE.md](docs/CONTRIBUTE.md) if you are reviewing or changing code.
+- [Settings reference](docs/generated/SETTINGS.md) for all supported settings, defaults, constraints, and security notes.
+- [IPC API reference](docs/generated/API.md) for the exact client-daemon wire contract.
+- [Audit checklist](docs/governance/AUDIT.md) and [contribution guide](docs/CONTRIBUTE.md) if you are reviewing or changing code.
 
 ### OPSEC & Security Concepts
 
@@ -254,7 +257,7 @@ Want to run Metor on a server and connect securely from your laptop?
 
 Metor's configuration system uses a cascading architecture. You can define **global settings** that apply to all profiles, or create **profile-specific overrides**.
 
-🔗 **Full Settings Reference:** See [SETTINGS.md](docs/SETTINGS.md) for the generated key-by-key reference, including defaults, constraints, scope, and security notes.
+🔗 **Full Settings Reference:** See the generated [settings reference](docs/generated/SETTINGS.md) for defaults, constraints, scope, and security notes.
 
 ### Global Settings (`settings`)
 
@@ -296,7 +299,7 @@ When interacting with a remote daemon over SSH, Metor's CLI acts as a smart rout
 - `ui.terminal.inbox_notification_delay` (float): Delays and aggregates unread-message notifications for unfocused peers on this local UI.
 - `ui.terminal.chat_limit` (int): Maximum number of messages kept in the UI's volatile RAM display buffer.
 
-The full list, including all network and transport tuning knobs, is documented in [SETTINGS.md](docs/SETTINGS.md).
+The full list, including all network and transport tuning knobs, is documented in the generated [settings reference](docs/generated/SETTINGS.md).
 
 ## 🧰 Development Workflow
 
@@ -304,10 +307,10 @@ The release bundle workflow is separate from the normal developer workflow. Day-
 
 Generated documentation is part of the project maintenance pipeline.
 
-- `npm run docs`: Regenerates [API.md](docs/API.md) and [SETTINGS.md](docs/SETTINGS.md).
+- `npm run docs`: Regenerates the [IPC API](docs/generated/API.md), [settings](docs/generated/SETTINGS.md), and machine-readable compatibility references under `docs/generated/`.
 - `npm run ready`: Formats code and markdown, runs linting and type checking, then regenerates the generated docs.
 
-Before changing architecture, security boundaries, or contributor-facing workflows, review [ARCHITECTURE.md](docs/ARCHITECTURE.md), [AUDIT.md](docs/AUDIT.md), and [CONTRIBUTE.md](docs/CONTRIBUTE.md).
+Before changing architecture, security boundaries, or contributor-facing workflows, review the [architecture guide](docs/ARCHITECTURE.md), [audit checklist](docs/governance/AUDIT.md), and [contribution guide](docs/CONTRIBUTE.md).
 
 ## 🛡️ Security Disclaimer
 

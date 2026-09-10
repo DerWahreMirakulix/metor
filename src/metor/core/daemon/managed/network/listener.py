@@ -44,6 +44,11 @@ from metor.data import (
     SettingKey,
 )
 from metor.utils import Constants
+from metor.versioning import (
+    PEER_PROTOCOL_MIN_SUPPORTED,
+    PEER_PROTOCOL_VERSION,
+    negotiate_protocol_generation,
+)
 
 # Local Package Imports
 from metor.core.daemon.managed.network.state import (
@@ -374,9 +379,22 @@ class InboundListener:
             line: Optional[str] = stream.read_line()
 
             if line:
-                remote_onion, signature, is_async, has_recovery_hint = (
-                    HandshakeProtocol.parse_auth_line(line)
+                (
+                    remote_onion,
+                    signature,
+                    peer_current,
+                    peer_minimum,
+                    is_async,
+                    has_recovery_hint,
+                ) = HandshakeProtocol.parse_auth_line(line)
+                negotiated_version: int | None = negotiate_protocol_generation(
+                    PEER_PROTOCOL_VERSION,
+                    PEER_PROTOCOL_MIN_SUPPORTED,
+                    peer_current,
+                    peer_minimum,
                 )
+                if negotiated_version is None:
+                    raise ValueError('Peer protocol ranges do not overlap')
                 if self._crypto.verify_signature(remote_onion, challenge, signature):
                     onion = remote_onion
                     auth_successful = True

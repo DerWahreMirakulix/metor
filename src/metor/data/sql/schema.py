@@ -1,9 +1,8 @@
 """Central schema bootstrap helpers for the SQL persistence package."""
 
-from metor.data.sql.backends import SqlCipherCursor
+from metor.data.sql.backends import SqlCipherConnection, SqlCipherCursor
+from metor.versioning import DB_SCHEMA_VERSION
 
-
-SCHEMA_VERSION: int = 4
 
 PEER_TABLE_QUERY: str = """
 CREATE TABLE IF NOT EXISTS peers (
@@ -76,7 +75,7 @@ INDEX_QUERIES: tuple[str, ...] = (
 )
 
 
-def ensure_core_schema(cursor: SqlCipherCursor) -> None:
+def create_core_schema(cursor: SqlCipherCursor) -> None:
     """
     Creates the central persistence schema on the active cursor.
 
@@ -95,12 +94,69 @@ def ensure_core_schema(cursor: SqlCipherCursor) -> None:
     for index_query in INDEX_QUERIES:
         cursor.execute(index_query)
 
-    # Catch up pre-transport databases: CREATE TABLE IF NOT EXISTS leaves existing
-    # tables untouched, so the column is added explicitly. The table_info check
-    # prevents a duplicate-column error on freshly created databases.
-    cursor.execute('PRAGMA table_info(history_ledger)')
-    has_transport_column: bool = any(row[1] == 'transport' for row in cursor.fetchall())
-    if not has_transport_column:
-        cursor.execute('ALTER TABLE history_ledger ADD COLUMN transport TEXT')
 
-    cursor.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
+def initialize_schema(cursor: SqlCipherCursor) -> None:
+    """Creates a new schema and stamps it only after all DDL succeeds.
+
+    Args:
+        cursor (SqlCipherCursor): Cursor for a new, empty database transaction.
+
+    Returns:
+        None
+    """
+    create_core_schema(cursor)
+    cursor.execute(f'PRAGMA user_version = {DB_SCHEMA_VERSION}')
+
+
+def initialize_database(connection: SqlCipherConnection) -> None:
+    """Creates and versions an empty database in one explicit transaction.
+
+    Args:
+        connection (SqlCipherConnection): Keyed connection to an empty database.
+
+    Returns:
+        None
+    """
+    cursor = connection.cursor()
+    try:
+        cursor.execute('BEGIN IMMEDIATE')
+        initialize_schema(cursor)
+        connection.commit()
+    except Exception:
+        try:
+            cursor.execute('ROLLBACK')
+        except Exception:
+            pass
+        raise
+
+
+def read_schema_version(cursor: SqlCipherCursor) -> int:
+    """Reads the durable SQLite schema generation.
+
+    Args:
+        cursor (SqlCipherCursor): Cursor on an already keyed database.
+
+    Returns:
+        int: Current ``PRAGMA user_version`` value.
+    """
+    cursor.execute('PRAGMA user_version')
+    row: object = cursor.fetchone()
+    if not isinstance(row, tuple) or not row or type(row[0]) is not int:
+        raise ValueError('Database schema version could not be read.')
+    return row[0]
+
+
+def has_user_schema(cursor: SqlCipherCursor) -> bool:
+    """Reports whether an unversioned database already contains application tables.
+
+    Args:
+        cursor (SqlCipherCursor): Cursor on an already keyed database.
+
+    Returns:
+        bool: True when a non-internal table already exists.
+    """
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' "
+        "AND name NOT LIKE 'sqlite_%' LIMIT 1"
+    )
+    return cursor.fetchone() is not None

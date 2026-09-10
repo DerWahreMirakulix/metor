@@ -50,8 +50,8 @@ class LiveAction(str, Enum):
 class CapabilityInfo:
     """Negotiated daemon capability and protocol summary."""
 
-    protocol_version: int
-    daemon_version: str
+    negotiated_ipc_generation: int
+    daemon_application_version: str
     capabilities: Tuple[str, ...] = ()
 
 

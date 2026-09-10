@@ -18,16 +18,16 @@ from nacl.encoding import RawEncoder
 
 from metor.core.api import JsonValue
 from metor.utils import secure_clear_buffer, secure_shred_file
+from metor.versioning import KEYSLOT_FORMAT_VERSION, PROFILE_KEY_DERIVATION_VERSION
 
 PROFILE_MASTER_KEY_BYTES = 32
 DERIVED_KEY_BYTES = 32
 KEYSLOT_FORMAT = 'metor-password-keyslot'
-KEYSLOT_VERSION = 1
 KEYSLOT_KDF = 'argon2id'
 KEYSLOT_WRAP = 'xsalsa20-poly1305-secretbox'
-DB_KEY_CONTEXT = b'metor/db/v1'
-SECRET_KEY_CONTEXT = b'metor/secrets/v1'
-BLOB_KEY_CONTEXT = b'metor/blobs/v1'
+DB_KEY_CONTEXT = f'metor/db/v{PROFILE_KEY_DERIVATION_VERSION}'.encode('ascii')
+SECRET_KEY_CONTEXT = f'metor/secrets/v{PROFILE_KEY_DERIVATION_VERSION}'.encode('ascii')
+BLOB_KEY_CONTEXT = f'metor/blobs/v{PROFILE_KEY_DERIVATION_VERSION}'.encode('ascii')
 PASSWORD_KDF_OPSLIMIT = nacl.pwhash.argon2id.OPSLIMIT_INTERACTIVE
 PASSWORD_KDF_MEMLIMIT = nacl.pwhash.argon2id.MEMLIMIT_INTERACTIVE
 MIN_PASSWORD_KDF_OPSLIMIT = nacl.pwhash.argon2id.OPSLIMIT_MIN
@@ -345,7 +345,7 @@ class PasswordKeyProtector:
             secure_clear_buffer(kek)
         document: dict[str, JsonValue] = {
             'format': KEYSLOT_FORMAT,
-            'version': KEYSLOT_VERSION,
+            'version': KEYSLOT_FORMAT_VERSION,
             'kdf': {
                 'algorithm': KEYSLOT_KDF,
                 'opslimit': PASSWORD_KDF_OPSLIMIT,
@@ -454,7 +454,7 @@ class PasswordKeyProtector:
             raise InvalidKeyslotError('Keyslot fields are invalid.')
         if (
             document['format'] != KEYSLOT_FORMAT
-            or document['version'] != KEYSLOT_VERSION
+            or document['version'] != KEYSLOT_FORMAT_VERSION
         ):
             raise InvalidKeyslotError('Keyslot format or version is unsupported.')
         kdf = document['kdf']

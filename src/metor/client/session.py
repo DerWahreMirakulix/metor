@@ -24,6 +24,12 @@ from metor.core.api import (
     ensure_request_id,
 )
 from metor.utils.constants import Constants
+from metor.versioning import (
+    APP_VERSION,
+    IPC_PROTOCOL_MIN_SUPPORTED,
+    IPC_PROTOCOL_VERSION,
+    negotiate_protocol_generation,
+)
 
 T = TypeVar('T', bound=IpcEvent)
 
@@ -64,7 +70,7 @@ class MetorClient:
         on_event: Optional[Callable[[IpcEvent], None]] = None,
         on_disconnect: Optional[Callable[[], None]] = None,
         timeout: float = Constants.DEFAULT_IPC_TIMEOUT,
-        client_version: str = '0.2.0',
+        client_version: str = APP_VERSION,
     ) -> None:
         """
         Initializes one MetorClient.
@@ -258,12 +264,32 @@ class MetorClient:
                 return None
 
         init_cmd: InitCommand = InitCommand(
-            protocol_version=Constants.IPC_PROTOCOL_VERSION,
+            current_version=IPC_PROTOCOL_VERSION,
+            min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
         )
         init_event: Optional[InitEvent] = self.request(init_cmd, InitEvent)
-        if init_event is not None:
+        if init_event is not None and self._accepts_init_event(init_event):
             self._init_event = init_event
-        return init_event
+            return init_event
+        return None
+
+    @staticmethod
+    def _accepts_init_event(event: InitEvent) -> bool:
+        """Validates the daemon range and negotiated IPC generation.
+
+        Args:
+            event (InitEvent): Candidate daemon initialization response.
+
+        Returns:
+            bool: True when the negotiated generation is the highest overlap.
+        """
+        negotiated: int | None = negotiate_protocol_generation(
+            IPC_PROTOCOL_VERSION,
+            IPC_PROTOCOL_MIN_SUPPORTED,
+            event.daemon_current_version,
+            event.daemon_min_supported,
+        )
+        return negotiated == event.negotiated_version
 
     def register_live_consumer(self) -> bool:
         """

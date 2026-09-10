@@ -631,17 +631,17 @@
             }
           ]
         },
-        "protocol_version": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ]
+        "current_version": {
+          "type": "integer"
+        },
+        "min_supported": {
+          "type": "integer"
         }
-      }
+      },
+      "required": [
+        "current_version",
+        "min_supported"
+      ]
     },
     "LockCommand": {
       "title": "LockCommand",
@@ -3063,30 +3063,19 @@
             }
           ]
         },
+        "negotiated_version": {
+          "type": "integer"
+        },
+        "daemon_current_version": {
+          "type": "integer"
+        },
+        "daemon_min_supported": {
+          "type": "integer"
+        },
         "onion": {
           "anyOf": [
             {
               "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "version": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "min_supported": {
-          "anyOf": [
-            {
-              "type": "integer"
             },
             {
               "type": "null"
@@ -3109,7 +3098,12 @@
             "type": "string"
           }
         }
-      }
+      },
+      "required": [
+        "negotiated_version",
+        "daemon_current_version",
+        "daemon_min_supported"
+      ]
     },
     "InternalErrorEvent": {
       "title": "InternalErrorEvent",
@@ -4049,26 +4043,24 @@
             }
           ]
         },
-        "daemon_version": {
+        "daemon_current_version": {
           "type": "integer"
         },
-        "min_supported": {
+        "daemon_min_supported": {
           "type": "integer"
         },
-        "client_version": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ]
+        "client_current_version": {
+          "type": "integer"
+        },
+        "client_min_supported": {
+          "type": "integer"
         }
       },
       "required": [
-        "daemon_version",
-        "min_supported"
+        "daemon_current_version",
+        "daemon_min_supported",
+        "client_current_version",
+        "client_min_supported"
       ]
     },
     "ReadReceiptEvent": {

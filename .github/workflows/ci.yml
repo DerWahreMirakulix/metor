@@ -28,5 +28,13 @@ jobs:
           mypy-paths: "src/metor/ scripts/"
           run-tests: "true"
 
-      - name: Build Wheel
-        run: python -m pip wheel --no-deps --no-build-isolation . -w dist
+      - name: Build and validate all wheels
+        shell: bash
+        run: |
+          python -m pip wheel --no-deps --no-build-isolation . -w dist
+          python -m pip wheel --no-deps --no-build-isolation packaging/daemon -w dist
+          python -m pip wheel --no-deps --no-build-isolation packaging/sdk -w dist
+          python scripts/validate_wheel_versions.py dist/*.whl
+
+      - name: Validate Central Version Registry
+        run: python scripts/versioning.py validate
