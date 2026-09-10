@@ -50,7 +50,7 @@ Metor strictly separates presentation (UI) from domain logic (Core/Data). Commun
 
 Recommended reading order:
 
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) for the high-level design and long-lived decisions.
+- [Architecture guide](docs/ARCHITECTURE.md) for the high-level design and long-lived decisions.
 - [Settings reference](docs/generated/SETTINGS.md) for all supported settings, defaults, constraints, and security notes.
 - [IPC API reference](docs/generated/API.md) for the exact client-daemon wire contract.
 - [Audit checklist](docs/governance/AUDIT.md) and [contribution guide](docs/CONTRIBUTE.md) if you are reviewing or changing code.
