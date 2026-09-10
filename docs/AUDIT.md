@@ -16,7 +16,7 @@ Every Pull Request, AI code generation, or architectural change MUST be audited 
 
 - [ ] **PRNG Verification:** Are all cryptographic seeds, UUIDs, tokens, and nonces generated using a cryptographically secure module (e.g., `secrets`)? _(Reject any use of standard `random`)._
 - [ ] **Handshake Security:** Are cryptographic signatures and challenge-response mechanisms validated securely without susceptibility to timing attacks?
-- [ ] **Key Storage & Permissions:** Are master keys correctly encrypted (e.g., `Argon2i` + `SecretBox`) before being written to disk? Are file and directory permissions strictly minimized (e.g., `0o600` or `0o700`)?
+- [ ] **Key Storage & Permissions:** Does Argon2id derive only the KEK that wraps a random PMK with authenticated encryption? Are keyslot files and directories strictly minimized (e.g., `0o600` or `0o700`)?
 - [ ] **Zero-Trace Policies:** Are volatile runtime keys or sensitive ephemeral data securely shredded from disk immediately upon daemon shutdown or read-receipt?
 
 ## 3. Network, IPC & Anti-DoS

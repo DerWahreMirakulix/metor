@@ -173,7 +173,7 @@ class Paths:
         return self.get_protected_key_dir() / Constants.PROFILE_KEYSLOT_FILE
 
     def get_blob_dir(self) -> Path:
-        """Returns the encrypted external-object root directory.
+        """Returns the mode-appropriate external-object root directory.
 
         Args:
             None
@@ -184,7 +184,7 @@ class Paths:
         return self.get_config_dir() / Constants.BLOBS_DIR
 
     def get_persistent_blob_dir(self) -> Path:
-        """Returns the persistent encrypted blob directory.
+        """Returns the persistent external blob directory.
 
         Args:
             None
@@ -195,7 +195,7 @@ class Paths:
         return self.get_blob_dir() / Constants.PERSISTENT_BLOBS_DIR
 
     def get_temporary_blob_dir(self) -> Path:
-        """Returns the ephemeral encrypted blob spool directory.
+        """Returns the ephemeral external blob spool directory.
 
         Args:
             None

@@ -79,7 +79,7 @@ from metor.data import (
     SettingKey,
 )
 from metor.data.sql import SqlManager
-from metor.data.blob import EncryptedBlobStore
+from metor.data.blob import BlobStore
 from metor.utils import Constants, clean_onion, secure_shred_file
 
 # Local Package Imports
@@ -130,7 +130,7 @@ class Daemon:
         cm: Optional[ContactManager] = None,
         hm: Optional[HistoryManager] = None,
         mm: Optional[MessageManager] = None,
-        blob_store: Optional[EncryptedBlobStore] = None,
+        blob_store: Optional[BlobStore] = None,
         session_auth: Optional[SessionAuthContext] = None,
         status_callback: Optional[
             Callable[[Union[EventType, DaemonStatus], Dict[str, JsonValue]], None]
@@ -148,7 +148,7 @@ class Daemon:
             cm (Optional[ContactManager]): Address book manager.
             hm (Optional[HistoryManager]): Event logging.
             mm (Optional[MessageManager]): Offline messages storage.
-            blob_store (Optional[EncryptedBlobStore]): Encrypted external object store.
+            blob_store (Optional[BlobStore]): Mode-appropriate external object store.
             session_auth (Optional[SessionAuthContext]): Optional verifier context for per-session local auth.
             status_callback (Optional[Callable]): Hook for UI-agnostic startup logging.
             require_session_auth (bool): Whether this daemon runtime should require per-session auth.
@@ -163,7 +163,7 @@ class Daemon:
         self._hm: Optional[HistoryManager] = None
         self._mm: Optional[MessageManager] = None
         self._km: Optional[KeyManager] = None
-        self._blob_store: Optional[EncryptedBlobStore] = None
+        self._blob_store: Optional[BlobStore] = None
         self._status_cb: Optional[
             Callable[[Union[EventType, DaemonStatus], Dict[str, JsonValue]], None]
         ] = status_callback

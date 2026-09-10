@@ -1,4 +1,4 @@
-"""Public encrypted blob-store contracts and implementation."""
+"""Public external blob-store contracts and implementations."""
 
 from metor.data.blob.store import (
     BLOB_FORMAT_MAGIC,
@@ -7,8 +7,11 @@ from metor.data.blob.store import (
     BlobFormatError,
     BlobLifecycle,
     BlobNotFoundError,
+    BlobStore,
+    BlobStoreError,
     EncryptedBlobStore,
     InvalidBlobIdError,
+    PlaintextBlobStore,
 )
 
 __all__ = [
@@ -18,6 +21,9 @@ __all__ = [
     'BlobFormatError',
     'BlobLifecycle',
     'BlobNotFoundError',
+    'BlobStore',
+    'BlobStoreError',
     'EncryptedBlobStore',
     'InvalidBlobIdError',
+    'PlaintextBlobStore',
 ]

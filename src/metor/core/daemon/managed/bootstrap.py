@@ -12,7 +12,7 @@ from metor.data import (
     HistoryManager,
     MessageManager,
 )
-from metor.data.blob import EncryptedBlobStore
+from metor.data.blob import BlobStore, EncryptedBlobStore, PlaintextBlobStore
 from metor.data.profile import ProfileManager
 
 # Local Package Imports
@@ -35,7 +35,7 @@ class DaemonRuntime:
     cm: ContactManager
     hm: HistoryManager
     mm: MessageManager
-    blob_store: Optional[EncryptedBlobStore]
+    blob_store: Optional[BlobStore]
     session_auth: Optional[SessionAuthContext]
 
 
@@ -78,7 +78,7 @@ def build_runtime(
         session_auth = create_session_auth_context(auth_password)
 
     database_key = km.get_database_key()
-    blob_store: Optional[EncryptedBlobStore] = None
+    blob_store: BlobStore
     try:
         cm = ContactManager(pm, database_key)
         hm = HistoryManager(pm, database_key)
@@ -88,6 +88,11 @@ def build_runtime(
                 pm.paths.get_persistent_blob_dir(),
                 pm.paths.get_temporary_blob_dir(),
                 km.get_blob_key(),
+            )
+        else:
+            blob_store = PlaintextBlobStore(
+                pm.paths.get_persistent_blob_dir(),
+                pm.paths.get_temporary_blob_dir(),
             )
     except DatabaseCorruptedError as exc:
         km.clear_sensitive_state()

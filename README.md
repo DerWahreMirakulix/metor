@@ -28,7 +28,7 @@ Use this README as the landing page, then jump to the specialized documents belo
 - **Cryptographic Peer Authentication:**
   Connections are secured by a deterministic Ed25519 Challenge-Response handshake. Identity spoofing is mathematically impossible—every peer must cryptographically prove ownership of their `.onion` key before a session is established.
 - **Multi-Profile Support:**
-  Manage completely isolated identities (`metor -p work`, `metor -p private`). Each profile gets its own cryptographic keys, its own `.onion` address, and an isolated SQLCipher-encrypted database (Argon2i + SecretBox).
+  Manage completely isolated identities (`metor -p work`, `metor -p private`). Each encrypted profile gets a random Profile Master Key (PMK), its own `.onion` address, a SQLCipher-encrypted database, and authenticated external blob storage.
 - **Dynamic Contact Management:**
   Unknown incoming connections are assigned volatile RAM aliases (e.g., `exw4kj1`) dynamically. These "Discovered Peers" can be promoted to permanent contacts on the fly. Deleting a contact during an active chat invokes a "Downgrade Delete"—the connection is not dropped, but gracefully downgraded back to a volatile alias.
 - **Remote Capability (VPS / SSH):**
@@ -54,7 +54,7 @@ Recommended reading order:
 
 ### OPSEC & Security Concepts
 
-- **Data-at-Rest Encryption:** All local data (history, address book, queues) are stored in an SQLite database encrypted via SQLCipher. Master keys are heavily derived using Argon2i and protected via NaCL SecretBoxes.
+- **Data-at-Rest Encryption:** Argon2id derives a password-based KEK that authenticates and unwraps a random PMK. Domain-separated `DB_KEY`, `SECRET_KEY`, and `BLOB_KEY` values are derived from that PMK; the password itself is never the SQLCipher key.
 - **Network Anti-DoS:** Incoming TCP streams (both Tor and local IPC) enforce strict stream framing and length limitations (`MAX_STREAM_BYTES`) to thwart Out-Of-Memory (OOM) and UTF-8 fragmentation attacks.
 - **Thread Safety:** Address book mutations and session state transitions are safeguarded by deterministic locks (`FileLock` across processes, `threading.Lock` in memory) preventing race conditions and database corruption.
 
@@ -223,14 +223,20 @@ You don't need to enter the Chat UI to use Metor. It can act as an asynchronous 
 
 Local profiles support two structural storage modes:
 
-- `encrypted` (default): keys and the SQLite database stay encrypted at rest and support daemon lock plus per-session local auth.
-- `plaintext`: create with `metor profiles add <name> --plaintext` when you intentionally do not want password protection at rest.
+- `encrypted` (default): the database, private secrets, and external blobs are encrypted at rest and support daemon lock plus per-session local auth.
+- `plaintext`: a development/debug-only mode in which the database, private secrets, and external blobs are plaintext on disk and provide no at-rest confidentiality.
 
 Security mode is structural profile metadata, not a normal `config set` key. To change it later, use the dedicated migration flow:
 
 ```bash
 metor profiles migrate <name> --to <encrypted|plaintext>
 ```
+
+Migration transforms the database, private secrets, keyslot, metadata, and all
+persistent blobs in one failure-atomic staged transaction. Blob IDs and database
+references remain unchanged. Non-durable temporary blob spool state is discarded
+while the profile is offline. Password changes instead validate and rewrap the
+same PMK; they do not rewrite the database, secrets, or blobs.
 
 Want to run Metor on a server and connect securely from your laptop?
 
@@ -305,7 +311,7 @@ Before changing architecture, security boundaries, or contributor-facing workflo
 
 ## 🛡️ Security Disclaimer
 
-While Metor leverages the Tor network for anonymity and relies on strong modern cryptography (Ed25519, Argon2i, SQLCipher), this software is provided "as-is". **Do not use this software for communication where your life or liberty depends on absolute operational security.** The codebase has not undergone a formal third-party security audit.
+While Metor leverages the Tor network for anonymity and relies on strong modern cryptography (Ed25519, Argon2id, SQLCipher), this software is provided "as-is". **Do not use this software for communication where your life or liberty depends on absolute operational security.** The codebase has not undergone a formal third-party security audit.
 
 ## 📄 License
 

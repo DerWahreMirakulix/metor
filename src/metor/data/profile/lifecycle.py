@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Optional, cast
 
 from metor.data import DatabaseCorruptedError, SettingKey, Settings, SqlManager
+from metor.data.blob import (
+    BlobStore,
+    EncryptedBlobStore,
+    InvalidBlobIdError,
+    PlaintextBlobStore,
+)
 from metor.utils import Constants, secure_remove_path, secure_shred_file
 
 # Local Package Imports
@@ -22,6 +28,7 @@ from metor.data.profile.support import normalize_profile_name
 _MIGRATION_JOURNAL_VERSION = 1
 _MIGRATION_PREPARED = 'prepared'
 _MIGRATION_COMMITTED = 'committed'
+_BLOB_FILE_SUFFIX = '.blob'
 
 
 def _migration_checkpoint(_stage: str) -> None:
@@ -33,6 +40,169 @@ def _migration_checkpoint(_stage: str) -> None:
     Returns:
         None
     """
+
+
+def _blob_store(
+    profile_manager: object,
+    mode: ProfileSecurityMode,
+    blob_key: Optional[bytes],
+) -> BlobStore:
+    """Creates the mode-appropriate logical blob store for one profile generation.
+
+    Args:
+        profile_manager (object): Profile manager exposing storage paths.
+        mode (ProfileSecurityMode): Profile storage security mode.
+        blob_key (Optional[bytes]): PMK-derived key for encrypted storage.
+
+    Returns:
+        BlobStore: Mode-appropriate external-object store.
+    """
+    from metor.data.profile.manager import ProfileManager
+
+    typed_manager = cast(ProfileManager, profile_manager)
+    if mode is ProfileSecurityMode.ENCRYPTED:
+        if blob_key is None:
+            raise ValueError('Encrypted blob migration requires a blob key.')
+        return EncryptedBlobStore(
+            typed_manager.paths.get_persistent_blob_dir(),
+            typed_manager.paths.get_temporary_blob_dir(),
+            blob_key,
+        )
+    return PlaintextBlobStore(
+        typed_manager.paths.get_persistent_blob_dir(),
+        typed_manager.paths.get_temporary_blob_dir(),
+    )
+
+
+def _persistent_blob_ids(persistent_dir: Path) -> list[str]:
+    """Enumerates every canonical persistent blob without following directories.
+
+    Args:
+        persistent_dir (Path): Source persistent-object directory.
+
+    Returns:
+        list[str]: Sorted canonical logical blob identifiers.
+    """
+    if not persistent_dir.exists():
+        return []
+    blob_ids: list[str] = []
+    for path in persistent_dir.iterdir():
+        if not path.is_file() or path.is_symlink() or path.suffix != _BLOB_FILE_SUFFIX:
+            raise InvalidBlobIdError(
+                'Persistent blob storage contains an invalid entry.'
+            )
+        blob_id = path.stem
+        if path.name != f'{blob_id}{_BLOB_FILE_SUFFIX}':
+            raise InvalidBlobIdError('Persistent blob filename is invalid.')
+        EncryptedBlobStore._validate_blob_id(blob_id)
+        blob_ids.append(blob_id)
+    if len(blob_ids) != len(set(blob_ids)):
+        raise InvalidBlobIdError('Persistent blob IDs conflict.')
+    return sorted(blob_ids)
+
+
+def _migrate_persistent_blobs(
+    source_pm: object,
+    staged_pm: object,
+    source_mode: ProfileSecurityMode,
+    target_mode: ProfileSecurityMode,
+    source_blob_key: Optional[bytes],
+    target_blob_key: Optional[bytes],
+) -> list[str]:
+    """Transforms all persistent blobs inside the staged profile generation.
+
+    Temporary blobs are non-durable runtime spool state and are intentionally
+    discarded while the profile is offline.
+
+    Args:
+        source_pm (object): Active source profile manager.
+        staged_pm (object): Prepared target profile manager.
+        source_mode (ProfileSecurityMode): Active source storage mode.
+        target_mode (ProfileSecurityMode): Prepared target storage mode.
+        source_blob_key (Optional[bytes]): Source PMK-derived blob key.
+        target_blob_key (Optional[bytes]): Target PMK-derived blob key.
+
+    Returns:
+        list[str]: Migrated logical blob identifiers.
+    """
+    from metor.data.profile.manager import ProfileManager
+
+    typed_source = cast(ProfileManager, source_pm)
+    typed_target = cast(ProfileManager, staged_pm)
+    blob_ids = _persistent_blob_ids(typed_source.paths.get_persistent_blob_dir())
+    secure_remove_path(typed_target.paths.get_persistent_blob_dir())
+    secure_remove_path(typed_target.paths.get_temporary_blob_dir())
+    source_store = _blob_store(typed_source, source_mode, source_blob_key)
+    target_store = _blob_store(typed_target, target_mode, target_blob_key)
+    try:
+        for index, blob_id in enumerate(blob_ids):
+            _migration_checkpoint(f'before_blob_read:{index}')
+            plaintext = source_store.read(blob_id)
+            _migration_checkpoint(f'before_blob_write:{index}')
+            target_store.put_with_id(blob_id, plaintext)
+            _migration_checkpoint(f'after_blob_write:{index}')
+            if target_store.read(blob_id) != plaintext:
+                raise ValueError('Migrated blob validation failed.')
+            _migration_checkpoint(f'after_blob_validation:{index}')
+        if (
+            _persistent_blob_ids(typed_target.paths.get_persistent_blob_dir())
+            != blob_ids
+        ):
+            raise ValueError('Migrated persistent blob set is incomplete.')
+        _migration_checkpoint('after_all_blob_writes')
+        return blob_ids
+    finally:
+        source_store.close()
+        target_store.close()
+
+
+def _quote_sql_identifier(identifier: str) -> str:
+    """Quotes one database-owned SQLite identifier safely.
+
+    Args:
+        identifier (str): Identifier loaded from SQLite schema metadata.
+
+    Returns:
+        str: Double-quoted SQLite identifier.
+    """
+    return f'"{identifier.replace(chr(34), chr(34) * 2)}"'
+
+
+def _validate_database_blob_references(
+    sql_manager: SqlManager,
+    persistent_blob_ids: list[str],
+) -> None:
+    """Rejects invalid or missing persistent blob references in the target DB.
+
+    Args:
+        sql_manager (SqlManager): Open staged target database.
+        persistent_blob_ids (list[str]): Complete migrated persistent blob set.
+
+    Returns:
+        None
+    """
+    available_ids = set(persistent_blob_ids)
+    tables = sql_manager.fetchall(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+    )
+    for (table_name,) in tables:
+        if not isinstance(table_name, str):
+            raise ValueError('Target database contains an invalid table name.')
+        quoted_table = _quote_sql_identifier(table_name)
+        columns = sql_manager.fetchall(f'PRAGMA table_info({quoted_table})')
+        if not any(len(column) > 1 and column[1] == 'blob_id' for column in columns):
+            continue
+        references = sql_manager.fetchall(
+            f'SELECT {_quote_sql_identifier("blob_id")} FROM {quoted_table}'
+        )
+        for (blob_id,) in references:
+            if blob_id is None:
+                continue
+            if not isinstance(blob_id, str):
+                raise InvalidBlobIdError('Database blob reference is invalid.')
+            EncryptedBlobStore._validate_blob_id(blob_id)
+            if blob_id not in available_ids:
+                raise ValueError('Target database references a missing blob.')
 
 
 def _migration_paths(profile_name: str) -> tuple[Path, Path, Path]:
@@ -493,6 +663,27 @@ def migrate_profile_security(
                 )
                 target_db_key = None
 
+            source_blob_key: Optional[bytes] = (
+                key_manager.get_blob_key()
+                if current_mode is ProfileSecurityMode.ENCRYPTED
+                else None
+            )
+            target_blob_key: Optional[bytes] = (
+                staged_key_manager.get_blob_key()
+                if target_mode is ProfileSecurityMode.ENCRYPTED
+                else None
+            )
+            _migration_checkpoint('before_blob_migration')
+            migrated_blob_ids = _migrate_persistent_blobs(
+                pm,
+                staged_pm,
+                current_mode,
+                target_mode,
+                source_blob_key,
+                target_blob_key,
+            )
+            _migration_checkpoint('after_blob_migration')
+
             if db_path.exists():
                 _migration_checkpoint('during_db_copy')
                 SqlManager.export_database_copy(
@@ -513,10 +704,34 @@ def migrate_profile_security(
                     else None
                 )
                 _migration_checkpoint('during_validation')
-                SqlManager(staged_db_path, staged_pm.config, validated_key)
+                validation_sql = SqlManager(
+                    staged_db_path,
+                    staged_pm.config,
+                    validated_key,
+                )
+                _validate_database_blob_references(
+                    validation_sql,
+                    migrated_blob_ids,
+                )
                 SqlManager.close_connection(staged_db_path)
                 if validation_key_manager.has_metor_key():
                     validation_key_manager.get_metor_key()
+                validation_blob_key: Optional[bytes] = (
+                    validation_key_manager.get_blob_key()
+                    if target_mode is ProfileSecurityMode.ENCRYPTED
+                    else None
+                )
+                validation_blob_store = _blob_store(
+                    staged_pm,
+                    target_mode,
+                    validation_blob_key,
+                )
+                try:
+                    for index, blob_id in enumerate(migrated_blob_ids):
+                        _migration_checkpoint(f'during_blob_validation:{index}')
+                        validation_blob_store.read(blob_id)
+                finally:
+                    validation_blob_store.close()
                 staged_pm.validate_integrity()
             finally:
                 validation_key_manager.clear_sensitive_state()

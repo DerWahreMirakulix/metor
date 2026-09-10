@@ -38,6 +38,7 @@ from metor.data.blob import (
     BlobLifecycle,
     EncryptedBlobStore,
     InvalidBlobIdError,
+    PlaintextBlobStore,
 )
 from metor.data.profile import ProfileConfigKey, ProfileManager, ProfileSecurityMode
 from metor.data.profile import lifecycle as profile_lifecycle
@@ -289,6 +290,27 @@ class ProfileStorageSecurityTests(unittest.TestCase):
             finally:
                 before.clear()
                 after.clear()
+
+    def test_password_rewrap_validation_failure_preserves_old_keyslot(self) -> None:
+        """Verifies a staged keyslot must read back before replacing the active one.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            pmk = b'v' * PROFILE_MASTER_KEY_BYTES
+            protector = self._keyslot(Path(temp_dir), 'old', pmk)
+            with (
+                patch.object(protector, '_build_document', return_value=b'{}'),
+                self.assertRaises(InvalidKeyslotError),
+            ):
+                protector.rewrap('old', 'new')
+            self.assertEqual(bytes(protector.unprotect('old')), pmk)
+            with self.assertRaises(InvalidCredentialError):
+                protector.unprotect('new')
 
     def test_keyslot_uses_persisted_bounded_kdf_parameters(self) -> None:
         """Verifies existing keyslots remain readable when recommended limits change.
@@ -639,6 +661,351 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         finally:
             Constants.DATA = original_data
 
+    def test_blob_security_migration_round_trip_preserves_ids_and_payloads(
+        self,
+    ) -> None:
+        """Verifies blobs and structured data survive both security-mode transforms.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                Constants.DATA = Path(temp_dir)
+                self.assertTrue(
+                    ProfileManager.add_profile_folder(
+                        'blob-round-trip', master_password='source-password'
+                    ).success
+                )
+                source_pm = ProfileManager('blob-round-trip')
+                source_keys = KeyManager(source_pm, 'source-password')
+                sql = SqlManager(
+                    source_pm.paths.get_db_file(),
+                    source_pm.config,
+                    source_keys.get_database_key(),
+                )
+                sql.execute('CREATE TABLE blob_owner (blob_id TEXT PRIMARY KEY)')
+                source_store = EncryptedBlobStore(
+                    source_pm.paths.get_persistent_blob_dir(),
+                    source_pm.paths.get_temporary_blob_dir(),
+                    source_keys.get_blob_key(),
+                )
+                payloads = (b'first persistent payload', b'\x00second payload\xff')
+                blob_ids = [source_store.put(payload) for payload in payloads]
+                for blob_id in blob_ids:
+                    sql.execute('INSERT INTO blob_owner VALUES (?)', (blob_id,))
+                temporary_id = source_store.put(
+                    b'non-durable spool', BlobLifecycle.TEMPORARY
+                )
+                source_store.close()
+                SqlManager.close_connection(source_pm.paths.get_db_file())
+                source_keys.clear_sensitive_state()
+
+                with patch.object(Settings, 'get_bool', return_value=True):
+                    result = ProfileManager.migrate_profile_security(
+                        'blob-round-trip',
+                        ProfileSecurityMode.PLAINTEXT,
+                        current_password='source-password',
+                    )
+                self.assertTrue(result.success, result.params)
+                plain_pm = ProfileManager('blob-round-trip')
+                self.assertFalse(plain_pm.paths.get_keyslot_file().exists())
+                plain_store = PlaintextBlobStore(
+                    plain_pm.paths.get_persistent_blob_dir(),
+                    plain_pm.paths.get_temporary_blob_dir(),
+                )
+                for blob_id, payload in zip(blob_ids, payloads, strict=True):
+                    self.assertEqual(plain_store.read(blob_id), payload)
+                    self.assertEqual(
+                        (
+                            plain_pm.paths.get_persistent_blob_dir() / f'{blob_id}.blob'
+                        ).read_bytes(),
+                        payload,
+                    )
+                self.assertFalse(
+                    (
+                        plain_pm.paths.get_temporary_blob_dir() / f'{temporary_id}.blob'
+                    ).exists()
+                )
+                plain_store.close()
+
+                result = ProfileManager.migrate_profile_security(
+                    'blob-round-trip',
+                    ProfileSecurityMode.ENCRYPTED,
+                    new_password='target-password',
+                )
+                self.assertTrue(result.success, result.params)
+                target_pm = ProfileManager('blob-round-trip')
+                target_keys = KeyManager(target_pm, 'target-password')
+                target_store = EncryptedBlobStore(
+                    target_pm.paths.get_persistent_blob_dir(),
+                    target_pm.paths.get_temporary_blob_dir(),
+                    target_keys.get_blob_key(),
+                )
+                for blob_id, payload in zip(blob_ids, payloads, strict=True):
+                    self.assertEqual(target_store.read(blob_id), payload)
+                    encoded = (
+                        target_pm.paths.get_persistent_blob_dir() / f'{blob_id}.blob'
+                    ).read_bytes()
+                    self.assertTrue(encoded.startswith(BLOB_FORMAT_MAGIC))
+                    self.assertNotEqual(encoded, payload)
+                wrong_keys = ProfileKeySet.derive(b'z' * PROFILE_MASTER_KEY_BYTES)
+                wrong_store = EncryptedBlobStore(
+                    target_pm.paths.get_persistent_blob_dir(),
+                    target_pm.paths.get_temporary_blob_dir(),
+                    wrong_keys.blob_key(),
+                )
+                with self.assertRaises(BlobAuthenticationError):
+                    wrong_store.read(blob_ids[0])
+                migrated_path = (
+                    target_pm.paths.get_persistent_blob_dir() / f'{blob_ids[0]}.blob'
+                )
+                original_encoded = migrated_path.read_bytes()
+                tampered_encoded = bytearray(original_encoded)
+                tampered_encoded[-1] ^= 1
+                migrated_path.write_bytes(tampered_encoded)
+                with self.assertRaises(BlobAuthenticationError):
+                    target_store.read(blob_ids[0])
+                migrated_path.write_bytes(original_encoded)
+                wrong_store.close()
+                wrong_keys.clear()
+                reopened = SqlManager(
+                    target_pm.paths.get_db_file(),
+                    target_pm.config,
+                    target_keys.get_database_key(),
+                )
+                self.assertEqual(
+                    reopened.fetchall('SELECT blob_id FROM blob_owner ORDER BY rowid'),
+                    [(blob_id,) for blob_id in blob_ids],
+                )
+                SqlManager.close_connection(target_pm.paths.get_db_file())
+                target_store.close()
+                target_keys.clear_sensitive_state()
+        finally:
+            Constants.DATA = original_data
+
+    def test_blob_migration_precommit_failures_preserve_readable_sources(self) -> None:
+        """Verifies blob-stage failures cannot damage either active source mode.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        stages = (
+            'before_blob_read:0',
+            'before_blob_read:1',
+            'before_blob_write:0',
+            'after_blob_write:0',
+            'after_all_blob_writes',
+            'during_blob_validation:0',
+            'immediately_before_commit',
+        )
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                Constants.DATA = Path(temp_dir)
+                for source_mode in (
+                    ProfileSecurityMode.ENCRYPTED,
+                    ProfileSecurityMode.PLAINTEXT,
+                ):
+                    for index, stage in enumerate(stages):
+                        with self.subTest(source_mode=source_mode, stage=stage):
+                            name = f'blob-failure-{source_mode.value}-{index}'
+                            if source_mode is ProfileSecurityMode.ENCRYPTED:
+                                self.assertTrue(
+                                    ProfileManager.add_profile_folder(
+                                        name, master_password='source-password'
+                                    ).success
+                                )
+                                source_pm = ProfileManager(name)
+                                source_keys = KeyManager(source_pm, 'source-password')
+                                source_store = EncryptedBlobStore(
+                                    source_pm.paths.get_persistent_blob_dir(),
+                                    source_pm.paths.get_temporary_blob_dir(),
+                                    source_keys.get_blob_key(),
+                                )
+                            else:
+                                source_pm = self._profile(Constants.DATA, name)
+                                source_pm.config.set(
+                                    ProfileConfigKey.SECURITY_MODE,
+                                    source_mode.value,
+                                    allow_mutating_structural_keys=True,
+                                )
+                                source_keys = None
+                                source_store = PlaintextBlobStore(
+                                    source_pm.paths.get_persistent_blob_dir(),
+                                    source_pm.paths.get_temporary_blob_dir(),
+                                )
+                            blob_ids = [
+                                source_store.put(b'first'),
+                                source_store.put(b'second'),
+                            ]
+                            source_store.close()
+                            if source_keys is not None:
+                                source_keys.clear_sensitive_state()
+                            with (
+                                patch.object(Settings, 'get_bool', return_value=True),
+                                patch.object(
+                                    profile_lifecycle,
+                                    '_migration_checkpoint',
+                                    side_effect=lambda checkpoint, expected=stage: (
+                                        (_ for _ in ()).throw(OSError(expected))
+                                        if checkpoint == expected
+                                        else None
+                                    ),
+                                ),
+                            ):
+                                result = ProfileManager.migrate_profile_security(
+                                    name,
+                                    (
+                                        ProfileSecurityMode.PLAINTEXT
+                                        if source_mode is ProfileSecurityMode.ENCRYPTED
+                                        else ProfileSecurityMode.ENCRYPTED
+                                    ),
+                                    current_password=(
+                                        'source-password'
+                                        if source_mode is ProfileSecurityMode.ENCRYPTED
+                                        else None
+                                    ),
+                                    new_password=(
+                                        'target-password'
+                                        if source_mode is ProfileSecurityMode.PLAINTEXT
+                                        else None
+                                    ),
+                                )
+                            self.assertFalse(result.success)
+                            recovered_pm = ProfileManager(name)
+                            self.assertIs(recovered_pm.get_security_mode(), source_mode)
+                            if source_mode is ProfileSecurityMode.ENCRYPTED:
+                                recovered_keys = KeyManager(
+                                    recovered_pm, 'source-password'
+                                )
+                                recovered_database_key = (
+                                    recovered_keys.get_database_key()
+                                )
+                                recovered_store = EncryptedBlobStore(
+                                    recovered_pm.paths.get_persistent_blob_dir(),
+                                    recovered_pm.paths.get_temporary_blob_dir(),
+                                    recovered_keys.get_blob_key(),
+                                )
+                            else:
+                                recovered_keys = None
+                                recovered_database_key = None
+                                recovered_store = PlaintextBlobStore(
+                                    recovered_pm.paths.get_persistent_blob_dir(),
+                                    recovered_pm.paths.get_temporary_blob_dir(),
+                                )
+                            self.assertEqual(
+                                recovered_store.read(blob_ids[0]), b'first'
+                            )
+                            self.assertEqual(
+                                recovered_store.read(blob_ids[1]), b'second'
+                            )
+                            SqlManager(
+                                recovered_pm.paths.get_db_file(),
+                                recovered_pm.config,
+                                recovered_database_key,
+                            )
+                            SqlManager.close_connection(
+                                recovered_pm.paths.get_db_file()
+                            )
+                            recovered_store.close()
+                            if recovered_keys is not None:
+                                recovered_keys.clear_sensitive_state()
+        finally:
+            Constants.DATA = original_data
+
+    def test_blob_migration_rejects_tampering_and_missing_database_references(
+        self,
+    ) -> None:
+        """Verifies authentication and target-reference failures abort before commit.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                Constants.DATA = Path(temp_dir)
+                self.assertTrue(
+                    ProfileManager.add_profile_folder(
+                        'tampered-source', master_password='source-password'
+                    ).success
+                )
+                encrypted_pm = ProfileManager('tampered-source')
+                encrypted_keys = KeyManager(encrypted_pm, 'source-password')
+                encrypted_store = EncryptedBlobStore(
+                    encrypted_pm.paths.get_persistent_blob_dir(),
+                    encrypted_pm.paths.get_temporary_blob_dir(),
+                    encrypted_keys.get_blob_key(),
+                )
+                blob_id = encrypted_store.put(b'authenticated payload')
+                blob_path = (
+                    encrypted_pm.paths.get_persistent_blob_dir() / f'{blob_id}.blob'
+                )
+                tampered = bytearray(blob_path.read_bytes())
+                tampered[-1] ^= 1
+                blob_path.write_bytes(tampered)
+                encrypted_store.close()
+                encrypted_keys.clear_sensitive_state()
+                with patch.object(Settings, 'get_bool', return_value=True):
+                    result = ProfileManager.migrate_profile_security(
+                        'tampered-source',
+                        ProfileSecurityMode.PLAINTEXT,
+                        current_password='source-password',
+                    )
+                self.assertFalse(result.success)
+                recovered_encrypted = ProfileManager('tampered-source')
+                self.assertTrue(recovered_encrypted.uses_encrypted_storage())
+                KeyManager(recovered_encrypted, 'source-password').get_blob_key()
+                self.assertEqual(blob_path.read_bytes(), bytes(tampered))
+
+                plaintext_pm = self._profile(Constants.DATA, 'missing-reference')
+                plaintext_pm.config.set(
+                    ProfileConfigKey.SECURITY_MODE,
+                    ProfileSecurityMode.PLAINTEXT.value,
+                    allow_mutating_structural_keys=True,
+                )
+                plaintext_sql = SqlManager(
+                    plaintext_pm.paths.get_db_file(), plaintext_pm.config
+                )
+                plaintext_sql.execute(
+                    'CREATE TABLE blob_reference (blob_id TEXT NOT NULL)'
+                )
+                missing_id = 'a' * 64
+                plaintext_sql.execute(
+                    'INSERT INTO blob_reference VALUES (?)', (missing_id,)
+                )
+                SqlManager.close_connection(plaintext_pm.paths.get_db_file())
+                result = ProfileManager.migrate_profile_security(
+                    'missing-reference',
+                    ProfileSecurityMode.ENCRYPTED,
+                    new_password='target-password',
+                )
+                self.assertFalse(result.success)
+                recovered_plaintext = ProfileManager('missing-reference')
+                self.assertTrue(recovered_plaintext.uses_plaintext_storage())
+                recovered_sql = SqlManager(
+                    recovered_plaintext.paths.get_db_file(),
+                    recovered_plaintext.config,
+                )
+                self.assertEqual(
+                    recovered_sql.fetchall('SELECT blob_id FROM blob_reference'),
+                    [(missing_id,)],
+                )
+                SqlManager.close_connection(recovered_plaintext.paths.get_db_file())
+        finally:
+            Constants.DATA = original_data
+
     def test_precommit_migration_failure_preserves_encrypted_source(self) -> None:
         """Verifies a staged migration failure leaves the original password usable.
 
@@ -806,6 +1173,16 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                                 master_password='source-password',
                             ).success
                         )
+                        source_pm = ProfileManager(name)
+                        source_keys = KeyManager(source_pm, 'source-password')
+                        source_store = EncryptedBlobStore(
+                            source_pm.paths.get_persistent_blob_dir(),
+                            source_pm.paths.get_temporary_blob_dir(),
+                            source_keys.get_blob_key(),
+                        )
+                        blob_id = source_store.put(b'committed blob')
+                        source_store.close()
+                        source_keys.clear_sensitive_state()
                         with (
                             patch.object(Settings, 'get_bool', return_value=True),
                             patch.object(
@@ -825,9 +1202,73 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                             )
                         recovered_pm = ProfileManager(name)
                         self.assertTrue(recovered_pm.uses_plaintext_storage())
+                        recovered_store = PlaintextBlobStore(
+                            recovered_pm.paths.get_persistent_blob_dir(),
+                            recovered_pm.paths.get_temporary_blob_dir(),
+                        )
+                        self.assertEqual(
+                            recovered_store.read(blob_id), b'committed blob'
+                        )
+                        recovered_store.close()
                         self.assertTrue(
                             result.success or stage == 'immediately_after_commit'
                         )
+        finally:
+            Constants.DATA = original_data
+
+    def test_plaintext_to_encrypted_postcommit_failure_recovers_target(self) -> None:
+        """Verifies committed encrypted blobs retain their target keyslot on recovery.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                Constants.DATA = Path(temp_dir)
+                source_pm = self._profile(Constants.DATA, 'encrypted-recovery')
+                source_pm.config.set(
+                    ProfileConfigKey.SECURITY_MODE,
+                    ProfileSecurityMode.PLAINTEXT.value,
+                    allow_mutating_structural_keys=True,
+                )
+                source_store = PlaintextBlobStore(
+                    source_pm.paths.get_persistent_blob_dir(),
+                    source_pm.paths.get_temporary_blob_dir(),
+                )
+                blob_id = source_store.put(b'encrypted after recovery')
+                source_store.close()
+                with patch.object(
+                    profile_lifecycle,
+                    '_migration_checkpoint',
+                    side_effect=lambda stage: (
+                        (_ for _ in ()).throw(OSError(stage))
+                        if stage == 'immediately_after_commit'
+                        else None
+                    ),
+                ):
+                    result = ProfileManager.migrate_profile_security(
+                        'encrypted-recovery',
+                        ProfileSecurityMode.ENCRYPTED,
+                        new_password='target-password',
+                    )
+                self.assertFalse(result.success)
+                recovered_pm = ProfileManager('encrypted-recovery')
+                self.assertTrue(recovered_pm.uses_encrypted_storage())
+                recovered_keys = KeyManager(recovered_pm, 'target-password')
+                recovered_store = EncryptedBlobStore(
+                    recovered_pm.paths.get_persistent_blob_dir(),
+                    recovered_pm.paths.get_temporary_blob_dir(),
+                    recovered_keys.get_blob_key(),
+                )
+                self.assertEqual(
+                    recovered_store.read(blob_id), b'encrypted after recovery'
+                )
+                recovered_store.close()
+                recovered_keys.clear_sensitive_state()
         finally:
             Constants.DATA = original_data
 
@@ -887,6 +1328,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
             second_path = root / 'persistent' / f'{second_blob_id}.blob'
             self.assertNotEqual(blob_id, second_blob_id)
             self.assertNotEqual(encoded, second_path.read_bytes())
+            self.assertTrue(store.exists(blob_id))
 
             wrong_store = self._blob_store(root, wrong_keys.blob_key())
             with self.assertRaises(BlobAuthenticationError):
@@ -901,6 +1343,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
 
             store.delete(blob_id)
             self.assertFalse(path.exists())
+            self.assertFalse(store.exists(blob_id))
             store.delete(blob_id)
             store.close()
             wrong_store.close()

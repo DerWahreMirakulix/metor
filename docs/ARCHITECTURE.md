@@ -97,9 +97,12 @@ change without invalidating existing valid keyslots, while hostile metadata
 cannot request unbounded work or memory.
 
 Keyslot creation and password rewrap use an owner-only temporary file, flush and
-`fsync`, then atomic replacement. Rewrap authenticates the old password and
-wraps the same PMK with a new salt and nonce. It does not re-encrypt SQLCipher,
-identity data, or blobs. A failed rewrap leaves the prior valid keyslot in place.
+`fsync`, then atomic replacement. Before replacement, rewrap opens the staged
+keyslot with the new password and verifies that it recovers the exact original
+PMK. Rewrap authenticates the old password and wraps that same PMK with a new
+salt and nonce. It does not re-encrypt SQLCipher, identity data, or blobs, so
+`DB_KEY`, `SECRET_KEY`, and `BLOB_KEY` remain unchanged. A failed build or
+read-back leaves the prior valid keyslot in place.
 `ChangePasswordCommand(current_password, new_password)` requires explicit
 current-password verification even from an authenticated unlocked daemon session;
 this prevents a separate local IPC client from changing another session's
@@ -114,8 +117,20 @@ snapshots, backups, and remapped blocks can retain historical copies.
 
 Security-mode migration is a multi-resource staged transaction. It copies the
 active profile to a sibling staged generation, transforms the staged database,
-keyslot, private secret representation, and metadata, then reopens and validates
-that staged target. The active source is not modified during preparation.
+keyslot, private secret representation, metadata, and every persistent external
+blob, then reopens and validates that staged target. Encrypted-to-plaintext
+migration authenticates and decrypts each source blob with the source `BLOB_KEY`;
+plaintext-to-encrypted migration writes the current authenticated blob format
+with the target `BLOB_KEY`. Both paths preserve every logical blob ID, compare
+each staged read-back with its source payload, and validate target database
+`blob_id` references before commit. The active source and its key material are
+not modified during preparation.
+
+Temporary blobs are non-durable runtime spool state. Security migration requires
+the profile daemon to be offline, so the staged target discards that namespace
+instead of copying mode-incompatible runtime residue. Persistent blobs are all
+migrated, including currently orphaned canonical objects, because ownership
+metadata is not yet sufficient to discard them without risking data loss.
 
 The explicit durable commit point is the atomic replacement of a sibling
 migration journal from `prepared` to `committed`, after the complete staged tree
@@ -135,8 +150,8 @@ profile/
 ├── protected-key-material/
 │   └── keyslot.json                   # protected PMK, owner-only
 ├── blobs/
-│   ├── persistent/                    # future DROP/file durable ciphertext
-│   └── temporary/                     # future LIVE crash-safe ciphertext spool
+│   ├── persistent/                    # durable ciphertext or development plaintext
+│   └── temporary/                     # non-durable mode-appropriate runtime spool
 ├── hidden_service/
 │   ├── metor_secret.key               # SECRET_KEY ciphertext when encrypted
 │   ├── hs_ed25519_secret_key.enc       # SECRET_KEY ciphertext when encrypted
@@ -147,7 +162,13 @@ profile/
 Sensitive directories use owner-only permissions where the platform supports
 them. Permissions are defense in depth, not encryption.
 
-### Encrypted external blob store
+### External blob stores
+
+`EncryptedBlobStore` and `PlaintextBlobStore` implement the same logical
+`BlobStore` API: `put`, `read`, `delete`, `promote`, and `exists`. Callers use
+opaque IDs and never select filesystem paths or security-mode formats. The
+plaintext implementation is development-only and writes payload bytes directly
+to disk; it provides no at-rest confidentiality.
 
 `EncryptedBlobStore` maps random 256-bit lowercase hexadecimal blob IDs to
 internal files; callers never supply or receive filesystem paths. It supports
@@ -217,8 +238,9 @@ protector can make purge stronger by destroying a non-exportable wrapping key.
 Plaintext local profiles remain an explicit DEVELOPMENT/DEBUG option for testing
 workflows, but are not appropriate for normal or hardened deployment. They have
 no PMK, no at-rest confidentiality, no password-backed local unlock, no
-encrypted external blob store, and no cryptographic-erasure guarantee; purge is
-filesystem cleanup only. `daemon.allow_plaintext_profiles` defaults to `false`;
+encrypted external blob store, and no cryptographic-erasure guarantee. Their
+external blob payloads are plaintext on disk; purge is filesystem cleanup only.
+`daemon.allow_plaintext_profiles` defaults to `false`;
 development environments must deliberately enable it, while hardened/device
 builds keep it disabled to prohibit plaintext profile creation and migration.
 

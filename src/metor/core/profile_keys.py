@@ -1,6 +1,7 @@
 """Profile master-key protection and domain-separated runtime key derivation."""
 
 import base64
+import hmac
 import json
 import os
 import secrets
@@ -361,11 +362,20 @@ class PasswordKeyProtector:
             'utf-8'
         )
 
-    def _atomic_write(self, document: bytes) -> None:
+    def _atomic_write(
+        self,
+        document: bytes,
+        validation_credential: str | None = None,
+        expected_pmk: bytes | bytearray | None = None,
+    ) -> None:
         """Persists a complete replacement keyslot atomically.
 
         Args:
             document (bytes): Serialized keyslot document.
+            validation_credential (str | None): Credential used to read back a
+                staged replacement before activation.
+            expected_pmk (bytes | bytearray | None): PMK the staged replacement
+                must recover before activation.
 
         Returns:
             None
@@ -380,6 +390,17 @@ class PasswordKeyProtector:
                 handle.flush()
                 os.fsync(handle.fileno())
             temp_path.chmod(0o600)
+            if validation_credential is not None and expected_pmk is not None:
+                recovered_pmk = PasswordKeyProtector(temp_path).unprotect(
+                    validation_credential
+                )
+                try:
+                    if not hmac.compare_digest(recovered_pmk, expected_pmk):
+                        raise InvalidKeyslotError(
+                            'Replacement keyslot recovered an unexpected PMK.'
+                        )
+                finally:
+                    secure_clear_buffer(recovered_pmk)
             temp_path.replace(self._keyslot_path)
             self._keyslot_path.chmod(0o600)
             if os.name != 'nt':
@@ -498,7 +519,11 @@ class PasswordKeyProtector:
         """
         pmk = self.unprotect(old_credential)
         try:
-            self._atomic_write(self._build_document(pmk, new_credential))
+            self._atomic_write(
+                self._build_document(pmk, new_credential),
+                validation_credential=new_credential,
+                expected_pmk=pmk,
+            )
         finally:
             secure_clear_buffer(pmk)
 
