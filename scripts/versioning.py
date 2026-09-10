@@ -35,8 +35,7 @@ MINIMUM_CONSTANTS: dict[str, str] = {
     'blob': 'BLOB_FORMAT_MIN_SUPPORTED',
 }
 SEMVER_PATTERN: re.Pattern[str] = re.compile(
-    r'^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)'
-    r'(?:-(?:alpha|beta|rc)\.(?:0|[1-9]\d*))?$'
+    r'^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
 )
 
 
@@ -120,7 +119,7 @@ def set_application_version(version: str) -> None:
     """Sets the application SemVer used by explicit release automation.
 
     Args:
-        version (str): Valid release or prerelease Semantic Version.
+        version (str): Valid stable application Semantic Version.
 
     Raises:
         ValueError: If the value is not a supported Semantic Version.

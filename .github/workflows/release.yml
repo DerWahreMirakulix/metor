@@ -13,30 +13,6 @@ on:
           - patch
           - minor
           - major
-      prerelease:
-        description: Optional prerelease label
-        required: true
-        type: choice
-        default: none
-        options:
-          - none
-          - alpha
-          - beta
-          - rc
-      peer_compatibility:
-        description: Explicit peer-wire compatibility review
-        required: true
-        type: choice
-        default: unchanged
-        options:
-          - unchanged
-          - additive
-          - breaking
-      crypto_migration_reviewed:
-        description: Confirm migration/support review when derivation contexts changed
-        required: true
-        type: boolean
-        default: false
       dry_run:
         description: Validate and build without committing, tagging, or publishing
         required: true
@@ -82,7 +58,7 @@ jobs:
             fi
           done <<< "$release_tags"
           latest_tag="$(python scripts/calculate_release_version.py --select-baseline "${baseline_args[@]}")"
-          args=(--release-type '${{ inputs.release_type }}' --prerelease '${{ inputs.prerelease }}')
+          args=(--release-type '${{ inputs.release_type }}')
           if [ -n "$latest_tag" ]; then
             args+=(--previous-release "$latest_tag")
           fi
@@ -145,12 +121,9 @@ jobs:
       - name: Check release compatibility
         shell: bash
         run: |
-          args=(--current docs/generated/compatibility.json --peer-classification '${{ inputs.peer_compatibility }}')
+          args=(--current docs/generated/compatibility.json)
           if [ -n '${{ needs.prepare.outputs.latest_tag }}' ]; then
             args+=(--previous previous-compatibility.json)
-          fi
-          if [ '${{ inputs.crypto_migration_reviewed }}' = 'true' ]; then
-            args+=(--crypto-migration-reviewed)
           fi
           python scripts/check_release_compatibility.py "${args[@]}"
 
@@ -166,6 +139,90 @@ jobs:
       - name: Build platform release bundles
         shell: bash
         run: python scripts/build_release_wheelhouse.py --output-dir dist/release --skip-pip-upgrade --variant all
+
+      - name: Smoke-test Linux bundle installers
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -e
+          extract_dir='dist/release-smoke'
+
+          full_zip="$(find dist/release -maxdepth 1 -type f -name 'metor-wheelhouse-*.zip' ! -name 'metor-daemon*' ! -name 'metor-sdk*' | head -n 1)"
+          python -m zipfile -e "$full_zip" "$extract_dir/full"
+          full_dir="$(find "$extract_dir/full" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          sh "$full_dir/install.sh"
+          "$full_dir/.venv/bin/python" -m pip check
+          "$full_dir/.venv/bin/python" -c "import metor; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
+          "$full_dir/.venv/bin/metor" --help
+
+          daemon_zip="$(find dist/release -maxdepth 1 -type f -name 'metor-daemon-wheelhouse-*.zip' | head -n 1)"
+          python -m zipfile -e "$daemon_zip" "$extract_dir/daemon"
+          daemon_dir="$(find "$extract_dir/daemon" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          sh "$daemon_dir/install.sh"
+          "$daemon_dir/.venv/bin/python" -m pip check
+          "$daemon_dir/.venv/bin/python" -c "import metor.daemon_main; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
+          "$daemon_dir/.venv/bin/metor-daemon" --help
+          "$daemon_dir/.venv/bin/python" -c "
+          try:
+            import metor.ui
+            raise SystemExit(1)
+          except ModuleNotFoundError:
+            pass
+          "
+
+          sdk_zip="$(find dist/release -maxdepth 1 -type f -name 'metor-sdk-wheelhouse-*.zip' | head -n 1)"
+          python -m zipfile -e "$sdk_zip" "$extract_dir/sdk"
+          sdk_dir="$(find "$extract_dir/sdk" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          sh "$sdk_dir/install.sh"
+          "$sdk_dir/.venv/bin/python" -m pip check
+          "$sdk_dir/.venv/bin/python" -c "from metor.client import MetorClient; print(MetorClient)"
+          "$sdk_dir/.venv/bin/python" -c "
+          try:
+            import sqlcipher3
+            raise SystemExit(1)
+          except ModuleNotFoundError:
+            pass
+          "
+          "$sdk_dir/.venv/bin/python" -c "
+          try:
+            import metor.data
+            raise SystemExit(1)
+          except ModuleNotFoundError:
+            pass
+          "
+
+      - name: Smoke-test Windows bundle installers
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $extractDir = Join-Path $PWD 'dist/release-smoke'
+
+          $fullZip = (Get-ChildItem 'dist/release' -Filter 'metor-wheelhouse-*.zip' | Where-Object { $_.Name -notlike 'metor-daemon*' -and $_.Name -notlike 'metor-sdk*' } | Select-Object -First 1).FullName
+          python -m zipfile -e $fullZip (Join-Path $extractDir 'full')
+          $fullDir = (Get-ChildItem (Join-Path $extractDir 'full') -Directory | Select-Object -First 1).FullName
+          & "$fullDir\install.cmd"
+          & "$fullDir\.venv\Scripts\python.exe" -m pip check
+          & "$fullDir\.venv\Scripts\python.exe" -c "import metor; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
+          & "$fullDir\.venv\Scripts\metor.exe" --help
+
+          $daemonZip = (Get-ChildItem 'dist/release' -Filter 'metor-daemon-wheelhouse-*.zip' | Select-Object -First 1).FullName
+          python -m zipfile -e $daemonZip (Join-Path $extractDir 'daemon')
+          $daemonDir = (Get-ChildItem (Join-Path $extractDir 'daemon') -Directory | Select-Object -First 1).FullName
+          & "$daemonDir\install.cmd"
+          & "$daemonDir\.venv\Scripts\python.exe" -m pip check
+          & "$daemonDir\.venv\Scripts\python.exe" -c "import metor.daemon_main; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
+          & "$daemonDir\.venv\Scripts\metor-daemon.exe" --help
+          & "$daemonDir\.venv\Scripts\python.exe" -c "try:`n    import metor.ui`n    raise SystemExit(1)`nexcept ModuleNotFoundError:`n    pass"
+
+          $sdkZip = (Get-ChildItem 'dist/release' -Filter 'metor-sdk-wheelhouse-*.zip' | Select-Object -First 1).FullName
+          python -m zipfile -e $sdkZip (Join-Path $extractDir 'sdk')
+          $sdkDir = (Get-ChildItem (Join-Path $extractDir 'sdk') -Directory | Select-Object -First 1).FullName
+          & "$sdkDir\install.cmd"
+          & "$sdkDir\.venv\Scripts\python.exe" -m pip check
+          & "$sdkDir\.venv\Scripts\python.exe" -c "from metor.client import MetorClient; print(MetorClient)"
+          & "$sdkDir\.venv\Scripts\python.exe" -c "try:`n    import sqlcipher3`n    raise SystemExit(1)`nexcept ModuleNotFoundError:`n    pass"
+          & "$sdkDir\.venv\Scripts\python.exe" -c "try:`n    import metor.data`n    raise SystemExit(1)`nexcept ModuleNotFoundError:`n    pass"
 
       - name: Preserve platform release bundles
         uses: actions/upload-artifact@v4
@@ -239,7 +296,7 @@ jobs:
             python scripts/versioning.py status
             echo '```'
           } > release-notes.md
-          gh release create 'v${{ needs.prepare.outputs.next_version }}' --verify-tag --generate-notes --notes-file release-notes.md ${{ inputs.prerelease != 'none' && '--prerelease' || '' }}
+          gh release create 'v${{ needs.prepare.outputs.next_version }}' --verify-tag --generate-notes --notes-file release-notes.md
           while IFS= read -r -d '' archive_path; do
             gh release upload 'v${{ needs.prepare.outputs.next_version }}' "$archive_path"
           done < <(find dist/release-assets -type f -name '*.zip' -print0)

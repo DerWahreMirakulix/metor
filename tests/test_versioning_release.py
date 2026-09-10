@@ -503,7 +503,7 @@ class ReleaseCompatibilityTests(unittest.TestCase):
     """Covers SemVer and release compatibility decisions."""
 
     def test_semver_release_calculation(self) -> None:
-        """Verifies first, patch, minor, major, and prerelease calculations.
+        """Verifies first, patch, minor, and major release calculations.
 
         Args:
             None
@@ -524,18 +524,52 @@ class ReleaseCompatibilityTests(unittest.TestCase):
             calculate_next_version('0.2.0', 'major', previous_release='v0.2.0'),
             '1.0.0',
         )
-        self.assertEqual(
-            calculate_next_version('0.2.0', 'minor', 'rc', 'v0.2.0'),
-            '0.3.0-rc.1',
+
+    def test_current_release_rejects_existing_stable_baseline(self) -> None:
+        """Verifies current is reserved for the first public release.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with self.assertRaises(ValueError):
+            calculate_next_version('0.2.0', 'current', previous_release='v0.2.0')
+
+    def test_release_calculation_rejects_prerelease_versions(self) -> None:
+        """Verifies release creation cannot use a prerelease version.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with self.assertRaises(ValueError):
+            calculate_next_version('0.3.0-rc.1', 'current')
+        with self.assertRaises(ValueError):
+            calculate_next_version('0.2.0', 'patch', previous_release='v0.3.0-rc.1')
+
+    def test_registry_cli_rejects_prerelease_application_versions(self) -> None:
+        """Verifies release automation cannot write prerelease APP_VERSION values.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        root: Path = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, 'scripts/versioning.py', 'set-app', '0.3.0-rc.1'],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
         )
-        self.assertEqual(
-            calculate_next_version('0.3.0-rc.1', 'minor', 'rc', 'v0.3.0-rc.1'),
-            '0.3.0-rc.2',
-        )
-        self.assertEqual(
-            calculate_next_version('0.3.0-rc.2', 'minor', 'none', 'v0.3.0-rc.2'),
-            '0.3.0',
-        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Invalid Metor Semantic Version', result.stderr)
 
     def test_release_baseline_uses_highest_stable_semver(self) -> None:
         """Verifies release publication order cannot select an older backport.
@@ -817,6 +851,7 @@ class DocumentationReleaseArchitectureTests(unittest.TestCase):
         workflow: str = (root / '.github' / 'workflows' / 'release.yml').read_text(
             encoding='utf-8'
         )
+        workflow_inputs: str = workflow.split('\njobs:', maxsplit=1)[0]
         validation_jobs, publish_job = workflow.split('\n  publish:', maxsplit=1)
         self.assertNotIn('\npermissions:\n  contents: write', workflow)
         self.assertIn('Reject non-main publish requests', validation_jobs)
@@ -831,6 +866,32 @@ class DocumentationReleaseArchitectureTests(unittest.TestCase):
         self.assertIn('docs/generated/SETTINGS.md', workflow)
         self.assertIn('if ! git diff --cached --quiet; then', publish_job)
         self.assertIn('--select-baseline', validation_jobs)
+        self.assertNotIn('prerelease:', workflow)
+        self.assertNotIn('--prerelease', workflow)
+        self.assertIn('release_type:', workflow_inputs)
+        self.assertIn('dry_run:', workflow_inputs)
+        self.assertNotIn('peer_compatibility:', workflow_inputs)
+        self.assertNotIn('crypto_migration_reviewed:', workflow_inputs)
+        self.assertIn('Smoke-test Linux bundle installers', validation_jobs)
+        self.assertIn('Smoke-test Windows bundle installers', validation_jobs)
+        self.assertIn('install.sh', validation_jobs)
+        self.assertIn('install.cmd', validation_jobs)
+
+    def test_canonical_release_workflow_replaces_legacy_bundle_workflow(
+        self,
+    ) -> None:
+        """Verifies bundle publishing has one canonical release workflow.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        root: Path = Path(__file__).resolve().parents[1]
+        workflows_dir: Path = root / '.github' / 'workflows'
+        self.assertTrue((workflows_dir / 'release.yml').is_file())
+        self.assertFalse((workflows_dir / 'release_wheel_bundles.yml').exists())
 
     def test_generated_docs_workflow_uses_canonical_allowlist(self) -> None:
         """Verifies generated-document automation cannot stage authored docs.

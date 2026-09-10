@@ -32,8 +32,7 @@ PROFILE_KEY_DERIVATION_VERSION: int = 1
 BLOB_OBJECT_DERIVATION_VERSION: int = 1
 
 _APP_SEMVER_PATTERN: re.Pattern[str] = re.compile(
-    r'^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)'
-    r'(?:-(?:alpha|beta|rc)\.(?:0|[1-9]\d*))?$'
+    r'^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
 )
 
 

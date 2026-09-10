@@ -29,9 +29,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         '--release-type', choices=('current', 'patch', 'minor', 'major')
     )
-    parser.add_argument(
-        '--prerelease', choices=('none', 'alpha', 'beta', 'rc'), default='none'
-    )
     parser.add_argument('--previous-release')
     parser.add_argument('--available-release', action='append', default=[])
     parser.add_argument('--select-baseline', action='store_true')
@@ -48,7 +45,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         version: str = calculate_next_version(
             APP_VERSION,
             args.release_type,
-            args.prerelease,
             previous_release,
         )
     except ValueError as exc:

@@ -47,6 +47,10 @@ application version, or explicitly request another SemVer bump. With no prior
 `docs/generated/compatibility.json` becomes the baseline. No migration from arbitrary
 pre-release development data is promised.
 
+The supported release types are `current`, `patch`, `minor`, and `major`.
+Prerelease channels are intentionally unsupported until an explicit
+release-sequencing design introduces them.
+
 ## Database lifecycle
 
 `DB_SCHEMA_VERSION` is stored with SQLite/SQLCipher `PRAGMA user_version` and is
@@ -106,10 +110,11 @@ python scripts/check_release_compatibility.py --current docs/generated/compatibi
 Start **Release Metor** manually in GitHub Actions and select:
 
 - application bump (`current` for the first release, otherwise patch/minor/major);
-- optional alpha, beta, or rc label;
-- peer compatibility classification;
-- cryptographic migration acknowledgement only when applicable; and
 - dry-run or publish.
+
+Peer-wire and cryptographic derivation changes remain fail-closed under the
+compatibility checker defaults. They require an explicit future release design
+before they can be published.
 
 The workflow discovers every non-draft GitHub Release and selects the highest
 valid stable `vMAJOR.MINOR.PATCH` tag through parsed SemVer ordering. Prerelease
