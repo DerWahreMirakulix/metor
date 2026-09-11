@@ -8,7 +8,7 @@ from typing import Dict, Optional, Set
 class StateTrackerRetunnelMixin:
     """Encapsulates reconnect grace windows and retunnel lifecycle markers."""
 
-    _lock: threading.Lock
+    _lock: threading.RLock
     _live_reconnect_grace: Dict[str, float]
     _local_recovery_opt_outs: Dict[str, float]
     _retunnel_reconnects: Set[str]

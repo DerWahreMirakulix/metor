@@ -30,6 +30,7 @@ from metor.client.contact_qr import (
     validate_contact_qr,
 )
 from metor.client.session import MetorClient, MetorRequestRejectedError, parse_endpoint
+from metor.client.outcomes import MetorProtocolError
 from metor.client.lifecycle import (
     ProfileRuntimeCoordinator,
     ProfileSwitchError,
@@ -42,6 +43,8 @@ from metor.client.frontends import (
     FRONTEND_LAUNCH_CONTRACT_VERSION,
     FrontendDescriptor,
     FrontendBootstrapError,
+    FrontendBootstrapReason,
+    FrontendSettings,
     FrontendBootstrapResult,
     FrontendHost,
     FrontendInteractions,
@@ -75,6 +78,8 @@ __all__ = [
     'FRONTEND_LAUNCH_CONTRACT_VERSION',
     'FrontendDescriptor',
     'FrontendBootstrapError',
+    'FrontendBootstrapReason',
+    'FrontendSettings',
     'FrontendBootstrapResult',
     'FrontendHost',
     'FrontendInteractions',
@@ -92,6 +97,7 @@ __all__ = [
     'ContactQrValidationResult',
     'MetorClient',
     'MetorRequestRejectedError',
+    'MetorProtocolError',
     'ProfileRuntimeCoordinator',
     'ProfileSwitchError',
     'ProfileSwitchPhase',

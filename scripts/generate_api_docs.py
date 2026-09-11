@@ -324,7 +324,7 @@ class ApiDocGenerator:
                 lines.append('')
                 lines.append('---')
 
-        with self._output_path.open('w', encoding='utf-8') as f:
+        with self._output_path.open('w', encoding='utf-8', newline='\n') as f:
             f.write('\n'.join(lines))
 
 
@@ -464,7 +464,7 @@ class ApiSchemaGenerator:
             'events': events,
         }
 
-        with self._output_path.open('w', encoding='utf-8') as f:
+        with self._output_path.open('w', encoding='utf-8', newline='\n') as f:
             f.write(json.dumps(document, indent=2))
             f.write('\n')
 

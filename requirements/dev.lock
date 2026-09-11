@@ -1,7 +1,7 @@
 # Exact development dependency set for security-conscious installs and CI.
 # Install with:
 #   pip install -r requirements/dev.lock
-#   pip install --no-deps --no-build-isolation -e .
+#   pip install --no-deps --no-build-isolation -e packaging/sdk -e . -e packaging/terminal
 
 stem==1.8.2
 PySocks==1.7.1

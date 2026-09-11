@@ -14,7 +14,6 @@ from metor.ui.terminal import (
     prompt_hidden,
     prompt_text,
 )
-from metor.data import ProfileManager
 from metor.ui.terminal.chat import Chat
 
 
@@ -101,9 +100,8 @@ def launch(context: FrontendLaunchContext) -> int:
         if str(exc):
             print(interactions._spacer.format(str(exc)))
         return exc.exit_code
-    profile = ProfileManager(bootstrap.profile)
     chat = Chat(
-        profile,
+        bootstrap,
         startup_session_auth_provider=bootstrap.session_auth.take,
     )
     chat.run()

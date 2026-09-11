@@ -1,10 +1,5 @@
 """Public facade for the terminal frontend."""
 
-from metor.data import (
-    TERMINAL_UI_SETTINGS,
-    get_registered_ui_settings,
-    register_ui_settings,
-)
 from metor.ui.terminal.help import CommandDef, Help, SubCommandDef
 from metor.ui.terminal.models import AliasPolicy, StatusTone, TranslationDef
 from metor.ui.terminal.presenter import UIPresenter
@@ -22,9 +17,6 @@ from metor.ui.terminal.session_auth import (
 )
 from metor.ui.terminal.theme import Theme
 from metor.ui.terminal.translations import Translator
-
-if 'terminal' not in get_registered_ui_settings():
-    register_ui_settings('terminal', TERMINAL_UI_SETTINGS)
 
 __all__ = [
     'AliasPolicy',

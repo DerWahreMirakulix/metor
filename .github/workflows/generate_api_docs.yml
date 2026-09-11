@@ -10,7 +10,7 @@ on:
       - "scripts/generate_compatibility_manifest.py"
       - "scripts/validate_generated_docs.py"
       - "scripts/release/**"
-      - "src/metor/versioning.py"
+      - "src/metor/versioning/**"
       - "src/metor/core/daemon/managed/models.py"
       - "src/metor/core/daemon/managed/network/handshake.py"
       - "src/metor/data/sql/schema.py"

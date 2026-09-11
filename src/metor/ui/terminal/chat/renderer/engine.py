@@ -16,14 +16,14 @@ from metor.core.api import JsonValue
 from metor.ui.terminal.models import AliasPolicy, StatusTone
 from metor.ui.terminal.chat.models import ChatLine, ChatMessageType, ChatTransportState
 from metor.ui.terminal.chat.presenter import ChatPresenter
-from metor.utils import Constants
+from metor.ui.terminal.constants import Constants
 
 # Local Package Imports
 from metor.ui.terminal.chat.renderer.display import Display
 from metor.ui.terminal.chat.renderer.input import InputHandler
 
 if TYPE_CHECKING:
-    from metor.data import Config
+    from metor.client import FrontendSettings
 
 
 UI_PROMPT_SIGN_KEY: str = 'ui.terminal.prompt_sign'
@@ -43,17 +43,17 @@ class Renderer:
     Implements the ChatRenderer protocol structurally.
     """
 
-    def __init__(self, config: 'Config') -> None:
+    def __init__(self, config: 'FrontendSettings') -> None:
         """
         Initializes the Renderer Engine and its sub-components.
 
         Args:
-            config (Config): The profile configuration instance.
+            config (FrontendSettings): Bounded read-only frontend settings.
 
         Returns:
             None
         """
-        self._config: 'Config' = config
+        self._config: 'FrontendSettings' = config
         self._initial_prompt: str = (
             f'{self._config.get_namespace_str(UI_PROMPT_SIGN_KEY)} '
         )

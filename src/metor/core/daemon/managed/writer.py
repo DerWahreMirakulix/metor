@@ -7,6 +7,7 @@ import queue
 import socket
 import threading
 from typing import Callable, Optional
+from metor.utils import Constants
 
 
 class FrameQueueFull(ConnectionError):
@@ -19,6 +20,7 @@ class QueuedFrame:
 
     payload: bytes
     claim: Optional[Callable[[], bool]] = None
+    final: bool = False
 
 
 class BoundedSocketWriter:
@@ -46,7 +48,8 @@ class BoundedSocketWriter:
         self._queued_bytes = 0
         self._on_failure = on_failure
         self._on_exit = on_exit
-        self._state_lock = threading.Lock()
+        self._state_lock = threading.RLock()
+        self._finish_timer: threading.Timer | None = None
         self._accepting = True
         self._socket_closed = False
         self._drained = threading.Event()
@@ -57,7 +60,11 @@ class BoundedSocketWriter:
         self._thread.start()
 
     def enqueue(
-        self, payload: bytes, claim: Optional[Callable[[], bool]] = None
+        self,
+        payload: bytes,
+        claim: Optional[Callable[[], bool]] = None,
+        *,
+        final: bool = False,
     ) -> None:
         """Admits one bounded frame without waiting for socket I/O."""
         payload_size = len(payload)
@@ -69,11 +76,30 @@ class BoundedSocketWriter:
             if self._queued_bytes + payload_size > self._byte_capacity:
                 raise FrameQueueFull('Socket writer byte queue is full.')
             try:
-                self._queue.put_nowait(QueuedFrame(payload=payload, claim=claim))
+                self._queue.put_nowait(
+                    QueuedFrame(payload=payload, claim=claim, final=final)
+                )
             except queue.Full as exc:
                 raise FrameQueueFull('Socket writer queue is full.') from exc
             self._queued_bytes += payload_size
             self._drained.clear()
+
+    def finish(self, payload: bytes, timeout: float) -> None:
+        """Admits the last frame and transfers bounded shutdown to the writer.
+
+        Args:
+            payload (bytes): Final control frame, after all previously admitted work.
+            timeout (float): Finite maximum drain time before forced cancellation.
+
+        Returns:
+            None
+        """
+        with self._state_lock:
+            self.enqueue(payload, final=True)
+            self._accepting = False
+            self._finish_timer = threading.Timer(max(0.0, timeout), self.close)
+            self._finish_timer.daemon = True
+            self._finish_timer.start()
 
     def flush(self, timeout: float) -> bool:
         """Waits a bounded time for accepted frames to finish.
@@ -105,6 +131,8 @@ class BoundedSocketWriter:
                 return
             self._socket_closed = True
             self._closed.set()
+            if self._finish_timer is not None:
+                self._finish_timer.cancel()
         try:
             self._conn.shutdown(socket.SHUT_RDWR)
         except (OSError, TypeError):
@@ -130,7 +158,9 @@ class BoundedSocketWriter:
         try:
             while not self._closed.is_set():
                 try:
-                    item = self._queue.get(timeout=0.1)
+                    item = self._queue.get(
+                        timeout=Constants.SOCKET_WRITER_POLL_TIMEOUT_SEC
+                    )
                 except queue.Empty:
                     continue
                 try:
@@ -139,6 +169,9 @@ class BoundedSocketWriter:
                     if item.claim is not None and not item.claim():
                         continue
                     self._conn.sendall(item.payload)
+                    if item.final:
+                        self._conn.shutdown(socket.SHUT_WR)
+                        return
                 except Exception as exc:
                     with self._state_lock:
                         self._accepting = False

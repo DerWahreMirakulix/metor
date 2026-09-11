@@ -41,7 +41,7 @@ class PendingConnectionSnapshot:
 class StateTrackerConnectionsMixin:
     """Encapsulates live, pending, and outbound connection state operations."""
 
-    _lock: threading.Lock
+    _lock: threading.RLock
     _connections: Dict[str, socket.socket]
     _pending_connections: Dict[str, socket.socket]
     _pending_connection_reasons: Dict[str, PendingConnectionReason]
@@ -528,7 +528,7 @@ class StateTrackerConnectionsMixin:
         return should_track
 
     def pop_pending_connection(
-        self, onion: str
+        self, onion: str, expected_socket: Optional[socket.socket] = None
     ) -> Tuple[
         Optional[socket.socket],
         bytes,
@@ -546,6 +546,11 @@ class StateTrackerConnectionsMixin:
                 The pending socket, initial buffer, pending reason, and origin.
         """
         with self._lock:
+            if (
+                expected_socket is not None
+                and self._pending_connections.get(onion) is not expected_socket
+            ):
+                return None, b'', None, None
             conn: Optional[socket.socket] = self._pending_connections.pop(onion, None)
             buf: bytes = self._initial_buffers.pop(onion, b'')
             reason: Optional[PendingConnectionReason] = (
@@ -558,6 +563,22 @@ class StateTrackerConnectionsMixin:
             if conn is not None:
                 self._expired_pending_connections.pop(onion, None)
             return conn, buf, reason, origin
+
+    def pending_identity(self, onion: str) -> tuple[socket.socket, float] | None:
+        """Returns exact pending socket ownership with its bounded deadline."""
+        with self._lock:
+            conn = self._pending_connections.get(onion)
+            deadline = self._pending_connection_deadlines.get(onion)
+            if conn is None:
+                return None
+            if deadline is not None and deadline <= time.time():
+                return None
+            return (
+                conn,
+                deadline
+                if deadline is not None
+                else time.time() + Constants.PENDING_EXPIRY_FEEDBACK_WINDOW_SEC,
+            )
 
     def get_pending_connection_reason(
         self, onion: str
@@ -747,7 +768,9 @@ class StateTrackerConnectionsMixin:
                 return None
             return self._live_context_generations.get(onion)
 
-    def pop_any_connection(self, onion: str) -> Optional[socket.socket]:
+    def pop_any_connection(
+        self, onion: str, expected_socket: Optional[socket.socket] = None
+    ) -> Optional[socket.socket]:
         """
         Removes and returns any tracked socket connection for teardown.
 
@@ -760,6 +783,11 @@ class StateTrackerConnectionsMixin:
         active_conn: Optional[socket.socket] = None
         pending_conn: Optional[socket.socket] = None
         with self._lock:
+            current = self._connections.get(onion) or self._pending_connections.get(
+                onion
+            )
+            if expected_socket is not None and current is not expected_socket:
+                return None
             active_conn = self._connections.pop(onion, None)
             pending_conn = self._pending_connections.pop(onion, None)
             self._outbound_attempt_origins.pop(onion, None)

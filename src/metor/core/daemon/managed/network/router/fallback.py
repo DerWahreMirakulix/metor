@@ -41,7 +41,7 @@ class FallbackRouter:
         broadcast_callback: Callable[[IpcEvent], None],
         config: 'Config',
         transition_lock: Optional[threading.RLock] = None,
-        promote_voice_callback: Optional[Callable[[list[str]], None]] = None,
+        promote_voice_callback: Optional[Callable[[list[str], str], None]] = None,
         purge_fence: Optional[threading.Event] = None,
     ) -> None:
         """Initializes fallback routing with its explicit collaborators.
@@ -67,7 +67,7 @@ class FallbackRouter:
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
         self._config: 'Config' = config
         self._transition_lock = transition_lock or threading.RLock()
-        self._promote_voice = promote_voice_callback or (lambda _msg_ids: None)
+        self._promote_voice = promote_voice_callback or (lambda _msg_ids, _peer: None)
         self._purge_fence = purge_fence or threading.Event()
 
     def _get_pending_live_messages(
@@ -127,12 +127,11 @@ class FallbackRouter:
                 return {}
             records = self._mm.promote_pending_live_to_drop(onion)
             if not records:
-                self._promote_voice([])
                 return {}
             self._state.invalidate_live_generations(
                 onion, [record.msg_id for record in records]
             )
-            self._promote_voice([record.msg_id for record in records])
+            self._promote_voice([record.msg_id for record in records], onion)
             unacked: Dict[str, Tuple[str, str]] = {
                 record.msg_id: (record.payload, record.timestamp) for record in records
             }
@@ -228,7 +227,19 @@ class FallbackRouter:
         with self._transition_lock:
             if self._purge_fence.is_set():
                 return False, EventType.FALLBACK_REJECTED, {'target': target}
-            records = self._mm.promote_pending_live_to_drop(onion, msg_ids)
+            try:
+                records = self._mm.promote_pending_live_to_drop(onion, msg_ids)
+            except Exception:
+                return (
+                    False,
+                    EventType.FALLBACK_REJECTED,
+                    {
+                        'alias': alias,
+                        'onion': onion,
+                        'msg_ids': list(msg_ids or []),
+                        'reason': MessageOperationReason.PERSISTENCE_FAILED.value,
+                    },
+                )
             if records is None:
                 selected_ids: list[JsonValue] = list(msg_ids or [])
                 return (
@@ -241,12 +252,22 @@ class FallbackRouter:
                         'reason': MessageOperationReason.INVALID_SELECTION.value,
                     },
                 )
-            if not records:
-                self._promote_voice(list(msg_ids or []))
             self._state.invalidate_live_generations(
                 onion, [record.msg_id for record in records]
             )
-            self._promote_voice([record.msg_id for record in records])
+            try:
+                self._promote_voice([record.msg_id for record in records], onion)
+            except Exception:
+                return (
+                    False,
+                    EventType.FALLBACK_REJECTED,
+                    {
+                        'alias': alias,
+                        'onion': onion,
+                        'msg_ids': list(msg_ids or []),
+                        'reason': MessageOperationReason.PERSISTENCE_FAILED.value,
+                    },
+                )
             for record in records:
                 self._state.remove_unacked_message(onion, record.msg_id)
                 self._hm.log_event(

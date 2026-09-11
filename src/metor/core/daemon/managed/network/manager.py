@@ -5,6 +5,7 @@ the complex interactions between the Listener, Receiver, Controller, and Router.
 """
 
 import threading
+import socket
 from contextlib import contextmanager
 from typing import Dict, Iterator, List, Callable, Optional, Tuple, TYPE_CHECKING
 
@@ -114,9 +115,12 @@ class NetworkManager:
             has_live_consumers_callback=has_live_consumers_callback,
             stop_flag=stop_flag,
             config=config,
+            operation_lock=operation_lock,
         )
         self._state.set_peer_writer_failure_callback(
-            lambda onion: self._controller.disconnect(onion, is_fallback=True)
+            lambda onion, conn: self._controller.disconnect(
+                onion, initiated_by_self=False, is_fallback=True, socket_to_close=conn
+            )
         )
 
         self._receiver: StreamReceiver = StreamReceiver(
@@ -173,7 +177,9 @@ class NetworkManager:
         """
         self._controller.connect_to(target)
 
-    def accept(self, target: str) -> None:
+    def accept(
+        self, target: str, *, expected_pending: Optional[socket.socket] = None
+    ) -> None:
         """
         Approves a pending incoming connection request.
 
@@ -183,9 +189,15 @@ class NetworkManager:
         Returns:
             None
         """
-        self._controller.accept(target)
+        self._controller.accept(target, expected_pending=expected_pending)
 
-    def reject(self, target: str, initiated_by_self: bool = True) -> None:
+    def reject(
+        self,
+        target: str,
+        initiated_by_self: bool = True,
+        *,
+        expected_pending: Optional[socket.socket] = None,
+    ) -> None:
         """
         Rejects a connection request.
 
@@ -196,7 +208,9 @@ class NetworkManager:
         Returns:
             None
         """
-        self._controller.reject(target, initiated_by_self)
+        self._controller.reject(
+            target, initiated_by_self, expected_pending=expected_pending
+        )
 
     def disconnect(
         self,
@@ -412,6 +426,10 @@ class NetworkManager:
     def voice_target(self, msg_id: str) -> Optional[str]:
         """Returns the onion identity bound to one active outbound Voice turn."""
         return self._router.voice_target(msg_id)
+
+    def voice_context(self, onion: str, msg_id: str, direction: str) -> int | None:
+        """Returns immutable message provenance for restricted media access."""
+        return self._router.voice_context(onion, msg_id, direction)
 
     def voice_delivery(self, msg_id: str) -> Optional[Delivery]:
         """Returns the delivery semantics fixed at Voice begin."""

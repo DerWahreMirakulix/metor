@@ -60,6 +60,7 @@ class ConnectionControllerSupportMixin:
     _receiver: Optional['StreamReceiver']
     _live_reconnect_queue: List[str]
     _live_reconnect_lock: threading.Lock
+    _operation_lock: threading.RLock
 
     def _is_inflight_outbound_socket(self, onion: str, sock: socket.socket) -> bool:
         """

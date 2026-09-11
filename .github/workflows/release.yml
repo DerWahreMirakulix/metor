@@ -279,7 +279,7 @@ jobs:
           cp release-state/compatibility.json docs/generated/compatibility.json
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git config user.name 'github-actions[bot]'
-          git add src/metor/versioning.py docs/generated/API.md docs/generated/SETTINGS.md docs/generated/api.schema.json docs/generated/compatibility.json
+          git add src/metor/versioning/__init__.py docs/generated/API.md docs/generated/SETTINGS.md docs/generated/api.schema.json docs/generated/compatibility.json
           if ! git diff --cached --quiet; then
             git commit -m 'release: v${{ needs.prepare.outputs.next_version }}'
           fi

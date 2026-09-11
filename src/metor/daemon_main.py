@@ -213,6 +213,9 @@ def main() -> None:
         None
     """
     args: argparse.Namespace = _build_parser().parse_args()
+    from metor.application import initialize_runtime_environment
+
+    initialize_runtime_environment()
 
     try:
         exit_code: int
@@ -220,7 +223,7 @@ def main() -> None:
             exit_code = _run_cleanup(force=args.force)
         elif args.command == 'unlock':
             sys.stderr.write(
-                "Unlock requires the terminal UI. Run 'metor unlock' instead.\n"
+                "Unlock requires credential interaction. Run 'metor unlock' instead.\n"
             )
             exit_code = 1
         else:

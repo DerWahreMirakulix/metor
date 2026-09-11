@@ -2134,6 +2134,7 @@ class _DisconnectControllerHarness(ConnectionControllerSessionMixin):
         contact_manager_mock.resolve_target.return_value = ('peer', 'peer-onion')
         contact_manager_mock.cleanup_orphans.return_value = []
         self._cm = cast(ContactManager, contact_manager_mock)
+        self._operation_lock = threading.RLock()
         self._state = state
         self._config = config
         self._broadcast = cast(Any, Mock())

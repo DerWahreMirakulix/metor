@@ -7,7 +7,8 @@ from metor.client.auth import (
     IpcAuthExchange,
     IpcAuthResult,
 )
-from metor.client.ipc import IpcClient
+from metor.client.ipc import IpcClient, RequestLease
+from metor.client.outcomes import PROGRESS_EVENTS, REJECTION_EVENTS, MetorProtocolError
 from metor.core.api import (
     AppendVoiceChunkCommand,
     BeginVoiceCommand,
@@ -377,13 +378,17 @@ class MetorClient:
             Optional[IpcEvent]: Matching terminal event, or None for auth failure.
         """
         request_id: str = ensure_request_id(cmd)
-        self._ipc.begin_request(request_id)
+        lease = self._ipc.begin_request(request_id)
         try:
-            self._ipc.send_command(cmd)
-            auth_exchange: IpcAuthExchange = self._create_auth_exchange(request_id)
+            self._ipc.send_command(cmd, lease)
+            auth_exchange: IpcAuthExchange = self._create_auth_exchange(
+                request_id, lease
+            )
 
             while True:
-                event: Optional[IpcEvent] = self._ipc.wait_for_response(request_id)
+                event: Optional[IpcEvent] = self._ipc.wait_for_response(
+                    request_id, lease
+                )
 
                 if event is None:
                     return None
@@ -391,7 +396,7 @@ class MetorClient:
                 auth_result: IpcAuthResult = auth_exchange.handle(event)
                 if auth_result.handled:
                     if auth_result.resend_original_command:
-                        self._ipc.send_command(cmd)
+                        self._ipc.send_command(cmd, lease)
                         continue
 
                     if (
@@ -411,10 +416,15 @@ class MetorClient:
                     return None
                 if isinstance(event, VoiceOperationRejectedEvent):
                     raise MetorRequestRejectedError(event)
-                self._ipc.dispatch_async_event(event)
-                raise MetorRequestRejectedError(event)
+                if event.event_type in PROGRESS_EVENTS:
+                    self._ipc.dispatch_async_event(event, lease)
+                    continue
+                self._ipc.dispatch_async_event(event, lease)
+                if event.event_type in REJECTION_EVENTS:
+                    raise MetorRequestRejectedError(event)
+                raise MetorProtocolError(event)
         finally:
-            self._ipc.end_request(request_id)
+            self._ipc.end_request(request_id, lease)
 
     def bootstrap(self) -> Optional[InitEvent]:
         """
@@ -475,7 +485,9 @@ class MetorClient:
         self._ipc.send_command(RegisterLiveConsumerCommand())
         return True
 
-    def _create_auth_exchange(self, request_id: str) -> IpcAuthExchange:
+    def _create_auth_exchange(
+        self, request_id: str, lease: RequestLease | None = None
+    ) -> IpcAuthExchange:
         """
         Creates an IpcAuthExchange configured with the active auth provider.
 
@@ -518,7 +530,7 @@ class MetorClient:
         return IpcAuthExchange(
             prompt_session_proof=_prompt_session,
             prompt_unlock_password=_prompt_unlock,
-            send_command=self._ipc.send_command,
+            send_command=lambda command: self._ipc.send_command(command, lease),
             request_id=request_id,
         )
 

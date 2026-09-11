@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional, Tuple, cast
+from typing import List, Optional, Tuple, cast
 
 from metor.core.api import ContentType, Delivery
 from metor.data.message.models import (
@@ -16,12 +16,11 @@ from metor.data.sql.backends import SqlParam
 from metor.utils import clean_onion
 
 
-class MessageInboundMixin:
-    """Owns inbound receipt, payload, unread, and LIVE-to-DROP transitions."""
+from .receipts import MessageReceiptStore
 
-    def __getattr__(self, name: str) -> Any:
-        """Defers typed collaborator attributes to the composed repository."""
-        raise AttributeError(name)
+
+class MessageInboundMixin(MessageReceiptStore):
+    """Owns inbound receipt, payload, unread, and LIVE-to-DROP transitions."""
 
     def has_inbound_message(self, contact_onion: str, msg_id: str) -> bool:
         """

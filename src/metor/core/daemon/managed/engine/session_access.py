@@ -37,6 +37,7 @@ from metor.core.daemon.managed.quick_unlock import (
     QuickUnlockStore,
 )
 from metor.utils import Constants
+from .capabilities import PendingCallGrant
 
 # Local Package Imports
 from ..local_auth import (
@@ -80,7 +81,13 @@ class SessionAccessController(SessionEventMixin):
             Callable[[str, str], Optional[Delivery]]
         ] = None,
         live_context_callback: Optional[Callable[[str], object | None]] = None,
+        voice_context_callback: Optional[
+            Callable[[str, str, str], object | None]
+        ] = None,
         self_destruct_requires_unlock_callback: Optional[Callable[[], bool]] = None,
+        pending_call_callback: Optional[
+            Callable[[str], tuple[socket.socket, float] | None]
+        ] = None,
     ) -> None:
         """Initializes session access with policy and event callbacks.
 
@@ -128,6 +135,9 @@ class SessionAccessController(SessionEventMixin):
             lambda _onion, _msg_id: None
         )
         self._live_context = live_context_callback or (lambda _onion: None)
+        self._voice_context = voice_context_callback or (
+            lambda _onion, _msg_id, _direction: None
+        )
         self._self_destruct_requires_unlock = (
             self_destruct_requires_unlock_callback or (lambda: True)
         )
@@ -135,7 +145,9 @@ class SessionAccessController(SessionEventMixin):
         self._restricted_challenges: dict[socket.socket, str] = {}
         self._pin_failures: dict[socket.socket, int] = {}
         self._pin_disabled: set[socket.socket] = set()
-        self._call_handles: dict[socket.socket, dict[str, tuple[str, int]]] = {}
+        self._call_handles: dict[socket.socket, dict[str, PendingCallGrant]] = {}
+        self._pending_call = pending_call_callback or (lambda _onion: None)
+        self._authorized_calls: dict[socket.socket, socket.socket] = {}
         self._restriction_generations: dict[socket.socket, int] = {}
 
     def install_context(self, context: Optional[SessionAuthContext]) -> None:
@@ -149,6 +161,8 @@ class SessionAccessController(SessionEventMixin):
         """
         with self._lock:
             self._auth_runtime_generation += 1
+            self._call_handles.clear()
+            self._authorized_calls.clear()
             self._sensitive_auth_pending.clear()
             self._sensitive_auth_grants.clear()
         self._local_auth.install_context(context)
@@ -223,6 +237,7 @@ class SessionAccessController(SessionEventMixin):
             self._pin_failures.pop(conn, None)
             self._pin_disabled.discard(conn)
             self._call_handles.pop(conn, None)
+            self._authorized_calls.pop(conn, None)
             self._restriction_generations.pop(conn, None)
         self._local_auth.clear_connection(conn)
 
@@ -246,6 +261,7 @@ class SessionAccessController(SessionEventMixin):
             self._pin_failures.clear()
             self._pin_disabled.clear()
             self._call_handles.clear()
+            self._authorized_calls.clear()
             self._restriction_generations.clear()
         self._local_auth.install_context(None)
 
@@ -327,10 +343,11 @@ class SessionAccessController(SessionEventMixin):
             if isinstance(cmd, (AcceptCommand, RejectCommand)):
                 with self._lock:
                     mapped_target = self._call_handles.get(conn, {}).get(cmd.target)
-                    generation = self._restriction_generations.get(conn)
-                if mapped_target is not None and mapped_target[1] == generation:
+                if mapped_target is not None and self._valid_call_grant(
+                    conn, mapped_target
+                ):
                     mapped_call_handle = cmd.target
-                    cmd.target = mapped_target[0]
+                    cmd.target = mapped_target.onion
                     mapped_call_target = True
             if isinstance(cmd, ReauthorizeClientCommand):
                 restricted_retry_after = self.retry_after_seconds()
@@ -409,6 +426,10 @@ class SessionAccessController(SessionEventMixin):
                     and restricted_policy.continued_live_target
                     == self._voice_target(cmd.msg_id)
                     and self._voice_delivery(cmd.msg_id) is Delivery.LIVE
+                    and self._voice_context(
+                        restricted_policy.continued_live_target or '', cmd.msg_id, 'out'
+                    )
+                    == restricted_policy.continued_live_context
                     and self._live_context(
                         restricted_policy.continued_live_target or ''
                     )
@@ -425,6 +446,8 @@ class SessionAccessController(SessionEventMixin):
                     and target is not None
                     and self._inbound_voice_delivery(target, cmd.msg_id)
                     is Delivery.LIVE
+                    and self._voice_context(target, cmd.msg_id, 'in')
+                    == restricted_policy.continued_live_context
                     and self._live_context(target)
                     == restricted_policy.continued_live_context
                 ):
@@ -438,6 +461,8 @@ class SessionAccessController(SessionEventMixin):
                     and target is not None
                     and self._inbound_voice_delivery(target, cmd.msg_id)
                     is Delivery.LIVE
+                    and self._voice_context(target, cmd.msg_id, 'in')
+                    == restricted_policy.continued_live_context
                     and self._live_context(target)
                     == restricted_policy.continued_live_context
                 ):
@@ -600,6 +625,7 @@ class SessionAccessController(SessionEventMixin):
                 self._restriction_generations.get(conn, 0) + 1
             )
             self._call_handles.pop(conn, None)
+            self._authorized_calls.pop(conn, None)
             self._restricted[conn] = policy
             self._pin_failures.pop(conn, None)
             self._pin_disabled.discard(conn)
@@ -826,6 +852,7 @@ class SessionAccessController(SessionEventMixin):
             self._sensitive_auth_grants.pop(conn, None)
             self._call_handles.pop(conn, None)
             self._restriction_generations.pop(conn, None)
+            self._authorized_calls.pop(conn, None)
             if full_password:
                 self._full_auth_clients.add(conn)
             else:
@@ -878,9 +905,27 @@ class SessionAccessController(SessionEventMixin):
             if event_onion is None and isinstance(event_msg_id, str):
                 event_onion = self._voice_target(event_msg_id)
             event_delivery = getattr(event, 'delivery', Delivery.LIVE)
+            direction = getattr(event, 'direction', None)
+            if direction is None:
+                direction = (
+                    'in'
+                    if event.event_type
+                    in {
+                        EventType.VOICE_INCOMING_STARTED,
+                        EventType.VOICE_CHUNK_RECEIVED,
+                    }
+                    else 'out'
+                )
+            else:
+                direction = direction.value
             if (
                 event_onion == policy.continued_live_target
                 and event_delivery is Delivery.LIVE
+                and policy.continued_live_context is not None
+                and isinstance(event_msg_id, str)
+                and self._live_context(event_onion) == policy.continued_live_context
+                and self._voice_context(event_onion, event_msg_id, direction)
+                == policy.continued_live_context
             ):
                 return event
             return None
@@ -911,15 +956,45 @@ class SessionAccessController(SessionEventMixin):
                 with self._lock:
                     handles = self._call_handles.setdefault(conn, {})
                     generation = self._restriction_generations.get(conn, 0)
+                    for handle, grant in tuple(handles.items()):
+                        if (
+                            not self._valid_call_grant(conn, grant)
+                            and event.event_type
+                            is not EventType.PENDING_CONNECTION_EXPIRED
+                        ):
+                            handles.pop(handle, None)
                     action_handle = None
                     if event.event_type is EventType.INCOMING_CONNECTION:
-                        action_handle = secrets.token_urlsafe(32)
-                        handles[action_handle] = (onion, generation)
+                        pending = self._pending_call(onion)
+                        if pending is not None:
+                            action_handle = next(
+                                (
+                                    handle
+                                    for handle, grant in handles.items()
+                                    if grant.onion == onion
+                                    and grant.pending is pending[0]
+                                ),
+                                None,
+                            )
+                            if (
+                                action_handle is None
+                                and len(handles) < Constants.MAX_ANONYMOUS_CALL_HANDLES
+                            ):
+                                action_handle = secrets.token_urlsafe(32)
+                                handles[action_handle] = PendingCallGrant(
+                                    onion,
+                                    generation,
+                                    self._auth_runtime_generation,
+                                    pending[0],
+                                    min(
+                                        pending[1],
+                                        time.time()
+                                        + Constants.PENDING_EXPIRY_FEEDBACK_WINDOW_SEC,
+                                    ),
+                                )
                     if event.event_type is EventType.PENDING_CONNECTION_EXPIRED:
-                        for handle, (target, handle_generation) in tuple(
-                            handles.items()
-                        ):
-                            if target == onion and handle_generation == generation:
+                        for handle, grant in tuple(handles.items()):
+                            if grant.onion == onion and grant.restriction == generation:
                                 action_handle = handle
                                 handles.pop(handle, None)
                                 break
@@ -943,4 +1018,22 @@ class SessionAccessController(SessionEventMixin):
         """
         with self._lock:
             if handle is not None:
-                self._call_handles.get(conn, {}).pop(handle, None)
+                grant = self._call_handles.get(conn, {}).pop(handle, None)
+                if grant is not None:
+                    self._authorized_calls[conn] = grant.pending
+
+    def _valid_call_grant(self, conn: socket.socket, grant: PendingCallGrant) -> bool:
+        """Checks the exact request, session cycle, runtime and expiry."""
+        pending = self._pending_call(grant.onion)
+        return (
+            grant.restriction == self._restriction_generations.get(conn)
+            and grant.runtime == self._auth_runtime_generation
+            and grant.expires_at > time.time()
+            and pending is not None
+            and pending[0] is grant.pending
+        )
+
+    def take_pending_action(self, conn: socket.socket) -> socket.socket | None:
+        """Transfers exact pending identity to the controller's atomic removal."""
+        with self._lock:
+            return self._authorized_calls.pop(conn, None)

@@ -58,7 +58,9 @@ class SessionMaintenance:
             return
         try:
             for msg_id in msg_ids:
-                conn.sendall(f'{TorCommand.READ.value} {msg_id}\n'.encode('utf-8'))
+                self._state.send_frame(
+                    conn, f'{TorCommand.READ.value} {msg_id}\n'.encode('utf-8')
+                )
         except Exception:
             pass
 

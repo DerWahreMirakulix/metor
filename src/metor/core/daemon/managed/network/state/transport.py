@@ -16,7 +16,7 @@ from metor.core.daemon.managed.models import (
 class StateTrackerTransportMixin:
     """Encapsulates focus counters, drop tunnels, and transport snapshots."""
 
-    _lock: threading.Lock
+    _lock: threading.RLock
     _connections: Dict[str, socket.socket]
     _pending_connections: Dict[str, socket.socket]
     _outbound_attempts: Set[str]

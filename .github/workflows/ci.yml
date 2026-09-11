@@ -38,3 +38,13 @@ jobs:
 
       - name: Validate Central Version Registry
         run: python scripts/versioning.py validate
+
+      - name: Validate generated references against checked-in copies
+        run: python scripts/validate_generated_docs.py
+
+      - name: Build native offline bundles and test installed consumers
+        shell: bash
+        run: |
+          python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir closure-bundles
+          python scripts/validate_installed_artifacts.py closure-bundles
+          python scripts/validate_release_installers.py closure-bundles

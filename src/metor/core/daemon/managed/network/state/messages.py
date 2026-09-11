@@ -12,7 +12,7 @@ from metor.utils import Constants
 class StateTrackerMessagesMixin:
     """Encapsulates in-flight message and raw socket state."""
 
-    _lock: threading.Lock
+    _lock: threading.RLock
     _connections: Dict[str, socket.socket]
     _pending_connections: Dict[str, socket.socket]
     _outbound_sockets: Dict[str, socket.socket]

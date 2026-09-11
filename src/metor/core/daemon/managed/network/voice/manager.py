@@ -115,6 +115,31 @@ class VoiceTransferManager(VoiceOutboundMixin):
             return None
         return (str(metadata['blob_id']), *(str(item) for item in raw_chunks))
 
+    def context_token(self, onion: str, msg_id: str, direction: str) -> int | None:
+        """Returns immutable runtime provenance of a LIVE recording.
+
+        Args:
+            onion (str): Exact peer owner.
+            msg_id (str): Exact recording identity.
+            direction (str): Inbound or outbound ownership.
+
+        Returns:
+            int | None: Admission context; restored or unrelated media has no grant.
+        """
+        with self._lock:
+            turn = (
+                self._inbound.get((onion, msg_id))
+                if direction == 'in'
+                else self._outbound.get(msg_id)
+            )
+            if (
+                turn is None
+                or turn.onion != onion
+                or turn.delivery is not Delivery.LIVE
+            ):
+                return None
+            return turn.context_generation
+
     def _reconcile_drop_ownership(self) -> None:
         """Completes interrupted temporary-to-persistent Voice promotions."""
         payloads = [
@@ -122,7 +147,11 @@ class VoiceTransferManager(VoiceOutboundMixin):
             for row in self._messages.get_pending_outbox()
             if row[2] == ContentType.VOICE.value
         ]
-        payloads.extend(self._messages.get_voice_draft_payloads())
+        payloads.extend(
+            payload
+            for payload in self._messages.get_voice_draft_payloads()
+            if self._metadata_finalized(payload)
+        )
         payloads.extend(
             record.payload
             for record in self._messages.get_unread_inbound_voices()
@@ -262,9 +291,20 @@ class VoiceTransferManager(VoiceOutboundMixin):
                 size_bytes=actual_size,
                 duration_ms=int(duration) if duration is not None else None,
                 finalized=bool(metadata.get('finalized', False)),
+                fallback_committed=metadata.get('fallback_committed') is True,
                 acknowledged_offset=acknowledged_offset,
             )
         except (KeyError, TypeError, ValueError, OSError):
+            return None
+
+    def _canonical_inbound_metadata(self, turn: VoiceTurn) -> bool | None:
+        """Resolves ambiguous writes before rollback; unavailable is not absent."""
+        try:
+            record = self._messages.get_inbound_voice(turn.onion, turn.msg_id)
+            return record is not None and json.loads(record.payload) == json.loads(
+                self._metadata(turn)
+            )
+        except Exception:
             return None
 
     @staticmethod
@@ -287,6 +327,7 @@ class VoiceTransferManager(VoiceOutboundMixin):
                 'size_bytes': turn.size_bytes,
                 'duration_ms': turn.duration_ms,
                 'finalized': turn.finalized,
+                'fallback_committed': turn.fallback_committed,
                 'acknowledged_offset': turn.acknowledged_offset,
             },
             separators=(',', ':'),
@@ -630,6 +671,7 @@ class VoiceTransferManager(VoiceOutboundMixin):
                 onion=onion,
                 msg_id=msg_id,
                 delivery=delivery,
+                context_generation=self._state.get_live_context_generation(onion),
                 codec=codec,
                 blob_id=blob_id,
                 chunk_ids=[],
@@ -651,8 +693,11 @@ class VoiceTransferManager(VoiceOutboundMixin):
             except Exception:
                 queued = None
             if not queued:
-                self._delete_turn_blobs(turn, BlobLifecycle.TEMPORARY)
-                return FrameAdmission.RESOURCE_LIMIT
+                canonical = self._canonical_inbound_metadata(turn)
+                if canonical is not True:
+                    if canonical is False:
+                        self._delete_turn_blobs(turn, BlobLifecycle.TEMPORARY)
+                    return FrameAdmission.RESOURCE_LIMIT
             self._inbound[(onion, msg_id)] = turn
             if (
                 delivery is Delivery.LIVE
@@ -755,6 +800,14 @@ class VoiceTransferManager(VoiceOutboundMixin):
                     )
                 except Exception:
                     updated = False
+                if not updated:
+                    canonical = self._canonical_inbound_metadata(turn)
+                    if canonical is None:
+                        # Preserve possibly committed segments. A new BEGIN must
+                        # reload the canonical receipt, not reuse speculative RAM.
+                        self._inbound.pop((onion, msg_id), None)
+                        return FrameAdmission.RESOURCE_LIMIT
+                    updated = canonical
                 if not updated:
                     turn.chunk_ids.pop()
                     turn.chunk_sizes.pop()
@@ -886,6 +939,12 @@ class VoiceTransferManager(VoiceOutboundMixin):
                 )
             except Exception:
                 updated = False
+            if not updated:
+                canonical = self._canonical_inbound_metadata(turn)
+                if canonical is None:
+                    self._inbound.pop((onion, msg_id), None)
+                    return FrameAdmission.RESOURCE_LIMIT
+                updated = canonical
             if not updated:
                 turn.duration_ms = previous_duration
                 turn.finalized = previous_finalized

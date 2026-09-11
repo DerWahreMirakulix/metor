@@ -1,6 +1,7 @@
 """Salted memory-hard PIN verifier persistence and challenge proof checking."""
 
 import hashlib
+import base64
 import hmac
 import json
 import os
@@ -206,6 +207,11 @@ class QuickUnlockStore:
         """
         try:
             self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            info = self._path.parent.lstat()
+            if stat.S_ISLNK(info.st_mode) or getattr(
+                info, 'st_file_attributes', 0
+            ) & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0):
+                raise QuickUnlockStorageError('Credential directory cannot be a link.')
             if os.name == 'nt':
                 self._protect_windows_path(self._path.parent, directory=True)
             self._validate_protection(self._path.parent, directory=True)
@@ -232,7 +238,7 @@ class QuickUnlockStore:
             else '[System.Security.AccessControl.InheritanceFlags]::None'
         )
         script = (
-            'param([string]$Target); '
+            ''
             '$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; '
             '$system=New-Object System.Security.Principal.SecurityIdentifier('
             "'S-1-5-18'); "
@@ -250,38 +256,19 @@ class QuickUnlockStore:
             'FileSystemAccessRule($sid,$rights,$inherit,$prop,$allow))); '
             '$acl.AddAccessRule((New-Object System.Security.AccessControl.'
             'FileSystemAccessRule($system,$rights,$inherit,$prop,$allow))); '
-            'Set-Acl -LiteralPath $Target -AclObject $acl -ErrorAction Stop'
+            + (
+                '[System.IO.Directory]::SetAccessControl($Target,$acl)'
+                if directory
+                else '[System.IO.File]::SetAccessControl($Target,$acl)'
+            )
         )
-        try:
-            completed = subprocess.run(
-                [
-                    'powershell.exe',
-                    '-NoProfile',
-                    '-NonInteractive',
-                    '-Command',
-                    script,
-                    '-Target',
-                    str(path),
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=Constants.QUICK_UNLOCK_HELPER_TIMEOUT_SEC,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise QuickUnlockStorageError(
-                'Windows ACL protection could not be established.'
-            ) from exc
-        if completed.returncode != 0:
-            raise QuickUnlockStorageError(
-                'Windows ACL protection could not be established.'
-            )
+        QuickUnlockStore._run_acl_helper(path, script, 'protect')
 
     @staticmethod
     def _validate_windows_acl(path: Path) -> None:
         """Verifies effective trustees after the ACL replacement."""
         script = (
-            'param([string]$Target); '
+            ''
             '$current=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; '
             '$acl=Get-Acl -LiteralPath $Target -ErrorAction Stop; '
             '$rules=@($acl.Access | ForEach-Object { [pscustomobject]@{ '
@@ -289,30 +276,9 @@ class QuickUnlockStore:
             'Inherited=$_.IsInherited; Type=$_.AccessControlType.ToString(); '
             'Rights=$_.FileSystemRights.ToString() } }); '
             '[pscustomobject]@{ Protected=$acl.AreAccessRulesProtected; '
-            'Current=$current; Rules=$rules } | ConvertTo-Json -Compress -Depth 4'
+            'Current=$current; Owner=$acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value; Rules=$rules } | ConvertTo-Json -Compress -Depth 4'
         )
-        try:
-            completed = subprocess.run(
-                [
-                    'powershell.exe',
-                    '-NoProfile',
-                    '-NonInteractive',
-                    '-Command',
-                    script,
-                    '-Target',
-                    str(path),
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=Constants.QUICK_UNLOCK_HELPER_TIMEOUT_SEC,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise QuickUnlockStorageError(
-                'Windows ACL protection is unreadable.'
-            ) from exc
-        if completed.returncode != 0:
-            raise QuickUnlockStorageError('Windows ACL protection is unreadable.')
+        completed = QuickUnlockStore._run_acl_helper(path, script, 'validate')
         try:
             result = json.loads(completed.stdout)
             current = result['Current']
@@ -321,6 +287,7 @@ class QuickUnlockStore:
                 rules = [rules]
             if (
                 result.get('Protected') is not True
+                or result.get('Owner') != current
                 or not isinstance(current, str)
                 or not isinstance(rules, list)
                 or len(rules) != 2
@@ -340,6 +307,56 @@ class QuickUnlockStore:
             raise QuickUnlockStorageError(
                 'Windows ACL protection is not private.'
             ) from exc
+
+    @staticmethod
+    def _run_acl_helper(
+        path: Path, script: str, phase: str
+    ) -> subprocess.CompletedProcess[str]:
+        """Runs constant PowerShell code with path data on standard input.
+
+        Args:
+            path (Path): Target path, never interpolated into executable code.
+            script (str): Constant ACL operation.
+            phase (str): Non-secret diagnostic phase.
+
+        Returns:
+            subprocess.CompletedProcess[str]: Successful bounded helper result.
+        """
+        preamble = (
+            "$ErrorActionPreference='Stop'; "
+            '$utf8=New-Object System.Text.UTF8Encoding($false); '
+            '[Console]::InputEncoding=$utf8; [Console]::OutputEncoding=$utf8; '
+            '$Target=[Console]::In.ReadToEnd(); '
+        )
+        encoded = base64.b64encode((preamble + script).encode('utf-16-le')).decode(
+            'ascii'
+        )
+        try:
+            completed = subprocess.run(
+                [
+                    'powershell.exe',
+                    '-NoProfile',
+                    '-NonInteractive',
+                    '-EncodedCommand',
+                    encoded,
+                ],
+                input=str(path),
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                check=False,
+                timeout=Constants.QUICK_UNLOCK_HELPER_TIMEOUT_SEC,
+            )
+        except (OSError, subprocess.SubprocessError):
+            raise QuickUnlockStorageError(
+                f'Windows ACL {phase}: helper unavailable or timed out.'
+            ) from None
+        if completed.returncode != 0:
+            raise QuickUnlockStorageError(
+                f'Windows ACL {phase}: helper exited {completed.returncode}.'
+            )
+        return completed
 
     @staticmethod
     def _validate_protection(path: Path, *, directory: bool) -> None:

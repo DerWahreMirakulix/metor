@@ -91,7 +91,9 @@ class FinalRemediationContractTests(unittest.TestCase):
             'metor.core.daemon.managed.quick_unlock.subprocess.run',
             side_effect=subprocess.TimeoutExpired('powershell.exe', 10),
         ) as run:
-            with self.assertRaisesRegex(QuickUnlockStorageError, 'could not'):
+            with self.assertRaisesRegex(
+                QuickUnlockStorageError, 'protect: helper unavailable or timed out'
+            ):
                 QuickUnlockStore._protect_windows_path(
                     Path('path with spaces'), directory=False
                 )
@@ -157,18 +159,18 @@ class FinalRemediationContractTests(unittest.TestCase):
 
         failed, peer = socket.socketpair()
         failure = threading.Event()
-        peer.close()
+        exited = threading.Event()
+        self.addCleanup(peer.close)
+        failed.shutdown(socket.SHUT_WR)
         failed_writer = BoundedSocketWriter(
             failed,
             capacity=1,
             on_failure=lambda _conn, _exc: failure.set(),
+            on_exit=lambda _writer: exited.set(),
         )
         failed_writer.enqueue(b'x')
         self.assertTrue(failure.wait(timeout=1.0))
-        for _ in range(100):
-            if failed.fileno() == -1:
-                break
-            threading.Event().wait(0.005)
+        self.assertTrue(exited.wait(timeout=1.0))
         self.assertEqual(failed.fileno(), -1)
 
     def test_destruction_attempts_disk_key_after_every_preparation_failure(
@@ -220,6 +222,7 @@ class FinalRemediationContractTests(unittest.TestCase):
                 else Delivery.DROP
             ),
             live_context_callback=lambda _onion: current_token[0],
+            voice_context_callback=lambda _onion, _msg_id, _direction: token,
         )
         access.restrict(
             conn,
@@ -338,7 +341,7 @@ class FinalRemediationContractTests(unittest.TestCase):
         pm.is_remote.return_value = False
         pm.uses_plaintext_storage.return_value = False
         pm.uses_encrypted_storage.return_value = True
-        pm.get_static_port.return_value = 4312
+        pm.get_daemon_port.return_value = 4312
 
         def fake_gui(context: FrontendLaunchContext) -> int:
             started.set()

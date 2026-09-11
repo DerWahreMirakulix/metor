@@ -59,6 +59,21 @@ class VoiceOutboundMixin:
     _outbound: dict[str, VoiceTurn]
     _inbound: dict[tuple[str, str], VoiceTurn]
 
+    def _canonical_outbound_metadata(self, turn: VoiceTurn) -> bool | None:
+        """Reconciles an ambiguous write without deleting possibly committed bytes.
+
+        None means storage remains unavailable, not that the write was rolled back.
+        """
+        try:
+            record = self._messages.get_voice_payload(
+                turn.onion, turn.msg_id, MessageDirection.OUT
+            )
+            return record is not None and json.loads(record.payload) == json.loads(
+                self._metadata(turn)
+            )
+        except Exception:
+            return None
+
     @staticmethod
     def _metadata(turn: VoiceTurn) -> str:
         """Returns metadata through the concrete transfer manager."""
@@ -167,6 +182,7 @@ class VoiceOutboundMixin:
                 )
                 return
             turn = VoiceTurn(
+                context_generation=self._state.get_live_context_generation(onion),
                 alias=alias,
                 onion=onion,
                 msg_id=msg_id,
@@ -206,13 +222,19 @@ class VoiceOutboundMixin:
                         else PendingLiveAdmission.DUPLICATE
                     )
             except Exception:
-                persistence_failed = True
-                admission = PendingLiveAdmission.DUPLICATE
+                canonical = self._canonical_outbound_metadata(turn)
+                persistence_failed = canonical is not True
+                admission = (
+                    PendingLiveAdmission.ACCEPTED
+                    if canonical is True
+                    else PendingLiveAdmission.DUPLICATE
+                )
             if persistence_failed:
-                try:
-                    self._blobs.delete(blob_id, BlobLifecycle.TEMPORARY)
-                except Exception:
-                    pass
+                if canonical is False:
+                    try:
+                        self._blobs.delete(blob_id, BlobLifecycle.TEMPORARY)
+                    except Exception:
+                        pass
                 self._broadcast(
                     VoiceOperationRejectedEvent(
                         msg_id=msg_id,
@@ -424,6 +446,7 @@ class VoiceOutboundMixin:
             turn.chunk_sizes.append(len(chunk))
             turn.data.extend(chunk)
             turn.size_bytes += len(chunk)
+            safe_to_delete = True
             try:
                 if turn.delivery is Delivery.LIVE:
                     admission = self._messages.grow_pending_live_voice_if_capacity(
@@ -441,17 +464,28 @@ class VoiceOutboundMixin:
                     )
                     admission = PendingLiveAdmission.ACCEPTED
             except Exception:
-                updated = False
-                admission = PendingLiveAdmission.DUPLICATE
+                canonical = self._canonical_outbound_metadata(turn)
+                updated = canonical is True
+                safe_to_delete = canonical is False
+                if canonical is None:
+                    # Force canonical rehydration before another mutation can
+                    # overwrite a commit whose outcome is still unavailable.
+                    self._outbound.pop(msg_id, None)
+                admission = (
+                    PendingLiveAdmission.ACCEPTED
+                    if updated
+                    else PendingLiveAdmission.DUPLICATE
+                )
             if not updated:
                 turn.chunk_ids.pop()
                 turn.chunk_sizes.pop()
                 del turn.data[-len(chunk) :]
                 turn.size_bytes -= len(chunk)
-                try:
-                    self._blobs.delete(chunk_id, BlobLifecycle.TEMPORARY)
-                except Exception:
-                    pass
+                if safe_to_delete:
+                    try:
+                        self._blobs.delete(chunk_id, BlobLifecycle.TEMPORARY)
+                    except Exception:
+                        pass
                 if admission is PendingLiveAdmission.BYTE_LIMIT:
                     self._broadcast(
                         VoiceResourceLimitEvent(
@@ -591,7 +625,10 @@ class VoiceOutboundMixin:
                 turn.onion, turn.msg_id, turn.size_bytes, self._metadata(turn)
             )
         except Exception:
-            updated = False
+            canonical = self._canonical_outbound_metadata(turn)
+            updated = canonical is True
+            if canonical is None:
+                self._outbound.pop(turn.msg_id, None)
         if not updated:
             turn.duration_ms = previous_duration
             turn.finalized = previous_finalized
@@ -631,6 +668,7 @@ class VoiceOutboundMixin:
             if records:
                 self._state.invalidate_live_generations(turn.onion, [turn.msg_id])
                 turn.delivery = Delivery.DROP
+                turn.fallback_committed = True
                 try:
                     self._promote_turn_blobs(turn)
                 except Exception:
@@ -699,7 +737,7 @@ class VoiceOutboundMixin:
                 self._send_begin(turn)
         return [turn.msg_id for turn in turns]
 
-    def promote_fallback(self, msg_ids: list[str]) -> None:
+    def promote_fallback(self, msg_ids: list[str], peer: str | None = None) -> None:
         """Releases LIVE Voice budget after message-level fallback commits.
 
         Args:
@@ -713,27 +751,43 @@ class VoiceOutboundMixin:
         with self._lock:
             if self._purge_fence.is_set():
                 return
-            selected = (
-                [
-                    self._outbound[msg_id]
-                    for msg_id in msg_ids
-                    if msg_id in self._outbound
-                    and self._state.get_live_generation(
-                        self._outbound[msg_id].onion, msg_id
-                    )
-                    is None
-                ]
-                if msg_ids
-                else [
-                    turn
-                    for turn in self._outbound.values()
-                    if self._state.get_live_generation(turn.onion, turn.msg_id) is None
-                ]
-            )
-            for turn in selected:
-                turn.delivery = Delivery.DROP
-                self._promote_turn_blobs(turn)
-                self._outbound.pop(turn.msg_id, None)
+            selected_ids = set(msg_ids)
+            if not selected_ids:
+                return
+            for (
+                _,
+                onion,
+                content_type,
+                payload,
+                msg_id,
+                _,
+            ) in self._messages.get_pending_outbox():
+                if (
+                    msg_id not in selected_ids
+                    or content_type != 'voice'
+                    or (peer is not None and onion != peer)
+                ):
+                    continue
+                metadata = json.loads(payload)
+                if (
+                    not isinstance(metadata, dict)
+                    or metadata.get('fallback_committed') is not True
+                ):
+                    continue
+                if self._state.get_live_generation(onion, msg_id) is not None:
+                    continue
+                blob_ids = self._metadata_blob_ids(payload)
+                if blob_ids is None:
+                    raise ValueError('Committed fallback metadata is invalid.')
+                turn = self._outbound.get(msg_id)
+                if turn is not None and turn.onion == onion:
+                    turn.delivery = Delivery.DROP
+                    turn.fallback_committed = True
+                for blob_id in blob_ids:
+                    if not self._blobs.exists(blob_id, BlobLifecycle.PERSISTENT):
+                        self._blobs.promote(blob_id)
+                if turn is not None and turn.onion == onion:
+                    self._outbound.pop(msg_id, None)
 
     def acknowledge(self, onion: str, msg_id: str, next_offset: int) -> None:
         """Advances an outbound Voice resume cursor monotonically.

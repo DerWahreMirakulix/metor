@@ -13,7 +13,6 @@ dependencies = ["pynacl==1.6.2"]
 
 [tool.setuptools]
 include-package-data = true
-py-modules = ["metor.versioning", "metor.core.auth"]
 
 [tool.setuptools.dynamic]
 version = { attr = "metor.versioning.APP_VERSION" }
@@ -24,6 +23,9 @@ version = { attr = "metor.versioning.APP_VERSION" }
 [tool.setuptools.packages.find]
 where = ["../../src"]
 include = [
+    "metor.versioning",
+    "metor.core.auth",
+    "metor.core.auth.*",
     "metor.core.api",
     "metor.core.api.*",
     "metor.client",
@@ -31,3 +33,10 @@ include = [
     "metor.shared",
     "metor.shared.*",
 ]
+
+[tool.setuptools.package-data]
+"metor.client" = ["py.typed"]
+"metor.core.api" = ["py.typed"]
+"metor.core.auth" = ["py.typed"]
+"metor.shared" = ["py.typed"]
+"metor.versioning" = ["py.typed"]

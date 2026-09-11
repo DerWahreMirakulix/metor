@@ -1,10 +1,12 @@
 """Base-owned deferred bootstrap services for independently installed frontends."""
 
 from typing import Optional
+import threading
 
 from metor.client import (
     FRONTEND_LAUNCH_CONTRACT_VERSION,
     FrontendBootstrapError,
+    FrontendBootstrapReason,
     FrontendBootstrapResult,
     FrontendHost,
     FrontendInteractions,
@@ -20,10 +22,11 @@ from metor.data import (
     ProfileSecurityMode,
     SettingKey,
 )
-from metor.utils import TypeCaster
+from metor.utils import TypeCaster, ProcessManager
 
 # Local Package Imports
 from .runtime import PlaintextLockedDaemonError, start_managed_daemon_process
+from .frontend_settings import LocalFrontendSettings
 
 
 def _resolve_autostart_policy(
@@ -84,7 +87,8 @@ class LocalFrontendHost:
         """
         self._profile = profile
         self._start_daemon_override = start_daemon_override
-        self._used = False
+        self._attempt_lock = threading.Lock()
+        self._started_processes: dict[str, int | None] = {}
 
     def profile_state(self) -> FrontendProfileState:
         """Returns read-only state for a frontend first-run route.
@@ -104,7 +108,7 @@ class LocalFrontendHost:
         )
 
     def _ensure_unused(self) -> None:
-        """Rejects profile routing after the one-shot bootstrap boundary.
+        """Rejects concurrent routing while bootstrap owns the selection boundary.
 
         Args:
             None
@@ -112,8 +116,11 @@ class LocalFrontendHost:
         Returns:
             None
         """
-        if self._used:
-            raise FrontendBootstrapError('Frontend bootstrap was already consumed.')
+        if self._attempt_lock.locked():
+            raise FrontendBootstrapError(
+                'Frontend bootstrap is already running.',
+                reason=FrontendBootstrapReason.BUSY,
+            )
 
     def list_profiles(self) -> tuple[FrontendProfileState, ...]:
         """Returns public state for every local profile.
@@ -147,9 +154,21 @@ class LocalFrontendHost:
         Returns:
             FrontendProfileState: State for the new selection.
         """
-        self._ensure_unused()
-        self._profile = ProfileManager(profile)
-        return self.profile_state()
+        if not self._attempt_lock.acquire(blocking=False):
+            raise FrontendBootstrapError(
+                'Frontend bootstrap is already running.',
+                reason=FrontendBootstrapReason.BUSY,
+            )
+        try:
+            self._profile = ProfileManager(profile)
+            return self.profile_state()
+        except ValueError:
+            raise FrontendBootstrapError(
+                'Invalid profile configuration.',
+                reason=FrontendBootstrapReason.INVALID_CONFIGURATION,
+            ) from None
+        finally:
+            self._attempt_lock.release()
 
     def create_profile(
         self,
@@ -165,7 +184,20 @@ class LocalFrontendHost:
         Returns:
             FrontendProfileOperationResult: Public creation result.
         """
-        self._ensure_unused()
+        if not self._attempt_lock.acquire(blocking=False):
+            raise FrontendBootstrapError(
+                'Frontend bootstrap is already running.',
+                reason=FrontendBootstrapReason.BUSY,
+            )
+        try:
+            return self._create_profile(request, secret)
+        finally:
+            self._attempt_lock.release()
+
+    def _create_profile(
+        self, request: FrontendProfileCreateRequest, secret: OneUseSecretProvider | None
+    ) -> FrontendProfileOperationResult:
+        """Creates a profile while owning the selection/bootstrap transition."""
         password = secret.take() if secret is not None else None
         security = (
             ProfileSecurityMode.ENCRYPTED
@@ -188,34 +220,72 @@ class LocalFrontendHost:
         )
 
     def bootstrap(self, interactions: FrontendInteractions) -> FrontendBootstrapResult:
-        """Performs bootstrap once, after the frontend has started.
+        """Performs one retryable bootstrap attempt after the frontend has started.
 
         Args:
             interactions (FrontendInteractions): Frontend-owned interaction adapter.
 
         Returns:
-            FrontendBootstrapResult: Established endpoint and secret transfer.
+            FrontendBootstrapResult: Resolved endpoint and one-use secret transfer.
         """
-        self._ensure_unused()
-        self._used = True
+        if not self._attempt_lock.acquire(blocking=False):
+            raise FrontendBootstrapError(
+                'Frontend bootstrap is already running.',
+                reason=FrontendBootstrapReason.BUSY,
+            )
+        try:
+            return self._bootstrap_attempt(interactions)
+        except FrontendBootstrapError:
+            raise
+        except ValueError:
+            raise FrontendBootstrapError(
+                'The frontend profile configuration is invalid.',
+                reason=FrontendBootstrapReason.INVALID_CONFIGURATION,
+            ) from None
+        except OSError:
+            raise FrontendBootstrapError(
+                'The frontend endpoint could not be resolved.',
+                reason=FrontendBootstrapReason.UNREACHABLE,
+            ) from None
+        finally:
+            self._attempt_lock.release()
+
+    def _bootstrap_attempt(
+        self, interactions: FrontendInteractions
+    ) -> FrontendBootstrapResult:
+        """Resolves one attempt; credentials never survive a failed attempt."""
         profile = self._profile
         if not profile.exists():
             raise FrontendBootstrapError(
-                f"Profile '{profile.profile_name}' does not exist."
+                f"Profile '{profile.profile_name}' does not exist.",
+                reason=FrontendBootstrapReason.MISSING_PROFILE,
             )
 
         startup_secret: Optional[str] = None
         daemon_started = False
-        if not profile.is_daemon_running():
-            if profile.is_remote():
-                raise FrontendBootstrapError('The remote daemon is offline.')
+        confirmed_start = profile.profile_name in self._started_processes
+        started_pid = self._started_processes.get(profile.profile_name)
+        if (
+            confirmed_start
+            and started_pid is not None
+            and not ProcessManager.is_pid_running(started_pid)
+        ):
+            self._started_processes.pop(profile.profile_name, None)
+            confirmed_start = False
+        if (
+            not profile.is_remote()
+            and not profile.is_daemon_running()
+            and not confirmed_start
+        ):
             policy = _resolve_autostart_policy(profile, self._start_daemon_override)
             if policy is ChatDaemonAutostartPolicy.NEVER:
                 raise FrontendBootstrapError(_offline_hint())
             if policy is ChatDaemonAutostartPolicy.ASK:
                 confirmation = interactions.confirm_daemon_start()
                 if confirmation is None:
-                    raise FrontendBootstrapError('', 130)
+                    raise FrontendBootstrapError(
+                        '', 130, reason=FrontendBootstrapReason.CANCELLED
+                    )
                 if not confirmation:
                     raise FrontendBootstrapError(_offline_hint())
             if profile.uses_plaintext_storage() and profile.config.get_bool(
@@ -223,7 +293,9 @@ class LocalFrontendHost:
             ):
                 startup_secret = interactions.request_session_auth_secret()
                 if startup_secret is None:
-                    raise FrontendBootstrapError('Aborted.', 130)
+                    raise FrontendBootstrapError(
+                        'Aborted.', 130, reason=FrontendBootstrapReason.CANCELLED
+                    )
             interactions.show_status('Starting local daemon...')
             try:
                 daemon_started = start_managed_daemon_process(
@@ -232,30 +304,50 @@ class LocalFrontendHost:
                     session_auth_password=startup_secret,
                 )
             except PlaintextLockedDaemonError as exc:
+                startup_secret = None
                 raise FrontendBootstrapError(
                     'Plaintext profiles cannot be started in locked mode.'
                 ) from exc
             except ValueError as exc:
+                startup_secret = None
                 raise FrontendBootstrapError(
-                    'The local daemon configuration is invalid.'
+                    'The local daemon configuration is invalid.',
+                    reason=FrontendBootstrapReason.INVALID_CONFIGURATION,
                 ) from exc
+            except OSError:
+                startup_secret = None
+                raise FrontendBootstrapError(
+                    'The local daemon could not be started.',
+                    reason=FrontendBootstrapReason.START_FAILED,
+                ) from None
             if not daemon_started:
+                startup_secret = None
                 raise FrontendBootstrapError(
                     "Could not start the local daemon. Run 'metor daemon' to "
                     'inspect foreground startup errors.'
                 )
+            self._started_processes[profile.profile_name] = profile.get_daemon_pid()
+        port = profile.get_daemon_port()
+        if type(port) is not int or not 0 < port < 65536:
+            startup_secret = None
+            raise FrontendBootstrapError(
+                'No active daemon endpoint is available.',
+                reason=FrontendBootstrapReason.UNREACHABLE,
+            )
         return FrontendBootstrapResult(
             profile=profile.profile_name,
             remote=profile.is_remote(),
-            port=profile.get_static_port(),
+            port=port,
             daemon_started_by_launcher=daemon_started,
             session_auth=OneUseSecretProvider(startup_secret),
+            config=LocalFrontendSettings(profile.config),
+            encrypted=profile.uses_encrypted_storage(),
         )
 
 
 def create_local_frontend_host(
-    profile: ProfileManager,
-    start_daemon_override: Optional[bool],
+    profile: str | ProfileManager = 'default',
+    start_daemon_override: Optional[bool] = None,
 ) -> FrontendHost:
     """Creates the public deferred host implemented by the base distribution.
 
@@ -266,4 +358,7 @@ def create_local_frontend_host(
     Returns:
         FrontendHost: Versioned frontend-neutral host boundary.
     """
-    return LocalFrontendHost(profile, start_daemon_override)
+    return LocalFrontendHost(
+        ProfileManager(profile) if isinstance(profile, str) else profile,
+        start_daemon_override,
+    )

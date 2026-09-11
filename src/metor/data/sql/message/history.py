@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple, cast
+from typing import Dict, List, Optional, Tuple, cast
 
 from metor.core.api import ContentType, Delivery, is_valid_message_id
 from metor.data.message.models import (
@@ -16,12 +16,11 @@ from metor.data.sql.backends import SqlParam
 from metor.utils import clean_onion
 
 
-class MessageHistoryMixin:
-    """Owns visible history reads, read state, and scoped deletion."""
+from .receipts import MessageReceiptStore
 
-    def __getattr__(self, name: str) -> Any:
-        """Defers typed collaborator attributes to the composed repository."""
-        raise AttributeError(name)
+
+class MessageHistoryMixin(MessageReceiptStore):
+    """Owns visible history reads, read state, and scoped deletion."""
 
     def get_unread_counts(self) -> Dict[str, int]:
         """

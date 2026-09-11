@@ -7,20 +7,7 @@ import os
 import stat
 import secrets
 from pathlib import Path
-
-
-def secure_clear_buffer(buffer: bytearray | memoryview) -> None:
-    """
-    Overwrites one mutable in-memory buffer with zero bytes in place.
-
-    Args:
-        buffer (bytearray | memoryview): The mutable buffer to clear.
-
-    Returns:
-        None
-    """
-    view: memoryview = buffer if isinstance(buffer, memoryview) else memoryview(buffer)
-    view.cast('B')[:] = b'\x00' * len(view)
+from metor.shared.security import secure_clear_buffer as secure_clear_buffer
 
 
 def secure_shred_file(file_path: Path) -> None:

@@ -11,7 +11,7 @@ from typing import Sequence
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
 SRC_DIR: Path = PROJECT_ROOT / 'src'
-REGISTRY_PATH: Path = SRC_DIR / 'metor' / 'versioning.py'
+REGISTRY_PATH: Path = SRC_DIR / 'metor' / 'versioning' / '__init__.py'
 
 sys.path.insert(0, str(SRC_DIR))
 

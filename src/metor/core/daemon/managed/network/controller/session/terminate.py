@@ -235,6 +235,8 @@ def reject(
     socket_to_close: Optional[socket.socket] = None,
     origin: ConnectionOrigin = ConnectionOrigin.INCOMING,
     reject_intent: Optional[RejectIntent] = None,
+    *,
+    expected_pending: Optional[socket.socket] = None,
 ) -> None:
     """
     Rejects one pending or in-flight connection attempt.
@@ -256,6 +258,34 @@ def reject(
             controller._broadcast(PeerNotFoundEvent(target=target))
         return
     alias, onion = resolved
+
+    if expected_pending is not None:
+        pending_conn, _, _, _ = controller._state.pop_pending_connection(
+            onion, expected_pending
+        )
+        if pending_conn is None:
+            return
+        _mark_local_recovery_opt_out(controller, onion)
+        controller._state.clear_scheduled_auto_reconnect(onion)
+        controller._state.discard_outbound_attempt(onion)
+        controller._hm.log_event(
+            HistoryEvent.REJECTED, onion, actor=HistoryActor.LOCAL, trigger=origin
+        )
+        try:
+            controller._state.finish_connection(
+                pending_conn,
+                f'{TorCommand.REJECT.value} {RejectIntent.MANUAL.value} {controller._tm.onion}\n'.encode(
+                    'utf-8'
+                ),
+            )
+        except OSError:
+            _close_socket(pending_conn)
+        controller._broadcast(
+            ConnectionRejectedEvent(
+                alias=alias, onion=onion, origin=origin, actor=ConnectionActor.LOCAL
+            )
+        )
+        return
 
     if initiated_by_self:
         _mark_local_recovery_opt_out(controller, onion)
@@ -435,6 +465,14 @@ def disconnect(
             controller._broadcast(PeerNotFoundEvent(target=target))
         return
     alias, onion = resolved
+    if socket_to_close is not None:
+        winner = controller._state.get_connection(onion)
+        pending = controller._state.pending_identity(onion)
+        if (winner is not None and winner is not socket_to_close) or (
+            pending is not None and pending[0] is not socket_to_close
+        ):
+            _close_socket(socket_to_close)
+            return
     if (
         initiated_by_self
         and origin is ConnectionOrigin.MANUAL
@@ -548,7 +586,12 @@ def disconnect(
             )
         return
 
-    conn: Optional[socket.socket] = controller._state.pop_any_connection(onion)
+    conn: Optional[socket.socket] = controller._state.pop_any_connection(
+        onion, socket_to_close
+    )
+    if socket_to_close is not None and conn is None:
+        _close_socket(socket_to_close)
+        return
     retain_unacked_for_recovery: bool = (
         controller._state.is_retunneling(onion)
         or defer_remote_fallback
@@ -602,25 +645,17 @@ def disconnect(
                 mark_local_termination(conn)
             try:
                 disconnect_intent: DisconnectIntent = _resolve_disconnect_intent(origin)
-                controller._state.send_frame(
+                controller._state.finish_connection(
                     conn,
                     (
                         f'{TorCommand.DISCONNECT.value} '
                         f'{disconnect_intent.value} {controller._tm.onion}\n'
                     ).encode('utf-8'),
                 )
-                try:
-                    conn.shutdown(socket.SHUT_WR)
-                except OSError:
-                    pass
-                linger_timeout_sec: float = controller._config.get_float(
-                    SettingKey.LIVE_DISCONNECT_LINGER_TIMEOUT
-                )
-                if linger_timeout_sec > 0:
-                    time.sleep(linger_timeout_sec)
             except OSError:
-                pass
-        _close_socket(conn)
+                _close_socket(conn)
+        else:
+            _close_socket(conn)
 
     if outbound_socket_to_close is not None and outbound_socket_to_close is not conn:
         _close_socket(outbound_socket_to_close)

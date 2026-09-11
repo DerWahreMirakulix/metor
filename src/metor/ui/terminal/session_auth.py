@@ -3,8 +3,8 @@
 from typing import Optional
 
 from metor.client.auth import extract_session_auth_prompt
-from metor.data import ProfileManager
-from metor.utils import build_session_auth_proof
+from metor.client import FrontendBootstrapResult
+from metor.client import build_session_auth_proof
 
 # Local Package Imports
 from metor.ui.terminal.prompt import prompt_hidden_optional
@@ -42,12 +42,12 @@ def prompt_session_auth_proof(
     return build_session_auth_proof(password, challenge, salt)
 
 
-def get_session_auth_prompt(pm: ProfileManager) -> str:
+def get_session_auth_prompt(pm: FrontendBootstrapResult) -> str:
     """
     Resolves the user-facing prompt label for per-session daemon auth.
 
     Args:
-        pm (ProfileManager): The active profile manager.
+        pm (FrontendBootstrapResult): Public prompt mode projection.
 
     Returns:
         str: The prompt text without terminal styling.

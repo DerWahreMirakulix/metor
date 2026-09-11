@@ -25,3 +25,5 @@ class VoiceTurn:
     duration_ms: Optional[int] = None
     finalized: bool = False
     pressure_emitted: bool = False
+    context_generation: int | None = None
+    fallback_committed: bool = False

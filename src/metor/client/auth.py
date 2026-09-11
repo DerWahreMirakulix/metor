@@ -1,11 +1,8 @@
 """Client-side authentication helpers, proof derivation, and auth-gate state machine."""
 
-import hashlib
-import hmac
 from dataclasses import dataclass
-from typing import Callable, Optional, Protocol, Union
+from typing import Callable, Optional, Protocol
 
-import nacl.pwhash
 
 from metor.core.api import (
     AuthenticateSessionCommand,
@@ -17,15 +14,14 @@ from metor.core.api import (
     UnlockCommand,
 )
 from metor.core.auth import (
+    build_session_auth_proof,
+    build_session_auth_proof_from_key,
+    derive_session_auth_proof_key,
     build_pin_unlock_proof,
     create_pin_verifier,
     derive_pin_verifier,
 )
 from metor.shared.constants import Constants
-from metor.shared.security import secure_clear_buffer
-
-_SESSION_AUTH_PASSWORD_PREFIX: str = 'metor-ipc-auth:'
-ProofKeyBuffer = Union[bytes, bytearray, memoryview]
 
 __all__ = [
     'AuthProvider',
@@ -39,136 +35,6 @@ __all__ = [
     'derive_session_auth_proof_key',
     'extract_session_auth_prompt',
 ]
-
-
-def _decode_session_auth_salt(salt_hex: str) -> bytes:
-    """
-    Decodes and validates one session-auth salt from hexadecimal format.
-
-    Args:
-        salt_hex (str): The hexadecimal salt string.
-
-    Raises:
-        ValueError: If the salt is not valid hexadecimal or has the wrong length.
-
-    Returns:
-        bytes: The decoded salt bytes.
-    """
-    try:
-        salt: bytes = bytes.fromhex(salt_hex)
-    except ValueError as exc:
-        raise ValueError('Invalid session auth salt.') from exc
-
-    if len(salt) != nacl.pwhash.argon2i.SALTBYTES:
-        raise ValueError('Invalid session auth salt length.')
-
-    return salt
-
-
-def _decode_session_auth_challenge(challenge_hex: str) -> bytes:
-    """
-    Decodes one daemon-issued session-auth challenge from hexadecimal format.
-
-    Args:
-        challenge_hex (str): The hexadecimal challenge string.
-
-    Raises:
-        ValueError: If the challenge is not valid hexadecimal or has the wrong length.
-
-    Returns:
-        bytes: The decoded challenge bytes.
-    """
-    try:
-        challenge: bytes = bytes.fromhex(challenge_hex)
-    except ValueError as exc:
-        raise ValueError('Invalid session auth challenge.') from exc
-
-    if len(challenge) != Constants.SESSION_AUTH_CHALLENGE_BYTES:
-        raise ValueError('Invalid session auth challenge length.')
-
-    return challenge
-
-
-def _scope_password(password: str) -> bytes:
-    """
-    Domain-separates one master password before deriving the session-auth proof key.
-
-    Args:
-        password (str): The master password.
-
-    Returns:
-        bytes: The scoped password bytes.
-    """
-    return f'{_SESSION_AUTH_PASSWORD_PREFIX}{password}'.encode('utf-8')
-
-
-def derive_session_auth_proof_key(password: str, salt: bytes) -> bytearray:
-    """
-    Derives one password-scoped IPC session-auth proof key from the runtime salt.
-
-    Args:
-        password (str): The master password.
-        salt (bytes): The persisted profile salt.
-
-    Returns:
-        bytearray: The derived proof key in a mutable buffer.
-    """
-    return bytearray(
-        nacl.pwhash.argon2i.kdf(
-            Constants.SESSION_AUTH_KEY_BYTES,
-            _scope_password(password),
-            salt,
-            opslimit=nacl.pwhash.argon2i.OPSLIMIT_SENSITIVE,
-            memlimit=nacl.pwhash.argon2i.MEMLIMIT_SENSITIVE,
-        )
-    )
-
-
-def build_session_auth_proof_from_key(
-    proof_key: ProofKeyBuffer,
-    challenge_hex: str,
-) -> str:
-    """
-    Builds one HMAC proof from an already-derived session-auth proof key.
-
-    Args:
-        proof_key (ProofKeyBuffer): The derived proof key.
-        challenge_hex (str): The daemon-issued challenge.
-
-    Returns:
-        str: The hexadecimal proof digest.
-    """
-    challenge: bytes = _decode_session_auth_challenge(challenge_hex)
-    hmac_key: bytes | bytearray
-    if isinstance(proof_key, memoryview):
-        hmac_key = proof_key.tobytes()
-    else:
-        hmac_key = proof_key
-    return hmac.new(hmac_key, challenge, hashlib.sha256).hexdigest()
-
-
-def build_session_auth_proof(
-    password: str,
-    challenge_hex: str,
-    salt_hex: str,
-) -> str:
-    """
-    Builds one HMAC proof from the supplied password, daemon challenge, and salt.
-
-    Args:
-        password (str): The master password.
-        challenge_hex (str): The daemon-issued challenge.
-        salt_hex (str): The daemon-issued salt.
-
-    Returns:
-        str: The hexadecimal proof digest.
-    """
-    salt: bytes = _decode_session_auth_salt(salt_hex)
-    proof_key: bytearray = derive_session_auth_proof_key(password, salt)
-    try:
-        return build_session_auth_proof_from_key(proof_key, challenge_hex)
-    finally:
-        secure_clear_buffer(proof_key)
 
 
 def extract_session_auth_prompt(event: IpcEvent) -> Optional[tuple[str, str]]:

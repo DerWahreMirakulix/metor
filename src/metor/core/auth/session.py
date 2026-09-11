@@ -8,8 +8,8 @@ from typing import Union
 import nacl.pwhash
 
 # Local Package Imports
-from metor.utils.constants import Constants
-from metor.utils.security import secure_clear_buffer
+from metor.shared.constants import Constants
+from metor.shared.security import secure_clear_buffer
 
 
 _SESSION_AUTH_PASSWORD_PREFIX: str = 'metor-ipc-auth:'

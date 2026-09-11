@@ -4,7 +4,7 @@ Module managing the active connection states and focus targets for the UI.
 
 from typing import Dict, List, Optional, Set
 
-from metor.utils import clean_onion
+from metor.shared import clean_onion
 
 # Local Package Imports
 from metor.ui.terminal.chat.models import BufferedOutgoingMessage, ChatTransportState

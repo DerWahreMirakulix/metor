@@ -200,5 +200,7 @@ def write_compatibility_manifest(ipc_schema_path: Path, output_path: Path) -> No
     document: JsonObject = build_compatibility_manifest(ipc_schema_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
-        json.dumps(document, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+        json.dumps(document, indent=2, sort_keys=True) + '\n',
+        encoding='utf-8',
+        newline='\n',
     )

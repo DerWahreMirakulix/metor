@@ -7,7 +7,7 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from metor.utils.auth import (  # noqa: F401
+    from metor.core.auth import (  # noqa: F401
         build_session_auth_proof,
         build_session_auth_proof_from_key,
         create_session_auth_salt,
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from metor.utils.caster import TypeCaster  # noqa: F401
     from metor.utils.constants import Constants  # noqa: F401
     from metor.utils.lock import FileLock  # noqa: F401
-    from metor.utils.network import (  # noqa: F401
+    from metor.shared.network import (  # noqa: F401
         clean_onion,
         decode_tor_v3_onion_public_key,
         ensure_onion_format,
@@ -35,40 +35,40 @@ if TYPE_CHECKING:
 _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     'Constants': ('metor.utils.constants', 'Constants'),
     'build_session_auth_proof': (
-        'metor.utils.auth',
+        'metor.core.auth',
         'build_session_auth_proof',
     ),
     'build_session_auth_proof_from_key': (
-        'metor.utils.auth',
+        'metor.core.auth',
         'build_session_auth_proof_from_key',
     ),
     'create_session_auth_salt': (
-        'metor.utils.auth',
+        'metor.core.auth',
         'create_session_auth_salt',
     ),
     'create_session_auth_challenge': (
-        'metor.utils.auth',
+        'metor.core.auth',
         'create_session_auth_challenge',
     ),
     'derive_session_auth_proof_key': (
-        'metor.utils.auth',
+        'metor.core.auth',
         'derive_session_auth_proof_key',
     ),
     'FileLock': ('metor.utils.lock', 'FileLock'),
     'ProcessManager': ('metor.utils.process', 'ProcessManager'),
     'TypeCaster': ('metor.utils.caster', 'TypeCaster'),
     'validate_json_file': ('metor.utils.validators', 'validate_json_file'),
-    'clean_onion': ('metor.utils.network', 'clean_onion'),
+    'clean_onion': ('metor.shared.network', 'clean_onion'),
     'decode_tor_v3_onion_public_key': (
-        'metor.utils.network',
+        'metor.shared.network',
         'decode_tor_v3_onion_public_key',
     ),
-    'ensure_onion_format': ('metor.utils.network', 'ensure_onion_format'),
+    'ensure_onion_format': ('metor.shared.network', 'ensure_onion_format'),
     'secure_clear_buffer': ('metor.utils.security', 'secure_clear_buffer'),
     'secure_remove_path': ('metor.utils.security', 'secure_remove_path'),
     'secure_shred_file': ('metor.utils.security', 'secure_shred_file'),
     'verify_session_auth_proof': (
-        'metor.utils.auth',
+        'metor.core.auth',
         'verify_session_auth_proof',
     ),
 }

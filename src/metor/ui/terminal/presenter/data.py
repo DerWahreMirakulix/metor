@@ -18,7 +18,6 @@ from metor.core.api import (
 from metor.ui.terminal.content import render_content
 
 # Local Package Imports
-from metor.data import UiSettingSpec, get_registered_ui_settings
 from metor.ui.terminal.presenter.shared import (
     build_timestamp_prefix,
     format_prefixed_message,
@@ -69,11 +68,8 @@ def _format_snapshot_category(category: str) -> str:
 
     if category.startswith('ui.'):
         frontend_id: str = category.split('.', 1)[1]
-        registered: dict[str, UiSettingSpec] = get_registered_ui_settings().get(
-            frontend_id, {}
-        )
-        if registered:
-            return next(iter(registered.values())).category
+        if frontend_id == 'terminal':
+            return 'Terminal UI'
         return frontend_id.replace('_', ' ').title()
 
     return category

@@ -1,6 +1,7 @@
 """Pending-connection acceptance helpers for the connection controller."""
 
 from typing import Optional, Tuple
+import socket
 
 from metor.core.api import (
     ConnectedEvent,
@@ -25,6 +26,8 @@ def accept(
     controller: AcceptControllerProtocol,
     target: str,
     origin: ConnectionOrigin = ConnectionOrigin.INCOMING,
+    *,
+    expected_pending: Optional[socket.socket] = None,
 ) -> None:
     """
     Accepts one pending connection and transitions it into the active state.
@@ -44,9 +47,11 @@ def accept(
     alias, onion = resolved
 
     conn, initial_buffer, _, pending_origin = controller._state.pop_pending_connection(
-        onion
+        onion, expected_pending
     )
     if not conn:
+        if expected_pending is not None:
+            return
         if controller._state.is_retunneling(onion):
             controller._hm.log_event(
                 HistoryEvent.CONNECTION_LOST,

@@ -261,6 +261,14 @@ class MessageRouter:
         """Returns the peer identity permanently bound to one outbound turn."""
         return self._voice.outbound_target(msg_id) if self._voice is not None else None
 
+    def voice_context(self, onion: str, msg_id: str, direction: str) -> int | None:
+        """Returns the recording's admission context, never the peer's latest call."""
+        return (
+            self._voice.context_token(onion, msg_id, direction)
+            if self._voice is not None
+            else None
+        )
+
     def voice_delivery(self, msg_id: str) -> Optional[Delivery]:
         """Returns delivery semantics permanently bound to one outbound turn."""
         return (

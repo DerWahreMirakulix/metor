@@ -1,4 +1,4 @@
-"""Shared client/Core proof construction without daemon-internal imports."""
+"""Deterministic PIN proof primitives shared by clients and the daemon."""
 
 import hashlib
 import hmac

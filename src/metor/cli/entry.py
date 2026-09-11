@@ -14,6 +14,7 @@ from metor.data import ProfileManager, SettingKey, Settings
 from metor.cli import CliDispatcher, CliParser, Help, Theme
 from metor.cli.handlers import CommandHandlers
 from metor.versioning import APP_VERSION
+from metor.application import initialize_runtime_environment
 
 
 def run_cli(argv: List[str]) -> int:
@@ -56,6 +57,7 @@ def run_cli(argv: List[str]) -> int:
         print(Help.show_quick_start())
         return 0
 
+    initialize_runtime_environment()
     if args.command == 'chat' and not extra:
         selected_frontend: str = (
             args.ui

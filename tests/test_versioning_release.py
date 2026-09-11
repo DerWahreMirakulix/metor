@@ -205,7 +205,7 @@ class VersionRegistryTests(unittest.TestCase):
             for source_path in (root / 'src').rglob('*.py'):
                 if pattern.search(source_path.read_text(encoding='utf-8')):
                     owners.append(source_path.relative_to(root))
-            self.assertEqual(owners, [Path('src/metor/versioning.py')])
+            self.assertEqual(owners, [Path('src/metor/versioning/__init__.py')])
 
 
 class ProtocolNegotiationTests(unittest.TestCase):
@@ -756,7 +756,9 @@ class ReleaseCompatibilityTests(unittest.TestCase):
             )
             for wheel_path in wheel_dir.glob('*.whl'):
                 with ZipFile(wheel_path) as archive:
-                    owns_versioning = 'metor/versioning.py' in archive.namelist()
+                    owns_versioning = (
+                        'metor/versioning/__init__.py' in archive.namelist()
+                    )
                     self.assertEqual(
                         owns_versioning, wheel_path.name.startswith('metor_sdk-')
                     )

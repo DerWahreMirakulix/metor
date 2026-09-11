@@ -321,7 +321,7 @@ class SettingsDocGenerator:
 
         content: str = '\n'.join(lines)
 
-        with self._output_path.open('w', encoding='utf-8') as handle:
+        with self._output_path.open('w', encoding='utf-8', newline='\n') as handle:
             handle.write(content)
 
 

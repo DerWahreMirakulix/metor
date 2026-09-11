@@ -29,4 +29,6 @@ __all__ = [
     'run_with_headless_daemon',
     'LocalFrontendHost',
     'create_local_frontend_host',
+    'initialize_runtime_environment',
 ]
+from .environment import initialize_runtime_environment

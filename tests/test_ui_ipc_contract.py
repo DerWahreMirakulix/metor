@@ -1102,6 +1102,7 @@ class UiIpcContractTests(unittest.TestCase):
         """
 
         pm = Mock(spec=ProfileManager)
+        pm.get_daemon_port.return_value = 37123
         pm.profile_name = 'default'
         pm.exists.return_value = True
         pm.is_daemon_running.return_value = False
@@ -1246,6 +1247,7 @@ class UiIpcContractTests(unittest.TestCase):
         """
 
         pm = Mock(spec=ProfileManager)
+        pm.get_daemon_port.return_value = 37123
         pm.profile_name = 'default'
         pm.exists.return_value = True
         pm.is_daemon_running.return_value = False

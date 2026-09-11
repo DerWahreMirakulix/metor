@@ -1,4 +1,4 @@
-"""Regenerates canonical release documentation and verifies reproducibility."""
+"""Verifies checked-in generated documentation freshness and reproducibility."""
 
 # ruff: noqa: E402
 
@@ -63,14 +63,15 @@ def generated_artifacts() -> dict[Path, bytes]:
 
 
 def validate_reproducibility() -> tuple[Path, ...]:
-    """Runs generators twice and reports artifacts changed by the second run.
+    """Reports stale originals as well as non-deterministic second-generation output.
 
     Args:
         None
 
     Returns:
-        tuple[Path, ...]: Canonical artifacts changed on the second generation.
+        tuple[Path, ...]: Stale or non-deterministic canonical artifacts.
     """
+    original = generated_artifacts()
     run_generators()
     first_generation: dict[Path, bytes] = generated_artifacts()
     run_generators()
@@ -78,7 +79,8 @@ def validate_reproducibility() -> tuple[Path, ...]:
     return tuple(
         path
         for path in GENERATED_ARTIFACT_PATHS
-        if first_generation[path] != second_generation[path]
+        if original[path] != first_generation[path]
+        or first_generation[path] != second_generation[path]
     )
 
 
@@ -95,9 +97,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     changed_paths: tuple[Path, ...] = validate_reproducibility()
     if changed_paths:
         for path in changed_paths:
-            print(f'Generated artifact changed on second run: {path}')
+            print(f'Generated artifact was stale or non-deterministic: {path}')
         return 1
-    print('Generated documentation is reproducible.')
+    print('Generated documentation is fresh and reproducible.')
     return 0
 
 

@@ -17,10 +17,28 @@ class FrontendLaunchError(RuntimeError):
     """Reports an unavailable, conflicting, or broken frontend installation."""
 
 
+class FrontendBootstrapReason(str, Enum):
+    """Machine-readable outcomes for a recoverable bootstrap attempt."""
+
+    MISSING_PROFILE = 'missing_profile'
+    INVALID_CONFIGURATION = 'invalid_configuration'
+    CANCELLED = 'cancelled'
+    UNREACHABLE = 'unreachable'
+    START_FAILED = 'start_failed'
+    INCOMPATIBLE = 'incompatible'
+    BUSY = 'busy'
+
+
 class FrontendBootstrapError(RuntimeError):
     """Reports a user-visible host bootstrap outcome with its process status."""
 
-    def __init__(self, message: str, exit_code: int = 1) -> None:
+    def __init__(
+        self,
+        message: str,
+        exit_code: int = 1,
+        *,
+        reason: FrontendBootstrapReason = FrontendBootstrapReason.START_FAILED,
+    ) -> None:
         """Initializes one typed frontend bootstrap failure.
 
         Args:
@@ -32,6 +50,7 @@ class FrontendBootstrapError(RuntimeError):
         """
         super().__init__(message)
         self.exit_code = exit_code
+        self.reason = reason
 
 
 class FrontendInteractions(Protocol):
@@ -133,9 +152,38 @@ class FrontendBootstrapResult:
 
     profile: str
     remote: bool
-    port: int | None
+    port: int
     daemon_started_by_launcher: bool
     session_auth: OneUseSecretProvider
+    config: FrontendSettings
+    encrypted: bool
+
+    def get_daemon_port(self) -> int:
+        """Returns the endpoint resolved by base bootstrap."""
+        return self.port
+
+    def uses_encrypted_storage(self) -> bool:
+        """Returns only the non-secret credential prompt mode."""
+        return self.encrypted
+
+
+class FrontendSettings(Protocol):
+    """Bounded local client/UI values service; base owns validation and persistence."""
+
+    def get_int(self, key: str) -> int: ...
+    def get_float(self, key: str) -> float: ...
+    def get_namespace_str(self, key: str) -> str: ...
+    def get_namespace_int(self, key: str) -> int: ...
+    def get_namespace_bool(self, key: str) -> bool: ...
+    def get_namespace_float(self, key: str) -> float: ...
+
+    def set_client_value(self, key: str, value: str | int | float | bool) -> None:
+        """Sets a validated selected-profile client override; never daemon policy."""
+        ...
+
+    def set_ui_value(self, key: str, value: str | int | float | bool) -> None:
+        """Sets a validated selected-profile official frontend override."""
+        ...
 
 
 @dataclass(frozen=True)

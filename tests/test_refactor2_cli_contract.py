@@ -139,7 +139,7 @@ class IndependentCliContractTests(unittest.TestCase):
                 pm.exists.return_value = True
                 pm.is_daemon_running.return_value = True
                 pm.is_remote.return_value = False
-                pm.get_static_port.return_value = 37123
+                pm.get_daemon_port.return_value = 37123
                 loaded = Mock(spec=LoadedFrontend)
                 environment_values = (
                     {'METOR_UI': environment} if environment is not None else {}

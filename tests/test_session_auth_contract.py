@@ -108,8 +108,12 @@ class SessionAuthContractTests(unittest.TestCase):
 
             store.configure(salt, verifier)
 
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+            if os.name == 'nt':
+                store._validate_windows_acl(path)
+                store._validate_windows_acl(path.parent)
+            else:
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
 
     @unittest.skipIf(
         os.name == 'nt', 'POSIX permission bits do not define Windows ACLs.'
@@ -136,7 +140,7 @@ class SessionAuthContractTests(unittest.TestCase):
         result = Mock()
         result.returncode = 0
         result.stdout = (
-            '{"Protected":true,"Current":"S-1-5-21-1","Rules":['
+            '{"Protected":true,"Current":"S-1-5-21-1","Owner":"S-1-5-21-1","Rules":['
             '{"Sid":"S-1-5-21-1","Inherited":false,"Type":"Allow",'
             '"Rights":"FullControl"},'
             '{"Sid":"S-1-5-18","Inherited":false,"Type":"Allow",'
@@ -177,6 +181,9 @@ class SessionAuthContractTests(unittest.TestCase):
                     Delivery.LIVE if msg_id == 'alice-voice' else Delivery.DROP
                 ),
                 live_context_callback=lambda onion: onion,
+                voice_context_callback=lambda onion, msg_id, direction: (
+                    onion if msg_id == 'alice-voice' else None
+                ),
             )
             controller.install_context(create_session_auth_context('profile-password'))
             restricted = controller.restrict(
@@ -337,6 +344,10 @@ class SessionAuthContractTests(unittest.TestCase):
                     failure_limit_callback=lambda: 3,
                     live_consumer_available_callback=lambda: None,
                     resolve_target_callback=lambda target: f'{target}-onion',
+                    live_context_callback=lambda onion: onion,
+                    voice_context_callback=lambda onion, msg_id, direction: (
+                        onion if msg_id == 'alice-voice' else None
+                    ),
                 )
                 controller.restrict(
                     conn,
@@ -383,12 +394,19 @@ class SessionAuthContractTests(unittest.TestCase):
     def test_anonymized_call_handles_are_unique_actionable_and_expirable(self) -> None:
         """G19: two callers remain independently actionable without identity leakage."""
         conn = cast(socket.socket, object())
+        pending = {
+            'alice-onion': cast(socket.socket, object()),
+            'bob-onion': cast(socket.socket, object()),
+        }
         controller = SessionAccessController(
             require_auth=False,
             send_callback=lambda _conn, _event: None,
             lockout_timeout_callback=lambda: 30.0,
             failure_limit_callback=lambda: 3,
             live_consumer_available_callback=lambda: None,
+            pending_call_callback=lambda onion: (
+                (pending[onion], float('inf')) if onion in pending else None
+            ),
         )
         controller.restrict(
             conn,

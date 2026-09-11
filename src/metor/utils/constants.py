@@ -2,56 +2,29 @@
 Module defining application-wide constants to adhere to the DRY (Don't Repeat Yourself) principle.
 """
 
+from metor.shared.constants import Constants as ContractConstants
+
 import os
 from pathlib import Path
 
 
-def _load_local_dotenv() -> None:
-    """
-    Loads environment variables from a local `.env` file when python-dotenv exists.
-
-    Args:
-        None
-
-    Returns:
-        None
-    """
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        return
-
-    load_dotenv()
-
-
-_load_local_dotenv()
-
-
-class Constants:
+class Constants(ContractConstants):
     """Centralized constants for file names, network settings, and directory structures."""
 
-    LOCALHOST: str = '127.0.0.1'
-
     # Network Constraints
-    MAX_STREAM_BYTES: int = 1048576  # 1 MB Limit for Tor TCP streams (OOM Protection)
-    MAX_IPC_BYTES: int = 5242880  # 5 MB Limit for local IPC streams (OOM Protection)
-    VOICE_CHUNK_MAX_BYTES: int = 65536
-    DEFAULT_RETAINED_PAGE_SIZE: int = 50
-    MAX_RETAINED_PAGE_SIZE: int = 200
+
     VOICE_TURN_HARD_MAX_BYTES: int = 1073741824
     VOICE_MAX_SEGMENTS: int = 16384
     VOICE_METADATA_MAX_BYTES: int = 2097152
-    VOICE_CODEC_MAX_CHARS: int = 64
-    VOICE_PRESSURE_PERCENT: int = 90
-    MESSAGE_ID_MAX_CHARS: int = 128
-    TCP_BUFFER_SIZE: int = 4096  # Standard TCP chunk size for socket.recv
+
     SERVER_BACKLOG: int = 5  # Standard socket backlog for daemon IPC and listeners
     SERVER_BACKLOG_HEADLESS: int = 1  # Minimal socket backlog for ephemeral daemons
     PEER_WRITER_QUEUE_FRAMES: int = 256
     IPC_WRITER_QUEUE_FRAMES: int = 256
-    PEER_WRITER_QUEUE_BYTES: int = 8 * MAX_STREAM_BYTES
-    IPC_WRITER_QUEUE_BYTES: int = 8 * MAX_IPC_BYTES
+    PEER_WRITER_QUEUE_BYTES: int = 8 * ContractConstants.MAX_STREAM_BYTES
+    IPC_WRITER_QUEUE_BYTES: int = 8 * ContractConstants.MAX_IPC_BYTES
     SOCKET_WRITER_FLUSH_TIMEOUT_SEC: float = 2.0
+    SOCKET_WRITER_POLL_TIMEOUT_SEC: float = 0.1
 
     # Tor Bootstrapping
     UNIX_TOR_TIMEOUT: int = 45  # Process launch timeout for Unix Tor binaries
@@ -78,25 +51,18 @@ class Constants:
     LIVE_MSG_DEDUPE_CACHE_SIZE: int = (
         256  # Per-peer cache size for recent live message IDs
     )
-    SESSION_AUTH_KEY_BYTES: int = (
-        32  # Argon2-derived key length for IPC session-auth proofs
-    )
-    SESSION_AUTH_CHALLENGE_BYTES: int = (
-        32  # Random challenge length for one IPC session-auth proof round
-    )
+
     SENSITIVE_AUTH_GRANT_TIMEOUT_SEC: float = 60.0
+    MAX_ANONYMOUS_CALL_HANDLES: int = 128
     QUICK_UNLOCK_HELPER_TIMEOUT_SEC: float = 10.0
     TOR_HANDSHAKE_CHALLENGE_BYTES: int = (
         32  # Random challenge length for one Tor peer-auth proof round
     )
-    TOR_V3_ONION_ADDRESS_LENGTH: int = 56  # Base32 chars in one v3 onion address
-    TOR_V3_PUBLIC_KEY_BYTES: int = 32  # Ed25519 public key bytes embedded in v3 onions
-    TOR_V3_CHECKSUM_BYTES: int = 2  # Checksum bytes embedded in v3 onions
-    TOR_V3_VERSION_BYTE: int = 3  # Tor v3 onion address version marker
+
     INPUT_SELECT_TIMEOUT_SEC: float = 0.0  # Non-blocking POSIX stdin poll
 
     # Request Defaults
-    DEFAULT_IPC_TIMEOUT: float = 15.0  # Default client IPC socket timeout in seconds
+
     DEFAULT_HISTORY_LIMIT: int = (
         50  # History rows per request when no explicit limit is sent
     )
@@ -106,7 +72,7 @@ class Constants:
     RUNTIME_SNAPSHOT_MAX_RETRIES: int = 8
 
     # Thread Constraints & Timing
-    THREAD_POLL_TIMEOUT: float = 1.0  # Timeout for non-blocking accept/recv loops
+
     LISTENER_READY_TIMEOUT: float = (
         5.0  # Startup wait for inbound listener bind/listen readiness
     )
@@ -119,9 +85,7 @@ class Constants:
     )
     INPUT_SLEEP_SEC: float = 0.02  # UI non-blocking input thread sleep
     TCP_CLOSE_LINGER_SEC: float = 0.2  # Socket linger before shutdown
-    IPC_AUTH_FAILURE_LIMIT: int = (
-        3  # Maximum invalid local auth attempts per IPC session before disconnect
-    )
+
     MUTUAL_CONNECT_RACE_WINDOW_SEC: float = 5.0  # Short grace window to recognize the winning inbound side of a simultaneous connect race
     PENDING_EXPIRY_FEEDBACK_WINDOW_SEC: float = 30.0  # How long a recently expired pending live request should produce a dedicated accept-expired UI hint
 

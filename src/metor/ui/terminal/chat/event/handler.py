@@ -11,7 +11,7 @@ from metor.core.api import (
     SwitchCommand,
 )
 from metor.ui.terminal import AliasPolicy, StatusTone, Translator
-from metor.utils import clean_onion
+from metor.shared import clean_onion
 
 # Local Package Imports
 from metor.ui.terminal.chat.event.content import handle_content_event

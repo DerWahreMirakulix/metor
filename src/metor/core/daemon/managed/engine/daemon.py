@@ -15,9 +15,10 @@ import os
 import signal
 import types
 from typing import Optional, Callable, Dict, Union
-from pathlib import Path
 
 from metor.core.api import (
+    AcceptCommand,
+    RejectCommand,
     ChangePasswordCommand,
     ConfigureQuickUnlockCommand,
     Delivery,
@@ -44,9 +45,8 @@ from metor.data import (
     MessageManager,
     SettingKey,
 )
-from metor.data.sql import SqlManager
 from metor.data.blob import BlobLifecycle, BlobStore
-from metor.utils import Constants, clean_onion, secure_shred_file
+from metor.utils import Constants, clean_onion
 
 # Local Package Imports
 from metor.core.daemon.managed.crypto import Crypto
@@ -73,6 +73,7 @@ from metor.core.daemon.handlers import (
 from .command_dispatch import DaemonCommandDispatcher
 from .lifecycle import DaemonLifecycle as DaemonLifecycle
 from .lifecycle import DaemonLifecycleMixin
+from .release import release_resources
 from .session_access import SessionAccessController
 from .session_maintenance import SessionMaintenance
 
@@ -128,6 +129,7 @@ class Daemon(DaemonLifecycleMixin):
 
         self._stop_flag: threading.Event = threading.Event()
         self._stop_lock: threading.Lock = threading.Lock()
+        self._release_lock = threading.RLock()
         self._lifecycle: DaemonLifecycle = (
             DaemonLifecycle.LOCKED if start_locked else DaemonLifecycle.UNLOCKED
         )
@@ -173,6 +175,10 @@ class Daemon(DaemonLifecycleMixin):
             is_saved_contact_callback=self._is_saved_contact_target,
             resolve_target_callback=self._resolve_contact_target,
             voice_target_callback=self._voice_target,
+            pending_call_callback=lambda onion: self._transport_state.pending_identity(
+                onion
+            ),
+            voice_context_callback=self._voice_context,
             voice_delivery_callback=self._voice_delivery,
             inbound_voice_delivery_callback=self._inbound_voice_delivery,
             live_context_callback=self._live_context_token,
@@ -462,6 +468,11 @@ class Daemon(DaemonLifecycleMixin):
         return True
 
     def stop(self) -> None:
+        """Serializes independently attempted release; failed phases remain retryable."""
+        with self._domain_operation_lock, self._release_lock:
+            self._stop_resources()
+
+    def _stop_resources(self) -> None:
         """
         Stops the engine and gracefully tears down all sub-services.
 
@@ -472,74 +483,30 @@ class Daemon(DaemonLifecycleMixin):
             None
         """
         with self._stop_lock:
-            if self._is_stopping:
+            if getattr(self, '_stop_completed', False):
                 return
             self._is_stopping = True
             self._stop_flag.set()
             self._runtime_stop_flag.set()
-            self._session_access.clear_all()
 
-        try:
-            if self._outbox is not None:
-                self._outbox.stop()
-        except Exception:
-            pass
-
-        try:
-            if self._network is not None:
-                self._network.disconnect_all()
-        except Exception:
-            pass
-
-        try:
-            if self._cm is not None:
-                self._cm.cleanup_orphans([])
-        except Exception:
-            pass
-
-        try:
-            self._ipc.stop()
-        except Exception:
-            pass
-
-        runtime_db_path: Path = (
-            self._pm.paths.get_config_dir() / Constants.DB_RUNTIME_FILE
+        self._last_stop_release = release_resources(
+            (
+                (
+                    'runtime',
+                    lambda: self._lock_runtime(
+                        preserve_reliability=not self._purge_fence.is_set()
+                    ),
+                ),
+                ('ipc', self._ipc.stop),
+                (
+                    'endpoint',
+                    lambda: self._pm.clear_daemon_port(
+                        expected_pid=os.getpid(), expected_port=self._ipc.port
+                    ),
+                ),
+            )
         )
-        try:
-            secure_shred_file(runtime_db_path)
-        except OSError:
-            self._on_runtime_internal_error(
-                'Failed to shred the runtime database mirror during shutdown.'
-            )
-
-        try:
-            self._pm.clear_daemon_port(
-                expected_pid=os.getpid(),
-                expected_port=self._ipc.port,
-            )
-        except Exception:
-            pass
-
-        SqlManager.close_connection(self._pm.paths.get_db_file())
-
-        try:
-            if self._tm is not None:
-                self._tm.stop()
-        except Exception:
-            pass
-
-        try:
-            if getattr(self, '_blob_store', None) is not None:
-                assert self._blob_store is not None
-                self._blob_store.close()
-        except Exception:
-            pass
-
-        try:
-            if self._km is not None:
-                self._km.clear_sensitive_state()
-        except Exception:
-            pass
+        self._stop_completed = self._last_stop_release.succeeded
 
     def _on_ipc_disconnect(self, conn: socket.socket) -> None:
         """
@@ -604,6 +571,14 @@ class Daemon(DaemonLifecycleMixin):
     def _voice_target(self, msg_id: str) -> Optional[str]:
         """Returns the stable target bound to an active outbound Voice turn."""
         return self._network.voice_target(msg_id) if self._network is not None else None
+
+    def _voice_context(self, onion: str, msg_id: str, direction: str) -> int | None:
+        """Returns immutable recording ownership from the active runtime."""
+        return (
+            self._network.voice_context(onion, msg_id, direction)
+            if self._network is not None
+            else None
+        )
 
     def _voice_delivery(self, msg_id: str) -> Optional[Delivery]:
         """Returns delivery semantics bound to an active outbound Voice turn."""
@@ -701,6 +676,15 @@ class Daemon(DaemonLifecycleMixin):
             runtime_unlocked=self._lifecycle is DaemonLifecycle.UNLOCKED,
         ):
             return
+
+        pending_action = self._session_access.take_pending_action(conn)
+        if pending_action is not None and self._network is not None:
+            if isinstance(cmd, AcceptCommand):
+                self._network.accept(cmd.target, expected_pending=pending_action)
+                return
+            if isinstance(cmd, RejectCommand):
+                self._network.reject(cmd.target, expected_pending=pending_action)
+                return
 
         if isinstance(cmd, UnlockCommand):
             if self._lifecycle is DaemonLifecycle.UNLOCKED:

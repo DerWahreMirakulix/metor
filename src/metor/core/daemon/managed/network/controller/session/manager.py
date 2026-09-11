@@ -78,6 +78,8 @@ class ConnectionControllerSessionMixin(ConnectionControllerSupportMixin):
         self,
         target: str,
         origin: ConnectionOrigin = ConnectionOrigin.INCOMING,
+        *,
+        expected_pending: Optional[socket.socket] = None,
     ) -> None:
         """
         Delegates pending-connection approval to the focused accept helper.
@@ -89,7 +91,7 @@ class ConnectionControllerSessionMixin(ConnectionControllerSupportMixin):
         Returns:
             None
         """
-        accept(self, target, origin=origin)
+        accept(self, target, origin=origin, expected_pending=expected_pending)
 
     def reject(
         self,
@@ -98,6 +100,8 @@ class ConnectionControllerSessionMixin(ConnectionControllerSupportMixin):
         socket_to_close: Optional[socket.socket] = None,
         origin: ConnectionOrigin = ConnectionOrigin.INCOMING,
         reject_intent: Optional[RejectIntent] = None,
+        *,
+        expected_pending: Optional[socket.socket] = None,
     ) -> None:
         """
         Delegates connection rejection to the focused termination helper.
@@ -119,6 +123,7 @@ class ConnectionControllerSessionMixin(ConnectionControllerSupportMixin):
             socket_to_close=socket_to_close,
             origin=origin,
             reject_intent=reject_intent,
+            expected_pending=expected_pending,
         )
 
     def disconnect(
@@ -146,13 +151,14 @@ class ConnectionControllerSessionMixin(ConnectionControllerSupportMixin):
         Returns:
             None
         """
-        disconnect(
-            self,
-            target,
-            initiated_by_self=initiated_by_self,
-            is_fallback=is_fallback,
-            socket_to_close=socket_to_close,
-            suppress_events=suppress_events,
-            origin=origin,
-            system_reason=system_reason,
-        )
+        with self._operation_lock, self._state.snapshot_barrier():
+            disconnect(
+                self,
+                target,
+                initiated_by_self=initiated_by_self,
+                is_fallback=is_fallback,
+                socket_to_close=socket_to_close,
+                suppress_events=suppress_events,
+                origin=origin,
+                system_reason=system_reason,
+            )

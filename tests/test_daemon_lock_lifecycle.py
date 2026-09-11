@@ -27,7 +27,7 @@ class DaemonLockLifecycleTests(unittest.TestCase):
         command = IpcCommand.from_dict({'command_type': CommandType.LOCK.value})
         self.assertIsInstance(command, LockCommand)
 
-    @patch('metor.core.daemon.managed.engine.daemon.SqlManager.close_connection')
+    @patch('metor.core.daemon.managed.engine.lifecycle.SqlManager.close_connection')
     def test_lock_releases_runtime_without_stopping_daemon(
         self,
         close_connection: Mock,
@@ -41,6 +41,8 @@ class DaemonLockLifecycleTests(unittest.TestCase):
             None
         """
         daemon = Daemon.__new__(Daemon)
+        daemon._release_lock = threading.RLock()
+        daemon._domain_operation_lock = threading.RLock()
         daemon._lifecycle = DaemonLifecycle.UNLOCKED
         daemon._stop_flag = threading.Event()
         daemon._runtime_stop_flag = threading.Event()

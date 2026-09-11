@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, List, Optional, Tuple, cast
+from typing import List, Optional, Tuple, cast
 
 from metor.core.api import ContentType, Delivery, is_valid_message_id
 from metor.data.message.models import (
@@ -16,12 +16,11 @@ from metor.data.sql.backends import SqlParam
 from metor.utils import clean_onion
 
 
-class MessageOutboxMixin:
-    """Owns pending outbox state and atomic shared quota admission."""
+from .receipts import MessageReceiptStore
 
-    def __getattr__(self, name: str) -> Any:
-        """Defers typed collaborator attributes to the composed repository."""
-        raise AttributeError(name)
+
+class MessageOutboxMixin(MessageReceiptStore):
+    """Owns pending outbox state and atomic shared quota admission."""
 
     def get_pending_outbox(self) -> List[Tuple[int, str, str, str, str, str]]:
         """
@@ -538,7 +537,6 @@ class MessageOutboxMixin:
             params: list[SqlParam] = [
                 normalized_onion,
                 MessageDirection.OUT.value,
-                Delivery.LIVE.value,
                 MessageStatus.PENDING.value,
             ]
             selection_sql = ''
@@ -548,14 +546,28 @@ class MessageOutboxMixin:
             rows = cast(
                 List[Tuple[SqlParam, ...]],
                 cursor.execute(
-                    'SELECT r.id, r.peer_onion, r.content_type, o.payload, r.msg_id, r.created_at '
+                    'SELECT r.id, r.peer_onion, r.content_type, o.payload, r.msg_id, r.created_at, r.delivery '
                     'FROM message_receipts AS r '
                     'INNER JOIN outbox_spool AS o ON o.receipt_id = r.id '
-                    'WHERE r.peer_onion = ? AND r.direction = ? AND r.delivery = ? AND r.status = ?'
+                    'WHERE r.peer_onion = ? AND r.direction = ? AND r.status = ?'
                     f'{selection_sql} ORDER BY r.created_at ASC, r.id ASC',
                     tuple(params),
                 ).fetchall(),
             )
+            eligible_rows = []
+            for row in rows:
+                if str(row[6]) == Delivery.LIVE.value:
+                    eligible_rows.append(row)
+                elif str(row[2]) == ContentType.VOICE.value:
+                    try:
+                        metadata = json.loads(str(row[3]))
+                    except (TypeError, ValueError):
+                        continue
+                    if (
+                        isinstance(metadata, dict)
+                        and metadata.get('fallback_committed') is True
+                    ):
+                        eligible_rows.append(row)
             records = [
                 PendingLiveRecord(
                     receipt_id=int(str(row[0])),
@@ -565,7 +577,7 @@ class MessageOutboxMixin:
                     msg_id=str(row[4]),
                     timestamp=str(row[5]),
                 )
-                for row in rows
+                for row in eligible_rows
             ]
             if msg_ids is not None and {record.msg_id for record in records} != set(
                 msg_ids
@@ -591,6 +603,17 @@ class MessageOutboxMixin:
             if not records:
                 return []
             receipt_ids = [record.receipt_id for record in records]
+            for record in records:
+                if record.content_type == ContentType.VOICE.value:
+                    metadata = json.loads(record.payload)
+                    metadata['fallback_committed'] = True
+                    cursor.execute(
+                        'UPDATE outbox_spool SET payload = ? WHERE receipt_id = ?',
+                        (
+                            json.dumps(metadata, separators=(',', ':')),
+                            record.receipt_id,
+                        ),
+                    )
             block = self._placeholders(len(receipt_ids))
             cursor.execute(
                 f'UPDATE message_receipts SET delivery = ?, visible_in_history = 1, updated_at = ? WHERE id IN ({block})',

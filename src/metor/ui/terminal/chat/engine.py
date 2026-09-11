@@ -26,7 +26,7 @@ from metor.core.api import (
     GetConnectionsCommand,
     SwitchCommand,
 )
-from metor.data import ProfileManager, SettingKey
+from metor.client import FrontendBootstrapResult
 from metor.client import IpcAuthExchange
 from metor.ui.terminal import (
     Help,
@@ -39,7 +39,9 @@ from metor.ui.terminal import (
     prompt_session_auth_proof,
 )
 from metor.ui.terminal.models import AliasPolicy, StatusTone
-from metor.utils import build_session_auth_proof, clean_onion, Constants
+from metor.client import build_session_auth_proof
+from metor.shared import clean_onion
+from metor.ui.terminal.constants import Constants
 from metor.versioning import IPC_PROTOCOL_MIN_SUPPORTED, IPC_PROTOCOL_VERSION
 
 # Local Package Imports
@@ -60,21 +62,21 @@ class Chat:
 
     def __init__(
         self,
-        pm: ProfileManager,
+        pm: FrontendBootstrapResult,
         startup_session_auth_provider: Optional[Callable[[], Optional[str]]] = None,
     ) -> None:
         """
         Initializes the Chat UI orchestrator.
 
         Args:
-            pm (ProfileManager): The manager handling the profile's daemon connection state.
+            pm (FrontendBootstrapResult): Public endpoint and client settings projection.
             startup_session_auth_provider (Optional[Callable]): One-use startup
                 credential provider owned outside the immutable launch context.
 
         Returns:
             None
         """
-        self._pm: ProfileManager = pm
+        self._pm: FrontendBootstrapResult = pm
         self._renderer: ChatRenderer = Renderer(self._pm.config)
         self._session: Session = Session()
         self._renderer.set_alias_resolver(self._session.get_peer_alias)
@@ -215,7 +217,7 @@ class Chat:
             ),
             send_command=self._ipc.send_command,
             request_id=request_id,
-            failure_limit=self._pm.config.get_int(SettingKey.LOCAL_AUTH_FAILURE_LIMIT),
+            failure_limit=self._pm.config.get_int('daemon.local_auth_failure_limit'),
         )
 
         while True:
@@ -333,7 +335,7 @@ class Chat:
 
         self._ipc = IpcClient(
             port=ipc_port,
-            timeout=self._pm.config.get_float(SettingKey.IPC_TIMEOUT),
+            timeout=self._pm.config.get_float('client.ipc_timeout'),
             on_event=self._on_ipc_event,
             on_disconnect=self._on_ipc_disconnect,
         )
@@ -359,7 +361,7 @@ class Chat:
             lambda: self._pm.config.get_namespace_float(
                 'ui.terminal.inbox_notification_delay'
             ),
-            lambda: self._pm.config.get_float(SettingKey.LIVE_RECONNECT_DELAY) > 0.0,
+            lambda: self._pm.config.get_float('daemon.live_reconnect_delay') > 0.0,
         )
         self._dispatcher = CommandDispatcher(self._ipc, self._session, self._renderer)
 
@@ -682,7 +684,7 @@ class Chat:
         self._conn_event.clear()
         self._ipc.send_command(GetConnectionsCommand(is_header=True))
 
-        ipc_timeout: float = self._pm.config.get_float(SettingKey.IPC_TIMEOUT)
+        ipc_timeout: float = self._pm.config.get_float('client.ipc_timeout')
         if not self._conn_event.wait(timeout=ipc_timeout):
             if self._disconnect_event.is_set():
                 self._handle_daemon_disconnect_exit()

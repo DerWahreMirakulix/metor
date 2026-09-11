@@ -46,6 +46,7 @@ class ConnectionController(
         has_live_consumers_callback: Callable[[], bool],
         stop_flag: threading.Event,
         config: 'Config',
+        operation_lock: Optional[threading.RLock] = None,
     ) -> None:
         """
         Initializes the ConnectionController.
@@ -77,6 +78,7 @@ class ConnectionController(
         self._has_live_consumers: Callable[[], bool] = has_live_consumers_callback
         self._stop_flag: threading.Event = stop_flag
         self._config: 'Config' = config
+        self._operation_lock = operation_lock or threading.RLock()
 
         self._receiver: Optional['StreamReceiver'] = None
         self._live_reconnect_queue: list[str] = []

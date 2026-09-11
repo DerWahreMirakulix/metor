@@ -53,7 +53,11 @@ runs:
       run: |
         python -m pip install --upgrade "pip==${{ inputs.pip-version }}"
         pip install -r "${{ inputs.dev-lockfile }}"
+        pip install --no-deps --no-build-isolation -e packaging/sdk
         pip install ${{ inputs.install-target }}
+        pip install --no-deps --no-build-isolation -e packaging/terminal
+        python -m pip check
+        python scripts/check_boundaries.py
 
     - name: Run Ruff (Linting)
       shell: bash

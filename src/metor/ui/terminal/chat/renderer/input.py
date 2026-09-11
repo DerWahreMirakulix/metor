@@ -6,7 +6,7 @@ import sys
 import os
 from typing import Optional, List
 
-from metor.utils import Constants
+from metor.ui.terminal.constants import Constants
 
 try:
     import msvcrt
