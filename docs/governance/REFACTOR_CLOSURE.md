@@ -529,4 +529,76 @@ Logs: `/tmp/metor-remaining-windows-final.log`,
 `/tmp/metor-remaining-close-race-red.log`,
 `/tmp/metor-remaining-close-race-green.log`.
 
+### Final runtime verification — 2c33c27
+
+Runtime/test SHA: `2c33c27e37a380884c05290a83dd50ce3f6acf84`. The final evidence
+commit changes only this report; its SHA and any subsequent CI run are supplied
+in the handoff rather than embedding a self-referential hash here.
+
+| Gate | Native Linux | Fresh native Windows checkout |
+| --- | --- | --- |
+| Full unittest suite | **462 passed**, 98.360s, no skips | **462 tests, OK (skipped=2)**, 254.834s |
+| Ruff check / format | Exit0; 324 files | Exit0; 324 files |
+| Strict MyPy | Exit0; 294 source files | Exit0; 294 source files |
+| pip check / AST boundaries / version registry | Exit0 | Exit0 |
+| Generated originals / first / second | Exit0, byte-identical | Exit0, byte-identical; fresh checkout has zero CRLF in all four references and the canonical hashes above |
+| Three official wheels and version compatibility | All0.2.0; exit0 | All0.2.0; exit0 |
+| Offline SDK/base/Terminal consumers | `ALL_ISOLATED_ARTIFACT_SCENARIOS_OK` | `ALL_ISOLATED_ARTIFACT_SCENARIOS_OK` |
+| Actual offline ZIP installers | Three `NATIVE_OFFLINE_ZIP_OK` markers | Three `NATIVE_OFFLINE_ZIP_OK` markers |
+
+The Windows skips are precisely the two pre-existing guards listed in the earlier
+ledger: POSIX termios behavior and POSIX permission-bit semantics. Windows ACL
+create, replacement, unsafe-trustee rejection and fail-closed checks execute.
+Additional native Windows stress runs: **50/50** existing stale-writer replacement
+tests passed (2.868s); **180/180** new R01–R03 tests passed (20 complete repetitions,
+49.196s). These local results do not substitute for a failing hosted job.
+
+Both artifact runs audit all six embedded Metor wheel RECORDs and disjoint member
+ownership. Each executes SDK-only inert imports, positive external strict typing,
+the intentionally invalid consumer with exactly three `arg-type` failures,
+base-only CLI/help, the installed dynamic-IPC fake frontend, the actual installed
+Terminal help/redraw loop, and uninstall/reinstall isolation with pip check.
+ZIP installers use only bundled dependencies and their native sh/cmd launcher.
+No runtime imports from an editable checkout are accepted in those consumers.
+
+Final local bundles:
+
+- Linux: `/tmp/metor-remaining-final-bundles-CuEE5Z`.
+- Windows: `C:\Users\lampl\AppData\Local\Temp\metor-remaining-final-fdoyuzjv\remaining-bundles`.
+
+| Native archive | SHA256 |
+| --- | --- |
+| metor-sdk-wheelhouse-linux-x86_64-py311.zip | `090b1162182d56b48fa4f3505860fa8b1dd113c09e4e20c49732fae40ce84e70` |
+| metor-wheelhouse-linux-x86_64-py311.zip | `8f6ccdf2aff8a7dc513a3955c7ad4e2623e53da35caecec4bf7054470b451133` |
+| metor-ui-terminal-wheelhouse-linux-x86_64-py311.zip | `da216694a030c3fbc1886d702de27d509bc26c8c64394985d72aa301e6f268f6` |
+| metor-sdk-wheelhouse-windows-x86_64-py311.zip | `e82524a154ae3751f966f2decdab9dc8a1585d1e6d322c9af1f62d99861ff4c1` |
+| metor-wheelhouse-windows-x86_64-py311.zip | `a7446d112f5986ec628598fbda075e9e6557b22dbbd8e56fe7d46afaac7c4f30` |
+| metor-ui-terminal-wheelhouse-windows-x86_64-py311.zip | `186781ea5713a3901091374635b5421579d2a6cbefd0c679642aa2ba80178538` |
+
+Local logs: `/tmp/metor-remaining-linux-2c33c27.log`,
+`/tmp/metor-remaining-linux-2c33c27-{build,versions,artifacts,installers}.log`,
+`/tmp/metor-remaining-linux-generated.log`,
+`/tmp/metor-remaining-windows-2c33c27.log`,
+`/tmp/metor-remaining-windows-{stale,regression}-stress.log`.
+The native Windows log terminates with `ALL_NATIVE_REMAINING_GATES_OK`.
+Both local hosts use CPython3.11.4 and the pinned development requirements;
+Linux uses Node24.18.0, Windows Node22.17.0, both installed Prettier3.8.1.
+Hosted CI pins Node22.17.1 and pip26.0.1 through the shared quality action.
+
+### Hosted CI ledger and remaining limitation
+
+| Commit / run / attempt | Ubuntu job | Windows job | Observed result |
+| --- | --- | --- | --- |
+| `05fd181`, [34655018880](https://github.com/DerWahreMirakulix/metor/actions/runs/34655018880), attempt1 | `103445410177` | `103445410262` | Both all stages successful, including freshness and installed-artifact/ZIP validation. Superseded by the additional native-observed timeout fix. |
+| `2c33c27`, [34655589180](https://github.com/DerWahreMirakulix/metor/actions/runs/34655589180), attempt1 | `103447161021`: all stages successful | `103447160865`: shared quality failed; later stages skipped | **Not full CI acceptance.** |
+
+The latter Windows check exposes only `Process completed with exit code 1` in its
+public annotation (`.github`, line307), not the failing test. The job log-download
+API returns403, `Must have admin rights to Repository`. The owner has been asked
+for the failing excerpt. Neither local success nor the superseded hosted run is
+claimed as proof that this hosted-only failure is resolved. Any later final-SHA
+run must be reported with its own run/attempt/job identifiers; a passing later
+run does not explain or erase this failure. No assertions, test selection,
+security gates or platform checks were weakened to change the result.
+
 Stop before GUI implementation. Independent approval remains the owner's review.
