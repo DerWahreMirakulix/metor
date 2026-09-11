@@ -99,6 +99,16 @@ with tempfile.TemporaryDirectory() as root:
         daemon.stop()
 """
 
+TERMINAL_HARNESS = FAKE_HARNESS.replace(
+    'assert CommandHandlers.handle_chat(pm, frontend_id="closure-fake") == 0\n'
+    '        assert "metor.ui.terminal" not in sys.modules',
+    'with patch("metor.ui.terminal.chat.renderer.engine.InputHandler"), '
+    'patch("metor.ui.terminal.chat.renderer.engine.Renderer.read_line", '
+    'side_effect=["/help", "/clear", "/help", "/exit"]):\n'
+    '            assert CommandHandlers.handle_chat(pm, frontend_id="terminal") == 0\n'
+    '        print("TERMINAL_LOOP_HELP_REDRAW_OK")',
+)
+
 
 def audit_wheel_records(wheels: tuple[Path, ...]) -> None:
     """Checks real RECORD hashes, disjoint ownership and namespace marker placement."""
@@ -293,6 +303,12 @@ py-modules = ["closure_fake"]
             raise RuntimeError('Installed fake did not complete dynamic IPC.')
         run([str(executable), '-m', 'pip', 'uninstall', '-y', 'metor-closure-fake'])
         install('metor-ui-terminal')
+        terminal_output = run([str(executable), '-I', '-c', TERMINAL_HARNESS])
+        if (
+            'TERMINAL_LOOP_HELP_REDRAW_OK' not in terminal_output
+            or '/connect' not in terminal_output
+        ):
+            raise RuntimeError('Installed Terminal did not render its real chat help.')
         run(
             [
                 str(executable),
