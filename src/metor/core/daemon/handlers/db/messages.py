@@ -1,5 +1,6 @@
 """Message and inbox-specific database command handling."""
 
+import json
 from typing import Callable, Dict, List, Optional, Tuple
 
 from metor.core.api import (
@@ -16,6 +17,7 @@ from metor.core.api import (
     MessageEntry,
     MessageStatusCode,
     MessagesDataEvent,
+    RuntimeStateChangedEvent,
     UnreadMessageEntry,
     UnreadMessagesEvent,
     create_event,
@@ -24,7 +26,7 @@ from metor.core.api import (
     VoiceContent,
 )
 from metor.core.api import Delivery
-from metor.data import SettingKey
+from metor.data import MessageDirection, SettingKey
 from metor.data.message import (
     MessageClearOperationType,
     MessageClearResult,
@@ -64,6 +66,13 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
                 content = deserialize_content(ContentType.VOICE, payload)
                 if isinstance(content, VoiceContent):
                     self._delete_persistent_blob_cb(content.blob_id)
+                metadata = json.loads(payload)
+                if isinstance(metadata, dict):
+                    chunk_ids = metadata.get('chunk_ids', [])
+                    if isinstance(chunk_ids, list):
+                        for chunk_id in chunk_ids:
+                            if isinstance(chunk_id, str):
+                                self._delete_persistent_blob_cb(chunk_id)
             except (KeyError, OSError, TypeError, ValueError):
                 continue
 
@@ -150,6 +159,8 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
             params = {'profile': result.profile or self._pm.profile_name}
 
         self._emit_orphan_cleanup(self._cm.cleanup_orphans(active_onions))
+        if result.success:
+            self._broadcast(RuntimeStateChangedEvent(scope='messages', onion=onion))
         return create_event(MESSAGE_CLEAR_EVENT_TYPES[result.operation_type], params)
 
     def _handle_get_inbox(self, _: GetInboxCommand) -> IpcEvent:
@@ -221,6 +232,8 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
             and self._pm.config.get_bool(SettingKey.SEND_READ_RECEIPTS)
         ):
             self._send_read_receipt_cb(onion, msg_ids)
+        if raw_messages:
+            self._broadcast(RuntimeStateChangedEvent(scope='inbox', onion=onion))
         return UnreadMessagesEvent(messages=messages_list, alias=alias, onion=onion)
 
     def _handle_delete_message(self, cmd: DeleteMessageCommand) -> IpcEvent:
@@ -236,13 +249,18 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
         if not resolved:
             return create_event(EventType.PEER_NOT_FOUND, {'target': cmd.target})
         alias, onion = resolved
+        direction = (
+            MessageDirection(cmd.direction.value) if cmd.direction is not None else None
+        )
         voice_payloads = self._mm.get_drop_voice_payloads(
             onion=onion,
             msg_id=cmd.msg_id,
+            direction=direction,
         )
-        outcome = self._mm.delete_drop_message(onion, cmd.msg_id)
+        outcome = self._mm.delete_drop_message(onion, cmd.msg_id, direction)
         if outcome is MessageDeleteOutcome.DELETED:
             self._delete_voice_payloads(voice_payloads)
+            self._broadcast(RuntimeStateChangedEvent(scope='messages', onion=onion))
             return create_event(
                 EventType.MESSAGE_DELETED,
                 {'alias': alias, 'onion': onion, 'msg_id': cmd.msg_id},
@@ -252,6 +270,9 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
             MessageDeleteOutcome.NOT_DROP: MessageOperationReason.NOT_DROP,
             MessageDeleteOutcome.PENDING_DELIVERY: (
                 MessageOperationReason.PENDING_DELIVERY
+            ),
+            MessageDeleteOutcome.AMBIGUOUS_IDENTITY: (
+                MessageOperationReason.AMBIGUOUS_IDENTITY
             ),
         }
         return create_event(

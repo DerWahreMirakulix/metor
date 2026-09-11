@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from metor.core.api import ContentType, Delivery, MessageReceivedEvent
 from metor.core.daemon.managed.network.state import StateTracker
 from metor.core.daemon.managed.network.voice import VoiceTransferManager
-from metor.data import ContactManager, MessageManager, SettingKey
+from metor.data import ContactManager, MessageDirection, MessageManager, SettingKey
 from metor.data.blob import BlobLifecycle, PlaintextBlobStore
 from metor.data.profile import ProfileManager
 from metor.data.sql import SqlManager
@@ -82,7 +82,10 @@ class VoiceContractTests(unittest.TestCase):
         self.assertTrue(metadata['finalized'])
         self.assertEqual(metadata['size_bytes'], len(payload))
         self.assertEqual(
-            self._blobs.read(metadata['blob_id'], BlobLifecycle.PERSISTENT),
+            b''.join(
+                self._blobs.read(chunk_id, BlobLifecycle.PERSISTENT)
+                for chunk_id in metadata['chunk_ids']
+            ),
             payload,
         )
 
@@ -167,12 +170,19 @@ class VoiceContractTests(unittest.TestCase):
             )
         )
 
-        rows = self._mm.get_and_read_inbox(self._onion, Delivery.DROP)
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0][1], Delivery.DROP.value)
-        metadata = json.loads(rows[0][2])
+        record = self._mm.get_voice_payload(
+            self._onion, 'voice-drop-in', MessageDirection.IN
+        )
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertEqual(record.delivery, Delivery.DROP.value)
+        metadata = json.loads(record.payload)
         self.assertEqual(
-            self._blobs.read(metadata['blob_id'], BlobLifecycle.PERSISTENT), payload
+            b''.join(
+                self._blobs.read(chunk_id, BlobLifecycle.PERSISTENT)
+                for chunk_id in metadata['chunk_ids']
+            ),
+            payload,
         )
 
     def test_inbound_voice_obeys_headless_unseen_count_policy(self) -> None:
@@ -229,14 +239,13 @@ class VoiceContractTests(unittest.TestCase):
                 {'id': 'voice-consumed', 'size': len(payload)},
             )
         )
-        self._mm.get_and_read_inbox(self._onion, Delivery.LIVE)
-        self._voice.release_consumed(self._onion, ['voice-consumed'])
+        self.assertTrue(self._voice.release_inbound(self._onion, 'voice-consumed'))
 
         duplicate_socket = _VoiceSocket()
         duplicate_conn = cast(socket.socket, duplicate_socket)
         self.assertFalse(self._voice.receive_begin(duplicate_conn, self._onion, begin))
 
-        self.assertEqual(duplicate_socket.sent, [b'/ack voice-consumed\n'])
+        self.assertEqual(duplicate_socket.sent, [b'/voice_commit_ack voice-consumed\n'])
         self.assertIsNone(self._mm.get_inbound_voice(self._onion, 'voice-consumed'))
 
 

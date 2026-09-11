@@ -1555,13 +1555,75 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                     """
                     raise OSError('simulated cleanup failure')
 
+                failures: list[tuple[str, bool]] = []
                 with self.assertRaises(OSError):
                     destroy_profile_storage(
-                        pm, protector=protector, cleanup=fail_cleanup
+                        pm,
+                        protector=protector,
+                        cleanup=fail_cleanup,
+                        failure_callback=lambda phase, destroyed: failures.append(
+                            (phase, destroyed)
+                        ),
                     )
                 self.assertFalse(pm.paths.get_keyslot_file().exists())
+                self.assertEqual(failures, [('cleanup', True)])
                 with self.assertRaises(ProtectedKeyMissingError):
                     protector.unprotect('password')
+        finally:
+            Constants.DATA = original_data
+
+    def test_preparation_failure_still_destroys_key_and_reports_phase(self) -> None:
+        """G26: nonessential preparation failure cannot prevent key destruction."""
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                pm = self._profile(Path(temp_dir))
+                protector = Mock()
+                cleanup = Mock()
+                failures: list[tuple[str, bool]] = []
+
+                with self.assertRaises(RuntimeError):
+                    destroy_profile_storage(
+                        pm,
+                        prepare_runtime=Mock(
+                            side_effect=RuntimeError('preparation failed')
+                        ),
+                        protector=cast(KeyProtector, protector),
+                        cleanup=cleanup,
+                        failure_callback=lambda phase, destroyed: failures.append(
+                            (phase, destroyed)
+                        ),
+                    )
+
+                protector.destroy.assert_called_once_with()
+                cleanup.assert_called_once_with(pm.paths.get_config_dir())
+                self.assertEqual(failures, [('preparation', True)])
+        finally:
+            Constants.DATA = original_data
+
+    def test_key_destruction_failure_prevents_cleanup_and_reports_phase(self) -> None:
+        """G26: keyslot failure is distinct and does not claim erasure."""
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                pm = self._profile(Path(temp_dir))
+                protector = Mock()
+                protector.destroy.side_effect = OSError('keyslot failed')
+                cleanup = Mock()
+                failures: list[tuple[str, bool]] = []
+
+                with self.assertRaises(OSError):
+                    destroy_profile_storage(
+                        pm,
+                        protector=cast(KeyProtector, protector),
+                        cleanup=cleanup,
+                        failure_callback=lambda phase, destroyed: failures.append(
+                            (phase, destroyed)
+                        ),
+                    )
+
+                cleanup.assert_not_called()
+                self.assertEqual(failures, [('key_destruction', False)])
         finally:
             Constants.DATA = original_data
 
@@ -1580,7 +1642,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         daemon.stop = Mock()
         daemon._on_runtime_internal_error = Mock()
         with patch(
-            'metor.core.daemon.managed.engine.daemon.destroy_profile_storage'
+            'metor.core.daemon.managed.engine.lifecycle.destroy_profile_storage'
         ) as destroy:
             daemon._nuke_data()
         destroy.assert_called_once()

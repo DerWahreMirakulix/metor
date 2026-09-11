@@ -22,6 +22,8 @@ from metor.core.api import (
     ReauthorizeClientCommand,
     RejectCommand,
     RestrictClientCommand,
+    PrepareProfileExitCommand,
+    SelfDestructCommand,
     EventType,
     IpcCommand,
     IpcEvent,
@@ -36,6 +38,7 @@ from ..local_auth import (
     SessionAuthContext,
     SessionAuthPrompt,
 )
+from .session_events import SessionEventMixin
 
 
 @dataclass(frozen=True)
@@ -47,9 +50,10 @@ class RestrictedSessionPolicy:
     live_while_locked: bool
     accept_while_locked: LockedAcceptPolicy
     notification_privacy: NotificationPrivacy
+    device_lifecycle: bool = False
 
 
-class SessionAccessController:
+class SessionAccessController(SessionEventMixin):
     """Owns IPC authentication state and interactive-consumer registration."""
 
     def __init__(
@@ -103,6 +107,7 @@ class SessionAccessController:
         self._restricted_challenges: dict[socket.socket, str] = {}
         self._pin_failures: dict[socket.socket, int] = {}
         self._pin_disabled: set[socket.socket] = set()
+        self._call_handles: dict[socket.socket, dict[str, str]] = {}
 
     def install_context(self, context: Optional[SessionAuthContext]) -> None:
         """Installs the verifier context for the active profile runtime.
@@ -181,6 +186,7 @@ class SessionAccessController:
             self._restricted_challenges.pop(conn, None)
             self._pin_failures.pop(conn, None)
             self._pin_disabled.discard(conn)
+            self._call_handles.pop(conn, None)
         self._local_auth.clear_connection(conn)
 
     def clear_all(self) -> None:
@@ -199,6 +205,7 @@ class SessionAccessController:
             self._restricted_challenges.clear()
             self._pin_failures.clear()
             self._pin_disabled.clear()
+            self._call_handles.clear()
         self._local_auth.install_context(None)
 
     def mark_authenticated(self, conn: socket.socket) -> None:
@@ -268,12 +275,54 @@ class SessionAccessController:
             restricted_policy = self._restricted.get(conn)
 
         if restricted_policy is not None:
+            mapped_call_target = False
+            if isinstance(cmd, (AcceptCommand, RejectCommand)):
+                with self._lock:
+                    mapped_target = self._call_handles.get(conn, {}).pop(
+                        cmd.target, None
+                    )
+                if mapped_target is not None:
+                    cmd.target = mapped_target
+                    mapped_call_target = True
             if isinstance(cmd, ReauthorizeClientCommand):
+                restricted_retry_after = self.retry_after_seconds()
+                if restricted_retry_after is not None:
+                    self._send(conn, self._rate_limited_event(restricted_retry_after))
+                    return False
                 self._handle_reauthorize(cmd, conn, restricted_policy)
                 return False
+            if isinstance(cmd, (PrepareProfileExitCommand, SelfDestructCommand)):
+                if restricted_policy.device_lifecycle:
+                    return True
             if isinstance(cmd, RejectCommand):
+                if (
+                    restricted_policy.notification_privacy
+                    is NotificationPrivacy.ANONYMIZE
+                    and not mapped_call_target
+                ):
+                    self._send(
+                        conn,
+                        create_event(
+                            EventType.CLIENT_ACCESS_RESTRICTED,
+                            {'command': cmd.command_type.value},
+                        ),
+                    )
+                    return False
                 return True
             if isinstance(cmd, AcceptCommand):
+                if (
+                    restricted_policy.notification_privacy
+                    is NotificationPrivacy.ANONYMIZE
+                    and not mapped_call_target
+                ):
+                    self._send(
+                        conn,
+                        create_event(
+                            EventType.CLIENT_ACCESS_RESTRICTED,
+                            {'command': cmd.command_type.value},
+                        ),
+                    )
+                    return False
                 if restricted_policy.accept_while_locked is LockedAcceptPolicy.ALL:
                     return True
                 if (
@@ -391,6 +440,10 @@ class SessionAccessController:
         Returns:
             IpcEvent: Typed restriction event with optional proof challenge.
         """
+        with self._lock:
+            device_lifecycle = (
+                cmd.device_lifecycle and conn in self._authenticated_clients
+            )
         policy = RestrictedSessionPolicy(
             unlock_method=cmd.unlock_method,
             continued_live_target=(
@@ -401,6 +454,7 @@ class SessionAccessController:
             live_while_locked=cmd.live_while_locked,
             accept_while_locked=cmd.accept_while_locked,
             notification_privacy=cmd.notification_privacy,
+            device_lifecycle=device_lifecycle,
         )
         challenge: Optional[str] = None
         salt: Optional[str] = None
@@ -425,6 +479,7 @@ class SessionAccessController:
                     policy.live_while_locked,
                     policy.accept_while_locked,
                     policy.notification_privacy,
+                    policy.device_lifecycle,
                 )
                 with self._lock:
                     self._restricted[conn] = policy
@@ -436,6 +491,7 @@ class SessionAccessController:
                 'unlock_method': policy.unlock_method.value,
                 'challenge': challenge,
                 'salt': salt,
+                'device_lifecycle': policy.device_lifecycle,
             },
         )
 
@@ -486,8 +542,17 @@ class SessionAccessController:
             self._complete_reauthorization(conn)
             return
         with self._lock:
+            pin_disabled = conn in self._pin_disabled
+        if cmd.method is ClientUnlockMethod.PROFILE_PASSWORD and cmd.proof is None:
+            self._issue_reauthorization_challenge(
+                conn, password_required=True, use_password_salt=True
+            )
+            return
+        with self._lock:
             challenge = self._restricted_challenges.pop(conn, None)
         authenticated = False
+        password_attempt = False
+        should_disconnect = False
         if challenge is not None and cmd.proof is not None:
             if (
                 cmd.method is ClientUnlockMethod.PIN
@@ -497,11 +562,24 @@ class SessionAccessController:
             ):
                 authenticated = self._quick_unlock.verify(challenge, cmd.proof)
             elif cmd.method is ClientUnlockMethod.PROFILE_PASSWORD:
-                authenticated = self._local_auth.verify_proof_key(challenge, cmd.proof)
+                password_attempt = True
+                result = self._local_auth.verify_challenge_proof(
+                    conn,
+                    challenge,
+                    cmd.proof,
+                    self._lockout_timeout(),
+                    self._failure_limit(),
+                )
+                authenticated = result.authenticated
+                should_disconnect = result.should_disconnect
         if authenticated:
             self._complete_reauthorization(conn)
             return
-        password_required = False
+        retry_after = self.retry_after_seconds()
+        if retry_after is not None:
+            self._send(conn, self._rate_limited_event(retry_after))
+            return
+        password_required = pin_disabled or password_attempt
         with self._lock:
             if cmd.method is ClientUnlockMethod.PIN:
                 failures = self._pin_failures.get(conn, 0) + 1
@@ -509,10 +587,47 @@ class SessionAccessController:
                 if failures >= 3:
                     self._pin_disabled.add(conn)
                     password_required = True
-            next_challenge = secrets.token_hex(32)
+        if cmd.method is ClientUnlockMethod.PIN:
+            should_disconnect = self._local_auth.register_invalid_unlock(
+                conn,
+                self._lockout_timeout(),
+                self._failure_limit(),
+            )
+            retry_after = self.retry_after_seconds()
+            if retry_after is not None:
+                self._send(conn, self._rate_limited_event(retry_after))
+                return
+        if should_disconnect:
+            self._disconnect_client(conn)
+            return
+        self._issue_reauthorization_challenge(
+            conn,
+            password_required=password_required,
+            use_password_salt=password_required,
+        )
+
+    def _issue_reauthorization_challenge(
+        self,
+        conn: socket.socket,
+        *,
+        password_required: bool,
+        use_password_salt: bool,
+    ) -> None:
+        """Issues a fresh restricted-session challenge without counting a failure.
+
+        Args:
+            conn (socket.socket): Restricted IPC connection.
+            password_required (bool): Whether PIN is unavailable for this cycle.
+            use_password_salt (bool): Whether to return the profile proof salt.
+
+        Returns:
+            None
+        """
+        next_challenge = secrets.token_hex(32)
+        with self._lock:
             self._restricted_challenges[conn] = next_challenge
-        salt = None
-        if password_required or cmd.method is ClientUnlockMethod.PROFILE_PASSWORD:
+        salt: Optional[str] = None
+        if use_password_salt:
             salt = self._local_auth.proof_salt()
         elif self._quick_unlock is not None:
             metadata = self._quick_unlock.metadata()
@@ -574,12 +689,37 @@ class SessionAccessController:
         policy = self.restricted_policy(conn)
         if policy is None:
             return event
+        voice_types = {
+            EventType.VOICE_STARTED,
+            EventType.VOICE_CHUNK_ACCEPTED,
+            EventType.VOICE_CHUNK_RECEIVED,
+            EventType.VOICE_FINALIZED,
+            EventType.VOICE_RESOURCE_PRESSURE,
+            EventType.VOICE_RESOURCE_LIMIT,
+            EventType.VOICE_INCOMING_STARTED,
+        }
+        if event.event_type in voice_types:
+            if not policy.live_while_locked or policy.continued_live_target is None:
+                return None
+            event_onion = getattr(event, 'onion', None)
+            event_msg_id = getattr(event, 'msg_id', None)
+            if event_onion is None and isinstance(event_msg_id, str):
+                event_onion = self._voice_target(event_msg_id)
+            event_delivery = getattr(event, 'delivery', Delivery.LIVE)
+            if (
+                event_onion == policy.continued_live_target
+                and event_delivery is Delivery.LIVE
+            ):
+                return event
+            return None
         permitted_types = {
             EventType.INCOMING_CONNECTION,
             EventType.CONNECTION_PENDING,
             EventType.CONNECTION_AUTO_ACCEPTED,
             EventType.CONNECTED,
             EventType.DISCONNECTED,
+            EventType.PENDING_CONNECTION_EXPIRED,
+            EventType.RUNTIME_STATE_CHANGED,
         }
         if event.event_type not in permitted_types:
             return None
@@ -587,60 +727,41 @@ class SessionAccessController:
             return None
         if policy.notification_privacy is NotificationPrivacy.ANONYMIZE:
             changes: dict[str, object] = {}
+            onion = getattr(event, 'onion', None)
             if hasattr(event, 'alias'):
                 changes['alias'] = 'unknown'
             if hasattr(event, 'onion'):
                 changes['onion'] = None
+            if event.event_type in {
+                EventType.INCOMING_CONNECTION,
+                EventType.PENDING_CONNECTION_EXPIRED,
+            } and isinstance(onion, str):
+                with self._lock:
+                    handles = self._call_handles.setdefault(conn, {})
+                    action_handle = next(
+                        (
+                            handle
+                            for handle, target in handles.items()
+                            if target == onion
+                        ),
+                        None,
+                    )
+                    if (
+                        action_handle is None
+                        and event.event_type is EventType.INCOMING_CONNECTION
+                    ):
+                        action_handle = secrets.token_urlsafe(32)
+                        handles[action_handle] = onion
+                    if event.event_type is EventType.PENDING_CONNECTION_EXPIRED:
+                        for handle, target in tuple(handles.items()):
+                            if target == onion:
+                                action_handle = handle
+                                handles.pop(handle, None)
+                                break
+                if hasattr(event, 'action_handle'):
+                    changes['action_handle'] = action_handle
             clone = IpcEvent.from_dict(json.loads(event.to_json()))
             for field_name, value in changes.items():
                 setattr(clone, field_name, value)
             return clone
         return event
-
-    @staticmethod
-    def _session_auth_event(
-        event_type: EventType, prompt: SessionAuthPrompt
-    ) -> IpcEvent:
-        """Builds one session-auth challenge event.
-
-        Args:
-            event_type (EventType): The event type to create.
-            prompt (SessionAuthPrompt): The challenge payload.
-
-        Returns:
-            IpcEvent: The typed authentication event.
-        """
-        return create_event(
-            event_type,
-            {'challenge': prompt.challenge, 'salt': prompt.salt},
-        )
-
-    @staticmethod
-    def _rate_limited_event(retry_after: int) -> IpcEvent:
-        """Builds one local-auth cooldown event.
-
-        Args:
-            retry_after (int): Remaining cooldown seconds.
-
-        Returns:
-            IpcEvent: The typed rate-limit event.
-        """
-        return create_event(
-            EventType.LOCAL_AUTH_RATE_LIMITED,
-            {'retry_after': retry_after},
-        )
-
-    @staticmethod
-    def _disconnect_client(conn: socket.socket) -> None:
-        """Closes one IPC socket after terminal authentication failure.
-
-        Args:
-            conn (socket.socket): The client socket.
-
-        Returns:
-            None
-        """
-        try:
-            conn.close()
-        except OSError:
-            pass

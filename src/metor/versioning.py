@@ -11,12 +11,12 @@ IPC_PROTOCOL_VERSION: int = 2
 IPC_PROTOCOL_MIN_SUPPORTED: int = 2
 
 # Daemon-to-daemon Tor handshake and message-wire generation.
-PEER_PROTOCOL_VERSION: int = 2
-PEER_PROTOCOL_MIN_SUPPORTED: int = 2
+PEER_PROTOCOL_VERSION: int = 3
+PEER_PROTOCOL_MIN_SUPPORTED: int = 3
 
 # Durable SQLite/SQLCipher schema generation stored in PRAGMA user_version.
-DB_SCHEMA_VERSION: int = 2
-DB_SCHEMA_MIN_SUPPORTED: int = 2
+DB_SCHEMA_VERSION: int = 3
+DB_SCHEMA_MIN_SUPPORTED: int = 3
 
 # Persisted password-protected profile-master-key document generation.
 KEYSLOT_FORMAT_VERSION: int = 1

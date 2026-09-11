@@ -2,7 +2,6 @@
 
 import base64
 import binascii
-from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import socket
@@ -12,18 +11,15 @@ from typing import TYPE_CHECKING, Callable, Optional
 from metor.core.api import (
     ContentType,
     Delivery,
-    FallbackSuccessEvent,
     InboxNotificationEvent,
     IpcEvent,
-    LiveMessageUnavailableEvent,
     MessageReceivedEvent,
-    VoiceChunkAcceptedEvent,
+    MessageDirectionCode,
+    RuntimeStateChangedEvent,
     VoiceChunkReceivedEvent,
     VoiceContent,
     VoiceFinalizedEvent,
-    VoiceResourceLimitEvent,
-    VoiceResourcePressureEvent,
-    VoiceStartedEvent,
+    VoiceIncomingStartedEvent,
     is_valid_message_id,
 )
 from metor.core.daemon.managed.models import TorCommand
@@ -39,31 +35,16 @@ from metor.utils import Constants
 
 # Local Package Imports
 from ..state import StateTracker
+from ..router.admission import FrameAdmission
 from ...notify import NotificationPayload
+from .models import VoiceTurn
+from .outbound import VoiceOutboundMixin
 
 if TYPE_CHECKING:
     from metor.data.profile import Config
 
 
-@dataclass
-class VoiceTurn:
-    """Tracks one peer-bound logical Voice turn and its resume position."""
-
-    alias: str
-    onion: str
-    msg_id: str
-    delivery: Delivery
-    codec: str
-    blob_id: str
-    data: bytearray
-    timestamp: str
-    acknowledged_offset: int = 0
-    duration_ms: Optional[int] = None
-    finalized: bool = False
-    pressure_emitted: bool = False
-
-
-class VoiceTransferManager:
+class VoiceTransferManager(VoiceOutboundMixin):
     """Owns bounded Voice capture, receive, resume, and fallback state."""
 
     def __init__(
@@ -78,6 +59,8 @@ class VoiceTransferManager:
         has_clients_callback: Optional[Callable[[], bool]] = None,
         has_live_consumers_callback: Optional[Callable[[], bool]] = None,
         notify_callback: Optional[Callable[[NotificationPayload], None]] = None,
+        transition_lock: Optional[threading.RLock] = None,
+        purge_fence: Optional[threading.Event] = None,
     ) -> None:
         """Initializes Voice transfer state with existing message primitives.
 
@@ -92,6 +75,8 @@ class VoiceTransferManager:
             has_live_consumers_callback (Optional[Callable[[], bool]]): Active
                 interactive LIVE-consumer check.
             notify_callback (Optional[Callable]): Detached notification sink.
+            transition_lock (Optional[threading.RLock]): Shared identity transition lock.
+            purge_fence (Optional[threading.Event]): Destructive lifecycle fence.
 
         Returns:
             None
@@ -105,10 +90,63 @@ class VoiceTransferManager:
         self._has_clients = has_clients_callback or (lambda: True)
         self._has_live_consumers = has_live_consumers_callback or (lambda: True)
         self._notify = notify_callback or (lambda _payload: None)
-        self._lock = threading.RLock()
+        self._lock = transition_lock or threading.RLock()
+        self._purge_fence = purge_fence or threading.Event()
         self._outbound: dict[str, VoiceTurn] = {}
         self._inbound: dict[tuple[str, str], VoiceTurn] = {}
+        self._reconcile_drop_ownership()
         self._hydrate_retained_turns()
+
+    @staticmethod
+    def _metadata_blob_ids(payload: str) -> Optional[tuple[str, ...]]:
+        """Parses the complete segmented object inventory from Voice metadata."""
+        try:
+            metadata = json.loads(payload)
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(metadata, dict) or not isinstance(
+            metadata.get('blob_id'), str
+        ):
+            return None
+        raw_chunks = metadata.get('chunk_ids')
+        if not isinstance(raw_chunks, list) or any(
+            not isinstance(chunk_id, str) for chunk_id in raw_chunks
+        ):
+            return None
+        return (str(metadata['blob_id']), *(str(item) for item in raw_chunks))
+
+    def _reconcile_drop_ownership(self) -> None:
+        """Completes interrupted temporary-to-persistent Voice promotions."""
+        payloads = [
+            row[3]
+            for row in self._messages.get_pending_outbox()
+            if row[2] == ContentType.VOICE.value
+        ]
+        payloads.extend(self._messages.get_voice_draft_payloads())
+        payloads.extend(
+            record.payload
+            for record in self._messages.get_unread_inbound_voices()
+            if record.delivery == Delivery.DROP.value
+            and self._metadata_finalized(record.payload)
+        )
+        for payload in payloads:
+            blob_ids = self._metadata_blob_ids(payload)
+            if blob_ids is None:
+                continue
+            for blob_id in blob_ids:
+                if self._blobs.exists(blob_id, BlobLifecycle.PERSISTENT):
+                    continue
+                if self._blobs.exists(blob_id, BlobLifecycle.TEMPORARY):
+                    self._blobs.promote(blob_id)
+
+    @staticmethod
+    def _metadata_finalized(payload: str) -> bool:
+        """Reports whether one Voice metadata document is finalized."""
+        try:
+            metadata = json.loads(payload)
+        except (TypeError, ValueError):
+            return False
+        return isinstance(metadata, dict) and metadata.get('finalized') is True
 
     def _hydrate_retained_turns(self) -> None:
         """Restores resumable Voice turns from canonical receipt/blob storage."""
@@ -131,13 +169,18 @@ class VoiceTransferManager:
                     record.payload,
                     record.timestamp,
                 )
-        for inbound_record in self._messages.get_unread_inbound_live_voices():
+        for inbound_record in self._messages.get_unread_inbound_voices():
+            delivery = Delivery(inbound_record.delivery)
+            if delivery is Delivery.DROP and self._metadata_finalized(
+                inbound_record.payload
+            ):
+                continue
             turn = self._turn_from_metadata(
                 inbound_record.peer_onion,
                 inbound_record.msg_id,
                 inbound_record.payload,
                 inbound_record.timestamp,
-                Delivery.LIVE,
+                delivery,
                 BlobLifecycle.TEMPORARY,
             )
             if turn is not None:
@@ -158,7 +201,17 @@ class VoiceTransferManager:
             if not isinstance(metadata, dict):
                 return None
             blob_id = str(metadata['blob_id'])
-            data = self._blobs.read(blob_id, lifecycle)
+            raw_chunk_ids = metadata.get('chunk_ids')
+            if not isinstance(raw_chunk_ids, list) or any(
+                not isinstance(chunk_id, str) for chunk_id in raw_chunk_ids
+            ):
+                return None
+            chunk_ids = [str(chunk_id) for chunk_id in raw_chunk_ids]
+            data = b''.join(
+                self._blobs.read(chunk_id, lifecycle) for chunk_id in chunk_ids
+            )
+            if int(metadata.get('size_bytes', -1)) != len(data):
+                return None
             duration = metadata.get('duration_ms')
             return VoiceTurn(
                 alias=self._contacts.ensure_alias_for_onion(onion) or onion,
@@ -167,6 +220,7 @@ class VoiceTransferManager:
                 delivery=delivery,
                 codec=str(metadata['codec']),
                 blob_id=blob_id,
+                chunk_ids=chunk_ids,
                 data=bytearray(data),
                 timestamp=timestamp,
                 duration_ms=int(duration) if duration is not None else None,
@@ -190,6 +244,7 @@ class VoiceTransferManager:
             {
                 'type': 'voice',
                 'blob_id': turn.blob_id,
+                'chunk_ids': turn.chunk_ids,
                 'codec': turn.codec,
                 'size_bytes': len(turn.data),
                 'duration_ms': turn.duration_ms,
@@ -198,6 +253,30 @@ class VoiceTransferManager:
             },
             separators=(',', ':'),
         )
+
+    @staticmethod
+    def _blob_ids(turn: VoiceTurn) -> tuple[str, ...]:
+        """Returns every object owned by one segmented Voice turn.
+
+        Args:
+            turn (VoiceTurn): Logical Voice turn.
+
+        Returns:
+            tuple[str, ...]: Manifest anchor followed by ordered chunks.
+        """
+        return (turn.blob_id, *turn.chunk_ids)
+
+    def _delete_turn_blobs(self, turn: VoiceTurn, lifecycle: BlobLifecycle) -> None:
+        """Deletes every segmented object owned by one Voice turn."""
+        for blob_id in self._blob_ids(turn):
+            self._blobs.delete(blob_id, lifecycle)
+
+    def _promote_turn_blobs(self, turn: VoiceTurn) -> None:
+        """Idempotently promotes every segmented Voice object."""
+        for blob_id in self._blob_ids(turn):
+            if self._blobs.exists(blob_id, BlobLifecycle.PERSISTENT):
+                continue
+            self._blobs.promote(blob_id)
 
     @staticmethod
     def _wire(command: TorCommand, payload: dict[str, object]) -> bytes:
@@ -239,408 +318,21 @@ class VoiceTransferManager:
             len(turn.data) for turn in self._inbound.values()
         )
 
-    def begin(self, target: str, delivery: Delivery, msg_id: str, codec: str) -> None:
-        """Begins one outbound logical Voice turn.
-
-        Args:
-            target (str): Target alias or onion.
-            delivery (Delivery): LIVE or DROP semantics.
-            msg_id (str): Stable logical message identity.
-            codec (str): Small codec identifier.
-
-        Returns:
-            None
-        """
-        resolved = self._contacts.resolve_target(target)
-        if (
-            not resolved
-            or not is_valid_message_id(msg_id)
-            or not codec
-            or len(codec) > Constants.VOICE_CODEC_MAX_CHARS
-        ):
-            return
-        alias, onion = resolved
-        with self._lock:
-            limit = self._limit()
-            used = self._used_bytes()
-            if msg_id in self._outbound or (limit >= 0 and used >= limit):
-                self._broadcast(
-                    VoiceResourceLimitEvent(
-                        msg_id=msg_id, used_bytes=used, limit_bytes=limit
-                    )
-                )
-                return
-            if (
-                delivery is Delivery.LIVE
-                and self._state.get_connection(onion) is None
-                and not self._is_recovery_plausible(onion)
-                and not self._config.get_bool(SettingKey.FALLBACK_TO_DROP)
-            ):
-                self._broadcast(
-                    LiveMessageUnavailableEvent(alias=alias, onion=onion, msg_id=msg_id)
-                )
-                return
-            blob_id = self._blobs.put(b'', BlobLifecycle.TEMPORARY)
-            turn = VoiceTurn(
-                alias=alias,
-                onion=onion,
-                msg_id=msg_id,
-                delivery=delivery,
-                codec=codec,
-                blob_id=blob_id,
-                data=bytearray(),
-                timestamp=datetime.now(timezone.utc).isoformat(),
-            )
-            self._outbound[msg_id] = turn
-            self._messages.queue_message(
-                contact_onion=onion,
-                direction=MessageDirection.OUT,
-                delivery=delivery,
-                content_type=ContentType.VOICE,
-                payload=self._metadata(turn),
-                status=MessageStatus.PENDING,
-                msg_id=msg_id,
-                timestamp=turn.timestamp,
-            )
-            if delivery is Delivery.LIVE:
-                self._state.add_unacked_message(
-                    onion, msg_id, self._metadata(turn), turn.timestamp
-                )
-            self._send_begin(turn)
-            self._broadcast(
-                VoiceStartedEvent(
-                    alias=alias, onion=onion, msg_id=msg_id, delivery=delivery
-                )
-            )
-
-    def _is_recovery_plausible(self, onion: str) -> bool:
-        """Checks genuine shared LIVE recovery state.
-
-        Args:
-            onion (str): Peer onion identity.
-
-        Returns:
-            bool: True when recovery is active or scheduled.
-        """
-        return (
-            self._state.has_live_reconnect_grace(onion)
-            or self._state.is_retunneling(onion)
-            or self._state.has_outbound_attempt(onion)
-            or self._state.has_scheduled_auto_reconnect(onion)
-            or self._state.is_connected_or_pending(onion)
-        )
-
-    def _send_begin(self, turn: VoiceTurn) -> None:
-        """Sends or resumes one Voice begin envelope when LIVE is available.
-
-        Args:
-            turn (VoiceTurn): Outbound Voice turn.
-
-        Returns:
-            None
-        """
-        conn = self._state.get_connection(turn.onion)
-        if conn is None or turn.delivery is not Delivery.LIVE:
-            return
-        try:
-            conn.sendall(
-                self._wire(
-                    TorCommand.VOICE_BEGIN,
-                    {
-                        'id': turn.msg_id,
-                        'codec': turn.codec,
-                        'offset': turn.acknowledged_offset,
-                        'timestamp': turn.timestamp,
-                    },
-                )
-            )
-        except OSError:
-            return
-
-    def append(self, msg_id: str, offset: int, encoded_data: str) -> None:
-        """Appends and durably retains one exact-offset Voice chunk.
-
-        Args:
-            msg_id (str): Stable Voice identity.
-            offset (int): Expected current byte length.
-            encoded_data (str): Strict Base64 chunk.
-
-        Returns:
-            None
-        """
-        try:
-            chunk = base64.b64decode(encoded_data, validate=True)
-        except (binascii.Error, ValueError):
-            return
-        if not chunk or len(chunk) > Constants.VOICE_CHUNK_MAX_BYTES:
-            return
-        with self._lock:
-            turn = self._outbound.get(msg_id)
-            if turn is None or turn.finalized or offset != len(turn.data):
-                return
-            limit = self._limit()
-            used = self._used_bytes()
-            if limit >= 0 and used + len(chunk) > limit:
-                self._broadcast(
-                    VoiceResourceLimitEvent(
-                        msg_id=msg_id, used_bytes=used, limit_bytes=limit
-                    )
-                )
-                self._finalize_locked(turn, None)
-                return
-            turn.data.extend(chunk)
-            old_blob_id = turn.blob_id
-            turn.blob_id = self._blobs.put(bytes(turn.data), BlobLifecycle.TEMPORARY)
-            if not self._messages.update_retained_bytes(
-                turn.onion, msg_id, len(turn.data), self._metadata(turn)
-            ):
-                self._blobs.delete(turn.blob_id, BlobLifecycle.TEMPORARY)
-                turn.blob_id = old_blob_id
-                del turn.data[-len(chunk) :]
-                return
-            self._blobs.delete(old_blob_id, BlobLifecycle.TEMPORARY)
-            self._send_chunk(turn, offset, encoded_data)
-            self._broadcast(
-                VoiceChunkAcceptedEvent(msg_id=msg_id, next_offset=len(turn.data))
-            )
-            used += len(chunk)
-            if (
-                limit > 0
-                and not turn.pressure_emitted
-                and used * 100 >= limit * Constants.VOICE_PRESSURE_PERCENT
-            ):
-                turn.pressure_emitted = True
-                self._broadcast(
-                    VoiceResourcePressureEvent(
-                        msg_id=msg_id, used_bytes=used, limit_bytes=limit
-                    )
-                )
-            if limit >= 0 and used >= limit:
-                self._broadcast(
-                    VoiceResourceLimitEvent(
-                        msg_id=msg_id, used_bytes=used, limit_bytes=limit
-                    )
-                )
-                self._finalize_locked(turn, None)
-
-    def _send_chunk(self, turn: VoiceTurn, offset: int, encoded_data: str) -> None:
-        """Sends one chunk over the current session without changing retention.
-
-        Args:
-            turn (VoiceTurn): Outbound Voice turn.
-            offset (int): Chunk byte offset.
-            encoded_data (str): Base64 chunk bytes.
-
-        Returns:
-            None
-        """
-        conn = self._state.get_connection(turn.onion)
-        if conn is None or turn.delivery is not Delivery.LIVE:
-            return
-        try:
-            conn.sendall(
-                self._wire(
-                    TorCommand.VOICE_CHUNK,
-                    {'id': turn.msg_id, 'offset': offset, 'data': encoded_data},
-                )
-            )
-        except OSError:
-            return
-
-    def finalize(self, msg_id: str, duration_ms: Optional[int]) -> None:
-        """Finalizes one outbound Voice turn.
-
-        Args:
-            msg_id (str): Stable Voice identity.
-            duration_ms (Optional[int]): Optional capture duration metadata.
-
-        Returns:
-            None
-        """
-        with self._lock:
-            turn = self._outbound.get(msg_id)
-            if turn is not None and not turn.finalized:
-                self._finalize_locked(turn, duration_ms)
-
-    def _finalize_locked(self, turn: VoiceTurn, duration_ms: Optional[int]) -> None:
-        """Commits Voice finalization while holding the manager lock.
-
-        Args:
-            turn (VoiceTurn): Outbound logical turn.
-            duration_ms (Optional[int]): Optional duration metadata.
-
-        Returns:
-            None
-        """
-        turn.duration_ms = duration_ms
-        turn.finalized = True
-        self._messages.update_retained_bytes(
-            turn.onion, turn.msg_id, len(turn.data), self._metadata(turn)
-        )
-        conn = self._state.get_connection(turn.onion)
-        if conn is not None and turn.delivery is Delivery.LIVE:
-            try:
-                conn.sendall(
-                    self._wire(
-                        TorCommand.VOICE_END,
-                        {'id': turn.msg_id, 'size': len(turn.data)},
-                    )
-                )
-            except OSError:
-                pass
-        if (
-            turn.delivery is Delivery.LIVE
-            and conn is None
-            and not self._is_recovery_plausible(turn.onion)
-            and self._config.get_bool(SettingKey.FALLBACK_TO_DROP)
-        ):
-            records = self._messages.promote_pending_live_to_drop(
-                turn.onion, [turn.msg_id]
-            )
-            if records:
-                self._blobs.promote(turn.blob_id)
-                turn.delivery = Delivery.DROP
-                self._state.remove_unacked_message(turn.onion, turn.msg_id)
-                self._outbound.pop(turn.msg_id, None)
-                self._broadcast(
-                    FallbackSuccessEvent(
-                        alias=turn.alias,
-                        onion=turn.onion,
-                        count=1,
-                        msg_ids=[turn.msg_id],
-                    )
-                )
-        elif turn.delivery is Delivery.DROP:
-            self._blobs.promote(turn.blob_id)
-            self._outbound.pop(turn.msg_id, None)
-        self._broadcast(
-            VoiceFinalizedEvent(msg_id=turn.msg_id, size_bytes=len(turn.data))
-        )
-
-    def replay(self, onion: str) -> list[str]:
-        """Resumes retained Voice turns after their acknowledged byte offset.
-
-        Args:
-            onion (str): Recovered peer identity.
-
-        Returns:
-            list[str]: Logical Voice IDs resumed.
-        """
-        resumed: list[str] = []
-        with self._lock:
-            for turn in self._outbound.values():
-                if turn.onion != onion or turn.delivery is not Delivery.LIVE:
-                    continue
-                self._send_begin(turn)
-                offset = turn.acknowledged_offset
-                while offset < len(turn.data):
-                    chunk = bytes(
-                        turn.data[offset : offset + Constants.VOICE_CHUNK_MAX_BYTES]
-                    )
-                    self._send_chunk(
-                        turn, offset, base64.b64encode(chunk).decode('ascii')
-                    )
-                    offset += len(chunk)
-                if turn.finalized:
-                    conn = self._state.get_connection(onion)
-                    if conn is not None:
-                        conn.sendall(
-                            self._wire(
-                                TorCommand.VOICE_END,
-                                {'id': turn.msg_id, 'size': len(turn.data)},
-                            )
-                        )
-                resumed.append(turn.msg_id)
-        return resumed
-
-    def promote_fallback(self, msg_ids: list[str]) -> None:
-        """Releases LIVE Voice budget after message-level fallback commits.
-
-        Args:
-            msg_ids (list[str]): Successfully promoted logical identities.
-
-        Returns:
-            None
-        """
-        with self._lock:
-            for msg_id in msg_ids:
-                turn = self._outbound.get(msg_id)
-                if turn is None:
-                    continue
-                self._blobs.promote(turn.blob_id)
-                turn.delivery = Delivery.DROP
-                self._outbound.pop(msg_id, None)
-
-    def acknowledge(self, onion: str, msg_id: str, next_offset: int) -> None:
-        """Advances an outbound Voice resume cursor monotonically.
-
-        Args:
-            onion (str): Peer onion identity.
-            msg_id (str): Stable Voice identity.
-            next_offset (int): Peer-confirmed contiguous byte offset.
-
-        Returns:
-            None
-        """
-        with self._lock:
-            turn = self._outbound.get(msg_id)
-            if turn is None or turn.onion != onion:
-                return
-            if next_offset < turn.acknowledged_offset or next_offset > len(turn.data):
-                return
-            turn.acknowledged_offset = next_offset
-            self._messages.update_retained_bytes(
-                onion, msg_id, len(turn.data), self._metadata(turn)
-            )
-            if turn.finalized and next_offset == len(turn.data):
-                self._messages.update_outbound_message_status(
-                    onion, msg_id, MessageStatus.DELIVERED
-                )
-                self._state.remove_unacked_message(onion, msg_id)
-                self._blobs.delete(turn.blob_id, BlobLifecycle.TEMPORARY)
-                self._outbound.pop(msg_id, None)
-
-    def acknowledge_complete(self, onion: str, msg_id: str) -> None:
-        """Releases retained LIVE Voice after a terminal logical-message ACK."""
-        with self._lock:
-            turn = self._outbound.get(msg_id)
-            if (
-                turn is None
-                or turn.onion != onion
-                or turn.delivery is not Delivery.LIVE
-            ):
-                return
-            self._blobs.delete(turn.blob_id, BlobLifecycle.TEMPORARY)
-            self._outbound.pop(msg_id, None)
-
-    def release_consumed(self, onion: str, msg_ids: list[str]) -> None:
-        """Releases Core-owned inbound LIVE Voice payloads after explicit consume."""
-        with self._lock:
-            for msg_id in msg_ids:
-                turn = self._inbound.pop((onion, msg_id), None)
-                if turn is not None and turn.delivery is Delivery.LIVE:
-                    self._blobs.delete(turn.blob_id, BlobLifecycle.TEMPORARY)
-
-    def outbound_target(self, msg_id: str) -> Optional[str]:
-        """Returns the immutable onion target bound at Voice begin."""
-        with self._lock:
-            turn = self._outbound.get(msg_id)
-            return turn.onion if turn is not None else None
-
-    def outbound_delivery(self, msg_id: str) -> Optional[Delivery]:
-        """Returns the immutable delivery semantics selected at Voice begin."""
-        with self._lock:
-            turn = self._outbound.get(msg_id)
-            return turn.delivery if turn is not None else None
-
     def dismiss_inbound(self, onion: str) -> None:
         """Shreds all retained inbound LIVE Voice payloads for one context."""
+        if self._purge_fence.is_set():
+            return
         with self._lock:
-            keys = [key for key in self._inbound if key[0] == onion]
+            if self._purge_fence.is_set():
+                return
+            keys = [
+                key
+                for key, turn in self._inbound.items()
+                if key[0] == onion and turn.delivery is Delivery.LIVE
+            ]
             for key in keys:
                 turn = self._inbound.pop(key)
-                if turn.delivery is Delivery.LIVE:
-                    self._blobs.delete(turn.blob_id, BlobLifecycle.TEMPORARY)
+                self._delete_turn_blobs(turn, BlobLifecycle.TEMPORARY)
 
     def receive_begin(
         self,
@@ -648,7 +340,7 @@ class VoiceTransferManager:
         onion: str,
         payload: dict[str, object],
         delivery: Delivery = Delivery.LIVE,
-    ) -> bool:
+    ) -> FrameAdmission:
         """Validates and initializes one inbound Voice stream.
 
         Args:
@@ -658,8 +350,10 @@ class VoiceTransferManager:
             delivery (Delivery): Logical LIVE or DROP semantics.
 
         Returns:
-            bool: True when the session must terminate for resource pressure.
+            FrameAdmission: Typed acceptance or termination outcome.
         """
+        if self._purge_fence.is_set():
+            return FrameAdmission.PURGING
         msg_id = payload.get('id')
         codec = payload.get('codec')
         timestamp = payload.get('timestamp')
@@ -668,20 +362,30 @@ class VoiceTransferManager:
             or not is_valid_message_id(msg_id)
             or not isinstance(codec, str)
         ):
-            return True
+            return FrameAdmission.MALFORMED
         if not codec or len(codec) > Constants.VOICE_CODEC_MAX_CHARS:
-            return True
+            return FrameAdmission.MALFORMED
         with self._lock:
+            if self._purge_fence.is_set():
+                return FrameAdmission.PURGING
             if (onion, msg_id) in self._inbound:
                 turn = self._inbound[(onion, msg_id)]
+                if delivery is Delivery.DROP and turn.delivery is Delivery.LIVE:
+                    turn.delivery = Delivery.DROP
+                    if not self._messages.promote_inbound_voice_to_drop(
+                        onion, msg_id, self._metadata(turn), len(turn.data)
+                    ):
+                        return FrameAdmission.MALFORMED
+                    if turn.finalized:
+                        self._promote_turn_blobs(turn)
                 self._send_receive_offset(conn, turn)
-                return False
+                return FrameAdmission.ACCEPTED
             retained = self._messages.get_inbound_voice(onion, msg_id)
             if retained is not None:
                 try:
                     metadata = json.loads(retained.payload)
                     if not isinstance(metadata, dict):
-                        return True
+                        return FrameAdmission.MALFORMED
                     stored_delivery = Delivery(retained.delivery)
                     finalized = bool(metadata.get('finalized', False))
                     blob_id = str(metadata['blob_id'])
@@ -690,7 +394,15 @@ class VoiceTransferManager:
                         if stored_delivery is Delivery.DROP and finalized
                         else BlobLifecycle.TEMPORARY
                     )
-                    retained_data = self._blobs.read(blob_id, lifecycle)
+                    raw_chunk_ids = metadata.get('chunk_ids')
+                    if not isinstance(raw_chunk_ids, list) or any(
+                        not isinstance(chunk_id, str) for chunk_id in raw_chunk_ids
+                    ):
+                        return FrameAdmission.MALFORMED
+                    chunk_ids = [str(chunk_id) for chunk_id in raw_chunk_ids]
+                    retained_data = b''.join(
+                        self._blobs.read(chunk_id, lifecycle) for chunk_id in chunk_ids
+                    )
                     turn = VoiceTurn(
                         alias=self._contacts.ensure_alias_for_onion(onion) or onion,
                         onion=onion,
@@ -698,6 +410,7 @@ class VoiceTransferManager:
                         delivery=stored_delivery,
                         codec=str(metadata['codec']),
                         blob_id=blob_id,
+                        chunk_ids=chunk_ids,
                         data=bytearray(retained_data),
                         timestamp=retained.timestamp,
                         duration_ms=(
@@ -708,35 +421,72 @@ class VoiceTransferManager:
                         finalized=finalized,
                     )
                 except (KeyError, TypeError, ValueError, OSError):
-                    return True
+                    return FrameAdmission.MALFORMED
+                if delivery is Delivery.DROP and turn.delivery is Delivery.LIVE:
+                    turn.delivery = Delivery.DROP
+                    if not self._messages.promote_inbound_voice_to_drop(
+                        onion, msg_id, self._metadata(turn), len(turn.data)
+                    ):
+                        return FrameAdmission.MALFORMED
+                    if turn.finalized:
+                        self._promote_turn_blobs(turn)
                 if finalized:
                     self._send_receive_offset(conn, turn)
-                    return False
+                    return FrameAdmission.ACCEPTED
                 self._inbound[(onion, msg_id)] = turn
                 self._send_receive_offset(conn, turn)
-                return False
+                return FrameAdmission.ACCEPTED
             if self._messages.has_inbound_message(onion, msg_id):
-                conn.sendall(f'{TorCommand.ACK.value} {msg_id}\n'.encode('ascii'))
-                return False
+                if not self._messages.has_inbound_voice_receipt(onion, msg_id):
+                    return FrameAdmission.MALFORMED
+                if delivery is Delivery.LIVE:
+                    self._state.send_frame(
+                        conn,
+                        f'{TorCommand.VOICE_COMMIT_ACK.value} {msg_id}\n'.encode(
+                            'ascii'
+                        ),
+                    )
+                    return FrameAdmission.ACCEPTED
+                alias = self._contacts.ensure_alias_for_onion(onion) or onion
+                blob_id = self._blobs.put(b'', BlobLifecycle.TEMPORARY)
+                turn = VoiceTurn(
+                    alias=alias,
+                    onion=onion,
+                    msg_id=msg_id,
+                    delivery=Delivery.DROP,
+                    codec=codec,
+                    blob_id=blob_id,
+                    chunk_ids=[],
+                    data=bytearray(),
+                    timestamp=str(timestamp or datetime.now(timezone.utc).isoformat()),
+                )
+                if not self._messages.promote_inbound_voice_to_drop(
+                    onion, msg_id, self._metadata(turn), 0
+                ):
+                    self._delete_turn_blobs(turn, BlobLifecycle.TEMPORARY)
+                    return FrameAdmission.MALFORMED
+                self._inbound[(onion, msg_id)] = turn
+                self._send_receive_offset(conn, turn)
+                return FrameAdmission.ACCEPTED
             limit = self._limit()
             if limit >= 0 and self._used_bytes() >= limit:
-                return True
+                return FrameAdmission.RESOURCE_LIMIT
             if delivery is Delivery.LIVE:
                 unseen_limit = self._config.get_int(SettingKey.MAX_UNSEEN_LIVE_MSGS)
                 if unseen_limit == 0 and not self._has_live_consumers():
-                    return True
+                    return FrameAdmission.RESOURCE_LIMIT
                 if (
                     unseen_limit > 0
                     and self._messages.get_unread_live_count(onion) >= unseen_limit
                 ):
-                    return True
+                    return FrameAdmission.RESOURCE_LIMIT
             else:
                 unseen_limit = self._config.get_int(SettingKey.MAX_UNSEEN_DROP_MSGS)
                 if (
                     unseen_limit != -1
                     and self._messages.get_unread_drop_count(onion) >= unseen_limit
                 ):
-                    return True
+                    return FrameAdmission.RESOURCE_LIMIT
             alias = self._contacts.ensure_alias_for_onion(onion) or onion
             blob_id = self._blobs.put(b'', BlobLifecycle.TEMPORARY)
             turn = VoiceTurn(
@@ -746,6 +496,7 @@ class VoiceTransferManager:
                 delivery=delivery,
                 codec=codec,
                 blob_id=blob_id,
+                chunk_ids=[],
                 data=bytearray(),
                 timestamp=str(timestamp or datetime.now(timezone.utc).isoformat()),
             )
@@ -760,23 +511,42 @@ class VoiceTransferManager:
                 msg_id=msg_id,
                 timestamp=turn.timestamp,
             )
-            return False
+            if (
+                delivery is Delivery.LIVE
+                and self._has_clients()
+                and self._has_live_consumers()
+            ):
+                self._broadcast(
+                    VoiceIncomingStartedEvent(
+                        alias=alias,
+                        onion=onion,
+                        msg_id=msg_id,
+                        delivery=delivery,
+                        codec=codec,
+                        next_offset=0,
+                    )
+                )
+            self._send_receive_offset(conn, turn)
+            return FrameAdmission.ACCEPTED
 
-    @staticmethod
-    def _send_receive_offset(conn: socket.socket, turn: VoiceTurn) -> None:
+    def _send_receive_offset(self, conn: socket.socket, turn: VoiceTurn) -> None:
         """Acknowledges a resumable byte boundary or completed DROP item."""
-        if turn.delivery is Delivery.DROP and turn.finalized:
-            conn.sendall(f'{TorCommand.ACK.value} {turn.msg_id}\n'.encode('ascii'))
+        if turn.finalized:
+            self._state.send_frame(
+                conn,
+                f'{TorCommand.VOICE_COMMIT_ACK.value} {turn.msg_id}\n'.encode('ascii'),
+            )
             return
-        conn.sendall(
+        self._state.send_frame(
+            conn,
             f'{TorCommand.VOICE_ACK.value} {turn.msg_id} {len(turn.data)}\n'.encode(
                 'ascii'
-            )
+            ),
         )
 
     def receive_chunk(
         self, conn: socket.socket, onion: str, payload: dict[str, object]
-    ) -> bool:
+    ) -> FrameAdmission:
         """Validates, retains, streams, and acknowledges one inbound chunk.
 
         Args:
@@ -785,8 +555,10 @@ class VoiceTransferManager:
             payload (dict[str, object]): Decoded chunk envelope.
 
         Returns:
-            bool: True when local resource policy requires disconnect.
+            FrameAdmission: Typed acceptance or termination outcome.
         """
+        if self._purge_fence.is_set():
+            return FrameAdmission.PURGING
         msg_id = payload.get('id')
         offset = payload.get('offset')
         encoded = payload.get('data')
@@ -796,50 +568,72 @@ class VoiceTransferManager:
             or type(offset) is not int
             or not isinstance(encoded, str)
         ):
-            return True
+            return FrameAdmission.MALFORMED
         try:
             chunk = base64.b64decode(encoded, validate=True)
         except (binascii.Error, ValueError):
-            return True
+            return FrameAdmission.MALFORMED
         if not chunk or len(chunk) > Constants.VOICE_CHUNK_MAX_BYTES:
-            return True
+            return FrameAdmission.MALFORMED
+        received_event: Optional[VoiceChunkReceivedEvent] = None
         with self._lock:
+            if self._purge_fence.is_set():
+                return FrameAdmission.PURGING
             turn = self._inbound.get((onion, msg_id))
-            if turn is None or offset != len(turn.data):
-                return True
-            limit = self._limit()
-            if limit >= 0 and self._used_bytes() + len(chunk) > limit:
-                return True
-            turn.data.extend(chunk)
-            old_blob_id = turn.blob_id
-            turn.blob_id = self._blobs.put(bytes(turn.data), BlobLifecycle.TEMPORARY)
-            if not self._messages.update_inbound_voice_metadata(
-                onion, msg_id, len(turn.data), self._metadata(turn)
-            ):
-                self._blobs.delete(turn.blob_id, BlobLifecycle.TEMPORARY)
-                turn.blob_id = old_blob_id
-                del turn.data[-len(chunk) :]
-                return True
-            self._blobs.delete(old_blob_id, BlobLifecycle.TEMPORARY)
-            self._broadcast(
-                VoiceChunkReceivedEvent(
-                    alias=turn.alias,
-                    onion=onion,
-                    msg_id=msg_id,
-                    offset=offset,
-                    data=encoded,
-                )
-            )
-            conn.sendall(
-                f'{TorCommand.VOICE_ACK.value} {msg_id} {len(turn.data)}\n'.encode(
+            if turn is None or turn.finalized or offset > len(turn.data):
+                return FrameAdmission.MALFORMED
+            if offset < len(turn.data):
+                duplicate_end = offset + len(chunk)
+                if (
+                    duplicate_end > len(turn.data)
+                    or bytes(turn.data[offset:duplicate_end]) != chunk
+                ):
+                    return FrameAdmission.MALFORMED
+            else:
+                limit = self._limit()
+                if limit >= 0 and self._used_bytes() + len(chunk) > limit:
+                    return FrameAdmission.RESOURCE_LIMIT
+                chunk_id = self._blobs.put(chunk, BlobLifecycle.TEMPORARY)
+                turn.chunk_ids.append(chunk_id)
+                turn.data.extend(chunk)
+                if not self._messages.update_inbound_voice_metadata(
+                    onion, msg_id, len(turn.data), self._metadata(turn)
+                ):
+                    self._blobs.delete(chunk_id, BlobLifecycle.TEMPORARY)
+                    turn.chunk_ids.pop()
+                    del turn.data[-len(chunk) :]
+                    return FrameAdmission.RESOURCE_LIMIT
+                if (
+                    turn.delivery is Delivery.LIVE
+                    and self._has_clients()
+                    and self._has_live_consumers()
+                ):
+                    received_event = VoiceChunkReceivedEvent(
+                        alias=turn.alias,
+                        onion=onion,
+                        msg_id=msg_id,
+                        offset=offset,
+                        data=encoded,
+                        delivery=turn.delivery,
+                        codec=turn.codec,
+                    )
+            next_offset = len(turn.data)
+        if received_event is not None:
+            self._broadcast(received_event)
+        try:
+            self._state.send_frame(
+                conn,
+                f'{TorCommand.VOICE_ACK.value} {msg_id} {next_offset}\n'.encode(
                     'ascii'
-                )
+                ),
             )
-            return False
+        except OSError:
+            pass
+        return FrameAdmission.ACCEPTED
 
     def receive_end(
         self, conn: socket.socket, onion: str, payload: dict[str, object]
-    ) -> bool:
+    ) -> FrameAdmission:
         """Finalizes one inbound Voice item after exact size validation.
 
         Args:
@@ -848,20 +642,49 @@ class VoiceTransferManager:
             payload (dict[str, object]): Decoded final envelope.
 
         Returns:
-            bool: True when the sequence is malformed.
+            FrameAdmission: Typed acceptance or termination outcome.
         """
+        if self._purge_fence.is_set():
+            return FrameAdmission.PURGING
         msg_id = payload.get('id')
         size = payload.get('size')
+        duration_ms = payload.get('duration_ms')
         if (
             not isinstance(msg_id, str)
             or not is_valid_message_id(msg_id)
             or type(size) is not int
+            or (duration_ms is not None and type(duration_ms) is not int)
         ):
-            return True
+            return FrameAdmission.MALFORMED
         with self._lock:
+            if self._purge_fence.is_set():
+                return FrameAdmission.PURGING
             turn = self._inbound.get((onion, msg_id))
-            if turn is None or size != len(turn.data):
-                return True
+            if turn is None:
+                retained = self._messages.get_inbound_voice(onion, msg_id)
+                if retained is not None:
+                    try:
+                        metadata = json.loads(retained.payload)
+                    except (TypeError, ValueError):
+                        metadata = None
+                    if isinstance(metadata, dict) and metadata.get('finalized') is True:
+                        self._state.send_frame(
+                            conn,
+                            f'{TorCommand.VOICE_COMMIT_ACK.value} {msg_id}\n'.encode(
+                                'ascii'
+                            ),
+                        )
+                        return FrameAdmission.ACCEPTED
+                return FrameAdmission.MALFORMED
+            if turn.finalized:
+                self._state.send_frame(
+                    conn,
+                    f'{TorCommand.VOICE_COMMIT_ACK.value} {msg_id}\n'.encode('ascii'),
+                )
+                return FrameAdmission.ACCEPTED
+            if size != len(turn.data):
+                return FrameAdmission.MALFORMED
+            turn.duration_ms = duration_ms
             turn.finalized = True
             self._messages.update_inbound_voice_metadata(
                 onion, msg_id, len(turn.data), self._metadata(turn)
@@ -873,10 +696,13 @@ class VoiceTransferManager:
                 duration_ms=turn.duration_ms,
             )
             if turn.delivery is Delivery.DROP:
-                self._blobs.promote(turn.blob_id)
+                self._promote_turn_blobs(turn)
                 self._inbound.pop((onion, msg_id), None)
                 self._notify_inbox(turn)
-                conn.sendall(f'{TorCommand.ACK.value} {msg_id}\n'.encode('ascii'))
+                self._state.send_frame(
+                    conn,
+                    f'{TorCommand.VOICE_COMMIT_ACK.value} {msg_id}\n'.encode('ascii'),
+                )
             else:
                 if self._has_clients() and self._has_live_consumers():
                     self._broadcast(
@@ -892,7 +718,18 @@ class VoiceTransferManager:
                 else:
                     self._notify_inbox(turn)
                 self._send_receive_offset(conn, turn)
-            return False
+            self._broadcast(
+                VoiceFinalizedEvent(
+                    msg_id=msg_id,
+                    size_bytes=len(turn.data),
+                    onion=onion,
+                    delivery=turn.delivery,
+                    direction=MessageDirectionCode.IN,
+                    duration_ms=turn.duration_ms,
+                )
+            )
+            self._broadcast(RuntimeStateChangedEvent(scope='inbox', onion=onion))
+            return FrameAdmission.ACCEPTED
 
     def _notify_inbox(self, turn: VoiceTurn) -> None:
         """Emits content-free attached or detached unseen notification metadata."""

@@ -1,22 +1,24 @@
 """Inbound drop-message persistence and tunnel-stream processing."""
 
 import socket
+import threading
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable, Optional, Tuple
 
-from metor.core.api import ContentType, Delivery, InboxNotificationEvent, IpcEvent
+from metor.core.api import InboxNotificationEvent, IpcEvent, RuntimeStateChangedEvent
 from metor.core.daemon.managed.models import TorCommand
 from metor.data import (
     HistoryActor,
     HistoryEvent,
-    MessageDirection,
-    MessageStatus,
+    InboundDropOutcome,
     SettingKey,
 )
 
 # Local Package Imports
 from ...notify import NotificationPayload
+from ..state import StateTracker
 from ..stream import TcpStreamReader
+from .admission import FrameAdmission
 from .codec import decode_drop_payload
 
 if TYPE_CHECKING:
@@ -36,9 +38,11 @@ class DropMessageRouter:
         has_clients_callback: Callable[[], bool],
         notify_callback: Callable[[NotificationPayload], None],
         config: 'Config',
+        state: StateTracker,
         voice_frame_callback: Optional[
-            Callable[[socket.socket, str, str, str], bool]
+            Callable[[socket.socket, str, str, str], FrameAdmission]
         ] = None,
+        transition_lock: Optional[threading.RLock] = None,
     ) -> None:
         """Initializes drop routing with its explicit collaborators.
 
@@ -50,7 +54,9 @@ class DropMessageRouter:
             has_clients_callback (Callable[[], bool]): Connected-client check.
             notify_callback (Callable[[NotificationPayload], None]): Detached notifier.
             config (Config): Profile configuration.
+            state (StateTracker): Shared socket frame serializer.
             voice_frame_callback (Optional[Callable]): Bounded DROP Voice frame handler.
+            transition_lock (Optional[threading.RLock]): State publication barrier.
 
         Returns:
             None
@@ -62,7 +68,9 @@ class DropMessageRouter:
         self._has_clients_callback: Callable[[], bool] = has_clients_callback
         self._notify_callback: Callable[[NotificationPayload], None] = notify_callback
         self._config: 'Config' = config
+        self._state = state
         self._voice_frame_callback = voice_frame_callback
+        self._transition_lock = transition_lock or threading.RLock()
 
     def _process_inbound_drop_frame(
         self,
@@ -90,15 +98,26 @@ class DropMessageRouter:
         if decoded_payload is None:
             return False
         msg_id, content, timestamp = decoded_payload
-        if self._mm.has_inbound_message(onion, msg_id):
-            self._acknowledge_drop(conn, msg_id)
-            return False
+        with self._transition_lock:
+            return self._store_decoded_drop(
+                conn, onion, msg_id, content, timestamp, transport
+            )
 
+    def _store_decoded_drop(
+        self,
+        conn: socket.socket,
+        onion: str,
+        msg_id: str,
+        content: str,
+        timestamp: Optional[str],
+        transport: str,
+    ) -> bool:
+        """Commits and publishes one validated DROP under the state barrier."""
         unread_drop_limit: int = self._config.get_int(SettingKey.MAX_UNSEEN_DROP_MSGS)
-        if (
-            unread_drop_limit != -1
-            and self._mm.get_unread_drop_count(onion) >= unread_drop_limit
-        ):
+        outcome = self._mm.store_inbound_drop_text(
+            onion, msg_id, content, timestamp, unread_drop_limit
+        )
+        if outcome is InboundDropOutcome.LIMIT:
             self._hm.log_event(
                 HistoryEvent.FAILED,
                 onion,
@@ -106,19 +125,10 @@ class DropMessageRouter:
                 detail_text='Drop backlog limit reached.',
             )
             return True
-
-        queue_result = self._mm.queue_message(
-            contact_onion=onion,
-            direction=MessageDirection.IN,
-            delivery=Delivery.DROP,
-            content_type=ContentType.TEXT,
-            payload=content,
-            status=MessageStatus.UNREAD,
-            msg_id=msg_id,
-            timestamp=timestamp,
-        )
+        if outcome is InboundDropOutcome.CONFLICT:
+            return False
         self._acknowledge_drop(conn, msg_id)
-        if queue_result.was_duplicate:
+        if outcome is InboundDropOutcome.DUPLICATE:
             return False
 
         self._hm.log_event(
@@ -140,10 +150,10 @@ class DropMessageRouter:
                         timestamp=datetime.now(timezone.utc).isoformat(),
                     )
                 )
+        self._broadcast(RuntimeStateChangedEvent(scope='inbox', onion=onion))
         return False
 
-    @staticmethod
-    def _acknowledge_drop(conn: socket.socket, msg_id: str) -> None:
+    def _acknowledge_drop(self, conn: socket.socket, msg_id: str) -> None:
         """Sends one best-effort DROP acknowledgement.
 
         Args:
@@ -154,7 +164,9 @@ class DropMessageRouter:
             None
         """
         try:
-            conn.sendall(f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8'))
+            self._state.send_frame(
+                conn, f'{TorCommand.DROP_ACK.value} {msg_id}\n'.encode('utf-8')
+            )
         except Exception:
             pass
 
@@ -177,6 +189,35 @@ class DropMessageRouter:
                 conn, onion, payload_id, b64_payload, 'session'
             )
 
+    def allows_inbound_drops(self) -> bool:
+        """Returns the shared semantic DROP admission policy.
+
+        Args:
+            None
+
+        Returns:
+            bool: True when inbound DROP content is enabled.
+        """
+        return self._config.get_bool(SettingKey.ALLOW_DROPS)
+
+    def reject_disabled_drop(self, conn: socket.socket) -> None:
+        """Applies privacy-aware rejection for disabled inbound DROP content.
+
+        Args:
+            conn (socket.socket): Authenticated peer socket.
+
+        Returns:
+            None
+        """
+        if not self._config.get_bool(SettingKey.EXPOSE_DROP_REJECTION):
+            return
+        try:
+            self._state.send_frame(
+                conn, f'{TorCommand.REJECT.value} drops_disabled\n'.encode('utf-8')
+            )
+        except OSError:
+            pass
+
     def process_async_drop(
         self, conn: socket.socket, stream: TcpStreamReader, onion: str
     ) -> None:
@@ -193,8 +234,9 @@ class DropMessageRouter:
         if not self._config.get_bool(SettingKey.ALLOW_DROPS):
             if self._config.get_bool(SettingKey.EXPOSE_DROP_REJECTION):
                 try:
-                    conn.sendall(
-                        f'{TorCommand.REJECT.value} drops_disabled\n'.encode('utf-8')
+                    self._state.send_frame(
+                        conn,
+                        f'{TorCommand.REJECT.value} drops_disabled\n'.encode('utf-8'),
                     )
                 except Exception:
                     pass

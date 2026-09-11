@@ -14,11 +14,13 @@ from metor.core.api import (
     EventType,
     IpcEvent,
     JsonValue,
+    MessageOperationReason,
+    VoiceContent,
 )
 from metor.core.daemon.managed.crypto import Crypto
 from metor.core.daemon.managed.models import TunnelState, SessionState
 from metor.core.tor import TorManager
-from metor.data import HistoryManager, ContactManager, MessageManager
+from metor.data import HistoryManager, ContactManager, MessageDirection, MessageManager
 from metor.data.blob import BlobStore
 
 # Local Package Imports
@@ -54,6 +56,8 @@ class NetworkManager:
         config: 'Config',
         state: Optional[StateTracker] = None,
         blob_store: Optional[BlobStore] = None,
+        purge_fence: Optional[threading.Event] = None,
+        operation_lock: Optional[threading.RLock] = None,
     ) -> None:
         """
         Initializes the NetworkManager and its isolated sub-components.
@@ -72,6 +76,8 @@ class NetworkManager:
             config (Config): The profile configuration instance.
             state (Optional[StateTracker]): Optional shared transport state.
             blob_store (Optional[BlobStore]): Active profile external object store.
+            purge_fence (Optional[threading.Event]): Destructive lifecycle fence.
+            operation_lock (Optional[threading.RLock]): State publication barrier.
 
         Returns:
             None
@@ -90,6 +96,8 @@ class NetworkManager:
             notify_callback=notify_callback,
             config=config,
             blob_store=blob_store,
+            purge_fence=purge_fence,
+            operation_lock=operation_lock,
         )
 
         self._controller: ConnectionController = ConnectionController(
@@ -403,6 +411,38 @@ class NetworkManager:
     def voice_delivery(self, msg_id: str) -> Optional[Delivery]:
         """Returns the delivery semantics fixed at Voice begin."""
         return self._router.voice_delivery(msg_id)
+
+    def read_voice_chunk(
+        self,
+        onion: str,
+        msg_id: str,
+        direction: MessageDirection,
+        offset: int,
+        max_bytes: int,
+    ) -> tuple[
+        Optional[VoiceContent],
+        Optional[Delivery],
+        Optional[bytes],
+        int,
+        bool,
+        Optional[MessageOperationReason],
+    ]:
+        """Reads one bounded retained Voice byte range."""
+        return self._router.read_voice_chunk(
+            onion, msg_id, direction, offset, max_bytes
+        )
+
+    def release_inbound_voice_item(self, onion: str, msg_id: str) -> bool:
+        """Consumes one finalized inbound Voice item explicitly."""
+        return self._router.release_inbound_voice_item(onion, msg_id)
+
+    def commit_voice_draft(self, target: str, msg_id: str) -> bool:
+        """Publishes one finalized DROP Voice draft."""
+        return self._router.commit_voice_draft(target, msg_id)
+
+    def cancel_voice_draft(self, target: str, msg_id: str) -> bool:
+        """Cancels one unsent DROP Voice draft."""
+        return self._router.cancel_voice_draft(target, msg_id)
 
     def dismiss_inbound_voice(self, onion: str) -> None:
         """Releases inbound Voice payloads for a dismissed LIVE context."""

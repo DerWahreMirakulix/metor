@@ -1,7 +1,6 @@
 """Live-message routing, durable acceptance, and acknowledgement handling."""
 
 import socket
-import threading
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable, Optional, Tuple, cast
 
@@ -17,6 +16,7 @@ from metor.core.api import (
     MessageOperationReason,
     MessageReceivedEvent,
     ReadReceiptEvent,
+    RuntimeStateChangedEvent,
     TextContent,
     get_current_request_id,
 )
@@ -27,11 +27,13 @@ from metor.data import (
     HistoryReasonCode,
     MessageDirection,
     MessageStatus,
+    PendingLiveAdmission,
     SettingKey,
 )
 
 # Local Package Imports
 from ..state import StateTracker
+from .admission import FrameAdmission
 from ...notify import NotificationPayload
 from .codec import build_message_frame, decode_live_payload
 
@@ -82,7 +84,6 @@ class LiveMessageRouter:
         )
         self._notify_callback: Callable[[NotificationPayload], None] = notify_callback
         self._config: 'Config' = config
-        self._pending_lock: threading.Lock = threading.Lock()
 
     def _should_defer_live_message(self, onion: str) -> bool:
         """Checks whether one outbound live message should stay recoverable.
@@ -115,27 +116,25 @@ class LiveMessageRouter:
         Returns:
             Optional[MessageOperationReason]: Limit reason, or None after queueing.
         """
-        with self._pending_lock:
-            pending_count, pending_bytes = self._mm.get_pending_live_usage()
-            count_limit = self._config.get_int(SettingKey.MAX_PENDING_LIVE_MSGS)
-            byte_limit = self._config.get_int(SettingKey.MAX_PENDING_LIVE_BYTES)
-            if count_limit >= 0 and pending_count >= count_limit:
-                return MessageOperationReason.COUNT_LIMIT
-            payload_bytes = len(msg.encode('utf-8'))
-            if byte_limit >= 0 and pending_bytes + payload_bytes > byte_limit:
-                return MessageOperationReason.BYTE_LIMIT
-            self._mm.queue_message(
-                contact_onion=onion,
-                direction=MessageDirection.OUT,
-                delivery=Delivery.LIVE,
-                content_type=ContentType.TEXT,
-                payload=msg,
-                status=MessageStatus.PENDING,
-                msg_id=msg_id,
-                timestamp=timestamp,
-            )
+        outcome = self._mm.queue_pending_live_if_capacity(
+            onion,
+            ContentType.TEXT,
+            msg,
+            msg_id,
+            timestamp,
+            0,
+            self._config.get_int(SettingKey.MAX_PENDING_LIVE_MSGS),
+            self._config.get_int(SettingKey.MAX_PENDING_LIVE_BYTES),
+        )
+        if outcome is PendingLiveAdmission.COUNT_LIMIT:
+            return MessageOperationReason.COUNT_LIMIT
+        if outcome is PendingLiveAdmission.BYTE_LIMIT:
+            return MessageOperationReason.BYTE_LIMIT
+        if outcome is PendingLiveAdmission.DUPLICATE:
+            return MessageOperationReason.INVALID_SELECTION
+        if outcome is PendingLiveAdmission.ACCEPTED:
             self._state.add_unacked_message(onion, msg_id, msg, timestamp)
-            return None
+        return None
 
     def send_message(self, target: str, msg: str, msg_id: str) -> None:
         """Sends one live message or durably defers it for recovery.
@@ -229,10 +228,11 @@ class LiveMessageRouter:
                     )
                 )
                 return
-            conn.sendall(
+            self._state.send_frame(
+                conn,
                 build_message_frame(TorCommand.MSG, msg_id, msg, timestamp).encode(
                     'utf-8'
-                )
+                ),
             )
             self._state.touch_session_activity(onion)
         except Exception:
@@ -240,7 +240,7 @@ class LiveMessageRouter:
 
     def process_incoming_msg(
         self, conn: socket.socket, onion: str, payload_id: str, b64_payload: str
-    ) -> bool:
+    ) -> FrameAdmission:
         """Persists one incoming live message before acknowledging the peer.
 
         Args:
@@ -250,7 +250,7 @@ class LiveMessageRouter:
             b64_payload (str): The Base64-encoded message envelope.
 
         Returns:
-            bool: True when the session must close for backlog pressure.
+            FrameAdmission: Accepted, malformed, or resource-limited outcome.
         """
         try:
             msg_id, content, timestamp = decode_live_payload(payload_id, b64_payload)
@@ -261,24 +261,26 @@ class LiveMessageRouter:
                 actor=HistoryActor.SYSTEM,
                 detail_text=str(exc),
             )
-            return True
+            return FrameAdmission.MALFORMED
 
         alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
         if self._mm.has_inbound_message(onion, msg_id):
+            if not self._mm.has_inbound_text_receipt(onion, msg_id):
+                return FrameAdmission.MALFORMED
             self._acknowledge(conn, msg_id)
-            return False
+            return FrameAdmission.ACCEPTED
 
         has_clients: bool = self._has_clients_callback()
         has_live_consumers: bool = self._has_live_consumers_callback()
         unread_live_limit: int = self._config.get_int(SettingKey.MAX_UNSEEN_LIVE_MSGS)
         if unread_live_limit == 0:
             if not has_live_consumers:
-                return True
+                return FrameAdmission.RESOURCE_LIMIT
         elif (
             unread_live_limit > 0
             and self._mm.get_unread_live_count(onion) >= unread_live_limit
         ):
-            return True
+            return FrameAdmission.RESOURCE_LIMIT
 
         queue_result = self._mm.queue_message(
             contact_onion=onion,
@@ -292,7 +294,7 @@ class LiveMessageRouter:
         )
         self._acknowledge(conn, msg_id)
         if queue_result.was_duplicate:
-            return False
+            return FrameAdmission.ACCEPTED
 
         if alias:
             if has_clients and has_live_consumers:
@@ -320,10 +322,10 @@ class LiveMessageRouter:
                         timestamp=datetime.now(timezone.utc).isoformat(),
                     )
                 )
-        return False
+        self._broadcast(RuntimeStateChangedEvent(scope='inbox', onion=onion))
+        return FrameAdmission.ACCEPTED
 
-    @staticmethod
-    def _acknowledge(conn: socket.socket, msg_id: str) -> None:
+    def _acknowledge(self, conn: socket.socket, msg_id: str) -> None:
         """Sends one best-effort transport acknowledgement.
 
         Args:
@@ -334,12 +336,14 @@ class LiveMessageRouter:
             None
         """
         try:
-            conn.sendall(f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8'))
+            self._state.send_frame(
+                conn, f'{TorCommand.ACK.value} {msg_id}\n'.encode('utf-8')
+            )
         except Exception:
             pass
 
     def process_incoming_ack(self, onion: str, msg_id: str) -> None:
-        """Finalizes a delivered outbound live or session-routed drop message.
+        """Finalizes a delivered outbound LIVE text message.
 
         Args:
             onion (str): The peer onion identity.
@@ -348,28 +352,38 @@ class LiveMessageRouter:
         Returns:
             None
         """
-        drop_timestamp: Optional[str] = self._mm.mark_drop_delivered(onion, msg_id)
-        if drop_timestamp is not None:
-            self._hm.log_event(
-                HistoryEvent.SENT, onion, actor=HistoryActor.LOCAL, transport='session'
-            )
-            self._broadcast(
-                AckEvent(
-                    msg_id=msg_id,
-                    timestamp=drop_timestamp,
-                    request_id=self._state.pop_message_request_id(msg_id),
-                )
-            )
+        timestamp = self._mm.mark_live_text_delivered(onion, msg_id)
+        if timestamp is None:
             return
-
-        acked_msg: Optional[Tuple[str, str]] = self._state.remove_unacked_message(
-            onion, msg_id
-        )
-        self._mm.update_outbound_message_status(onion, msg_id, MessageStatus.DELIVERED)
+        self._state.remove_unacked_message(onion, msg_id)
         self._broadcast(
             AckEvent(
                 msg_id=msg_id,
-                timestamp=acked_msg[1] if acked_msg else None,
+                timestamp=timestamp,
+                request_id=self._state.pop_message_request_id(msg_id),
+            )
+        )
+
+    def process_incoming_drop_ack(self, onion: str, msg_id: str) -> None:
+        """Finalizes only one pending session-routed DROP text message.
+
+        Args:
+            onion (str): Peer onion identity.
+            msg_id (str): Stable logical identity.
+
+        Returns:
+            None
+        """
+        timestamp = self._mm.mark_drop_delivered(onion, msg_id)
+        if timestamp is None:
+            return
+        self._hm.log_event(
+            HistoryEvent.SENT, onion, actor=HistoryActor.LOCAL, transport='session'
+        )
+        self._broadcast(
+            AckEvent(
+                msg_id=msg_id,
+                timestamp=timestamp,
                 request_id=self._state.pop_message_request_id(msg_id),
             )
         )

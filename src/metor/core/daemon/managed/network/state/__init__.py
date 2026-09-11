@@ -63,6 +63,22 @@ class StateTracker(
         self._ui_focus_counts: Dict[str, int] = {}
         self._session_last_activity: Dict[str, float] = {}
         self._last_disconnect_reasons: Dict[str, ConnectionReasonCode] = {}
+        self._socket_write_locks: Dict[socket.socket, threading.Lock] = {}
+
+    def send_frame(self, conn: socket.socket, frame: bytes) -> None:
+        """Serializes one complete application frame per shared peer socket.
+
+        Args:
+            conn (socket.socket): Authenticated peer socket.
+            frame (bytes): Complete bounded application frame.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            write_lock = self._socket_write_locks.setdefault(conn, threading.Lock())
+        with write_lock:
+            conn.sendall(frame)
 
 
 __all__ = ['PendingConnectionReason', 'PendingConnectionSnapshot', 'StateTracker']

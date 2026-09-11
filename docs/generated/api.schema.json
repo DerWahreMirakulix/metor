@@ -194,6 +194,32 @@
         "codec"
       ]
     },
+    "CancelVoiceCommand": {
+      "title": "CancelVoiceCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "msg_id"
+      ]
+    },
     "ChangePasswordCommand": {
       "title": "ChangePasswordCommand",
       "type": "object",
@@ -307,6 +333,32 @@
         }
       }
     },
+    "CommitVoiceCommand": {
+      "title": "CommitVoiceCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "msg_id"
+      ]
+    },
     "ConfigureQuickUnlockCommand": {
       "title": "ConfigureQuickUnlockCommand",
       "type": "object",
@@ -394,6 +446,20 @@
         },
         "msg_id": {
           "type": "string"
+        },
+        "direction": {
+          "anyOf": [
+            {
+              "enum": [
+                "in",
+                "out"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -840,6 +906,48 @@
         }
       }
     },
+    "GetVoiceChunkCommand": {
+      "title": "GetVoiceChunkCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "in",
+            "out"
+          ],
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer"
+        },
+        "max_bytes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "target",
+        "msg_id",
+        "direction",
+        "offset",
+        "max_bytes"
+      ]
+    },
     "InitCommand": {
       "title": "InitCommand",
       "type": "object",
@@ -1055,6 +1163,32 @@
         "target"
       ]
     },
+    "ReleaseVoiceCommand": {
+      "title": "ReleaseVoiceCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "msg_id"
+      ]
+    },
     "RemoveContactCommand": {
       "title": "RemoveContactCommand",
       "type": "object",
@@ -1211,6 +1345,9 @@
             "off"
           ],
           "type": "string"
+        },
+        "device_lifecycle": {
+          "type": "boolean"
         }
       }
     },
@@ -1481,6 +1618,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "msg_id": {
           "type": "string"
         },
@@ -1523,6 +1670,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "profile": {
           "type": "string"
         }
@@ -1549,6 +1706,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -1591,6 +1758,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "profile": {
           "type": "string"
         },
@@ -1627,6 +1804,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "profile": {
           "type": "string"
         }
@@ -1653,6 +1840,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -1701,6 +1898,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         }
@@ -1727,6 +1934,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -1778,6 +1995,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -1804,6 +2031,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -1825,6 +2062,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -1877,6 +2124,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -1917,6 +2174,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -1984,6 +2251,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -2005,6 +2282,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -2036,6 +2323,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -2057,6 +2354,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -2113,6 +2420,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "command": {
           "type": "string"
         }
@@ -2144,6 +2461,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -2165,6 +2492,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -2198,6 +2535,9 @@
               "type": "null"
             }
           ]
+        },
+        "device_lifecycle": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -2228,6 +2568,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "key": {
           "type": "string"
         }
@@ -2251,6 +2601,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -2287,6 +2647,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -2332,6 +2702,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -2353,6 +2733,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -2385,6 +2775,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "key": {
           "type": "string"
         }
@@ -2411,6 +2811,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -2467,6 +2877,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -2535,6 +2955,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -2591,6 +3021,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -2657,6 +3097,7 @@
                 "duplicate_incoming_pending",
                 "live_backlog_limit_reached",
                 "live_voice_limit_reached",
+                "invalid_peer_frame",
                 "idle_timeout"
               ],
               "type": "string"
@@ -2689,6 +3130,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -2757,6 +3208,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -2807,6 +3268,7 @@
                 "duplicate_incoming_pending",
                 "live_backlog_limit_reached",
                 "live_voice_limit_reached",
+                "invalid_peer_frame",
                 "idle_timeout"
               ],
               "type": "string"
@@ -2839,6 +3301,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -2915,6 +3387,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "active": {
           "type": "array",
           "items": {
@@ -2967,6 +3449,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -3007,6 +3499,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -3055,6 +3557,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -3091,6 +3603,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -3149,6 +3671,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -3194,6 +3726,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -3215,6 +3757,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -3250,6 +3802,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -3297,6 +3859,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -3318,6 +3890,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -3349,6 +3931,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -3375,6 +3967,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -3396,6 +3998,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -3436,6 +4048,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -3457,6 +4079,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -3513,6 +4145,7 @@
                 "duplicate_incoming_pending",
                 "live_backlog_limit_reached",
                 "live_voice_limit_reached",
+                "invalid_peer_frame",
                 "idle_timeout"
               ],
               "type": "string"
@@ -3551,6 +4184,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "target": {
           "type": "string"
         }
@@ -3577,6 +4220,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -3625,6 +4278,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -3666,6 +4329,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -3693,6 +4366,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -3708,7 +4391,11 @@
             "count_limit",
             "byte_limit",
             "outbound_pending_live",
-            "active_live_context"
+            "active_live_context",
+            "ambiguous_identity",
+            "not_finalized",
+            "invalid_range",
+            "unsupported_content"
           ],
           "type": "string"
         },
@@ -3753,6 +4440,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -3811,6 +4508,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -3832,6 +4539,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -3880,6 +4597,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "profile": {
           "type": "string"
         }
@@ -3906,6 +4633,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -3966,6 +4703,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "entries": {},
         "profile": {
           "type": "string"
@@ -4020,6 +4767,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "inbox": {
           "type": "object"
         }
@@ -4046,6 +4803,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -4104,6 +4871,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -4149,10 +4926,30 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
         "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action_handle": {
           "anyOf": [
             {
               "type": "string"
@@ -4205,6 +5002,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -4276,6 +5083,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -4297,6 +5114,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -4328,6 +5155,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -4349,6 +5186,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -4400,6 +5247,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -4421,6 +5278,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -4459,6 +5326,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "max_clients": {
           "type": "integer"
         }
@@ -4491,6 +5368,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -4506,7 +5393,11 @@
             "count_limit",
             "byte_limit",
             "outbound_pending_live",
-            "active_live_context"
+            "active_live_context",
+            "ambiguous_identity",
+            "not_finalized",
+            "invalid_range",
+            "unsupported_content"
           ],
           "type": "string"
         },
@@ -4544,6 +5435,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -4595,6 +5496,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -4613,7 +5524,11 @@
             "count_limit",
             "byte_limit",
             "outbound_pending_live",
-            "active_live_context"
+            "active_live_context",
+            "ambiguous_identity",
+            "not_finalized",
+            "invalid_range",
+            "unsupported_content"
           ],
           "type": "string"
         },
@@ -4664,6 +5579,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -4692,7 +5617,11 @@
             "count_limit",
             "byte_limit",
             "outbound_pending_live",
-            "active_live_context"
+            "active_live_context",
+            "ambiguous_identity",
+            "not_finalized",
+            "invalid_range",
+            "unsupported_content"
           ],
           "type": "string"
         }
@@ -4726,6 +5655,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "retry_after": {
           "type": "integer"
         }
@@ -4752,6 +5691,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -4794,6 +5743,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "target": {
           "type": "string"
         },
@@ -4812,7 +5771,11 @@
             "count_limit",
             "byte_limit",
             "outbound_pending_live",
-            "active_live_context"
+            "active_live_context",
+            "ambiguous_identity",
+            "not_finalized",
+            "invalid_range",
+            "unsupported_content"
           ],
           "type": "string"
         },
@@ -4851,6 +5814,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -4897,6 +5870,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -4979,6 +5962,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -5000,6 +5993,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -5048,6 +6051,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "profile": {
           "type": "string"
         }
@@ -5074,6 +6087,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -5122,6 +6145,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "profile": {
           "type": "string"
         }
@@ -5148,6 +6181,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -5201,6 +6244,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -5237,6 +6290,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -5285,6 +6348,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -5321,6 +6394,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -5369,6 +6452,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -5410,6 +6503,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -5431,6 +6534,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -5462,6 +6575,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -5483,6 +6606,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -5535,6 +6668,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -5577,6 +6720,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "target": {
           "type": "string"
         }
@@ -5603,6 +6756,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -5651,6 +6814,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -5693,10 +6866,30 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
         "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action_handle": {
           "anyOf": [
             {
               "type": "string"
@@ -5741,6 +6934,7 @@
             "duplicate_incoming_pending",
             "live_backlog_limit_reached",
             "live_voice_limit_reached",
+            "invalid_peer_frame",
             "idle_timeout"
           ],
           "type": "string"
@@ -5774,6 +6968,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "profile": {
           "type": "string"
         }
@@ -5800,6 +7004,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -5872,6 +7086,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "profiles": {
           "type": "array",
           "items": {}
@@ -5899,6 +7123,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -5949,6 +7183,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "enabled": {
           "type": "boolean"
         }
@@ -5975,6 +7219,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -6030,6 +7284,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -6070,6 +7334,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -6122,6 +7396,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -6211,6 +7495,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -6247,6 +7541,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -6295,6 +7599,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "profile": {
           "type": "string"
         },
@@ -6326,6 +7640,145 @@
         "onion"
       ]
     },
+    "RuntimeSnapshotUnavailableEvent": {
+      "title": "RuntimeSnapshotUnavailableEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "RuntimeStateChangedEvent": {
+      "title": "RuntimeStateChangedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scope": {
+          "type": "string"
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "scope"
+      ]
+    },
+    "SelfDestructCleanupFailedEvent": {
+      "title": "SelfDestructCleanupFailedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "profile": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "key_destroyed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "profile"
+      ]
+    },
     "SelfDestructCompletedEvent": {
       "title": "SelfDestructCompletedEvent",
       "type": "object",
@@ -6344,6 +7797,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -6375,8 +7838,60 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
+    },
+    "SelfDestructKeyDestroyedEvent": {
+      "title": "SelfDestructKeyDestroyedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "profile": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile"
+      ]
     },
     "SessionAuthenticatedEvent": {
       "title": "SessionAuthenticatedEvent",
@@ -6396,6 +7911,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -6422,6 +7947,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -6458,6 +7993,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -6509,6 +8054,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -6530,6 +8085,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -6568,6 +8133,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "scope": {
           "type": "string"
         },
@@ -6598,6 +8173,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -6649,6 +8234,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -6675,6 +8270,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -6696,6 +8301,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -6769,6 +8384,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "error": {
           "anyOf": [
             {
@@ -6830,6 +8455,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -6900,6 +8535,16 @@
               "type": "null"
             }
           ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -6921,6 +8566,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -6950,6 +8605,62 @@
         "alias"
       ]
     },
+    "VoiceCancelledEvent": {
+      "title": "VoiceCancelledEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alias": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "alias",
+        "msg_id"
+      ]
+    },
     "VoiceChunkAcceptedEvent": {
       "title": "VoiceChunkAcceptedEvent",
       "type": "object",
@@ -6968,6 +8679,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -7010,6 +8731,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -7031,6 +8762,23 @@
               "type": "null"
             }
           ]
+        },
+        "delivery": {
+          "enum": [
+            "live",
+            "drop"
+          ],
+          "type": "string"
+        },
+        "codec": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -7038,6 +8786,168 @@
         "msg_id",
         "offset",
         "data"
+      ]
+    },
+    "VoiceCommittedEvent": {
+      "title": "VoiceCommittedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alias": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "alias",
+        "msg_id"
+      ]
+    },
+    "VoiceDataEvent": {
+      "title": "VoiceDataEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alias": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "in",
+            "out"
+          ],
+          "type": "string"
+        },
+        "delivery": {
+          "enum": [
+            "live",
+            "drop"
+          ],
+          "type": "string"
+        },
+        "codec": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer"
+        },
+        "next_offset": {
+          "type": "integer"
+        },
+        "size_bytes": {
+          "type": "integer"
+        },
+        "data": {
+          "type": "string"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "alias",
+        "msg_id",
+        "direction",
+        "delivery",
+        "codec",
+        "offset",
+        "next_offset",
+        "size_bytes",
+        "data",
+        "complete"
       ]
     },
     "VoiceFinalizedEvent": {
@@ -7064,16 +8974,275 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "msg_id": {
           "type": "string"
         },
         "size_bytes": {
           "type": "integer"
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "delivery": {
+          "anyOf": [
+            {
+              "enum": [
+                "live",
+                "drop"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "direction": {
+          "anyOf": [
+            {
+              "enum": [
+                "in",
+                "out"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
         "msg_id",
         "size_bytes"
+      ]
+    },
+    "VoiceIncomingStartedEvent": {
+      "title": "VoiceIncomingStartedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alias": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "delivery": {
+          "enum": [
+            "live",
+            "drop"
+          ],
+          "type": "string"
+        },
+        "codec": {
+          "type": "string"
+        },
+        "next_offset": {
+          "type": "integer"
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "alias",
+        "msg_id",
+        "delivery",
+        "codec",
+        "next_offset"
+      ]
+    },
+    "VoiceOperationRejectedEvent": {
+      "title": "VoiceOperationRejectedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "invalid_selection",
+            "wrong_peer",
+            "not_pending_live",
+            "not_drop",
+            "pending_delivery",
+            "not_found",
+            "no_recovery",
+            "count_limit",
+            "byte_limit",
+            "outbound_pending_live",
+            "active_live_context",
+            "ambiguous_identity",
+            "not_finalized",
+            "invalid_range",
+            "unsupported_content"
+          ],
+          "type": "string"
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "msg_id",
+        "reason"
+      ]
+    },
+    "VoiceReleasedEvent": {
+      "title": "VoiceReleasedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alias": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "alias",
+        "msg_id"
       ]
     },
     "VoiceResourceLimitEvent": {
@@ -7100,6 +9269,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "used_bytes": {
           "type": "integer"
         },
@@ -7109,6 +9288,57 @@
         "msg_id": {
           "anyOf": [
             {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "delivery": {
+          "anyOf": [
+            {
+              "enum": [
+                "live",
+                "drop"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "enum": [
+                "invalid_selection",
+                "wrong_peer",
+                "not_pending_live",
+                "not_drop",
+                "pending_delivery",
+                "not_found",
+                "no_recovery",
+                "count_limit",
+                "byte_limit",
+                "outbound_pending_live",
+                "active_live_context",
+                "ambiguous_identity",
+                "not_finalized",
+                "invalid_range",
+                "unsupported_content"
+              ],
               "type": "string"
             },
             {
@@ -7146,6 +9376,16 @@
             }
           ]
         },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "used_bytes": {
           "type": "integer"
         },
@@ -7155,6 +9395,30 @@
         "msg_id": {
           "anyOf": [
             {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "delivery": {
+          "anyOf": [
+            {
+              "enum": [
+                "live",
+                "drop"
+              ],
               "type": "string"
             },
             {
@@ -7186,6 +9450,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -7242,6 +9516,9 @@
     "begin_voice": {
       "$ref": "#/definitions/BeginVoiceCommand"
     },
+    "cancel_voice": {
+      "$ref": "#/definitions/CancelVoiceCommand"
+    },
     "change_password": {
       "$ref": "#/definitions/ChangePasswordCommand"
     },
@@ -7256,6 +9533,9 @@
     },
     "clear_profile_db": {
       "$ref": "#/definitions/ClearProfileDbCommand"
+    },
+    "commit_voice": {
+      "$ref": "#/definitions/CommitVoiceCommand"
     },
     "configure_quick_unlock": {
       "$ref": "#/definitions/ConfigureQuickUnlockCommand"
@@ -7323,6 +9603,9 @@
     "get_transport_state": {
       "$ref": "#/definitions/GetTransportStateCommand"
     },
+    "get_voice_chunk": {
+      "$ref": "#/definitions/GetVoiceChunkCommand"
+    },
     "init": {
       "$ref": "#/definitions/InitCommand"
     },
@@ -7346,6 +9629,9 @@
     },
     "reject": {
       "$ref": "#/definitions/RejectCommand"
+    },
+    "release_voice": {
+      "$ref": "#/definitions/ReleaseVoiceCommand"
     },
     "remove_contact": {
       "$ref": "#/definitions/RemoveContactCommand"
@@ -7730,11 +10016,23 @@
     "runtime_snapshot": {
       "$ref": "#/definitions/RuntimeSnapshotEvent"
     },
+    "runtime_snapshot_unavailable": {
+      "$ref": "#/definitions/RuntimeSnapshotUnavailableEvent"
+    },
+    "runtime_state_changed": {
+      "$ref": "#/definitions/RuntimeStateChangedEvent"
+    },
+    "self_destruct_cleanup_failed": {
+      "$ref": "#/definitions/SelfDestructCleanupFailedEvent"
+    },
     "self_destruct_completed": {
       "$ref": "#/definitions/SelfDestructCompletedEvent"
     },
     "self_destruct_initiated": {
       "$ref": "#/definitions/SelfDestructInitiatedEvent"
+    },
+    "self_destruct_key_destroyed": {
+      "$ref": "#/definitions/SelfDestructKeyDestroyedEvent"
     },
     "session_authenticated": {
       "$ref": "#/definitions/SessionAuthenticatedEvent"
@@ -7778,14 +10076,32 @@
     "unread_messages": {
       "$ref": "#/definitions/UnreadMessagesEvent"
     },
+    "voice_cancelled": {
+      "$ref": "#/definitions/VoiceCancelledEvent"
+    },
     "voice_chunk_accepted": {
       "$ref": "#/definitions/VoiceChunkAcceptedEvent"
     },
     "voice_chunk_received": {
       "$ref": "#/definitions/VoiceChunkReceivedEvent"
     },
+    "voice_committed": {
+      "$ref": "#/definitions/VoiceCommittedEvent"
+    },
+    "voice_data": {
+      "$ref": "#/definitions/VoiceDataEvent"
+    },
     "voice_finalized": {
       "$ref": "#/definitions/VoiceFinalizedEvent"
+    },
+    "voice_incoming_started": {
+      "$ref": "#/definitions/VoiceIncomingStartedEvent"
+    },
+    "voice_operation_rejected": {
+      "$ref": "#/definitions/VoiceOperationRejectedEvent"
+    },
+    "voice_released": {
+      "$ref": "#/definitions/VoiceReleasedEvent"
     },
     "voice_resource_limit": {
       "$ref": "#/definitions/VoiceResourceLimitEvent"

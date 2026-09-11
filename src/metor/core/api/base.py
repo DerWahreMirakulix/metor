@@ -290,6 +290,7 @@ class IpcEvent(IpcMessage):
     """Base class for all events emitted by the daemon."""
 
     revision: Optional[int] = dataclasses.field(default=None, kw_only=True)
+    epoch: Optional[str] = dataclasses.field(default=None, kw_only=True)
     event_type: EventType = dataclasses.field(init=False)
 
     @classmethod

@@ -14,7 +14,6 @@ import atexit
 import os
 import signal
 import types
-from enum import Enum
 from typing import Optional, Callable, Dict, Union
 from pathlib import Path
 
@@ -37,7 +36,6 @@ from metor.core.api import (
 )
 from metor.core.key import KeyManager
 from metor.core.profile_keys import InvalidCredentialError
-from metor.core.profile_destruction import destroy_profile_storage
 from metor.core.tor import TorManager
 from metor.data.profile import ProfileManager
 from metor.data import (
@@ -73,20 +71,13 @@ from metor.core.daemon.handlers import (
 )
 
 from .command_dispatch import DaemonCommandDispatcher
+from .lifecycle import DaemonLifecycle as DaemonLifecycle
+from .lifecycle import DaemonLifecycleMixin
 from .session_access import SessionAccessController
 from .session_maintenance import SessionMaintenance
 
 
-class DaemonLifecycle(str, Enum):
-    """Security-relevant daemon lifecycle states."""
-
-    LOCKED = 'locked'
-    UNLOCKING = 'unlocking'
-    UNLOCKED = 'unlocked'
-    LOCKING = 'locking'
-
-
-class Daemon:
+class Daemon(DaemonLifecycleMixin):
     """The main orchestrator binding network, cryptography, and logic together."""
 
     def __init__(
@@ -142,6 +133,8 @@ class Daemon:
         )
         self._is_stopping: bool = False
         self._runtime_stop_flag: threading.Event = threading.Event()
+        self._domain_operation_lock = threading.RLock()
+        self._purge_fence = threading.Event()
         self._require_session_auth: bool = require_session_auth
         self._transport_state: StateTracker = StateTracker()
 
@@ -245,6 +238,8 @@ class Daemon:
             config=self._pm.config,
             state=self._transport_state,
             blob_store=runtime.blob_store,
+            purge_fence=self._purge_fence,
+            operation_lock=self._domain_operation_lock,
         )
         self._outbox = OutboxWorker(
             runtime.tm,
@@ -257,6 +252,7 @@ class Daemon:
             state=self._transport_state,
             error_callback=self._on_runtime_internal_error,
             blob_store=runtime.blob_store,
+            operation_lock=self._domain_operation_lock,
         )
         self._session_maintenance = SessionMaintenance(
             network=self._network,
@@ -334,18 +330,22 @@ class Daemon:
         Returns:
             None
         """
-        if self._lifecycle is DaemonLifecycle.LOCKING:
-            return
-        stamp_request_id(event)
-        recipients = (
-            self._session_access.authenticated_recipients()
-            if self._session_access.requires_auth()
-            else self._ipc.active_clients()
-        )
-        for recipient in recipients:
-            filtered = self._session_access.filter_restricted_event(recipient, event)
-            if filtered is not None:
-                self._ipc.broadcast_to(filtered, {recipient})
+        with self._domain_operation_lock:
+            if self._lifecycle is DaemonLifecycle.LOCKING:
+                return
+            if event.event_type is not EventType.RUNTIME_STATE_CHANGED:
+                stamp_request_id(event)
+            recipients = (
+                self._session_access.authenticated_recipients()
+                if self._session_access.requires_auth()
+                else self._ipc.active_clients()
+            )
+            for recipient in recipients:
+                filtered = self._session_access.filter_restricted_event(
+                    recipient, event
+                )
+                if filtered is not None:
+                    self._ipc.broadcast_to(filtered, {recipient})
 
     def _on_live_consumer_available(self) -> None:
         """Notifies the active network runtime about its first live consumer.
@@ -536,110 +536,6 @@ class Daemon:
         except Exception:
             pass
 
-    def _lock_runtime(self, preserve_reliability: bool = True) -> bool:
-        """Tears down all profile-scoped state while keeping IPC available.
-
-        Args:
-            preserve_reliability (bool): Whether normal pending LIVE fallback policy runs.
-
-        Returns:
-            bool: True only when every security-sensitive cleanup step completed.
-        """
-        self._lifecycle = DaemonLifecycle.LOCKING
-        self._runtime_stop_flag.set()
-        cleanup_succeeded: bool = True
-
-        # Revoke access first, then tear down decrypted resources.  The locked
-        # event is emitted only after this method completes.
-        self._session_access.clear_all()
-
-        try:
-            if self._outbox is not None:
-                self._outbox.stop()
-        except Exception:
-            cleanup_succeeded = False
-        try:
-            self._command_dispatcher.clear_all_focus()
-        except Exception:
-            cleanup_succeeded = False
-        try:
-            if self._network is not None:
-                if preserve_reliability:
-                    self._network.disconnect_all()
-                else:
-                    self._network.abort_all()
-        except Exception:
-            cleanup_succeeded = False
-        try:
-            if self._tm is not None:
-                self._tm.stop()
-        except Exception:
-            cleanup_succeeded = False
-        SqlManager.close_connection(self._pm.paths.get_db_file())
-        runtime_db_path: Path = (
-            self._pm.paths.get_config_dir() / Constants.DB_RUNTIME_FILE
-        )
-        try:
-            secure_shred_file(runtime_db_path)
-        except OSError:
-            cleanup_succeeded = False
-            self._on_runtime_internal_error(
-                'Failed to shred the runtime database mirror while locking.'
-            )
-        try:
-            if getattr(self, '_blob_store', None) is not None:
-                assert self._blob_store is not None
-                self._blob_store.close()
-        except Exception:
-            cleanup_succeeded = False
-        try:
-            if self._km is not None:
-                self._km.clear_sensitive_state()
-        except Exception:
-            cleanup_succeeded = False
-
-        self._command_dispatcher.clear_runtime_handlers()
-        self._network = None
-        self._outbox = None
-        self._session_maintenance = None
-        self._crypto = None
-        self._tm = None
-        self._cm = None
-        self._hm = None
-        self._mm = None
-        self._blob_store = None
-        self._km = None
-        self._transport_state = StateTracker()
-        self._lifecycle = (
-            DaemonLifecycle.LOCKED if cleanup_succeeded else DaemonLifecycle.LOCKING
-        )
-        return cleanup_succeeded
-
-    def _nuke_data(self) -> None:
-        """
-        Destroys PMK access before best-effort profile filesystem cleanup.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-        try:
-            destroy_profile_storage(
-                self._pm,
-                prepare_runtime=lambda: self._lock_runtime(preserve_reliability=False),
-            )
-            ipc = getattr(self, '_ipc', None)
-            if ipc is not None:
-                ipc.broadcast(create_event(EventType.SELF_DESTRUCT_COMPLETED))
-        except OSError:
-            self._on_runtime_internal_error(
-                'Encrypted profile cleanup was incomplete after PMK destruction.'
-            )
-        finally:
-            self.stop()
-
     def _on_ipc_disconnect(self, conn: socket.socket) -> None:
         """
         Callback fired when an IPC client disconnects. Cleans up authentication states.
@@ -723,7 +619,28 @@ class Daemon:
             None
         """
         with request_context(cmd.request_id):
-            self._process_ui_command_in_context(cmd, conn)
+            if self._purge_fence.is_set():
+                self._ipc.send_to(
+                    conn,
+                    create_event(
+                        EventType.SELF_DESTRUCT_INITIATED
+                        if isinstance(cmd, SelfDestructCommand)
+                        else EventType.DAEMON_OFFLINE
+                    ),
+                )
+                return
+            with self._domain_operation_lock:
+                if self._purge_fence.is_set():
+                    self._ipc.send_to(
+                        conn,
+                        create_event(
+                            EventType.SELF_DESTRUCT_INITIATED
+                            if isinstance(cmd, SelfDestructCommand)
+                            else EventType.DAEMON_OFFLINE
+                        ),
+                    )
+                    return
+                self._process_ui_command_in_context(cmd, conn)
 
     def _process_ui_command_in_context(
         self,
@@ -745,19 +662,6 @@ class Daemon:
             conn,
             runtime_unlocked=self._lifecycle is DaemonLifecycle.UNLOCKED,
         ):
-            return
-
-        if (
-            isinstance(cmd, SelfDestructCommand)
-            and self._lifecycle is DaemonLifecycle.LOCKED
-            and not self._pm.config.get_bool(SettingKey.SELF_DESTRUCT_REQUIRES_UNLOCK)
-        ):
-            self._lifecycle = DaemonLifecycle.LOCKING
-            self._ipc.send_to(
-                conn,
-                create_event(EventType.SELF_DESTRUCT_INITIATED),
-            )
-            threading.Thread(target=self._nuke_data, daemon=True).start()
             return
 
         if isinstance(cmd, UnlockCommand):
@@ -874,6 +778,7 @@ class Daemon:
             return
 
         if isinstance(cmd, SelfDestructCommand):
+            self._purge_fence.set()
             self._lifecycle = DaemonLifecycle.LOCKING
             self._runtime_stop_flag.set()
             if self._network is not None:

@@ -176,6 +176,7 @@ class RestrictClientCommand(IpcCommand):
     live_while_locked: bool = False
     accept_while_locked: LockedAcceptPolicy = LockedAcceptPolicy.NONE
     notification_privacy: NotificationPrivacy = NotificationPrivacy.OFF
+    device_lifecycle: bool = False
     command_type: CommandType = field(
         default=CommandType.RESTRICT_CLIENT,
         init=False,

@@ -12,6 +12,9 @@ from metor.data.message.models import (
     StoredMessageRecord,
     PendingLiveRecord,
     InboundVoiceRecord,
+    InboundDropOutcome,
+    PendingLiveAdmission,
+    VoicePayloadRecord,
     UnreadInboxSummaryRecord,
 )
 
@@ -30,6 +33,9 @@ __all__ = [
     'StoredMessageRecord',
     'PendingLiveRecord',
     'InboundVoiceRecord',
+    'InboundDropOutcome',
+    'PendingLiveAdmission',
+    'VoicePayloadRecord',
     'UnreadInboxSummaryRecord',
 ]
 

@@ -8,6 +8,7 @@ import os
 import socket
 import threading
 import json
+import secrets
 from typing import List, Callable, Dict, Optional, Iterable
 
 from metor.core.api import (
@@ -91,8 +92,10 @@ class IpcServer:
 
         self._clients: List[socket.socket] = []
         self._lock: threading.Lock = threading.Lock()
+        self._client_write_locks: Dict[socket.socket, threading.Lock] = {}
         self._revision_lock: threading.Lock = threading.Lock()
         self._state_revision: int = 0
+        self._epoch: str = secrets.token_hex(Constants.UUID_MSG_BYTES)
         self._stop_flag: threading.Event = threading.Event()
         self.port: Optional[int] = None
         self._server: Optional[socket.socket] = None
@@ -179,6 +182,7 @@ class IpcServer:
         with self._lock:
             clients: List[socket.socket] = list(self._clients)
             self._clients.clear()
+            self._client_write_locks.clear()
         for client in clients:
             try:
                 client.close()
@@ -226,7 +230,12 @@ class IpcServer:
 
         for client in clients:
             try:
-                client.sendall(msg)
+                with self._lock:
+                    write_lock = self._client_write_locks.setdefault(
+                        client, threading.Lock()
+                    )
+                with write_lock:
+                    client.sendall(msg)
             except Exception:
                 dead_clients.append(client)
 
@@ -235,6 +244,7 @@ class IpcServer:
                 for dead_client in dead_clients:
                     if dead_client in self._clients:
                         self._clients.remove(dead_client)
+                    self._client_write_locks.pop(dead_client, None)
 
             for dead_client in dead_clients:
                 try:
@@ -257,7 +267,10 @@ class IpcServer:
             stamp_request_id(event)
             self._stamp_revision(event)
             msg: bytes = (event.to_json() + '\n').encode('utf-8')
-            conn.sendall(msg)
+            with self._lock:
+                write_lock = self._client_write_locks.setdefault(conn, threading.Lock())
+            with write_lock:
+                conn.sendall(msg)
         except Exception:
             pass
 
@@ -274,6 +287,19 @@ class IpcServer:
             if getattr(event, 'revision', None) is None:
                 self._state_revision += 1
                 event.revision = self._state_revision
+            if getattr(event, 'epoch', None) is None and hasattr(event, 'epoch'):
+                event.epoch = self._epoch
+
+    def current_epoch(self) -> str:
+        """Returns the unguessable sequence epoch for this daemon process.
+
+        Args:
+            None
+
+        Returns:
+            str: Stable epoch for the current IPC server lifetime.
+        """
+        return self._epoch
 
     def current_revision(self) -> int:
         """Returns the latest assigned daemon event revision.
@@ -347,11 +373,13 @@ class IpcServer:
                     )
                     with self._lock:
                         self._clients.append(conn)
+                        self._client_write_locks.setdefault(conn, threading.Lock())
                     handler_thread.start()
                 except Exception:
                     with self._lock:
                         if conn in self._clients:
                             self._clients.remove(conn)
+                        self._client_write_locks.pop(conn, None)
                     try:
                         conn.close()
                     except Exception:
@@ -453,6 +481,7 @@ class IpcServer:
             with self._lock:
                 if conn in self._clients:
                     self._clients.remove(conn)
+                self._client_write_locks.pop(conn, None)
             try:
                 conn.close()
             except Exception:

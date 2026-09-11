@@ -380,27 +380,6 @@ DEVELOPMENT/DEBUG ONLY: permits creation or migration of local plaintext profile
 
 ---
 
-#### `daemon.self_destruct_requires_unlock`
-
-Requires an unlocked daemon before accepting self-destruction.
-
-| Property         | Value                                                                                                                                                                                    |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Type             | `bool`                                                                                                                                                                                   |
-| Default          | `True`                                                                                                                                                                                   |
-| Category         | `Core Daemon`                                                                                                                                                                            |
-| Scope            | `Daemon runtime`                                                                                                                                                                         |
-| Profile Override | `No`                                                                                                                                                                                     |
-| Constraints      | Boolean.                                                                                                                                                                                 |
-| Security Note    | Disabling permits any local IPC actor with command access to destroy a locked profile, creating a destructive availability risk. Use only with appropriate embedded-device IPC controls. |
-
-**CLI Examples**
-
-- `metor settings get daemon.self_destruct_requires_unlock`
-- `metor settings set daemon.self_destruct_requires_unlock true`
-
----
-
 #### `daemon.auto_accept_contacts`
 
 Automatically accepts incoming live sessions from saved contacts.

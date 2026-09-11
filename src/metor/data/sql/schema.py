@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS message_receipts (
     delivery TEXT NOT NULL CHECK (delivery IN ('live', 'drop')),
     content_type TEXT NOT NULL CHECK (content_type IN ('text', 'voice')),
     retained_bytes INTEGER NOT NULL DEFAULT 0 CHECK (retained_bytes >= 0),
-    status TEXT NOT NULL CHECK (status IN ('pending', 'delivered', 'unread', 'read')),
+    status TEXT NOT NULL CHECK (status IN ('pending', 'delivered', 'unread', 'read', 'draft')),
     visible_in_history INTEGER NOT NULL DEFAULT 0 CHECK (visible_in_history IN (0, 1)),
     created_at TEXT NOT NULL CHECK (created_at <> ''),
     updated_at TEXT NOT NULL CHECK (updated_at <> '')

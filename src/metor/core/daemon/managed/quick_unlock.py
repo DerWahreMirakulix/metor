@@ -5,72 +5,24 @@ import hmac
 import json
 import os
 from pathlib import Path
-import secrets
 from typing import Optional
 
-import nacl.pwhash
+from metor.core.auth import (
+    PIN_SALT_BYTES,
+    PIN_VERIFIER_BYTES,
+    build_pin_unlock_proof,
+    create_pin_verifier,
+    derive_pin_verifier,
+)
 
-PIN_VERIFIER_BYTES: int = 32
-PIN_SALT_BYTES: int = nacl.pwhash.argon2id.SALTBYTES
-
-
-def derive_pin_verifier(pin: str, salt_hex: str) -> bytearray:
-    """Derives domain-separated memory-hard verifier material from a PIN.
-
-    Args:
-        pin (str): User PIN supplied outside logs and command repr output.
-        salt_hex (str): Random Argon2id salt in hexadecimal.
-
-    Returns:
-        bytearray: Mutable verifier key material.
-    """
-    salt = bytes.fromhex(salt_hex)
-    if len(salt) != PIN_SALT_BYTES:
-        raise ValueError('Invalid PIN salt length.')
-    return bytearray(
-        nacl.pwhash.argon2id.kdf(
-            PIN_VERIFIER_BYTES,
-            f'metor-pin-quick-unlock:{pin}'.encode('utf-8'),
-            salt,
-            opslimit=nacl.pwhash.argon2id.OPSLIMIT_INTERACTIVE,
-            memlimit=nacl.pwhash.argon2id.MEMLIMIT_INTERACTIVE,
-        )
-    )
-
-
-def create_pin_verifier(pin: str) -> tuple[str, str]:
-    """Creates client-side verifier material without transmitting the raw PIN.
-
-    Args:
-        pin (str): Optional quick-unlock PIN.
-
-    Returns:
-        tuple[str, str]: Salt and verifier hexadecimal strings.
-    """
-    salt = secrets.token_bytes(PIN_SALT_BYTES)
-    verifier = derive_pin_verifier(pin, salt.hex())
-    return salt.hex(), bytes(verifier).hex()
-
-
-def build_pin_unlock_proof(pin: str, salt_hex: str, challenge_hex: str) -> str:
-    """Builds a one-use HMAC proof from a memory-hard PIN verifier.
-
-    Args:
-        pin (str): User-entered PIN.
-        salt_hex (str): Core-provided verifier salt.
-        challenge_hex (str): Core-provided one-use challenge.
-
-    Returns:
-        str: HMAC-SHA256 proof digest.
-    """
-    verifier = derive_pin_verifier(pin, salt_hex)
-    try:
-        return hmac.new(
-            verifier, bytes.fromhex(challenge_hex), hashlib.sha256
-        ).hexdigest()
-    finally:
-        for index in range(len(verifier)):
-            verifier[index] = 0
+__all__ = [
+    'PIN_SALT_BYTES',
+    'PIN_VERIFIER_BYTES',
+    'QuickUnlockStore',
+    'build_pin_unlock_proof',
+    'create_pin_verifier',
+    'derive_pin_verifier',
+]
 
 
 class QuickUnlockStore:

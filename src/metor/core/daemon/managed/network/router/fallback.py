@@ -10,13 +10,13 @@ from metor.core.api import (
     IpcEvent,
     JsonValue,
     MessageOperationReason,
+    RuntimeStateChangedEvent,
 )
 from metor.core.daemon.managed.models import TorCommand
 from metor.data import (
     HistoryActor,
     HistoryEvent,
     HistoryReasonCode,
-    PendingLiveRecord,
     SettingKey,
 )
 
@@ -40,6 +40,9 @@ class FallbackRouter:
         state: StateTracker,
         broadcast_callback: Callable[[IpcEvent], None],
         config: 'Config',
+        transition_lock: Optional[threading.RLock] = None,
+        promote_voice_callback: Optional[Callable[[list[str]], None]] = None,
+        purge_fence: Optional[threading.Event] = None,
     ) -> None:
         """Initializes fallback routing with its explicit collaborators.
 
@@ -50,6 +53,9 @@ class FallbackRouter:
             state (StateTracker): Pending-message and connection state.
             broadcast_callback (Callable[[IpcEvent], None]): IPC event broadcaster.
             config (Config): Profile configuration.
+            transition_lock (Optional[threading.RLock]): Shared message transition lock.
+            promote_voice_callback (Optional[Callable]): Blob ownership transition.
+            purge_fence (Optional[threading.Event]): Destructive lifecycle fence.
 
         Returns:
             None
@@ -60,7 +66,9 @@ class FallbackRouter:
         self._state: StateTracker = state
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
         self._config: 'Config' = config
-        self._transition_lock: threading.RLock = threading.RLock()
+        self._transition_lock = transition_lock or threading.RLock()
+        self._promote_voice = promote_voice_callback or (lambda _msg_ids: None)
+        self._purge_fence = purge_fence or threading.Event()
 
     def _get_pending_live_messages(
         self,
@@ -75,7 +83,6 @@ class FallbackRouter:
             list[tuple[str, str, str]]: Message ID, payload, and timestamp tuples.
         """
         pending_messages: list[tuple[str, str, str]] = []
-        seen_msg_ids: set[str] = set()
         state_messages: Dict[str, Tuple[str, str]] = self._state.get_unacked_messages(
             onion
         )
@@ -87,22 +94,7 @@ class FallbackRouter:
                 self._state.add_unacked_message(
                     onion, record.msg_id, record.payload, record.timestamp
                 )
-            else:
-                payload, timestamp = state_messages[record.msg_id]
-                record = PendingLiveRecord(
-                    record.receipt_id,
-                    record.peer_onion,
-                    record.content_type,
-                    payload,
-                    record.msg_id,
-                    timestamp,
-                )
             pending_messages.append((record.msg_id, record.payload, record.timestamp))
-            seen_msg_ids.add(record.msg_id)
-
-        for msg_id, pending_msg in state_messages.items():
-            if msg_id not in seen_msg_ids:
-                pending_messages.append((msg_id, pending_msg[0], pending_msg[1]))
 
         return pending_messages
 
@@ -131,9 +123,12 @@ class FallbackRouter:
             Dict[str, Tuple[str, str]]: The converted unacknowledged messages.
         """
         with self._transition_lock:
+            if self._purge_fence.is_set():
+                return {}
             records = self._mm.promote_pending_live_to_drop(onion)
             if not records:
                 return {}
+            self._promote_voice([record.msg_id for record in records])
             unacked: Dict[str, Tuple[str, str]] = {
                 record.msg_id: (record.payload, record.timestamp) for record in records
             }
@@ -145,17 +140,17 @@ class FallbackRouter:
                     actor=history_actor,
                     detail_code=history_reason_code,
                 )
-
-        if emit_event:
-            self._broadcast(
-                FallbackSuccessEvent(
-                    alias=alias,
-                    onion=onion,
-                    count=len(unacked),
-                    msg_ids=list(unacked),
-                    request_id=request_id,
+            if emit_event:
+                self._broadcast(
+                    FallbackSuccessEvent(
+                        alias=alias,
+                        onion=onion,
+                        count=len(unacked),
+                        msg_ids=list(unacked),
+                        request_id=request_id,
+                    )
                 )
-            )
+            self._broadcast(RuntimeStateChangedEvent(scope='messages', onion=onion))
         return unacked
 
     def replay_unacked_messages(self, onion: str) -> list[str]:
@@ -167,26 +162,33 @@ class FallbackRouter:
         Returns:
             list[str]: The message IDs replayed successfully.
         """
+        frames: list[tuple[str, str, str]] = []
         with self._transition_lock:
+            if self._purge_fence.is_set():
+                return []
             conn: Optional[socket.socket] = self._state.get_connection(onion)
             if conn is None:
                 return []
+            frames = self._get_pending_live_messages(onion)
 
-            replayed_msg_ids: list[str] = []
-            for msg_id, content, timestamp in self._get_pending_live_messages(onion):
-                try:
-                    conn.sendall(
-                        build_message_frame(
-                            TorCommand.MSG,
-                            msg_id,
-                            content,
-                            timestamp,
-                        ).encode('utf-8')
-                    )
-                except Exception:
-                    break
-                replayed_msg_ids.append(msg_id)
-            return replayed_msg_ids
+        replayed_msg_ids: list[str] = []
+        for msg_id, content, timestamp in frames:
+            if self._purge_fence.is_set():
+                break
+            try:
+                self._state.send_frame(
+                    conn,
+                    build_message_frame(
+                        TorCommand.MSG,
+                        msg_id,
+                        content,
+                        timestamp,
+                    ).encode('utf-8'),
+                )
+            except Exception:
+                break
+            replayed_msg_ids.append(msg_id)
+        return replayed_msg_ids
 
     def force_fallback(
         self, target: str, msg_ids: Optional[list[str]] = None
@@ -205,6 +207,8 @@ class FallbackRouter:
             return False, EventType.PEER_NOT_FOUND, {'target': target}
         alias, onion = resolved
         with self._transition_lock:
+            if self._purge_fence.is_set():
+                return False, EventType.FALLBACK_REJECTED, {'target': target}
             records = self._mm.promote_pending_live_to_drop(onion, msg_ids)
             if records is None:
                 selected_ids: list[JsonValue] = list(msg_ids or [])
@@ -218,6 +222,7 @@ class FallbackRouter:
                         'reason': MessageOperationReason.INVALID_SELECTION.value,
                     },
                 )
+            self._promote_voice([record.msg_id for record in records])
             for record in records:
                 self._state.remove_unacked_message(onion, record.msg_id)
                 self._hm.log_event(
@@ -252,7 +257,9 @@ class FallbackRouter:
         Returns:
             None
         """
-        if not self._config.get_bool(SettingKey.FALLBACK_TO_DROP):
+        if self._purge_fence.is_set() or not self._config.get_bool(
+            SettingKey.FALLBACK_TO_DROP
+        ):
             return []
 
         pending_onions: set[str] = set(self._state.get_unacked_onions())

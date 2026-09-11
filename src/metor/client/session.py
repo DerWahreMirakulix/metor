@@ -10,6 +10,10 @@ from metor.client.auth import (
 )
 from metor.client.ipc import IpcClient
 from metor.core.api import (
+    AppendVoiceChunkCommand,
+    BeginVoiceCommand,
+    CancelVoiceCommand,
+    CommitVoiceCommand,
     DaemonLockedEvent,
     Delivery,
     InitCommand,
@@ -18,13 +22,26 @@ from metor.core.api import (
     IpcEvent,
     LockCommand,
     GetRuntimeSnapshotCommand,
+    GetVoiceChunkCommand,
+    FinalizeVoiceCommand,
     PrepareProfileExitCommand,
     ProfileExitPreparedEvent,
     ProtocolMismatchEvent,
     RegisterLiveConsumerCommand,
+    ReleaseVoiceCommand,
     SendMessageCommand,
     RuntimeSnapshotEvent,
+    RuntimeSnapshotUnavailableEvent,
+    MessageDirectionCode,
     TextContent,
+    VoiceCancelledEvent,
+    VoiceChunkAcceptedEvent,
+    VoiceCommittedEvent,
+    VoiceDataEvent,
+    VoiceFinalizedEvent,
+    VoiceOperationRejectedEvent,
+    VoiceReleasedEvent,
+    VoiceStartedEvent,
     ensure_request_id,
 )
 from metor.utils.constants import Constants
@@ -193,6 +210,56 @@ class MetorClient:
             )
         )
 
+    def begin_voice(
+        self, target: str, delivery: Delivery, msg_id: str, codec: str
+    ) -> Optional[VoiceStartedEvent]:
+        """Begins one bounded Voice upload or LIVE turn."""
+        return self.request(
+            BeginVoiceCommand(target, delivery, msg_id, codec), VoiceStartedEvent
+        )
+
+    def append_voice(
+        self, msg_id: str, offset: int, data: str
+    ) -> Optional[VoiceChunkAcceptedEvent]:
+        """Appends one strict Base64 Voice chunk at an exact byte offset."""
+        return self.request(
+            AppendVoiceChunkCommand(msg_id, offset, data), VoiceChunkAcceptedEvent
+        )
+
+    def finalize_voice(
+        self, msg_id: str, duration_ms: Optional[int] = None
+    ) -> Optional[VoiceFinalizedEvent]:
+        """Finalizes capture without publishing a DROP draft."""
+        return self.request(
+            FinalizeVoiceCommand(msg_id, duration_ms), VoiceFinalizedEvent
+        )
+
+    def commit_voice(self, target: str, msg_id: str) -> Optional[VoiceCommittedEvent]:
+        """Publishes one finalized DROP Voice draft for delivery."""
+        return self.request(CommitVoiceCommand(target, msg_id), VoiceCommittedEvent)
+
+    def cancel_voice(self, target: str, msg_id: str) -> Optional[VoiceCancelledEvent]:
+        """Cancels one unpublished DROP Voice draft."""
+        return self.request(CancelVoiceCommand(target, msg_id), VoiceCancelledEvent)
+
+    def get_voice_chunk(
+        self,
+        target: str,
+        msg_id: str,
+        direction: MessageDirectionCode,
+        offset: int,
+        max_bytes: int,
+    ) -> Optional[VoiceDataEvent]:
+        """Retrieves one authorized bounded range without exposing daemon storage."""
+        return self.request(
+            GetVoiceChunkCommand(target, msg_id, direction, offset, max_bytes),
+            VoiceDataEvent,
+        )
+
+    def release_voice(self, target: str, msg_id: str) -> Optional[VoiceReleasedEvent]:
+        """Consumes one finalized inbound Voice item after byte handoff."""
+        return self.request(ReleaseVoiceCommand(target, msg_id), VoiceReleasedEvent)
+
     def lock(self) -> bool:
         """Securely locks the daemon while retaining the IPC connection.
 
@@ -231,38 +298,45 @@ class MetorClient:
             Optional[T]: Decoded response event, or None if the request failed or was rejected.
         """
         request_id: str = ensure_request_id(cmd)
-        self._ipc.send_command(cmd)
+        self._ipc.begin_request(request_id)
+        try:
+            self._ipc.send_command(cmd)
+            auth_exchange: IpcAuthExchange = self._create_auth_exchange(request_id)
 
-        auth_exchange: IpcAuthExchange = self._create_auth_exchange(request_id)
-
-        while True:
-            try:
-                event: Optional[IpcEvent] = self._ipc.read_event()
-            except (socket.timeout, OSError, ValueError):
-                return None
-
-            if event is None:
-                return None
-
-            if event.request_id is not None and event.request_id != request_id:
-                continue
-
-            auth_result: IpcAuthResult = auth_exchange.handle(event)
-            if auth_result.handled:
-                if auth_result.resend_original_command:
-                    self._ipc.send_command(cmd)
-                    continue
-
-                if auth_result.auth_incomplete or auth_result.error_event is not None:
+            while True:
+                try:
+                    event: Optional[IpcEvent] = self._ipc.wait_for_response(request_id)
+                except (socket.timeout, OSError, ValueError):
                     return None
 
-                continue
+                if event is None:
+                    return None
 
-            if isinstance(event, expected_type):
-                return event
+                auth_result: IpcAuthResult = auth_exchange.handle(event)
+                if auth_result.handled:
+                    if auth_result.resend_original_command:
+                        self._ipc.send_command(cmd)
+                        continue
 
-            if isinstance(event, ProtocolMismatchEvent):
-                return None
+                    if (
+                        auth_result.auth_incomplete
+                        or auth_result.error_event is not None
+                    ):
+                        return None
+
+                    continue
+
+                if isinstance(event, expected_type):
+                    return event
+
+                if isinstance(
+                    event, (ProtocolMismatchEvent, RuntimeSnapshotUnavailableEvent)
+                ):
+                    return None
+                if isinstance(event, VoiceOperationRejectedEvent):
+                    return None
+        finally:
+            self._ipc.end_request(request_id)
 
     def bootstrap(self) -> Optional[InitEvent]:
         """

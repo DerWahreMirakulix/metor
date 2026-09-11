@@ -76,6 +76,7 @@ class ClientRestrictedEvent(IpcEvent):
     unlock_method: ClientUnlockMethod
     challenge: Optional[str] = None
     salt: Optional[str] = None
+    device_lifecycle: bool = False
     event_type: EventType = field(default=EventType.CLIENT_RESTRICTED, init=False)
 
 
@@ -144,6 +145,32 @@ class SelfDestructCompletedEvent(IpcEvent):
     )
 
 
+@register_event(EventType.SELF_DESTRUCT_KEY_DESTROYED)
+@dataclass
+class SelfDestructKeyDestroyedEvent(IpcEvent):
+    """Confirms irreversible destruction of protected profile-key access."""
+
+    profile: str
+    event_type: EventType = field(
+        default=EventType.SELF_DESTRUCT_KEY_DESTROYED,
+        init=False,
+    )
+
+
+@register_event(EventType.SELF_DESTRUCT_CLEANUP_FAILED)
+@dataclass
+class SelfDestructCleanupFailedEvent(IpcEvent):
+    """Reports the exact failed destruction phase and irreversible state."""
+
+    profile: str
+    phase: str = 'cleanup'
+    key_destroyed: bool = True
+    event_type: EventType = field(
+        default=EventType.SELF_DESTRUCT_CLEANUP_FAILED,
+        init=False,
+    )
+
+
 @register_event(EventType.PROFILE_EXIT_PREPARED)
 @dataclass
 class ProfileExitPreparedEvent(IpcEvent):
@@ -152,6 +179,19 @@ class ProfileExitPreparedEvent(IpcEvent):
     profile: str
     event_type: EventType = field(
         default=EventType.PROFILE_EXIT_PREPARED,
+        init=False,
+    )
+
+
+@register_event(EventType.RUNTIME_STATE_CHANGED)
+@dataclass
+class RuntimeStateChangedEvent(IpcEvent):
+    """Invalidates one content-free canonical runtime projection scope."""
+
+    scope: str
+    onion: Optional[str] = None
+    event_type: EventType = field(
+        default=EventType.RUNTIME_STATE_CHANGED,
         init=False,
     )
 

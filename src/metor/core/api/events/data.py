@@ -123,6 +123,18 @@ class RuntimeSnapshotEvent(NestedEntryCastingMixin, IpcEvent):
     event_type: EventType = field(default=EventType.RUNTIME_SNAPSHOT, init=False)
 
 
+@register_event(EventType.RUNTIME_SNAPSHOT_UNAVAILABLE)
+@dataclass
+class RuntimeSnapshotUnavailableEvent(IpcEvent):
+    """Signals that sustained mutation prevented an authoritative snapshot."""
+
+    retryable: bool = True
+    event_type: EventType = field(
+        default=EventType.RUNTIME_SNAPSHOT_UNAVAILABLE,
+        init=False,
+    )
+
+
 @register_event(EventType.UNREAD_MESSAGES)
 @dataclass
 class UnreadMessagesEvent(NestedEntryCastingMixin, IpcEvent):

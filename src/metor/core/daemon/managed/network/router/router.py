@@ -1,9 +1,17 @@
 """Thin composition root for application-layer message routing."""
 
 import socket
+import threading
 from typing import TYPE_CHECKING, Callable, Dict, Optional, Tuple
 
-from metor.core.api import Delivery, EventType, IpcEvent, JsonValue
+from metor.core.api import (
+    Delivery,
+    EventType,
+    IpcEvent,
+    JsonValue,
+    MessageOperationReason,
+    VoiceContent,
+)
 from metor.core.daemon.managed.models import TorCommand
 from metor.data.blob import BlobStore
 from metor.data import (
@@ -12,6 +20,7 @@ from metor.data import (
     HistoryManager,
     HistoryReasonCode,
     MessageManager,
+    MessageDirection,
 )
 
 # Local Package Imports
@@ -21,6 +30,7 @@ from ..stream import TcpStreamReader
 from .drop import DropMessageRouter
 from .fallback import FallbackRouter
 from .live import LiveMessageRouter
+from .admission import FrameAdmission
 from ..voice import VoiceTransferManager
 
 if TYPE_CHECKING:
@@ -42,6 +52,8 @@ class MessageRouter:
         notify_callback: Callable[[NotificationPayload], None],
         config: 'Config',
         blob_store: Optional[BlobStore] = None,
+        purge_fence: Optional[threading.Event] = None,
+        operation_lock: Optional[threading.RLock] = None,
     ) -> None:
         """Composes the live, drop, and fallback routing components.
 
@@ -56,10 +68,14 @@ class MessageRouter:
             notify_callback (Callable[[NotificationPayload], None]): Detached notifier.
             config (Config): Profile configuration.
             blob_store (Optional[BlobStore]): Active profile external object store.
+            purge_fence (Optional[threading.Event]): Destructive lifecycle fence.
+            operation_lock (Optional[threading.RLock]): State publication barrier.
 
         Returns:
             None
         """
+        self._purge_fence = purge_fence or threading.Event()
+        self._operation_lock = operation_lock or threading.RLock()
         self._live: LiveMessageRouter = LiveMessageRouter(
             cm=cm,
             hm=hm,
@@ -71,14 +87,7 @@ class MessageRouter:
             notify_callback=notify_callback,
             config=config,
         )
-        self._fallback: FallbackRouter = FallbackRouter(
-            cm=cm,
-            hm=hm,
-            mm=mm,
-            state=state,
-            broadcast_callback=broadcast_callback,
-            config=config,
-        )
+        transition_lock = self._operation_lock
         self._voice: Optional[VoiceTransferManager] = (
             VoiceTransferManager(
                 contacts=cm,
@@ -90,9 +99,24 @@ class MessageRouter:
                 has_clients_callback=has_clients_callback,
                 has_live_consumers_callback=has_live_consumers_callback,
                 notify_callback=notify_callback,
+                transition_lock=transition_lock,
+                purge_fence=self._purge_fence,
             )
             if blob_store is not None
             else None
+        )
+        self._fallback: FallbackRouter = FallbackRouter(
+            cm=cm,
+            hm=hm,
+            mm=mm,
+            state=state,
+            broadcast_callback=broadcast_callback,
+            config=config,
+            transition_lock=transition_lock,
+            promote_voice_callback=(
+                self._voice.promote_fallback if self._voice is not None else None
+            ),
+            purge_fence=self._purge_fence,
         )
         self._drop: DropMessageRouter = DropMessageRouter(
             cm=cm,
@@ -102,7 +126,9 @@ class MessageRouter:
             has_clients_callback=has_clients_callback,
             notify_callback=notify_callback,
             config=config,
+            state=state,
             voice_frame_callback=self.process_drop_voice_frame,
+            transition_lock=transition_lock,
         )
 
     def send_message(self, target: str, msg: str, msg_id: str) -> None:
@@ -116,11 +142,13 @@ class MessageRouter:
         Returns:
             None
         """
-        self._live.send_message(target, msg, msg_id)
+        if not self._purge_fence.is_set():
+            with self._operation_lock:
+                self._live.send_message(target, msg, msg_id)
 
     def process_incoming_msg(
         self, conn: socket.socket, onion: str, payload_id: str, b64_payload: str
-    ) -> bool:
+    ) -> FrameAdmission:
         """Delegates inbound live-message acceptance to the live router.
 
         Args:
@@ -130,9 +158,12 @@ class MessageRouter:
             b64_payload (str): The Base64-encoded message envelope.
 
         Returns:
-            bool: True when the session must close for backlog pressure.
+            FrameAdmission: Typed acceptance or termination outcome.
         """
-        return self._live.process_incoming_msg(conn, onion, payload_id, b64_payload)
+        if self._purge_fence.is_set():
+            return FrameAdmission.PURGING
+        with self._operation_lock:
+            return self._live.process_incoming_msg(conn, onion, payload_id, b64_payload)
 
     def process_incoming_ack(self, onion: str, msg_id: str) -> None:
         """Delegates incoming acknowledgement handling to the live router.
@@ -144,9 +175,36 @@ class MessageRouter:
         Returns:
             None
         """
-        if self._voice is not None:
+        if not self._purge_fence.is_set():
+            with self._operation_lock:
+                self._live.process_incoming_ack(onion, msg_id)
+
+    def process_voice_commit_ack(self, onion: str, msg_id: str) -> None:
+        """Finalizes one outbound Voice item after durable peer completion.
+
+        Args:
+            onion (str): Authenticated peer identity.
+            msg_id (str): Stable Voice message identity.
+
+        Returns:
+            None
+        """
+        if self._voice is not None and not self._purge_fence.is_set():
             self._voice.acknowledge_complete(onion, msg_id)
-        self._live.process_incoming_ack(onion, msg_id)
+
+    def process_incoming_drop_ack(self, onion: str, msg_id: str) -> None:
+        """Finalizes a session-routed DROP text acknowledgement.
+
+        Args:
+            onion (str): Authenticated peer identity.
+            msg_id (str): Stable DROP message identity.
+
+        Returns:
+            None
+        """
+        if not self._purge_fence.is_set():
+            with self._operation_lock:
+                self._live.process_incoming_drop_ack(onion, msg_id)
 
     def begin_voice(
         self, target: str, delivery: Delivery, msg_id: str, codec: str
@@ -162,7 +220,7 @@ class MessageRouter:
         Returns:
             None
         """
-        if self._voice is not None:
+        if self._voice is not None and not self._purge_fence.is_set():
             self._voice.begin(target, delivery, msg_id, codec)
 
     def append_voice(self, msg_id: str, offset: int, data: str) -> None:
@@ -176,7 +234,7 @@ class MessageRouter:
         Returns:
             None
         """
-        if self._voice is not None:
+        if self._voice is not None and not self._purge_fence.is_set():
             self._voice.append(msg_id, offset, data)
 
     def finalize_voice(self, msg_id: str, duration_ms: Optional[int]) -> None:
@@ -189,12 +247,12 @@ class MessageRouter:
         Returns:
             None
         """
-        if self._voice is not None:
+        if self._voice is not None and not self._purge_fence.is_set():
             self._voice.finalize(msg_id, duration_ms)
 
     def release_consumed_voice(self, onion: str, msg_ids: list[str]) -> None:
         """Releases consumed inbound LIVE Voice retention."""
-        if self._voice is not None:
+        if self._voice is not None and not self._purge_fence.is_set():
             self._voice.release_consumed(onion, msg_ids)
 
     def voice_target(self, msg_id: str) -> Optional[str]:
@@ -207,14 +265,73 @@ class MessageRouter:
             self._voice.outbound_delivery(msg_id) if self._voice is not None else None
         )
 
+    def read_voice_chunk(
+        self,
+        onion: str,
+        msg_id: str,
+        direction: MessageDirection,
+        offset: int,
+        max_bytes: int,
+    ) -> tuple[
+        Optional[VoiceContent],
+        Optional[Delivery],
+        Optional[bytes],
+        int,
+        bool,
+        Optional[MessageOperationReason],
+    ]:
+        """Reads one bounded Voice range through the router boundary."""
+        if self._purge_fence.is_set():
+            return (
+                None,
+                None,
+                None,
+                offset,
+                False,
+                MessageOperationReason.NOT_FOUND,
+            )
+        if self._voice is None:
+            return (
+                None,
+                None,
+                None,
+                offset,
+                False,
+                MessageOperationReason.UNSUPPORTED_CONTENT,
+            )
+        return self._voice.read_chunk(onion, msg_id, direction, offset, max_bytes)
+
+    def release_inbound_voice_item(self, onion: str, msg_id: str) -> bool:
+        """Consumes one finalized inbound Voice item after client handoff."""
+        if self._voice is None or self._purge_fence.is_set():
+            return False
+        with self._operation_lock:
+            return self._voice.release_inbound(onion, msg_id)
+
+    def commit_voice_draft(self, target: str, msg_id: str) -> bool:
+        """Publishes one finalized DROP Voice draft."""
+        return (
+            self._voice.commit_draft(target, msg_id)
+            if self._voice is not None and not self._purge_fence.is_set()
+            else False
+        )
+
+    def cancel_voice_draft(self, target: str, msg_id: str) -> bool:
+        """Cancels one unsent DROP Voice draft."""
+        return (
+            self._voice.cancel_draft(target, msg_id)
+            if self._voice is not None and not self._purge_fence.is_set()
+            else False
+        )
+
     def dismiss_inbound_voice(self, onion: str) -> None:
         """Releases all inbound Voice retention for a dismissed LIVE context."""
-        if self._voice is not None:
+        if self._voice is not None and not self._purge_fence.is_set():
             self._voice.dismiss_inbound(onion)
 
     def process_voice_frame(
         self, conn: socket.socket, onion: str, command: str, encoded: str
-    ) -> bool:
+    ) -> FrameAdmission:
         """Processes one authenticated Voice application frame.
 
         Args:
@@ -224,30 +341,35 @@ class MessageRouter:
             encoded (str): Base64 JSON envelope.
 
         Returns:
-            bool: True when malformed/resource state requires disconnect.
+            FrameAdmission: Typed acceptance or termination outcome.
         """
+        if self._purge_fence.is_set():
+            return FrameAdmission.PURGING
         if self._voice is None:
-            return True
+            return FrameAdmission.MALFORMED
         payload = self._voice.decode_wire_payload(encoded)
         if payload is None:
-            return True
+            return FrameAdmission.MALFORMED
         if command == TorCommand.VOICE_BEGIN.value:
             return self._voice.receive_begin(conn, onion, payload)
         if command == TorCommand.VOICE_CHUNK.value:
             return self._voice.receive_chunk(conn, onion, payload)
         if command == TorCommand.VOICE_END.value:
             return self._voice.receive_end(conn, onion, payload)
-        return True
+        return FrameAdmission.MALFORMED
 
     def process_drop_voice_frame(
         self, conn: socket.socket, onion: str, command: str, encoded: str
-    ) -> bool:
+    ) -> FrameAdmission:
         """Processes one typed Voice frame carrying DROP semantics."""
         if self._voice is None:
-            return True
+            return FrameAdmission.MALFORMED
+        if not self._drop.allows_inbound_drops():
+            self._drop.reject_disabled_drop(conn)
+            return FrameAdmission.POLICY_REJECTED
         payload = self._voice.decode_wire_payload(encoded)
         if payload is None:
-            return True
+            return FrameAdmission.MALFORMED
         if command == TorCommand.DROP_VOICE_BEGIN.value:
             return self._voice.receive_begin(
                 conn, onion, payload, delivery=Delivery.DROP
@@ -256,7 +378,7 @@ class MessageRouter:
             return self._voice.receive_chunk(conn, onion, payload)
         if command == TorCommand.DROP_VOICE_END.value:
             return self._voice.receive_end(conn, onion, payload)
-        return True
+        return FrameAdmission.MALFORMED
 
     def process_voice_ack(self, onion: str, msg_id: str, next_offset: int) -> None:
         """Delegates one monotonic Voice resume acknowledgement.
@@ -269,7 +391,7 @@ class MessageRouter:
         Returns:
             None
         """
-        if self._voice is not None:
+        if self._voice is not None and not self._purge_fence.is_set():
             self._voice.acknowledge(onion, msg_id, next_offset)
 
     def process_incoming_read_receipt(self, onion: str, msg_id: str) -> None:
@@ -282,7 +404,9 @@ class MessageRouter:
         Returns:
             None
         """
-        self._live.process_incoming_read_receipt(onion, msg_id)
+        if not self._purge_fence.is_set():
+            with self._operation_lock:
+                self._live.process_incoming_read_receipt(onion, msg_id)
 
     def process_incoming_drop_over_session(
         self, conn: socket.socket, onion: str, payload_id: str, b64_payload: str
@@ -298,9 +422,10 @@ class MessageRouter:
         Returns:
             None
         """
-        self._drop.process_incoming_drop_over_session(
-            conn, onion, payload_id, b64_payload
-        )
+        if not self._purge_fence.is_set():
+            self._drop.process_incoming_drop_over_session(
+                conn, onion, payload_id, b64_payload
+            )
 
     def process_async_drop(
         self, conn: socket.socket, stream: TcpStreamReader, onion: str
@@ -315,7 +440,8 @@ class MessageRouter:
         Returns:
             None
         """
-        self._drop.process_async_drop(conn, stream, onion)
+        if not self._purge_fence.is_set():
+            self._drop.process_async_drop(conn, stream, onion)
 
     def convert_unacked_messages_to_drop(
         self,
@@ -341,6 +467,8 @@ class MessageRouter:
         Returns:
             Dict[str, Tuple[str, str]]: The converted unacknowledged messages.
         """
+        if self._purge_fence.is_set():
+            return {}
         converted = self._fallback.convert_unacked_messages_to_drop(
             alias,
             onion,
@@ -349,8 +477,6 @@ class MessageRouter:
             history_actor=history_actor,
             history_reason_code=history_reason_code,
         )
-        if self._voice is not None:
-            self._voice.promote_fallback(list(converted))
         return converted
 
     def replay_unacked_messages(self, onion: str) -> list[str]:
@@ -362,6 +488,8 @@ class MessageRouter:
         Returns:
             list[str]: The message IDs replayed successfully.
         """
+        if self._purge_fence.is_set():
+            return []
         replayed = self._fallback.replay_unacked_messages(onion)
         if self._voice is not None:
             replayed.extend(self._voice.replay(onion))
@@ -380,12 +508,6 @@ class MessageRouter:
             Tuple[bool, EventType, Dict[str, JsonValue]]: The operation result.
         """
         result = self._fallback.force_fallback(target, msg_ids)
-        if result[0] and self._voice is not None:
-            raw_ids = result[2].get('msg_ids', [])
-            if isinstance(raw_ids, list):
-                self._voice.promote_fallback(
-                    [msg_id for msg_id in raw_ids if isinstance(msg_id, str)]
-                )
         return result
 
     def finalize_pending_live_messages(self) -> None:
@@ -397,6 +519,5 @@ class MessageRouter:
         Returns:
             None
         """
-        promoted = self._fallback.finalize_pending_live_messages()
-        if self._voice is not None:
-            self._voice.promote_fallback(promoted)
+        if not self._purge_fence.is_set():
+            self._fallback.finalize_pending_live_messages()

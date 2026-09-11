@@ -17,6 +17,7 @@ class MessageStatusCode(str, Enum):
     DELIVERED = 'delivered'
     UNREAD = 'unread'
     READ = 'read'
+    DRAFT = 'draft'
 
 
 class MessageOperationReason(str, Enum):
@@ -33,3 +34,7 @@ class MessageOperationReason(str, Enum):
     BYTE_LIMIT = 'byte_limit'
     OUTBOUND_PENDING_LIVE = 'outbound_pending_live'
     ACTIVE_LIVE_CONTEXT = 'active_live_context'
+    AMBIGUOUS_IDENTITY = 'ambiguous_identity'
+    NOT_FINALIZED = 'not_finalized'
+    INVALID_RANGE = 'invalid_range'
+    UNSUPPORTED_CONTENT = 'unsupported_content'

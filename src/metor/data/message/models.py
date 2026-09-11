@@ -12,6 +12,7 @@ class MessageStatus(str, Enum):
     DELIVERED = 'delivered'
     UNREAD = 'unread'
     READ = 'read'
+    DRAFT = 'draft'
 
 
 class MessageDirection(str, Enum):
@@ -67,6 +68,18 @@ class InboundVoiceRecord:
     status: str
 
 
+@dataclass(frozen=True)
+class VoicePayloadRecord:
+    """Represents one exact-direction Voice payload ownership record."""
+
+    peer_onion: str
+    direction: MessageDirection
+    delivery: str
+    payload: str
+    msg_id: str
+    status: str
+
+
 class MessageDeleteOutcome(str, Enum):
     """Domain outcomes for local single-message deletion."""
 
@@ -74,6 +87,26 @@ class MessageDeleteOutcome(str, Enum):
     NOT_FOUND = 'not_found'
     NOT_DROP = 'not_drop'
     PENDING_DELIVERY = 'pending_delivery'
+    AMBIGUOUS_IDENTITY = 'ambiguous_identity'
+
+
+class InboundDropOutcome(str, Enum):
+    """Results for same-identity inbound DROP durability transitions."""
+
+    CREATED = 'created'
+    DUPLICATE = 'duplicate'
+    PROMOTED = 'promoted'
+    CONFLICT = 'conflict'
+    LIMIT = 'limit'
+
+
+class PendingLiveAdmission(str, Enum):
+    """Atomic profile-wide admission results for outbound LIVE content."""
+
+    ACCEPTED = 'accepted'
+    DUPLICATE = 'duplicate'
+    COUNT_LIMIT = 'count_limit'
+    BYTE_LIMIT = 'byte_limit'
 
 
 @dataclass(frozen=True)

@@ -62,7 +62,6 @@ class SettingKey(str, Enum):
     ENABLE_SQL_LOGGING = 'daemon.enable_sql_logging'
     ENABLE_RUNTIME_DB_MIRROR = 'daemon.enable_runtime_db_mirror'
     ALLOW_PLAINTEXT_PROFILES = 'daemon.allow_plaintext_profiles'
-    SELF_DESTRUCT_REQUIRES_UNLOCK = 'daemon.self_destruct_requires_unlock'
     AUTO_ACCEPT_CONTACTS = 'daemon.auto_accept_contacts'
     REQUIRE_LOCAL_AUTH = 'daemon.require_local_auth'
     LOCAL_AUTH_FAILURE_LIMIT = 'daemon.local_auth_failure_limit'
@@ -361,15 +360,6 @@ class Settings:
             description='DEVELOPMENT/DEBUG ONLY: permits creation or migration of local plaintext profiles without cryptographic at-rest protection.',
             constraints='Boolean.',
             security_note='Plaintext profiles have no at-rest confidentiality and no cryptographic erase guarantee. Hardened deployments should keep this disabled.',
-            allow_profile_override=False,
-        ),
-        SettingKey.SELF_DESTRUCT_REQUIRES_UNLOCK: SettingSpec(
-            key=SettingKey.SELF_DESTRUCT_REQUIRES_UNLOCK,
-            default=True,
-            category='Core Daemon',
-            description='Requires an unlocked daemon before accepting self-destruction.',
-            constraints='Boolean.',
-            security_note='Disabling permits any local IPC actor with command access to destroy a locked profile, creating a destructive availability risk. Use only with appropriate embedded-device IPC controls.',
             allow_profile_override=False,
         ),
         SettingKey.AUTO_ACCEPT_CONTACTS: SettingSpec(

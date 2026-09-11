@@ -43,6 +43,7 @@ class OutboxWorker:
         state: StateTracker,
         error_callback: Optional[Callable[[str], None]] = None,
         blob_store: Optional[BlobStore] = None,
+        operation_lock: Optional[threading.RLock] = None,
     ) -> None:
         """Composes the outbox worker, delivery, and tunnel components.
 
@@ -58,6 +59,7 @@ class OutboxWorker:
             error_callback (Optional[Callable[[str], None]]): Optional callback for
                 unexpected worker-loop failures.
             blob_store (Optional[BlobStore]): Profile object store for Voice drops.
+            operation_lock (Optional[threading.RLock]): State publication barrier.
 
         Returns:
             None
@@ -83,6 +85,7 @@ class OutboxWorker:
             stop_flag=stop_flag,
             config=config,
             blob_store=blob_store,
+            operation_lock=operation_lock,
         )
         self._worker_thread: Optional[threading.Thread] = None
 

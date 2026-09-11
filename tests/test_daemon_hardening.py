@@ -90,6 +90,8 @@ from metor.data import (
     MessageManager,
     MessageDirection,
     MessageStatus,
+    InboundDropOutcome,
+    PendingLiveAdmission,
     PendingLiveRecord,
     SettingKey,
 )
@@ -520,6 +522,69 @@ class _DummyMessageManager:
                 )
             )
         return _QueueResult()
+
+    def queue_pending_live_if_capacity(
+        self,
+        contact_onion: str,
+        content_type: ContentType,
+        payload: str,
+        msg_id: str,
+        timestamp: str,
+        retained_bytes: int,
+        _count_limit: int,
+        _byte_limit: int,
+    ) -> PendingLiveAdmission:
+        """Admits one test LIVE row through the production-shaped boundary."""
+        self.queue_message(
+            contact_onion=contact_onion,
+            direction=MessageDirection.OUT,
+            delivery=Delivery.LIVE,
+            content_type=content_type,
+            payload=payload,
+            status=MessageStatus.PENDING,
+            msg_id=msg_id,
+            timestamp=timestamp,
+            retained_bytes=retained_bytes,
+        )
+        return PendingLiveAdmission.ACCEPTED
+
+    def store_inbound_drop_text(
+        self,
+        contact_onion: str,
+        msg_id: str,
+        payload: str,
+        timestamp: Optional[str],
+        max_unread: int,
+    ) -> InboundDropOutcome:
+        """Stores one test DROP row while preserving the quota behavior."""
+        if max_unread >= 0 and self.unread_drop_count >= max_unread:
+            return InboundDropOutcome.LIMIT
+        self.queue_message(
+            contact_onion=contact_onion,
+            direction=MessageDirection.IN,
+            delivery=Delivery.DROP,
+            content_type=ContentType.TEXT,
+            payload=payload,
+            status=MessageStatus.UNREAD,
+            msg_id=msg_id,
+            timestamp=timestamp,
+        )
+        return InboundDropOutcome.CREATED
+
+    def has_inbound_text_receipt(self, _onion: str, _msg_id: str) -> bool:
+        """Reports no duplicate inbound text receipt in this test double."""
+        return False
+
+    def mark_live_text_delivered(
+        self, contact_onion: str, msg_id: str
+    ) -> Optional[str]:
+        """Records an exact LIVE text terminal acknowledgement."""
+        if not any(row.msg_id == msg_id for row in self.pending_live_outbox):
+            return None
+        self.update_outbound_message_status(
+            contact_onion, msg_id, MessageStatus.DELIVERED
+        )
+        return '1970-01-01T00:00:00+00:00'
 
     def mark_drop_delivered(
         self,
@@ -2505,8 +2570,8 @@ class DaemonHardeningTests(unittest.TestCase):
             conn.close()
             peer.close()
 
-    def test_locked_daemon_can_self_destruct_when_policy_allows_it(self) -> None:
-        """Verifies locked destruction is available only through explicit policy.
+    def test_hard_locked_daemon_cannot_bypass_session_authorization(self) -> None:
+        """Verifies no anonymous hard-lock destruction bypass exists.
 
         Args:
             None
@@ -2516,7 +2581,6 @@ class DaemonHardeningTests(unittest.TestCase):
         """
         daemon = self._build_daemon(start_locked=True)
         daemon._ipc = Mock()
-        daemon._pm.config.get_bool = Mock(return_value=False)
         conn, peer = socket.socketpair()
 
         try:
@@ -2525,9 +2589,9 @@ class DaemonHardeningTests(unittest.TestCase):
             ) as thread:
                 daemon._process_ui_command(SelfDestructCommand(), conn)
 
-            thread.assert_called_once()
+            thread.assert_not_called()
             sent_event = daemon._ipc.send_to.call_args.args[1]
-            self.assertIs(sent_event.event_type, EventType.SELF_DESTRUCT_INITIATED)
+            self.assertIs(sent_event.event_type, EventType.DAEMON_LOCKED)
         finally:
             conn.close()
             peer.close()
@@ -2825,10 +2889,10 @@ class DaemonHardeningTests(unittest.TestCase):
             None
         """
 
-        self.assertTrue(is_expected_ack_line('msg-1', '/ack msg-1'))
-        self.assertFalse(is_expected_ack_line('msg-1', '/ack msg-1 extra'))
-        self.assertFalse(is_expected_ack_line('msg-1', '/ack other'))
-        self.assertFalse(is_expected_ack_line('msg-1', 'prefix /ack msg-1'))
+        self.assertTrue(is_expected_ack_line('msg-1', '/drop_ack msg-1'))
+        self.assertFalse(is_expected_ack_line('msg-1', '/drop_ack msg-1 extra'))
+        self.assertFalse(is_expected_ack_line('msg-1', '/drop_ack other'))
+        self.assertFalse(is_expected_ack_line('msg-1', 'prefix /drop_ack msg-1'))
 
     def test_chat_ipc_client_applies_timeout_and_ignores_read_timeouts(self) -> None:
         """
@@ -3359,7 +3423,7 @@ class DaemonHardeningTests(unittest.TestCase):
             cm=cast(ContactManager, _DummyContactManager()),
             hm=cast(HistoryManager, history_manager),
             mm=cast(MessageManager, message_manager),
-            state=cast(StateTracker, object()),
+            state=StateTracker(),
             broadcast_callback=lambda _event: None,
             has_clients_callback=lambda: False,
             has_live_consumers_callback=lambda: False,
@@ -3388,7 +3452,7 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(len(message_manager.queued), 1)
         self.assertEqual(message_manager.queued[0]['msg_id'], 'msg-1')
         self.assertEqual(message_manager.queued[0]['payload'], 'hello')
-        self.assertEqual(conn.sent, [b'/ack msg-1\n'])
+        self.assertEqual(conn.sent, [b'/drop_ack msg-1\n'])
         self.assertTrue(conn.closed)
 
     def test_async_drop_stops_without_ack_when_drop_backlog_limit_is_reached(
@@ -3411,7 +3475,7 @@ class DaemonHardeningTests(unittest.TestCase):
             cm=cast(ContactManager, _DummyContactManager()),
             hm=cast(HistoryManager, history_manager),
             mm=cast(MessageManager, message_manager),
-            state=cast(StateTracker, object()),
+            state=StateTracker(),
             broadcast_callback=lambda _event: None,
             has_clients_callback=lambda: False,
             has_live_consumers_callback=lambda: False,
@@ -3453,7 +3517,7 @@ class DaemonHardeningTests(unittest.TestCase):
             cm=cast(ContactManager, _DummyContactManager()),
             hm=cast(HistoryManager, history_manager),
             mm=cast(MessageManager, message_manager),
-            state=cast(StateTracker, object()),
+            state=StateTracker(),
             broadcast_callback=lambda _event: None,
             has_clients_callback=lambda: False,
             has_live_consumers_callback=lambda: False,
@@ -3683,6 +3747,16 @@ class DaemonHardeningTests(unittest.TestCase):
             'hello',
             '2026-04-04T12:00:00+00:00',
         )
+        message_manager.pending_live_outbox.append(
+            PendingLiveRecord(
+                receipt_id=1,
+                peer_onion='peer-onion',
+                content_type=ContentType.TEXT.value,
+                payload='hello',
+                msg_id='msg-1',
+                timestamp='2026-04-04T12:00:00+00:00',
+            )
+        )
         state.remember_message_request_id('msg-1', 'req-live-1')
 
         router.process_incoming_ack('peer-onion', 'msg-1')
@@ -3829,7 +3903,7 @@ class DaemonHardeningTests(unittest.TestCase):
             'establish',
             return_value=(
                 cast(socket.socket, conn),
-                cast(TcpStreamReader, _FakeStream(['/ack msg-1'])),
+                cast(TcpStreamReader, _FakeStream(['/drop_ack msg-1'])),
             ),
         ):
             worker._delivery.send_single_drop(

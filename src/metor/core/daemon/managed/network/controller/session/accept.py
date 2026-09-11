@@ -88,7 +88,9 @@ def accept(
         return
 
     try:
-        conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8'))
+        controller._state.send_frame(
+            conn, f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8')
+        )
     except OSError:
         controller._hm.log_event(
             HistoryEvent.CONNECTION_LOST,

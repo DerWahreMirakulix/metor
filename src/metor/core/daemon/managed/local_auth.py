@@ -141,6 +141,41 @@ class LocalAuthTracker:
                 return False
             return verify_session_auth_proof(self._context.proof_key, challenge, proof)
 
+    def verify_challenge_proof(
+        self,
+        conn: socket.socket,
+        challenge: str,
+        proof: str,
+        lockout_seconds: float,
+        failure_limit: int,
+    ) -> SessionAuthAttemptResult:
+        """Verifies an externally issued challenge under shared failure policy.
+
+        Args:
+            conn (socket.socket): IPC connection owning the proof attempt.
+            challenge (str): One-use challenge issued for reauthorization.
+            proof (str): Client-supplied password proof.
+            lockout_seconds (float): Cross-connection cooldown duration.
+            failure_limit (int): Per-connection failure ceiling.
+
+        Returns:
+            SessionAuthAttemptResult: Auth result and disconnect requirement.
+        """
+        with self._lock:
+            if (
+                self._context is None
+                or self._get_retry_after_seconds_locked() is not None
+            ):
+                return SessionAuthAttemptResult(False, False)
+            if verify_session_auth_proof(self._context.proof_key, challenge, proof):
+                self._failure_counts.pop(conn, None)
+                self._reset_rate_limit_locked()
+                return SessionAuthAttemptResult(True, False)
+            should_disconnect = self._increment_failures_locked(
+                conn, lockout_seconds, failure_limit
+            )
+            return SessionAuthAttemptResult(False, should_disconnect)
+
     def clear_connection(self, conn: socket.socket) -> None:
         """
         Removes one IPC connection from tracked local-auth state.

@@ -15,12 +15,14 @@ from metor.core.api import (
     IpcEvent,
     MessageReceivedEvent,
     RuntimeSnapshotEvent,
+    RuntimeSnapshotUnavailableEvent,
     SendMessageCommand,
     TextContent,
     VoiceContent,
 )
 from metor.core.daemon.managed.handlers.network import NetworkCommandHandler
 from metor.ui.terminal.content import render_content
+from metor.utils import Constants
 
 
 class MessageArchitectureContractTests(unittest.TestCase):
@@ -119,6 +121,20 @@ class MessageArchitectureContractTests(unittest.TestCase):
 
         self.assertEqual(compose_count, 2)
         self.assertEqual(snapshot.revision, 5)
+
+    def test_runtime_snapshot_exhaustion_is_explicitly_retryable(self) -> None:
+        """G20: sustained mutation cannot produce an unchecked snapshot."""
+        handler = cast(Any, object.__new__(NetworkCommandHandler))
+        revisions = iter(range(Constants.RUNTIME_SNAPSHOT_MAX_RETRIES * 2))
+        handler._current_revision = lambda: next(revisions)
+        handler._compose_runtime_snapshot = lambda: RuntimeSnapshotEvent(
+            profile='default', onion='peer-onion'
+        )
+
+        result = handler._build_runtime_snapshot()
+
+        self.assertIsInstance(result, RuntimeSnapshotUnavailableEvent)
+        self.assertTrue(cast(RuntimeSnapshotUnavailableEvent, result).retryable)
 
 
 if __name__ == '__main__':

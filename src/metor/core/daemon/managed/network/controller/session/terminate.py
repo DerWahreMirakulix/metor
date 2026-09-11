@@ -373,11 +373,12 @@ def reject(
 
     if conn is not None and initiated_by_self:
         try:
-            conn.sendall(
+            controller._state.send_frame(
+                conn,
                 (
                     f'{TorCommand.REJECT.value} {RejectIntent.MANUAL.value} '
                     f'{controller._tm.onion}\n'
-                ).encode('utf-8')
+                ).encode('utf-8'),
             )
         except OSError:
             pass
@@ -601,11 +602,12 @@ def disconnect(
                 mark_local_termination(conn)
             try:
                 disconnect_intent: DisconnectIntent = _resolve_disconnect_intent(origin)
-                conn.sendall(
+                controller._state.send_frame(
+                    conn,
                     (
                         f'{TorCommand.DISCONNECT.value} '
                         f'{disconnect_intent.value} {controller._tm.onion}\n'
-                    ).encode('utf-8')
+                    ).encode('utf-8'),
                 )
                 try:
                     conn.shutdown(socket.SHUT_WR)

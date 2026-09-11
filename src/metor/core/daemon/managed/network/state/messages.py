@@ -23,6 +23,7 @@ class StateTrackerMessagesMixin:
     _scheduled_auto_reconnects: Set[str]
     _live_reconnect_grace: Dict[str, float]
     _retunnel_in_progress: Set[str]
+    _socket_write_locks: Dict[socket.socket, threading.Lock]
 
     def remember_message_request_id(
         self,
@@ -310,6 +311,7 @@ class StateTrackerMessagesMixin:
             self._scheduled_auto_reconnects.clear()
             self._live_reconnect_grace.clear()
             self._retunnel_in_progress.clear()
+            self._socket_write_locks.clear()
         for sock in sockets:
             try:
                 sock.close()

@@ -34,6 +34,7 @@ from metor.data import (
 from metor.core.daemon.managed.network.state import StateTracker
 from metor.core.daemon.managed.network.stream import TcpStreamReader
 from metor.core.daemon.managed.network.router import MessageRouter
+from metor.core.daemon.managed.network.router.admission import FrameAdmission
 
 if TYPE_CHECKING:
     from metor.data.profile import Config
@@ -382,7 +383,15 @@ class StreamReceiver:
                     remote_reject_intent = self._parse_reject_intent(msg)
                     break
                 else:
-                    ack_msg_id: Optional[str] = self._parse_ack_msg_id(msg)
+                    drop_ack_parts = msg.split(' ')
+                    if (
+                        len(drop_ack_parts) == 2
+                        and drop_ack_parts[0] == TorCommand.DROP_ACK.value
+                    ):
+                        self._router.process_incoming_drop_ack(onion, drop_ack_parts[1])
+                        ack_msg_id = None
+                    else:
+                        ack_msg_id = self._parse_ack_msg_id(msg)
                     if ack_msg_id is not None:
                         self._router.process_incoming_ack(onion, ack_msg_id)
 
@@ -400,10 +409,10 @@ class StreamReceiver:
                             msg_id = parts[1]
                             content: str = parts[2]
 
-                            should_disconnect: bool = self._router.process_incoming_msg(
+                            admission = self._router.process_incoming_msg(
                                 conn, onion, msg_id, content
                             )
-                            if should_disconnect:
+                            if admission is not FrameAdmission.ACCEPTED:
                                 self._disconnect_cb(
                                     onion,
                                     True,
@@ -411,7 +420,11 @@ class StreamReceiver:
                                     None,
                                     False,
                                     connection_origin,
-                                    ConnectionReasonCode.LIVE_BACKLOG_LIMIT_REACHED,
+                                    (
+                                        ConnectionReasonCode.LIVE_BACKLOG_LIMIT_REACHED
+                                        if admission is FrameAdmission.RESOURCE_LIMIT
+                                        else ConnectionReasonCode.INVALID_PEER_FRAME
+                                    ),
                                 )
                                 break
 
@@ -424,9 +437,14 @@ class StreamReceiver:
                         )
                     ):
                         parts = msg.split(' ', 1)
-                        if len(parts) != 2 or self._router.process_voice_frame(
-                            conn, onion, parts[0], parts[1]
-                        ):
+                        admission = (
+                            self._router.process_voice_frame(
+                                conn, onion, parts[0], parts[1]
+                            )
+                            if len(parts) == 2
+                            else FrameAdmission.MALFORMED
+                        )
+                        if admission is not FrameAdmission.ACCEPTED:
                             self._disconnect_cb(
                                 onion,
                                 True,
@@ -434,9 +452,18 @@ class StreamReceiver:
                                 None,
                                 False,
                                 connection_origin,
-                                ConnectionReasonCode.LIVE_VOICE_LIMIT_REACHED,
+                                (
+                                    ConnectionReasonCode.LIVE_VOICE_LIMIT_REACHED
+                                    if admission is FrameAdmission.RESOURCE_LIMIT
+                                    else ConnectionReasonCode.INVALID_PEER_FRAME
+                                ),
                             )
                             break
+
+                    elif msg.startswith(f'{TorCommand.VOICE_COMMIT_ACK.value} '):
+                        parts = msg.split(' ')
+                        if len(parts) == 2:
+                            self._router.process_voice_commit_ack(onion, parts[1])
 
                     elif msg.startswith(f'{TorCommand.VOICE_ACK.value} '):
                         parts = msg.split(' ')
@@ -459,9 +486,16 @@ class StreamReceiver:
                         )
                     ):
                         parts = msg.split(' ', 1)
-                        if len(parts) != 2 or self._router.process_drop_voice_frame(
-                            conn, onion, parts[0], parts[1]
-                        ):
+                        admission = (
+                            self._router.process_drop_voice_frame(
+                                conn, onion, parts[0], parts[1]
+                            )
+                            if len(parts) == 2
+                            else FrameAdmission.MALFORMED
+                        )
+                        if admission is FrameAdmission.POLICY_REJECTED:
+                            continue
+                        if admission is not FrameAdmission.ACCEPTED:
                             self._disconnect_cb(
                                 onion,
                                 True,
@@ -469,7 +503,11 @@ class StreamReceiver:
                                 None,
                                 False,
                                 connection_origin,
-                                ConnectionReasonCode.LIVE_VOICE_LIMIT_REACHED,
+                                (
+                                    ConnectionReasonCode.LIVE_VOICE_LIMIT_REACHED
+                                    if admission is FrameAdmission.RESOURCE_LIMIT
+                                    else ConnectionReasonCode.INVALID_PEER_FRAME
+                                ),
                             )
                             break
 

@@ -16,11 +16,29 @@ from metor.core.api import (
     IpcEvent,
     UnlockCommand,
 )
+from metor.core.auth import (
+    build_pin_unlock_proof,
+    create_pin_verifier,
+    derive_pin_verifier,
+)
 from metor.utils.constants import Constants
 from metor.utils.security import secure_clear_buffer
 
 _SESSION_AUTH_PASSWORD_PREFIX: str = 'metor-ipc-auth:'
 ProofKeyBuffer = Union[bytes, bytearray, memoryview]
+
+__all__ = [
+    'AuthProvider',
+    'IpcAuthExchange',
+    'IpcAuthResult',
+    'build_pin_unlock_proof',
+    'build_session_auth_proof',
+    'build_session_auth_proof_from_key',
+    'create_pin_verifier',
+    'derive_pin_verifier',
+    'derive_session_auth_proof_key',
+    'extract_session_auth_prompt',
+]
 
 
 def _decode_session_auth_salt(salt_hex: str) -> bytes:

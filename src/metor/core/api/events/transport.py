@@ -14,6 +14,7 @@ from metor.core.api.codes import (
     EventType,
     RuntimeErrorCode,
     MessageOperationReason,
+    MessageDirectionCode,
 )
 from metor.core.api.registry import register_event
 
@@ -234,6 +235,7 @@ class IncomingConnectionEvent(IpcEvent):
 
     alias: str
     onion: Optional[str] = None
+    action_handle: Optional[str] = None
     origin: ConnectionOrigin = ConnectionOrigin.INCOMING
     actor: ConnectionActor = ConnectionActor.REMOTE
     event_type: EventType = field(default=EventType.INCOMING_CONNECTION, init=False)
@@ -335,6 +337,7 @@ class PendingConnectionExpiredEvent(IpcEvent):
 
     alias: str
     onion: Optional[str] = None
+    action_handle: Optional[str] = None
     origin: ConnectionOrigin = ConnectionOrigin.INCOMING
     actor: ConnectionActor = ConnectionActor.SYSTEM
     reason_code: ConnectionReasonCode = ConnectionReasonCode.PENDING_ACCEPTANCE_EXPIRED
@@ -549,6 +552,8 @@ class VoiceChunkReceivedEvent(IpcEvent):
     offset: int
     data: str
     onion: Optional[str] = None
+    delivery: Delivery = Delivery.LIVE
+    codec: Optional[str] = None
     event_type: EventType = field(
         default=EventType.VOICE_CHUNK_RECEIVED,
         init=False,
@@ -562,6 +567,10 @@ class VoiceFinalizedEvent(IpcEvent):
 
     msg_id: str
     size_bytes: int
+    onion: Optional[str] = None
+    delivery: Optional[Delivery] = None
+    direction: Optional[MessageDirectionCode] = None
+    duration_ms: Optional[int] = None
     event_type: EventType = field(default=EventType.VOICE_FINALIZED, init=False)
 
 
@@ -573,6 +582,8 @@ class VoiceResourcePressureEvent(IpcEvent):
     used_bytes: int
     limit_bytes: int
     msg_id: Optional[str] = None
+    onion: Optional[str] = None
+    delivery: Optional[Delivery] = None
     event_type: EventType = field(
         default=EventType.VOICE_RESOURCE_PRESSURE,
         init=False,
@@ -587,10 +598,97 @@ class VoiceResourceLimitEvent(IpcEvent):
     used_bytes: int
     limit_bytes: int
     msg_id: Optional[str] = None
+    onion: Optional[str] = None
+    delivery: Optional[Delivery] = None
+    reason: Optional[MessageOperationReason] = None
     event_type: EventType = field(
         default=EventType.VOICE_RESOURCE_LIMIT,
         init=False,
     )
+
+
+@register_event(EventType.VOICE_INCOMING_STARTED)
+@dataclass
+class VoiceIncomingStartedEvent(IpcEvent):
+    """Describes one accepted inbound Voice stream before its first chunk."""
+
+    alias: str
+    msg_id: str
+    delivery: Delivery
+    codec: str
+    next_offset: int
+    onion: Optional[str] = None
+    event_type: EventType = field(
+        default=EventType.VOICE_INCOMING_STARTED,
+        init=False,
+    )
+
+
+@register_event(EventType.VOICE_DATA)
+@dataclass
+class VoiceDataEvent(IpcEvent):
+    """Returns one bounded authenticated Voice byte range."""
+
+    alias: str
+    msg_id: str
+    direction: MessageDirectionCode
+    delivery: Delivery
+    codec: str
+    offset: int
+    next_offset: int
+    size_bytes: int
+    data: str
+    complete: bool
+    duration_ms: Optional[int] = None
+    onion: Optional[str] = None
+    event_type: EventType = field(default=EventType.VOICE_DATA, init=False)
+
+
+@register_event(EventType.VOICE_RELEASED)
+@dataclass
+class VoiceReleasedEvent(IpcEvent):
+    """Confirms per-item inbound Voice consumption and retention release."""
+
+    alias: str
+    msg_id: str
+    onion: Optional[str] = None
+    event_type: EventType = field(default=EventType.VOICE_RELEASED, init=False)
+
+
+@register_event(EventType.VOICE_OPERATION_REJECTED)
+@dataclass
+class VoiceOperationRejectedEvent(IpcEvent):
+    """Rejects a Voice operation with a machine-readable reason."""
+
+    msg_id: str
+    reason: MessageOperationReason
+    onion: Optional[str] = None
+    event_type: EventType = field(
+        default=EventType.VOICE_OPERATION_REJECTED,
+        init=False,
+    )
+
+
+@register_event(EventType.VOICE_COMMITTED)
+@dataclass
+class VoiceCommittedEvent(IpcEvent):
+    """Confirms explicit publication of one DROP Voice draft."""
+
+    alias: str
+    msg_id: str
+    onion: Optional[str] = None
+    event_type: EventType = field(default=EventType.VOICE_COMMITTED, init=False)
+
+
+@register_event(EventType.VOICE_CANCELLED)
+@dataclass
+class VoiceCancelledEvent(IpcEvent):
+    """Confirms explicit cancellation of one unsent Voice draft."""
+
+    alias: str
+    msg_id: str
+    onion: Optional[str] = None
+    event_type: EventType = field(default=EventType.VOICE_CANCELLED, init=False)
 
 
 @register_event(EventType.RETUNNEL_INITIATED)

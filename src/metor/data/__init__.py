@@ -39,6 +39,9 @@ from metor.data.message import (
     MessageDirection,
     PendingLiveRecord,
     InboundVoiceRecord,
+    InboundDropOutcome,
+    PendingLiveAdmission,
+    VoicePayloadRecord,
 )
 from metor.data.profile import (
     Config,
@@ -66,6 +69,9 @@ __all__ = [
     'MessageDirection',
     'PendingLiveRecord',
     'InboundVoiceRecord',
+    'InboundDropOutcome',
+    'PendingLiveAdmission',
+    'VoicePayloadRecord',
     'ChatDaemonAutostartPolicy',
     'DAEMON_SETTING_KEYS',
     'Settings',

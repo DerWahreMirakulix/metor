@@ -32,11 +32,13 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [AppendVoiceChunkCommand](#appendvoicechunkcommand)
 - [AuthenticateSessionCommand](#authenticatesessioncommand)
 - [BeginVoiceCommand](#beginvoicecommand)
+- [CancelVoiceCommand](#cancelvoicecommand)
 - [ChangePasswordCommand](#changepasswordcommand)
 - [ClearContactsCommand](#clearcontactscommand)
 - [ClearHistoryCommand](#clearhistorycommand)
 - [ClearMessagesCommand](#clearmessagescommand)
 - [ClearProfileDbCommand](#clearprofiledbcommand)
+- [CommitVoiceCommand](#commitvoicecommand)
 - [ConfigureQuickUnlockCommand](#configurequickunlockcommand)
 - [ConnectCommand](#connectcommand)
 - [DeleteMessageCommand](#deletemessagecommand)
@@ -59,6 +61,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [GetSettingCommand](#getsettingcommand)
 - [GetSettingsListCommand](#getsettingslistcommand)
 - [GetTransportStateCommand](#gettransportstatecommand)
+- [GetVoiceChunkCommand](#getvoicechunkcommand)
 - [InitCommand](#initcommand)
 - [LockCommand](#lockcommand)
 - [MarkReadCommand](#markreadcommand)
@@ -67,6 +70,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [ReauthorizeClientCommand](#reauthorizeclientcommand)
 - [RegisterLiveConsumerCommand](#registerliveconsumercommand)
 - [RejectCommand](#rejectcommand)
+- [ReleaseVoiceCommand](#releasevoicecommand)
 - [RemoveContactCommand](#removecontactcommand)
 - [RemoveProfileCommand](#removeprofilecommand)
 - [RenameContactCommand](#renamecontactcommand)
@@ -197,8 +201,12 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [RetunnelInitiatedEvent](#retunnelinitiatedevent)
 - [RetunnelSuccessEvent](#retunnelsuccessevent)
 - [RuntimeSnapshotEvent](#runtimesnapshotevent)
+- [RuntimeSnapshotUnavailableEvent](#runtimesnapshotunavailableevent)
+- [RuntimeStateChangedEvent](#runtimestatechangedevent)
+- [SelfDestructCleanupFailedEvent](#selfdestructcleanupfailedevent)
 - [SelfDestructCompletedEvent](#selfdestructcompletedevent)
 - [SelfDestructInitiatedEvent](#selfdestructinitiatedevent)
+- [SelfDestructKeyDestroyedEvent](#selfdestructkeydestroyedevent)
 - [SessionAuthenticatedEvent](#sessionauthenticatedevent)
 - [SettingDataEvent](#settingdataevent)
 - [SettingTypeErrorEvent](#settingtypeerrorevent)
@@ -213,9 +221,15 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [TransportStateEvent](#transportstateevent)
 - [UnknownCommandEvent](#unknowncommandevent)
 - [UnreadMessagesEvent](#unreadmessagesevent)
+- [VoiceCancelledEvent](#voicecancelledevent)
 - [VoiceChunkAcceptedEvent](#voicechunkacceptedevent)
 - [VoiceChunkReceivedEvent](#voicechunkreceivedevent)
+- [VoiceCommittedEvent](#voicecommittedevent)
+- [VoiceDataEvent](#voicedataevent)
 - [VoiceFinalizedEvent](#voicefinalizedevent)
+- [VoiceIncomingStartedEvent](#voiceincomingstartedevent)
+- [VoiceOperationRejectedEvent](#voiceoperationrejectedevent)
+- [VoiceReleasedEvent](#voicereleasedevent)
 - [VoiceResourceLimitEvent](#voiceresourcelimitevent)
 - [VoiceResourcePressureEvent](#voiceresourcepressureevent)
 - [VoiceStartedEvent](#voicestartedevent)
@@ -369,6 +383,30 @@ Begins one peer-bound logical Voice turn.
 
 ---
 
+### `CancelVoiceCommand`
+
+Cancels one unsent DROP Voice draft.
+
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `target`     | `str`              | Required |
+| `msg_id`     | `str`              | Required |
+
+**Wire Value:** `cancel_voice`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "cancel_voice",
+  "target": "string",
+  "msg_id": "string"
+}
+```
+
+---
+
 ### `ChangePasswordCommand`
 
 Rewraps an encrypted profile PMK after verifying its current password.
@@ -476,6 +514,30 @@ Requests a full profile-database wipe.
 
 ---
 
+### `CommitVoiceCommand`
+
+Commits one finalized DROP Voice draft to pending delivery.
+
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `target`     | `str`              | Required |
+| `msg_id`     | `str`              | Required |
+
+**Wire Value:** `commit_voice`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "commit_voice",
+  "target": "string",
+  "msg_id": "string"
+}
+```
+
+---
+
 ### `ConfigureQuickUnlockCommand`
 
 Installs or removes memory-hard PIN verifier material.
@@ -526,11 +588,12 @@ Requests a live connection to a target peer.
 
 Deletes one eligible local DROP payload while retaining dedupe metadata.
 
-| Field        | Type               | Default  |
-| ------------ | ------------------ | -------- |
-| `request_id` | `Union[str, None]` | `None`   |
-| `target`     | `str`              | Required |
-| `msg_id`     | `str`              | Required |
+| Field        | Type                                         | Default  |
+| ------------ | -------------------------------------------- | -------- |
+| `request_id` | `Union[str, None]`                           | `None`   |
+| `target`     | `str`                                        | Required |
+| `msg_id`     | `str`                                        | Required |
+| `direction`  | `Union[<enum 'MessageDirectionCode'>, None]` | `None`   |
 
 **Wire Value:** `delete_message`
 
@@ -963,6 +1026,36 @@ Requests the current transport state for one peer or the whole daemon.
 
 ---
 
+### `GetVoiceChunkCommand`
+
+Reads one authenticated bounded range from retained Voice content.
+
+| Field        | Type                            | Default  |
+| ------------ | ------------------------------- | -------- |
+| `request_id` | `Union[str, None]`              | `None`   |
+| `target`     | `str`                           | Required |
+| `msg_id`     | `str`                           | Required |
+| `direction`  | `<enum 'MessageDirectionCode'>` | Required |
+| `offset`     | `int`                           | Required |
+| `max_bytes`  | `int`                           | Required |
+
+**Wire Value:** `get_voice_chunk`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "get_voice_chunk",
+  "target": "string",
+  "msg_id": "string",
+  "direction": "in",
+  "offset": 0,
+  "max_bytes": 0
+}
+```
+
+---
+
 ### `InitCommand`
 
 Requests initialization and advertises the client IPC support range.
@@ -1141,6 +1234,30 @@ Rejects a pending live connection.
 
 ---
 
+### `ReleaseVoiceCommand`
+
+Consumes one finalized inbound Voice item after client handoff.
+
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `target`     | `str`              | Required |
+| `msg_id`     | `str`              | Required |
+
+**Wire Value:** `release_voice`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "release_voice",
+  "target": "string",
+  "msg_id": "string"
+}
+```
+
+---
+
 ### `RemoveContactCommand`
 
 Removes a saved contact or discovered peer.
@@ -1246,6 +1363,7 @@ Places only the requesting authenticated IPC session in restricted state.
 | `live_while_locked`     | `bool`                         | `False`                               |
 | `accept_while_locked`   | `<enum 'LockedAcceptPolicy'>`  | `LockedAcceptPolicy.NONE`             |
 | `notification_privacy`  | `<enum 'NotificationPrivacy'>` | `NotificationPrivacy.OFF`             |
+| `device_lifecycle`      | `bool`                         | `False`                               |
 
 **Wire Value:** `restrict_client`
 
@@ -1483,6 +1601,7 @@ Confirms delivery of a live outbound message.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `msg_id`     | `str`              | Required |
 | `timestamp`  | `Union[str, None]` | `None`   |
 
@@ -1507,6 +1626,7 @@ Signals that address generation is blocked by a running daemon.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `profile`    | `str`              | Required |
 
 **Wire Value:** `address_cant_generate_running`
@@ -1530,6 +1650,7 @@ Returns the current onion address.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `profile`    | `str`              | Required |
 | `onion`      | `str`              | Required |
 
@@ -1555,6 +1676,7 @@ Returns a newly generated onion address.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `profile`    | `str`              | Required |
 | `onion`      | `str`              | Required |
 
@@ -1580,6 +1702,7 @@ Signals that a profile has no generated onion address yet.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `profile`    | `str`              | Required |
 
 **Wire Value:** `address_not_generated`
@@ -1603,6 +1726,7 @@ Signals that an alias is already in use.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 
@@ -1627,6 +1751,7 @@ Signals that the requested alias does not exist.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 
 **Wire Value:** `alias_not_found`
@@ -1650,6 +1775,7 @@ Signals that an alias was renamed successfully.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `old_alias`  | `str`              | Required |
 | `new_alias`  | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
@@ -1676,6 +1802,7 @@ Signals that a rename reused the same alias.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `alias_same`
 
@@ -1697,6 +1824,7 @@ Signals that the daemon is already unlocked.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `already_unlocked`
 
@@ -1718,6 +1846,7 @@ Signals that the session must authenticate first.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 | `challenge`  | `Union[str, None]` | `None`  |
 | `salt`       | `Union[str, None]` | `None`  |
 
@@ -1741,6 +1870,7 @@ Signals that one live-send request was queued directly as a drop.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `msg_id`     | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
@@ -1767,6 +1897,7 @@ Signals that an automatic reconnect was scheduled.
 | ------------ | --------------------------- | --------------------------------- |
 | `request_id` | `Union[str, None]`          | `None`                            |
 | `revision`   | `Union[int, None]`          | `None`                            |
+| `epoch`      | `Union[str, None]`          | `None`                            |
 | `alias`      | `str`                       | Required                          |
 | `onion`      | `Union[str, None]`          | `None`                            |
 | `origin`     | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.AUTO_RECONNECT` |
@@ -1793,6 +1924,7 @@ Signals that the local onion cannot connect to itself.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `cannot_connect_self`
 
@@ -1814,6 +1946,7 @@ Signals that the local onion cannot send drops to itself.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `cannot_drop_self`
 
@@ -1835,6 +1968,7 @@ Signals that the UI cannot focus the local onion.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `cannot_switch_self`
 
@@ -1856,6 +1990,7 @@ Returns the first-attach chat snapshot with sessions and unread summaries.
 | ------------ | ------------------------------- | ----------- |
 | `request_id` | `Union[str, None]`              | `None`      |
 | `revision`   | `Union[int, None]`              | `None`      |
+| `epoch`      | `Union[str, None]`              | `None`      |
 | `active`     | `List[str]`                     | Required    |
 | `contacts`   | `List[str]`                     | Required    |
 | `pending`    | `List[PendingConnectionEntry]`  | `Factory()` |
@@ -1883,6 +2018,7 @@ Rejects an operation outside the locked-session policy.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `command`    | `str`              | Required |
 
 **Wire Value:** `client_access_restricted`
@@ -1906,6 +2042,7 @@ Confirms that only the requesting restricted client was reauthorized.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `client_reauthorized`
 
@@ -1923,13 +2060,15 @@ Confirms that only the requesting restricted client was reauthorized.
 
 Confirms per-session restriction and supplies a one-use unlock challenge.
 
-| Field           | Type                          | Default  |
-| --------------- | ----------------------------- | -------- |
-| `request_id`    | `Union[str, None]`            | `None`   |
-| `revision`      | `Union[int, None]`            | `None`   |
-| `unlock_method` | `<enum 'ClientUnlockMethod'>` | Required |
-| `challenge`     | `Union[str, None]`            | `None`   |
-| `salt`          | `Union[str, None]`            | `None`   |
+| Field              | Type                          | Default  |
+| ------------------ | ----------------------------- | -------- |
+| `request_id`       | `Union[str, None]`            | `None`   |
+| `revision`         | `Union[int, None]`            | `None`   |
+| `epoch`            | `Union[str, None]`            | `None`   |
+| `unlock_method`    | `<enum 'ClientUnlockMethod'>` | Required |
+| `challenge`        | `Union[str, None]`            | `None`   |
+| `salt`             | `Union[str, None]`            | `None`   |
+| `device_lifecycle` | `bool`                        | `False`  |
 
 **Wire Value:** `client_restricted`
 
@@ -1952,6 +2091,7 @@ Signals that a client-scope setting or config key was routed to the daemon.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 | `key`        | `str`              | ``      |
 
 **Wire Value:** `client_scope_key_rejected`
@@ -1974,6 +2114,7 @@ Returns a profile-specific config value.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `key`        | `str`              | Required |
 | `value`      | `str`              | Required |
 
@@ -2005,6 +2146,7 @@ event_type (EventType): The stable IPC routing code.
 | ------------ | ---------------------------- | ----------- |
 | `request_id` | `Union[str, None]`           | `None`      |
 | `revision`   | `Union[int, None]`           | `None`      |
+| `epoch`      | `Union[str, None]`           | `None`      |
 | `scope`      | `str`                        | Required    |
 | `profile`    | `str`                        | Required    |
 | `entries`    | `List[SettingSnapshotEntry]` | `Factory()` |
@@ -2031,6 +2173,7 @@ Signals that profile config overrides were cleared.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `config_synced`
 
@@ -2052,6 +2195,7 @@ Signals that a config update failed.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `config_update_failed`
 
@@ -2073,6 +2217,7 @@ Signals that a profile-specific config override was updated.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `key`        | `str`              | Required |
 
 **Wire Value:** `config_updated`
@@ -2096,6 +2241,7 @@ Announces a connected peer.
 | ------------ | --------------------------- | ------------------------- |
 | `request_id` | `Union[str, None]`          | `None`                    |
 | `revision`   | `Union[int, None]`          | `None`                    |
+| `epoch`      | `Union[str, None]`          | `None`                    |
 | `alias`      | `str`                       | Required                  |
 | `onion`      | `str`                       | Required                  |
 | `origin`     | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.MANUAL` |
@@ -2123,6 +2269,7 @@ Signals that a pending connection was auto-accepted.
 | ------------ | --------------------------- | --------------------------- |
 | `request_id` | `Union[str, None]`          | `None`                      |
 | `revision`   | `Union[int, None]`          | `None`                      |
+| `epoch`      | `Union[str, None]`          | `None`                      |
 | `alias`      | `str`                       | Required                    |
 | `onion`      | `Union[str, None]`          | `None`                      |
 | `origin`     | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.INCOMING` |
@@ -2149,6 +2296,7 @@ Signals that an outbound connection attempt has started.
 | ------------ | --------------------------- | ------------------------- |
 | `request_id` | `Union[str, None]`          | `None`                    |
 | `revision`   | `Union[int, None]`          | `None`                    |
+| `epoch`      | `Union[str, None]`          | `None`                    |
 | `alias`      | `str`                       | Required                  |
 | `onion`      | `Union[str, None]`          | `None`                    |
 | `origin`     | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.MANUAL` |
@@ -2175,6 +2323,7 @@ Signals that a connection attempt failed permanently.
 | ------------- | -------------------------------------------- | ------------------------- |
 | `request_id`  | `Union[str, None]`                           | `None`                    |
 | `revision`    | `Union[int, None]`                           | `None`                    |
+| `epoch`       | `Union[str, None]`                           | `None`                    |
 | `alias`       | `str`                                        | Required                  |
 | `onion`       | `Union[str, None]`                           | `None`                    |
 | `error`       | `Union[str, None]`                           | `None`                    |
@@ -2203,6 +2352,7 @@ Signals a pending outbound live connection.
 | ------------ | --------------------------- | ------------------------- |
 | `request_id` | `Union[str, None]`          | `None`                    |
 | `revision`   | `Union[int, None]`          | `None`                    |
+| `epoch`      | `Union[str, None]`          | `None`                    |
 | `alias`      | `str`                       | Required                  |
 | `onion`      | `Union[str, None]`          | `None`                    |
 | `origin`     | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.MANUAL` |
@@ -2229,6 +2379,7 @@ Signals that a live connection was rejected.
 | ------------- | -------------------------------------------- | --------------------------- |
 | `request_id`  | `Union[str, None]`                           | `None`                      |
 | `revision`    | `Union[int, None]`                           | `None`                      |
+| `epoch`       | `Union[str, None]`                           | `None`                      |
 | `alias`       | `str`                                        | Required                    |
 | `onion`       | `Union[str, None]`                           | `None`                      |
 | `origin`      | `<enum 'ConnectionOrigin'>`                  | `ConnectionOrigin.INCOMING` |
@@ -2256,6 +2407,7 @@ Signals a retrying connection attempt.
 | ------------- | --------------------------- | ------------------------- |
 | `request_id`  | `Union[str, None]`          | `None`                    |
 | `revision`    | `Union[int, None]`          | `None`                    |
+| `epoch`       | `Union[str, None]`          | `None`                    |
 | `alias`       | `str`                       | Required                  |
 | `attempt`     | `int`                       | Required                  |
 | `max_retries` | `int`                       | Required                  |
@@ -2286,6 +2438,7 @@ Broadcasts the current connection-state snapshot.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `active`     | `List[str]`        | Required |
 | `pending`    | `List[str]`        | Required |
 | `contacts`   | `List[str]`        | Required |
@@ -2314,6 +2467,7 @@ Signals that a contact was added to the address book.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `profile`    | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
@@ -2340,6 +2494,7 @@ Signals that a discovered peer was already saved.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 
@@ -2364,6 +2519,7 @@ Signals that a saved contact was downgraded to unsaved.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 
@@ -2388,6 +2544,7 @@ Announces that a contact or peer was removed from the profile.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 | `profile`    | `Union[str, None]` | `None`   |
@@ -2413,6 +2570,7 @@ Signals that a removed contact was downgraded to a session peer.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `new_alias`  | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
@@ -2439,6 +2597,7 @@ Signals that clearing the address book failed.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `contacts_clear_failed`
 
@@ -2460,6 +2619,7 @@ Signals that the address book was cleared.
 | ----------------- | ------------------ | -------- |
 | `request_id`      | `Union[str, None]` | `None`   |
 | `revision`        | `Union[int, None]` | `None`   |
+| `epoch`           | `Union[str, None]` | `None`   |
 | `profile`         | `str`              | Required |
 | `preserved_peers` | `int`              | `0`      |
 
@@ -2484,6 +2644,7 @@ Returns the structured address book.
 | ------------ | -------------------- | -------- |
 | `request_id` | `Union[str, None]`   | `None`   |
 | `revision`   | `Union[int, None]`   | `None`   |
+| `epoch`      | `Union[str, None]`   | `None`   |
 | `saved`      | `List[ContactEntry]` | Required |
 | `discovered` | `List[ContactEntry]` | Required |
 | `profile`    | `str`                | Required |
@@ -2511,6 +2672,7 @@ Signals that the daemon is locked.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `daemon_locked`
 
@@ -2532,6 +2694,7 @@ Signals that no local daemon is running.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `daemon_offline`
 
@@ -2553,6 +2716,7 @@ Signals that the daemon was unlocked successfully.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `daemon_unlocked`
 
@@ -2574,6 +2738,7 @@ Signals that clearing the profile database failed.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `db_clear_failed`
 
@@ -2595,6 +2760,7 @@ Signals that a profile database was cleared.
 | ----------------- | ------------------ | -------- |
 | `request_id`      | `Union[str, None]` | `None`   |
 | `revision`        | `Union[int, None]` | `None`   |
+| `epoch`           | `Union[str, None]` | `None`   |
 | `profile`         | `str`              | Required |
 | `preserved_peers` | `int`              | `0`      |
 
@@ -2619,6 +2785,7 @@ Signals that the profile database is corrupted.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `db_corrupted`
 
@@ -2640,6 +2807,7 @@ Announces a disconnected peer.
 | ------------- | -------------------------------------------- | ------------------------- |
 | `request_id`  | `Union[str, None]`                           | `None`                    |
 | `revision`    | `Union[int, None]`                           | `None`                    |
+| `epoch`       | `Union[str, None]`                           | `None`                    |
 | `alias`       | `str`                                        | Required                  |
 | `onion`       | `Union[str, None]`                           | `None`                    |
 | `actor`       | `<enum 'ConnectionActor'>`                   | `ConnectionActor.LOCAL`   |
@@ -2667,6 +2835,7 @@ Signals that no discovered peer matched a requested promotion target.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `target`     | `str`              | Required |
 
 **Wire Value:** `discovered_peer_not_found`
@@ -2690,6 +2859,7 @@ Marks an asynchronous drop as failed.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `msg_id`     | `str`              | Required |
 | `reason`     | `Union[str, None]` | `None`   |
 
@@ -2714,6 +2884,7 @@ Signals that a drop was queued successfully.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 
@@ -2738,6 +2909,7 @@ Signals that offline drops are disabled.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `drops_disabled`
 
@@ -2759,6 +2931,7 @@ Rejects an atomic selective fallback whose selection is ineligible.
 | ------------ | --------------------------------- | -------- |
 | `request_id` | `Union[str, None]`                | `None`   |
 | `revision`   | `Union[int, None]`                | `None`   |
+| `epoch`      | `Union[str, None]`                | `None`   |
 | `alias`      | `str`                             | Required |
 | `reason`     | `<enum 'MessageOperationReason'>` | Required |
 | `msg_ids`    | `List[str]`                       | Required |
@@ -2787,6 +2960,7 @@ Signals that pending live messages were converted to drops.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `count`      | `int`              | Required |
 | `msg_ids`    | `List[str]`        | Required |
@@ -2815,6 +2989,7 @@ Signals that clearing history failed.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `history_clear_failed`
 
@@ -2836,6 +3011,7 @@ Signals that a peer-specific history was cleared.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 
@@ -2860,6 +3036,7 @@ Signals that profile history was cleared.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `profile`    | `str`              | Required |
 
 **Wire Value:** `history_cleared_all`
@@ -2883,6 +3060,7 @@ Returns projected user-facing history rows.
 | ------------ | ------------------------------- | -------- |
 | `request_id` | `Union[str, None]`              | `None`   |
 | `revision`   | `Union[int, None]`              | `None`   |
+| `epoch`      | `Union[str, None]`              | `None`   |
 | `entries`    | `Sequence[SummaryHistoryEntry]` | Required |
 | `profile`    | `str`                           | Required |
 | `alias`      | `Union[str, None]`              | `None`   |
@@ -2910,6 +3088,7 @@ Returns raw transport history ledger rows.
 | ------------ | --------------------------- | -------- |
 | `request_id` | `Union[str, None]`          | `None`   |
 | `revision`   | `Union[int, None]`          | `None`   |
+| `epoch`      | `Union[str, None]`          | `None`   |
 | `entries`    | `Sequence[RawHistoryEntry]` | Required |
 | `profile`    | `str`                       | Required |
 | `alias`      | `Union[str, None]`          | `None`   |
@@ -2937,6 +3116,7 @@ Returns unread-message counts grouped by peer.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `inbox`      | `Dict[str, int]`   | Required |
 
 **Wire Value:** `inbox_counts`
@@ -2962,6 +3142,7 @@ Carries buffered or unread offline messages.
 | --------------- | -------------------------- | ----------- |
 | `request_id`    | `Union[str, None]`         | `None`      |
 | `revision`      | `Union[int, None]`         | `None`      |
+| `epoch`         | `Union[str, None]`         | `None`      |
 | `alias`         | `str`                      | Required    |
 | `onion`         | `Union[str, None]`         | `None`      |
 | `messages`      | `List[UnreadMessageEntry]` | `Factory()` |
@@ -2989,6 +3170,7 @@ Signals new unread offline messages for a peer.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 | `count`      | `int`              | `1`      |
@@ -3010,14 +3192,16 @@ Signals new unread offline messages for a peer.
 
 Signals an inbound live connection request.
 
-| Field        | Type                        | Default                     |
-| ------------ | --------------------------- | --------------------------- |
-| `request_id` | `Union[str, None]`          | `None`                      |
-| `revision`   | `Union[int, None]`          | `None`                      |
-| `alias`      | `str`                       | Required                    |
-| `onion`      | `Union[str, None]`          | `None`                      |
-| `origin`     | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.INCOMING` |
-| `actor`      | `<enum 'ConnectionActor'>`  | `ConnectionActor.REMOTE`    |
+| Field           | Type                        | Default                     |
+| --------------- | --------------------------- | --------------------------- |
+| `request_id`    | `Union[str, None]`          | `None`                      |
+| `revision`      | `Union[int, None]`          | `None`                      |
+| `epoch`         | `Union[str, None]`          | `None`                      |
+| `alias`         | `str`                       | Required                    |
+| `onion`         | `Union[str, None]`          | `None`                      |
+| `action_handle` | `Union[str, None]`          | `None`                      |
+| `origin`        | `<enum 'ConnectionOrigin'>` | `ConnectionOrigin.INCOMING` |
+| `actor`         | `<enum 'ConnectionActor'>`  | `ConnectionActor.REMOTE`    |
 
 **Wire Value:** `incoming_connection`
 
@@ -3040,6 +3224,7 @@ Initializes the UI after successful IPC generation negotiation.
 | ------------------------ | ------------------ | ----------- |
 | `request_id`             | `Union[str, None]` | `None`      |
 | `revision`               | `Union[int, None]` | `None`      |
+| `epoch`                  | `Union[str, None]` | `None`      |
 | `negotiated_version`     | `int`              | Required    |
 | `daemon_current_version` | `int`              | Required    |
 | `daemon_min_supported`   | `int`              | Required    |
@@ -3070,6 +3255,7 @@ Signals that the daemon hit an unexpected internal error.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `internal_error`
 
@@ -3091,6 +3277,7 @@ Signals that a configuration key was invalid.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `invalid_config_key`
 
@@ -3112,6 +3299,7 @@ Signals that a replacement password fails validation.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `invalid_new_password`
 
@@ -3133,6 +3321,7 @@ Signals that the supplied unlock password or session proof was invalid.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 | `challenge`  | `Union[str, None]` | `None`  |
 | `salt`       | `Union[str, None]` | `None`  |
 
@@ -3156,6 +3345,7 @@ Signals that a setting key was invalid.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `invalid_setting_key`
 
@@ -3177,6 +3367,7 @@ Signals that a user-supplied target could not be resolved.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `target`     | `str`              | Required |
 
 **Wire Value:** `invalid_target`
@@ -3200,6 +3391,7 @@ Signals that the daemon rejected a new IPC session due to client saturation.
 | ------------- | ------------------ | -------- |
 | `request_id`  | `Union[str, None]` | `None`   |
 | `revision`    | `Union[int, None]` | `None`   |
+| `epoch`       | `Union[str, None]` | `None`   |
 | `max_clients` | `int`              | Required |
 
 **Wire Value:** `ipc_client_limit_reached`
@@ -3223,6 +3415,7 @@ Rejects LIVE-context dismissal while canonical state is unresolved.
 | ------------ | --------------------------------- | -------- |
 | `request_id` | `Union[str, None]`                | `None`   |
 | `revision`   | `Union[int, None]`                | `None`   |
+| `epoch`      | `Union[str, None]`                | `None`   |
 | `alias`      | `str`                             | Required |
 | `reason`     | `<enum 'MessageOperationReason'>` | Required |
 | `onion`      | `Union[str, None]`                | `None`   |
@@ -3249,6 +3442,7 @@ Confirms destruction of resolved inbound disconnected LIVE state.
 | --------------- | ------------------ | -------- |
 | `request_id`    | `Union[str, None]` | `None`   |
 | `revision`      | `Union[int, None]` | `None`   |
+| `epoch`         | `Union[str, None]` | `None`   |
 | `alias`         | `str`              | Required |
 | `onion`         | `Union[str, None]` | `None`   |
 | `removed_count` | `int`              | `0`      |
@@ -3274,6 +3468,7 @@ Rejects a LIVE send that would exceed the retained pending budget.
 | --------------- | --------------------------------- | -------- |
 | `request_id`    | `Union[str, None]`                | `None`   |
 | `revision`      | `Union[int, None]`                | `None`   |
+| `epoch`         | `Union[str, None]`                | `None`   |
 | `alias`         | `str`                             | Required |
 | `msg_id`        | `str`                             | Required |
 | `reason`        | `<enum 'MessageOperationReason'>` | Required |
@@ -3304,6 +3499,7 @@ Rejects a LIVE send when no active or recoverable session exists.
 | ------------ | --------------------------------- | ------------------------------------ |
 | `request_id` | `Union[str, None]`                | `None`                               |
 | `revision`   | `Union[int, None]`                | `None`                               |
+| `epoch`      | `Union[str, None]`                | `None`                               |
 | `alias`      | `str`                             | Required                             |
 | `msg_id`     | `str`                             | Required                             |
 | `onion`      | `Union[str, None]`                | `None`                               |
@@ -3331,6 +3527,7 @@ Signals that local daemon auth is temporarily rate-limited.
 | ------------- | ------------------ | -------- |
 | `request_id`  | `Union[str, None]` | `None`   |
 | `revision`    | `Union[int, None]` | `None`   |
+| `epoch`       | `Union[str, None]` | `None`   |
 | `retry_after` | `int`              | Required |
 
 **Wire Value:** `local_auth_rate_limited`
@@ -3354,6 +3551,7 @@ Signals that the maximum live connection count was reached.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `target`     | `str`              | Required |
 | `max_conn`   | `int`              | Required |
 
@@ -3379,6 +3577,7 @@ Rejects local deletion without changing delivery semantics.
 | ------------ | --------------------------------- | -------- |
 | `request_id` | `Union[str, None]`                | `None`   |
 | `revision`   | `Union[int, None]`                | `None`   |
+| `epoch`      | `Union[str, None]`                | `None`   |
 | `target`     | `str`                             | Required |
 | `msg_id`     | `str`                             | Required |
 | `reason`     | `<enum 'MessageOperationReason'>` | Required |
@@ -3407,6 +3606,7 @@ Confirms local payload deletion for one DROP message.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `msg_id`     | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
@@ -3433,6 +3633,7 @@ Carries inbound typed content and independent delivery semantics.
 | ------------ | ---------------------------------- | -------- |
 | `request_id` | `Union[str, None]`                 | `None`   |
 | `revision`   | `Union[int, None]`                 | `None`   |
+| `epoch`      | `Union[str, None]`                 | `None`   |
 | `alias`      | `str`                              | Required |
 | `delivery`   | `<enum 'Delivery'>`                | Required |
 | `content`    | `Union[TextContent, VoiceContent]` | Required |
@@ -3463,6 +3664,7 @@ Signals that clearing messages failed.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `messages_clear_failed`
 
@@ -3484,6 +3686,7 @@ Signals that peer-specific messages were cleared.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 
@@ -3508,6 +3711,7 @@ Signals that all profile messages were cleared.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `profile`    | `str`              | Required |
 
 **Wire Value:** `messages_cleared_all`
@@ -3531,6 +3735,7 @@ Signals that non-contact messages for a peer were cleared.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 
@@ -3555,6 +3760,7 @@ Signals that non-contact messages for a profile were cleared.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `profile`    | `str`              | Required |
 
 **Wire Value:** `messages_cleared_non_contacts_all`
@@ -3578,6 +3784,7 @@ Returns stored chat messages for a peer.
 | ------------ | -------------------- | -------- |
 | `request_id` | `Union[str, None]`   | `None`   |
 | `revision`   | `Union[int, None]`   | `None`   |
+| `epoch`      | `Union[str, None]`   | `None`   |
 | `messages`   | `List[MessageEntry]` | Required |
 | `alias`      | `str`                | Required |
 | `onion`      | `Union[str, None]`   | `None`   |
@@ -3604,6 +3811,7 @@ Signals that there is no connection to disconnect.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 
@@ -3628,6 +3836,7 @@ Signals that there is no connection to reject.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 
@@ -3652,6 +3861,7 @@ Signals that there is no pending connection to accept.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 
@@ -3676,6 +3886,7 @@ Signals that no pending live messages existed for fallback.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 
@@ -3700,6 +3911,7 @@ Signals that an onion is already bound to a saved contact.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 
@@ -3724,6 +3936,7 @@ Signals that password-keyslot replacement could not be committed.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `password_change_failed`
 
@@ -3745,6 +3958,7 @@ Signals that password change is unavailable for plaintext storage.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `password_change_unsupported`
 
@@ -3766,6 +3980,7 @@ Signals that the current profile PMK was rewrapped successfully.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `password_changed`
 
@@ -3787,6 +4002,7 @@ Signals that a discovered peer was anonymized.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `new_alias`  | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
@@ -3813,6 +4029,7 @@ Signals that an active peer cannot be deleted.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 
@@ -3837,6 +4054,7 @@ Signals that a user-supplied peer could not be resolved.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `target`     | `str`              | Required |
 
 **Wire Value:** `peer_not_found`
@@ -3860,6 +4078,7 @@ Signals that a discovered peer was promoted to a contact.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 
@@ -3884,6 +4103,7 @@ Signals that a discovered peer was removed.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 
@@ -3904,15 +4124,17 @@ Signals that a discovered peer was removed.
 
 Signals that a pending connection existed but its acceptance window expired.
 
-| Field         | Type                            | Default                                           |
-| ------------- | ------------------------------- | ------------------------------------------------- |
-| `request_id`  | `Union[str, None]`              | `None`                                            |
-| `revision`    | `Union[int, None]`              | `None`                                            |
-| `alias`       | `str`                           | Required                                          |
-| `onion`       | `Union[str, None]`              | `None`                                            |
-| `origin`      | `<enum 'ConnectionOrigin'>`     | `ConnectionOrigin.INCOMING`                       |
-| `actor`       | `<enum 'ConnectionActor'>`      | `ConnectionActor.SYSTEM`                          |
-| `reason_code` | `<enum 'ConnectionReasonCode'>` | `ConnectionReasonCode.PENDING_ACCEPTANCE_EXPIRED` |
+| Field           | Type                            | Default                                           |
+| --------------- | ------------------------------- | ------------------------------------------------- |
+| `request_id`    | `Union[str, None]`              | `None`                                            |
+| `revision`      | `Union[int, None]`              | `None`                                            |
+| `epoch`         | `Union[str, None]`              | `None`                                            |
+| `alias`         | `str`                           | Required                                          |
+| `onion`         | `Union[str, None]`              | `None`                                            |
+| `action_handle` | `Union[str, None]`              | `None`                                            |
+| `origin`        | `<enum 'ConnectionOrigin'>`     | `ConnectionOrigin.INCOMING`                       |
+| `actor`         | `<enum 'ConnectionActor'>`      | `ConnectionActor.SYSTEM`                          |
+| `reason_code`   | `<enum 'ConnectionReasonCode'>` | `ConnectionReasonCode.PENDING_ACCEPTANCE_EXPIRED` |
 
 **Wire Value:** `pending_connection_expired`
 
@@ -3935,6 +4157,7 @@ Confirms durable local transition and hard lock for normal profile exit.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `profile`    | `str`              | Required |
 
 **Wire Value:** `profile_exit_prepared`
@@ -3958,6 +4181,7 @@ Carries one structured local profile-operation result over IPC.
 | ---------------- | ------------------------------------------------------------------------------------------------------------ | -------- |
 | `request_id`     | `Union[str, None]`                                                                                           | `None`   |
 | `revision`       | `Union[int, None]`                                                                                           | `None`   |
+| `epoch`          | `Union[str, None]`                                                                                           | `None`   |
 | `success`        | `bool`                                                                                                       | Required |
 | `operation_type` | `<enum 'ProfileOperationCode'>`                                                                              | Required |
 | `params`         | `Dict[str, Union[str, int, float, bool, None, Dict[str, Dict[str, JsonValue]], List[Dict[str, JsonValue]]]]` | Required |
@@ -3991,6 +4215,7 @@ event_type (EventType): The stable IPC routing code.
 | ------------ | -------------------- | -------- |
 | `request_id` | `Union[str, None]`   | `None`   |
 | `revision`   | `Union[int, None]`   | `None`   |
+| `epoch`      | `Union[str, None]`   | `None`   |
 | `profiles`   | `List[ProfileEntry]` | Required |
 
 **Wire Value:** `profiles_data`
@@ -4014,6 +4239,7 @@ Signals that the client and daemon IPC ranges do not overlap.
 | ------------------------ | ------------------ | -------- |
 | `request_id`             | `Union[str, None]` | `None`   |
 | `revision`               | `Union[int, None]` | `None`   |
+| `epoch`                  | `Union[str, None]` | `None`   |
 | `daemon_current_version` | `int`              | Required |
 | `daemon_min_supported`   | `int`              | Required |
 | `client_current_version` | `int`              | Required |
@@ -4043,6 +4269,7 @@ Confirms installation or removal of the PIN verifier.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `enabled`    | `bool`             | Required |
 
 **Wire Value:** `quick_unlock_configured`
@@ -4066,6 +4293,7 @@ Rejects invalid quick-unlock verifier configuration or proof.
 | ------------------- | ------------------ | ------- |
 | `request_id`        | `Union[str, None]` | `None`  |
 | `revision`          | `Union[int, None]` | `None`  |
+| `epoch`             | `Union[str, None]` | `None`  |
 | `password_required` | `bool`             | `False` |
 | `challenge`         | `Union[str, None]` | `None`  |
 | `salt`              | `Union[str, None]` | `None`  |
@@ -4090,6 +4318,7 @@ Signals that the peer consumed one message and acknowledges it as read.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `msg_id`     | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
@@ -4116,6 +4345,7 @@ Synchronizes a peer alias rename across UIs.
 | ------------- | ------------------ | -------- |
 | `request_id`  | `Union[str, None]` | `None`   |
 | `revision`    | `Union[int, None]` | `None`   |
+| `epoch`       | `Union[str, None]` | `None`   |
 | `old_alias`   | `str`              | Required |
 | `new_alias`   | `str`              | Required |
 | `onion`       | `Union[str, None]` | `None`   |
@@ -4144,6 +4374,7 @@ Signals that retunneling failed for a peer.
 | -------------- | ---------------------------------------- | -------- |
 | `request_id`   | `Union[str, None]`                       | `None`   |
 | `revision`     | `Union[int, None]`                       | `None`   |
+| `epoch`        | `Union[str, None]`                       | `None`   |
 | `alias`        | `str`                                    | Required |
 | `onion`        | `Union[str, None]`                       | `None`   |
 | `error`        | `Union[str, None]`                       | `None`   |
@@ -4171,6 +4402,7 @@ Signals that retunneling has started for a peer.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 
@@ -4195,6 +4427,7 @@ Signals that retunneling succeeded for a peer.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
 | `onion`      | `Union[str, None]` | `None`   |
 
@@ -4219,6 +4452,7 @@ Returns one aggregate, content-free runtime projection for rich clients.
 | ------------------ | ------------------------------------ | ----------- |
 | `request_id`       | `Union[str, None]`                   | `None`      |
 | `revision`         | `Union[int, None]`                   | `None`      |
+| `epoch`            | `Union[str, None]`                   | `None`      |
 | `profile`          | `str`                                | Required    |
 | `onion`            | `str`                                | Required    |
 | `contacts`         | `List[ContactEntry]`                 | `Factory()` |
@@ -4241,6 +4475,80 @@ Returns one aggregate, content-free runtime projection for rich clients.
 
 ---
 
+### `RuntimeSnapshotUnavailableEvent`
+
+Signals that sustained mutation prevented an authoritative snapshot.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
+| `retryable`  | `bool`             | `True`  |
+
+**Wire Value:** `runtime_snapshot_unavailable`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "runtime_snapshot_unavailable"
+}
+```
+
+---
+
+### `RuntimeStateChangedEvent`
+
+Invalidates one content-free canonical runtime projection scope.
+
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
+| `scope`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
+
+**Wire Value:** `runtime_state_changed`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "runtime_state_changed",
+  "scope": "string"
+}
+```
+
+---
+
+### `SelfDestructCleanupFailedEvent`
+
+Reports the exact failed destruction phase and irreversible state.
+
+| Field           | Type               | Default   |
+| --------------- | ------------------ | --------- |
+| `request_id`    | `Union[str, None]` | `None`    |
+| `revision`      | `Union[int, None]` | `None`    |
+| `epoch`         | `Union[str, None]` | `None`    |
+| `profile`       | `str`              | Required  |
+| `phase`         | `str`              | `cleanup` |
+| `key_destroyed` | `bool`             | `True`    |
+
+**Wire Value:** `self_destruct_cleanup_failed`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "self_destruct_cleanup_failed",
+  "profile": "string"
+}
+```
+
+---
+
 ### `SelfDestructCompletedEvent`
 
 Signals that protected key access was destroyed before cleanup completion.
@@ -4249,6 +4557,7 @@ Signals that protected key access was destroyed before cleanup completion.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `self_destruct_completed`
 
@@ -4270,6 +4579,7 @@ Signals that daemon self-destruction has started.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `self_destruct_initiated`
 
@@ -4283,6 +4593,30 @@ Signals that daemon self-destruction has started.
 
 ---
 
+### `SelfDestructKeyDestroyedEvent`
+
+Confirms irreversible destruction of protected profile-key access.
+
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
+| `profile`    | `str`              | Required |
+
+**Wire Value:** `self_destruct_key_destroyed`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "self_destruct_key_destroyed",
+  "profile": "string"
+}
+```
+
+---
+
 ### `SessionAuthenticatedEvent`
 
 Signals that the current session authenticated successfully.
@@ -4291,6 +4625,7 @@ Signals that the current session authenticated successfully.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `session_authenticated`
 
@@ -4312,6 +4647,7 @@ Returns a global setting value.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `key`        | `str`              | Required |
 | `value`      | `str`              | Required |
 
@@ -4337,6 +4673,7 @@ Signals a type mismatch while applying a setting value.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 | `key`        | `Union[str, None]` | `None`  |
 | `reason`     | `Union[str, None]` | `None`  |
 
@@ -4360,6 +4697,7 @@ Signals that a global setting update failed.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `setting_update_failed`
 
@@ -4381,6 +4719,7 @@ Signals that a global setting was updated.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
 | `key`        | `str`              | Required |
 
 **Wire Value:** `setting_updated`
@@ -4409,6 +4748,7 @@ event_type (EventType): The stable IPC routing code.
 | ------------ | ---------------------------- | ----------- |
 | `request_id` | `Union[str, None]`           | `None`      |
 | `revision`   | `Union[int, None]`           | `None`      |
+| `epoch`      | `Union[str, None]`           | `None`      |
 | `scope`      | `str`                        | Required    |
 | `entries`    | `List[SettingSnapshotEntry]` | `Factory()` |
 
@@ -4433,6 +4773,7 @@ Confirms a focus switch or focus clear operation.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 | `alias`      | `Union[str, None]` | `None`  |
 | `onion`      | `Union[str, None]` | `None`  |
 
@@ -4456,6 +4797,7 @@ Signals that the encrypted Tor runtime key could not be decrypted.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `tor_key_decrypt_failed`
 
@@ -4477,6 +4819,7 @@ Signals that the Tor runtime key could not be written to disk.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `tor_key_write_failed`
 
@@ -4498,6 +4841,7 @@ Signals that Tor terminated unexpectedly during startup.
 | -------------- | ---------------------------------------- | ------- |
 | `request_id`   | `Union[str, None]`                       | `None`  |
 | `revision`     | `Union[int, None]`                       | `None`  |
+| `epoch`        | `Union[str, None]`                       | `None`  |
 | `error`        | `Union[str, None]`                       | `None`  |
 | `error_code`   | `Union[<enum 'RuntimeErrorCode'>, None]` | `None`  |
 | `error_detail` | `Union[str, None]`                       | `None`  |
@@ -4522,6 +4866,7 @@ Signals that the Tor process could not be started.
 | -------------- | ---------------------------------------- | ------- |
 | `request_id`   | `Union[str, None]`                       | `None`  |
 | `revision`     | `Union[int, None]`                       | `None`  |
+| `epoch`        | `Union[str, None]`                       | `None`  |
 | `error`        | `Union[str, None]`                       | `None`  |
 | `error_code`   | `Union[<enum 'RuntimeErrorCode'>, None]` | `None`  |
 | `error_detail` | `Union[str, None]`                       | `None`  |
@@ -4546,6 +4891,7 @@ Broadcasts the current transport state for one peer or the whole daemon.
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------- |
 | `request_id`         | `Union[str, None]`                                                                                                        | `None`   |
 | `revision`           | `Union[int, None]`                                                                                                        | `None`   |
+| `epoch`              | `Union[str, None]`                                                                                                        | `None`   |
 | `peer`               | `str`                                                                                                                     | Required |
 | `session_state`      | `str`                                                                                                                     | Required |
 | `onion`              | `Union[str, None]`                                                                                                        | `None`   |
@@ -4576,6 +4922,7 @@ Signals that the daemon received an unknown command.
 | ------------ | ------------------ | ------- |
 | `request_id` | `Union[str, None]` | `None`  |
 | `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
 
 **Wire Value:** `unknown_command`
 
@@ -4597,6 +4944,7 @@ Returns unread messages consumed explicitly for a peer.
 | ------------ | -------------------------- | -------- |
 | `request_id` | `Union[str, None]`         | `None`   |
 | `revision`   | `Union[int, None]`         | `None`   |
+| `epoch`      | `Union[str, None]`         | `None`   |
 | `messages`   | `List[UnreadMessageEntry]` | Required |
 | `alias`      | `str`                      | Required |
 | `onion`      | `Union[str, None]`         | `None`   |
@@ -4615,6 +4963,33 @@ Returns unread messages consumed explicitly for a peer.
 
 ---
 
+### `VoiceCancelledEvent`
+
+Confirms explicit cancellation of one unsent Voice draft.
+
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `msg_id`     | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
+
+**Wire Value:** `voice_cancelled`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "voice_cancelled",
+  "alias": "string",
+  "msg_id": "string"
+}
+```
+
+---
+
 ### `VoiceChunkAcceptedEvent`
 
 Confirms durable acceptance through the returned next offset.
@@ -4623,6 +4998,7 @@ Confirms durable acceptance through the returned next offset.
 | ------------- | ------------------ | -------- |
 | `request_id`  | `Union[str, None]` | `None`   |
 | `revision`    | `Union[int, None]` | `None`   |
+| `epoch`       | `Union[str, None]` | `None`   |
 | `msg_id`      | `str`              | Required |
 | `next_offset` | `int`              | Required |
 
@@ -4644,15 +5020,18 @@ Confirms durable acceptance through the returned next offset.
 
 Streams one bounded inbound Voice chunk to an attached consumer.
 
-| Field        | Type               | Default  |
-| ------------ | ------------------ | -------- |
-| `request_id` | `Union[str, None]` | `None`   |
-| `revision`   | `Union[int, None]` | `None`   |
-| `alias`      | `str`              | Required |
-| `msg_id`     | `str`              | Required |
-| `offset`     | `int`              | Required |
-| `data`       | `str`              | Required |
-| `onion`      | `Union[str, None]` | `None`   |
+| Field        | Type                | Default         |
+| ------------ | ------------------- | --------------- |
+| `request_id` | `Union[str, None]`  | `None`          |
+| `revision`   | `Union[int, None]`  | `None`          |
+| `epoch`      | `Union[str, None]`  | `None`          |
+| `alias`      | `str`               | Required        |
+| `msg_id`     | `str`               | Required        |
+| `offset`     | `int`               | Required        |
+| `data`       | `str`               | Required        |
+| `onion`      | `Union[str, None]`  | `None`          |
+| `delivery`   | `<enum 'Delivery'>` | `Delivery.LIVE` |
+| `codec`      | `Union[str, None]`  | `None`          |
 
 **Wire Value:** `voice_chunk_received`
 
@@ -4670,16 +5049,92 @@ Streams one bounded inbound Voice chunk to an attached consumer.
 
 ---
 
-### `VoiceFinalizedEvent`
+### `VoiceCommittedEvent`
 
-Confirms clean finalization of one logical Voice turn.
+Confirms explicit publication of one DROP Voice draft.
 
 | Field        | Type               | Default  |
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
 | `msg_id`     | `str`              | Required |
-| `size_bytes` | `int`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
+
+**Wire Value:** `voice_committed`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "voice_committed",
+  "alias": "string",
+  "msg_id": "string"
+}
+```
+
+---
+
+### `VoiceDataEvent`
+
+Returns one bounded authenticated Voice byte range.
+
+| Field         | Type                            | Default  |
+| ------------- | ------------------------------- | -------- |
+| `request_id`  | `Union[str, None]`              | `None`   |
+| `revision`    | `Union[int, None]`              | `None`   |
+| `epoch`       | `Union[str, None]`              | `None`   |
+| `alias`       | `str`                           | Required |
+| `msg_id`      | `str`                           | Required |
+| `direction`   | `<enum 'MessageDirectionCode'>` | Required |
+| `delivery`    | `<enum 'Delivery'>`             | Required |
+| `codec`       | `str`                           | Required |
+| `offset`      | `int`                           | Required |
+| `next_offset` | `int`                           | Required |
+| `size_bytes`  | `int`                           | Required |
+| `data`        | `str`                           | Required |
+| `complete`    | `bool`                          | Required |
+| `duration_ms` | `Union[int, None]`              | `None`   |
+| `onion`       | `Union[str, None]`              | `None`   |
+
+**Wire Value:** `voice_data`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "voice_data",
+  "alias": "string",
+  "msg_id": "string",
+  "direction": "in",
+  "delivery": "live",
+  "codec": "string",
+  "offset": 0,
+  "next_offset": 0,
+  "size_bytes": 0,
+  "data": "string",
+  "complete": false
+}
+```
+
+---
+
+### `VoiceFinalizedEvent`
+
+Confirms clean finalization of one logical Voice turn.
+
+| Field         | Type                                         | Default  |
+| ------------- | -------------------------------------------- | -------- |
+| `request_id`  | `Union[str, None]`                           | `None`   |
+| `revision`    | `Union[int, None]`                           | `None`   |
+| `epoch`       | `Union[str, None]`                           | `None`   |
+| `msg_id`      | `str`                                        | Required |
+| `size_bytes`  | `int`                                        | Required |
+| `onion`       | `Union[str, None]`                           | `None`   |
+| `delivery`    | `Union[<enum 'Delivery'>, None]`             | `None`   |
+| `direction`   | `Union[<enum 'MessageDirectionCode'>, None]` | `None`   |
+| `duration_ms` | `Union[int, None]`                           | `None`   |
 
 **Wire Value:** `voice_finalized`
 
@@ -4695,17 +5150,108 @@ Confirms clean finalization of one logical Voice turn.
 
 ---
 
+### `VoiceIncomingStartedEvent`
+
+Describes one accepted inbound Voice stream before its first chunk.
+
+| Field         | Type                | Default  |
+| ------------- | ------------------- | -------- |
+| `request_id`  | `Union[str, None]`  | `None`   |
+| `revision`    | `Union[int, None]`  | `None`   |
+| `epoch`       | `Union[str, None]`  | `None`   |
+| `alias`       | `str`               | Required |
+| `msg_id`      | `str`               | Required |
+| `delivery`    | `<enum 'Delivery'>` | Required |
+| `codec`       | `str`               | Required |
+| `next_offset` | `int`               | Required |
+| `onion`       | `Union[str, None]`  | `None`   |
+
+**Wire Value:** `voice_incoming_started`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "voice_incoming_started",
+  "alias": "string",
+  "msg_id": "string",
+  "delivery": "live",
+  "codec": "string",
+  "next_offset": 0
+}
+```
+
+---
+
+### `VoiceOperationRejectedEvent`
+
+Rejects a Voice operation with a machine-readable reason.
+
+| Field        | Type                              | Default  |
+| ------------ | --------------------------------- | -------- |
+| `request_id` | `Union[str, None]`                | `None`   |
+| `revision`   | `Union[int, None]`                | `None`   |
+| `epoch`      | `Union[str, None]`                | `None`   |
+| `msg_id`     | `str`                             | Required |
+| `reason`     | `<enum 'MessageOperationReason'>` | Required |
+| `onion`      | `Union[str, None]`                | `None`   |
+
+**Wire Value:** `voice_operation_rejected`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "voice_operation_rejected",
+  "msg_id": "string",
+  "reason": "invalid_selection"
+}
+```
+
+---
+
+### `VoiceReleasedEvent`
+
+Confirms per-item inbound Voice consumption and retention release.
+
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
+| `alias`      | `str`              | Required |
+| `msg_id`     | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
+
+**Wire Value:** `voice_released`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "voice_released",
+  "alias": "string",
+  "msg_id": "string"
+}
+```
+
+---
+
 ### `VoiceResourceLimitEvent`
 
 Reports Voice retention refusal or resource-limit finalization.
 
-| Field         | Type               | Default  |
-| ------------- | ------------------ | -------- |
-| `request_id`  | `Union[str, None]` | `None`   |
-| `revision`    | `Union[int, None]` | `None`   |
-| `used_bytes`  | `int`              | Required |
-| `limit_bytes` | `int`              | Required |
-| `msg_id`      | `Union[str, None]` | `None`   |
+| Field         | Type                                           | Default  |
+| ------------- | ---------------------------------------------- | -------- |
+| `request_id`  | `Union[str, None]`                             | `None`   |
+| `revision`    | `Union[int, None]`                             | `None`   |
+| `epoch`       | `Union[str, None]`                             | `None`   |
+| `used_bytes`  | `int`                                          | Required |
+| `limit_bytes` | `int`                                          | Required |
+| `msg_id`      | `Union[str, None]`                             | `None`   |
+| `onion`       | `Union[str, None]`                             | `None`   |
+| `delivery`    | `Union[<enum 'Delivery'>, None]`               | `None`   |
+| `reason`      | `Union[<enum 'MessageOperationReason'>, None]` | `None`   |
 
 **Wire Value:** `voice_resource_limit`
 
@@ -4725,13 +5271,16 @@ Reports Voice retention refusal or resource-limit finalization.
 
 Reports Voice retention reaching the warning threshold.
 
-| Field         | Type               | Default  |
-| ------------- | ------------------ | -------- |
-| `request_id`  | `Union[str, None]` | `None`   |
-| `revision`    | `Union[int, None]` | `None`   |
-| `used_bytes`  | `int`              | Required |
-| `limit_bytes` | `int`              | Required |
-| `msg_id`      | `Union[str, None]` | `None`   |
+| Field         | Type                             | Default  |
+| ------------- | -------------------------------- | -------- |
+| `request_id`  | `Union[str, None]`               | `None`   |
+| `revision`    | `Union[int, None]`               | `None`   |
+| `epoch`       | `Union[str, None]`               | `None`   |
+| `used_bytes`  | `int`                            | Required |
+| `limit_bytes` | `int`                            | Required |
+| `msg_id`      | `Union[str, None]`               | `None`   |
+| `onion`       | `Union[str, None]`               | `None`   |
+| `delivery`    | `Union[<enum 'Delivery'>, None]` | `None`   |
 
 **Wire Value:** `voice_resource_pressure`
 
@@ -4755,6 +5304,7 @@ Confirms allocation of one logical Voice turn.
 | ------------ | ------------------- | -------- |
 | `request_id` | `Union[str, None]`  | `None`   |
 | `revision`   | `Union[int, None]`  | `None`   |
+| `epoch`      | `Union[str, None]`  | `None`   |
 | `alias`      | `str`               | Required |
 | `msg_id`     | `str`               | Required |
 | `delivery`   | `<enum 'Delivery'>` | Required |

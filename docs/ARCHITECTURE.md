@@ -219,11 +219,11 @@ SQLCipher access, clears any injected runtime keys, calls
 key-first ordering. If cleanup fails after key destruction, nothing recreates
 protected key material.
 
-`daemon.self_destruct_requires_unlock` defaults to `true`, so locked daemons
-reject self-destruction. Embedded deployments may set it to `false` to permit a
-locked destructive IPC command. That choice creates a deliberate availability
-and denial-of-service risk: any actor able to issue the local IPC command can
-destroy the profile, so it requires appropriate device and IPC access controls.
+Hard-locked daemons reject anonymous self-destruction. An authenticated client
+may deliberately enter restricted mode with the `device_lifecycle` capability;
+only that fixed lock-cycle capability can prepare profile exit or self-destruct
+while the client remains restricted. Merely reaching the local IPC socket never
+grants destructive access.
 
 `secure_remove_path` remains defense in depth. Portable Python overwrite and
 unlink cannot guarantee physical erasure on SSD, SD, flash, copy-on-write,

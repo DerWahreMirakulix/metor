@@ -173,12 +173,13 @@ def connect_to(
                     conn.close()
                     raise ConnectionError('Local onion unavailable for live handshake.')
 
-                conn.sendall(
+                controller._state.send_frame(
+                    conn,
                     HandshakeProtocol.build_auth_line(
                         local_onion,
                         signature,
                         origin=origin,
-                    ).encode('utf-8')
+                    ).encode('utf-8'),
                 )
 
                 conn.settimeout(

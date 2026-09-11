@@ -2,6 +2,8 @@
 
 import socket
 import threading
+import time
+from collections import deque
 from typing import Callable, Optional
 
 from metor.client.stream import BufferedIpcEventReader
@@ -43,8 +45,12 @@ class IpcClient:
         self._stop_flag: threading.Event = threading.Event()
         self._listener_thread: Optional[threading.Thread] = None
         self._disconnect_lock: threading.Lock = threading.Lock()
+        self._send_lock: threading.Lock = threading.Lock()
         self._disconnect_notified: bool = False
         self._reader: BufferedIpcEventReader = BufferedIpcEventReader()
+        self._response_condition = threading.Condition()
+        self._response_waiters: set[str] = set()
+        self._responses: dict[str, deque[IpcEvent]] = {}
 
     @property
     def host(self) -> str:
@@ -91,6 +97,9 @@ class IpcClient:
             self._socket.settimeout(self._timeout)
             self._socket.connect((self._host, self._port))
             self._reader.reset()
+            with self._response_condition:
+                self._response_waiters.clear()
+                self._responses.clear()
             if start_listener:
                 self.start_listener()
             return True
@@ -131,6 +140,10 @@ class IpcClient:
             None
         """
         self._stop_flag.set()
+        with self._response_condition:
+            self._response_waiters.clear()
+            self._responses.clear()
+            self._response_condition.notify_all()
         sock: Optional[socket.socket] = self._socket
         self._socket = None
 
@@ -167,7 +180,8 @@ class IpcClient:
         try:
             ensure_request_id(cmd)
             payload: bytes = (cmd.to_json() + '\n').encode('utf-8')
-            self._socket.sendall(payload)
+            with self._send_lock:
+                self._socket.sendall(payload)
         except Exception:
             pass
 
@@ -184,7 +198,84 @@ class IpcClient:
         if self._socket is None:
             return None
 
+        if self._listener_thread is not None and self._listener_thread.is_alive():
+            raise RuntimeError('The active listener owns all IPC reads.')
+
         return self._reader.read_from_socket(self._socket)
+
+    def begin_request(self, request_id: str) -> None:
+        """Registers one correlated response stream before sending its command.
+
+        Args:
+            request_id (str): Stable request correlation identifier.
+
+        Returns:
+            None
+        """
+        with self._response_condition:
+            self._response_waiters.add(request_id)
+            self._responses.setdefault(request_id, deque())
+        self.start_listener()
+
+    def wait_for_response(self, request_id: str) -> Optional[IpcEvent]:
+        """Waits for the sole reader thread to demultiplex one response event.
+
+        Args:
+            request_id (str): Registered request correlation identifier.
+
+        Returns:
+            Optional[IpcEvent]: Next correlated event, or None on timeout/loss.
+        """
+        deadline = time.monotonic() + self._timeout
+        with self._response_condition:
+            while not self._stop_flag.is_set():
+                queued = self._responses.get(request_id)
+                if queued:
+                    return queued.popleft()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    return None
+                self._response_condition.wait(remaining)
+        return None
+
+    def end_request(self, request_id: str) -> None:
+        """Unregisters a request after its complete correlated exchange.
+
+        Args:
+            request_id (str): Stable request correlation identifier.
+
+        Returns:
+            None
+        """
+        with self._response_condition:
+            self._response_waiters.discard(request_id)
+            remaining = tuple(self._responses.pop(request_id, ()))
+        for event in remaining:
+            try:
+                self._on_event(event)
+            except Exception:
+                pass
+
+    def _dispatch_event(self, event: IpcEvent) -> None:
+        """Routes responses to waiters and preserves every asynchronous event.
+
+        Args:
+            event (IpcEvent): Decoded daemon event.
+
+        Returns:
+            None
+        """
+        request_id = event.request_id
+        if request_id is not None:
+            with self._response_condition:
+                if request_id in self._response_waiters:
+                    self._responses[request_id].append(event)
+                    self._response_condition.notify_all()
+                    return
+        try:
+            self._on_event(event)
+        except Exception:
+            pass
 
     def _notify_disconnect(self) -> None:
         """
@@ -228,7 +319,7 @@ class IpcClient:
                     continue
 
                 if buffered_event is not None:
-                    self._on_event(buffered_event)
+                    self._dispatch_event(buffered_event)
                     continue
 
                 try:

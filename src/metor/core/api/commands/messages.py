@@ -5,7 +5,7 @@ from typing import List, Optional
 
 # Local Package Imports
 from metor.core.api.base import IpcCommand
-from metor.core.api.codes import CommandType
+from metor.core.api.codes import CommandType, MessageDirectionCode
 from metor.core.api.content import Delivery, MessageContent
 from metor.core.api.registry import register_command
 
@@ -80,6 +80,7 @@ class DeleteMessageCommand(IpcCommand):
 
     target: str
     msg_id: str
+    direction: Optional[MessageDirectionCode] = None
     command_type: CommandType = field(default=CommandType.DELETE_MESSAGE, init=False)
 
 
@@ -132,3 +133,49 @@ class FinalizeVoiceCommand(IpcCommand):
         default=CommandType.FINALIZE_VOICE,
         init=False,
     )
+
+
+@register_command(CommandType.GET_VOICE_CHUNK)
+@dataclass
+class GetVoiceChunkCommand(IpcCommand):
+    """Reads one authenticated bounded range from retained Voice content."""
+
+    target: str
+    msg_id: str
+    direction: MessageDirectionCode
+    offset: int
+    max_bytes: int
+    command_type: CommandType = field(
+        default=CommandType.GET_VOICE_CHUNK,
+        init=False,
+    )
+
+
+@register_command(CommandType.RELEASE_VOICE)
+@dataclass
+class ReleaseVoiceCommand(IpcCommand):
+    """Consumes one finalized inbound Voice item after client handoff."""
+
+    target: str
+    msg_id: str
+    command_type: CommandType = field(default=CommandType.RELEASE_VOICE, init=False)
+
+
+@register_command(CommandType.COMMIT_VOICE)
+@dataclass
+class CommitVoiceCommand(IpcCommand):
+    """Commits one finalized DROP Voice draft to pending delivery."""
+
+    target: str
+    msg_id: str
+    command_type: CommandType = field(default=CommandType.COMMIT_VOICE, init=False)
+
+
+@register_command(CommandType.CANCEL_VOICE)
+@dataclass
+class CancelVoiceCommand(IpcCommand):
+    """Cancels one unsent DROP Voice draft."""
+
+    target: str
+    msg_id: str
+    command_type: CommandType = field(default=CommandType.CANCEL_VOICE, init=False)

@@ -12,8 +12,8 @@
     "minimum_supported": 1
   },
   "database": {
-    "current": 2,
-    "minimum_supported": 2,
+    "current": 3,
+    "minimum_supported": 3,
     "schema": {
       "tables": [
         {
@@ -502,7 +502,7 @@
             }
           ],
           "name": "message_receipts",
-          "sql": "CREATE TABLE message_receipts (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    msg_id TEXT NOT NULL CHECK (msg_id <> ''),\n    peer_onion TEXT NOT NULL CHECK (peer_onion <> '') REFERENCES peers(onion) ON DELETE RESTRICT,\n    direction TEXT NOT NULL CHECK (direction IN ('in', 'out')),\n    delivery TEXT NOT NULL CHECK (delivery IN ('live', 'drop')),\n    content_type TEXT NOT NULL CHECK (content_type IN ('text', 'voice')),\n    retained_bytes INTEGER NOT NULL DEFAULT 0 CHECK (retained_bytes >= 0),\n    status TEXT NOT NULL CHECK (status IN ('pending', 'delivered', 'unread', 'read')),\n    visible_in_history INTEGER NOT NULL DEFAULT 0 CHECK (visible_in_history IN (0, 1)),\n    created_at TEXT NOT NULL CHECK (created_at <> ''),\n    updated_at TEXT NOT NULL CHECK (updated_at <> '')\n)"
+          "sql": "CREATE TABLE message_receipts (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    msg_id TEXT NOT NULL CHECK (msg_id <> ''),\n    peer_onion TEXT NOT NULL CHECK (peer_onion <> '') REFERENCES peers(onion) ON DELETE RESTRICT,\n    direction TEXT NOT NULL CHECK (direction IN ('in', 'out')),\n    delivery TEXT NOT NULL CHECK (delivery IN ('live', 'drop')),\n    content_type TEXT NOT NULL CHECK (content_type IN ('text', 'voice')),\n    retained_bytes INTEGER NOT NULL DEFAULT 0 CHECK (retained_bytes >= 0),\n    status TEXT NOT NULL CHECK (status IN ('pending', 'delivered', 'unread', 'read', 'draft')),\n    visible_in_history INTEGER NOT NULL DEFAULT 0 CHECK (visible_in_history IN (0, 1)),\n    created_at TEXT NOT NULL CHECK (created_at <> ''),\n    updated_at TEXT NOT NULL CHECK (updated_at <> '')\n)"
         },
         {
           "columns": [
@@ -684,6 +684,9 @@
         "begin_voice": {
           "$ref": "#/definitions/BeginVoiceCommand"
         },
+        "cancel_voice": {
+          "$ref": "#/definitions/CancelVoiceCommand"
+        },
         "change_password": {
           "$ref": "#/definitions/ChangePasswordCommand"
         },
@@ -698,6 +701,9 @@
         },
         "clear_profile_db": {
           "$ref": "#/definitions/ClearProfileDbCommand"
+        },
+        "commit_voice": {
+          "$ref": "#/definitions/CommitVoiceCommand"
         },
         "configure_quick_unlock": {
           "$ref": "#/definitions/ConfigureQuickUnlockCommand"
@@ -765,6 +771,9 @@
         "get_transport_state": {
           "$ref": "#/definitions/GetTransportStateCommand"
         },
+        "get_voice_chunk": {
+          "$ref": "#/definitions/GetVoiceChunkCommand"
+        },
         "init": {
           "$ref": "#/definitions/InitCommand"
         },
@@ -788,6 +797,9 @@
         },
         "reject": {
           "$ref": "#/definitions/RejectCommand"
+        },
+        "release_voice": {
+          "$ref": "#/definitions/ReleaseVoiceCommand"
         },
         "remove_contact": {
           "$ref": "#/definitions/RemoveContactCommand"
@@ -857,6 +869,16 @@
         },
         "AckEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "msg_id": {
               "type": "string"
             },
@@ -979,6 +1001,16 @@
         },
         "AddressCantGenerateRunningEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "profile": {
               "type": "string"
             },
@@ -1011,6 +1043,16 @@
         },
         "AddressCurrentEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "type": "string"
             },
@@ -1047,6 +1089,16 @@
         },
         "AddressGeneratedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "type": "string"
             },
@@ -1083,6 +1135,16 @@
         },
         "AddressNotGeneratedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "profile": {
               "type": "string"
             },
@@ -1117,6 +1179,16 @@
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "onion": {
               "anyOf": [
@@ -1160,6 +1232,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -1189,6 +1271,16 @@
         },
         "AliasRenamedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "new_alias": {
               "type": "string"
             },
@@ -1235,6 +1327,16 @@
         },
         "AliasSameEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -1261,6 +1363,16 @@
         },
         "AlreadyUnlockedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -1318,6 +1430,16 @@
         "AuthRequiredEvent": {
           "properties": {
             "challenge": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "epoch": {
               "anyOf": [
                 {
                   "type": "string"
@@ -1388,6 +1510,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "msg_id": {
               "type": "string"
             },
@@ -1441,6 +1573,16 @@
             },
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "onion": {
               "anyOf": [
@@ -1529,8 +1671,44 @@
           "title": "BeginVoiceCommand",
           "type": "object"
         },
+        "CancelVoiceCommand": {
+          "properties": {
+            "msg_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "msg_id"
+          ],
+          "title": "CancelVoiceCommand",
+          "type": "object"
+        },
         "CannotConnectSelfEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -1557,6 +1735,16 @@
         },
         "CannotDropSelfEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -1583,6 +1771,16 @@
         },
         "CannotSwitchSelfEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -1646,6 +1844,16 @@
                 "type": "string"
               },
               "type": "array"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "pending": {
               "items": {},
@@ -1775,6 +1983,16 @@
             "command": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -1804,6 +2022,16 @@
         },
         "ClientReauthorizedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -1831,6 +2059,19 @@
         "ClientRestrictedEvent": {
           "properties": {
             "challenge": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "device_lifecycle": {
+              "type": "boolean"
+            },
+            "epoch": {
               "anyOf": [
                 {
                   "type": "string"
@@ -1887,6 +2128,16 @@
         },
         "ClientScopeKeyRejectedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "key": {
               "type": "string"
             },
@@ -1914,8 +2165,44 @@
           "title": "ClientScopeKeyRejectedEvent",
           "type": "object"
         },
+        "CommitVoiceCommand": {
+          "properties": {
+            "msg_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "msg_id"
+          ],
+          "title": "CommitVoiceCommand",
+          "type": "object"
+        },
         "ConfigDataEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "key": {
               "type": "string"
             },
@@ -1956,6 +2243,16 @@
               "items": {},
               "type": "array"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "profile": {
               "type": "string"
             },
@@ -1992,6 +2289,16 @@
         },
         "ConfigSyncedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -2018,6 +2325,16 @@
         },
         "ConfigUpdateFailedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -2044,6 +2361,16 @@
         },
         "ConfigUpdatedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "key": {
               "type": "string"
             },
@@ -2155,6 +2482,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "type": "string"
             },
@@ -2210,6 +2547,16 @@
             },
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "onion": {
               "anyOf": [
@@ -2273,6 +2620,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "anyOf": [
                 {
@@ -2335,6 +2692,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "error": {
               "anyOf": [
                 {
@@ -2384,6 +2751,7 @@
                     "duplicate_incoming_pending",
                     "live_backlog_limit_reached",
                     "live_voice_limit_reached",
+                    "invalid_peer_frame",
                     "idle_timeout"
                   ],
                   "type": "string"
@@ -2432,6 +2800,16 @@
             },
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "onion": {
               "anyOf": [
@@ -2495,6 +2873,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "anyOf": [
                 {
@@ -2534,6 +2922,7 @@
                     "duplicate_incoming_pending",
                     "live_backlog_limit_reached",
                     "live_voice_limit_reached",
+                    "invalid_peer_frame",
                     "idle_timeout"
                   ],
                   "type": "string"
@@ -2585,6 +2974,16 @@
             },
             "attempt": {
               "type": "integer"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "max_retries": {
               "type": "integer"
@@ -2654,6 +3053,16 @@
               },
               "type": "array"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "is_header": {
               "type": "boolean"
             },
@@ -2696,6 +3105,16 @@
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "onion": {
               "anyOf": [
@@ -2743,6 +3162,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "anyOf": [
                 {
@@ -2785,6 +3214,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "anyOf": [
                 {
@@ -2826,6 +3265,16 @@
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "new_alias": {
               "type": "string"
@@ -2872,6 +3321,16 @@
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "onion": {
               "anyOf": [
@@ -2922,6 +3381,16 @@
         },
         "ContactsClearFailedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -2948,6 +3417,16 @@
         },
         "ContactsClearedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "preserved_peers": {
               "type": "integer"
             },
@@ -2987,6 +3466,16 @@
               "items": {},
               "type": "array"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "profile": {
               "type": "string"
             },
@@ -3025,6 +3514,16 @@
         },
         "DaemonLockedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -3051,6 +3550,16 @@
         },
         "DaemonOfflineEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -3077,6 +3586,16 @@
         },
         "DaemonUnlockedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -3103,6 +3622,16 @@
         },
         "DatabaseClearFailedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -3129,6 +3658,16 @@
         },
         "DatabaseClearedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "preserved_peers": {
               "type": "integer"
             },
@@ -3164,6 +3703,16 @@
         },
         "DatabaseCorruptedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -3190,6 +3739,20 @@
         },
         "DeleteMessageCommand": {
           "properties": {
+            "direction": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "in",
+                    "out"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "msg_id": {
               "type": "string"
             },
@@ -3249,6 +3812,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "anyOf": [
                 {
@@ -3288,6 +3861,7 @@
                     "duplicate_incoming_pending",
                     "live_backlog_limit_reached",
                     "live_voice_limit_reached",
+                    "invalid_peer_frame",
                     "idle_timeout"
                   ],
                   "type": "string"
@@ -3326,6 +3900,16 @@
         },
         "DiscoveredPeerNotFoundEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -3380,6 +3964,16 @@
         },
         "DropFailedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "msg_id": {
               "type": "string"
             },
@@ -3425,6 +4019,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "anyOf": [
                 {
@@ -3464,6 +4068,16 @@
         },
         "DropsDisabledEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -3528,6 +4142,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "msg_ids": {
               "items": {
                 "type": "string"
@@ -3556,7 +4180,11 @@
                 "count_limit",
                 "byte_limit",
                 "outbound_pending_live",
-                "active_live_context"
+                "active_live_context",
+                "ambiguous_identity",
+                "not_finalized",
+                "invalid_range",
+                "unsupported_content"
               ],
               "type": "string"
             },
@@ -3596,6 +4224,16 @@
             },
             "count": {
               "type": "integer"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "msg_ids": {
               "items": {
@@ -4002,8 +4640,60 @@
           "title": "GetTransportStateCommand",
           "type": "object"
         },
+        "GetVoiceChunkCommand": {
+          "properties": {
+            "direction": {
+              "enum": [
+                "in",
+                "out"
+              ],
+              "type": "string"
+            },
+            "max_bytes": {
+              "type": "integer"
+            },
+            "msg_id": {
+              "type": "string"
+            },
+            "offset": {
+              "type": "integer"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "msg_id",
+            "direction",
+            "offset",
+            "max_bytes"
+          ],
+          "title": "GetVoiceChunkCommand",
+          "type": "object"
+        },
         "HistoryClearFailedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -4030,6 +4720,16 @@
         },
         "HistoryClearedAllEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "profile": {
               "type": "string"
             },
@@ -4064,6 +4764,16 @@
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "onion": {
               "anyOf": [
@@ -4115,6 +4825,16 @@
               ]
             },
             "entries": {},
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "peer_onion": {
               "anyOf": [
                 {
@@ -4169,6 +4889,16 @@
               ]
             },
             "entries": {},
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "peer_onion": {
               "anyOf": [
                 {
@@ -4212,6 +4942,16 @@
         },
         "InboxCountsEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "inbox": {
               "type": "object"
             },
@@ -4246,6 +4986,16 @@
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "inbox_counts": {
               "type": "object"
@@ -4302,6 +5052,16 @@
             "count": {
               "type": "integer"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "anyOf": [
                 {
@@ -4341,6 +5101,16 @@
         },
         "IncomingConnectionEvent": {
           "properties": {
+            "action_handle": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "actor": {
               "enum": [
                 "local",
@@ -4351,6 +5121,16 @@
             },
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "onion": {
               "anyOf": [
@@ -4441,6 +5221,16 @@
             "daemon_min_supported": {
               "type": "integer"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "negotiated_version": {
               "type": "integer"
             },
@@ -4495,6 +5285,16 @@
         },
         "InternalErrorEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -4521,6 +5321,16 @@
         },
         "InvalidConfigKeyEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -4547,6 +5357,16 @@
         },
         "InvalidNewPasswordEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -4574,6 +5394,16 @@
         "InvalidPasswordEvent": {
           "properties": {
             "challenge": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "epoch": {
               "anyOf": [
                 {
                   "type": "string"
@@ -4619,6 +5449,16 @@
         },
         "InvalidSettingKeyEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -4645,6 +5485,16 @@
         },
         "InvalidTargetEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -4677,6 +5527,16 @@
         },
         "IpcClientLimitReachedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "max_clients": {
               "type": "integer"
             },
@@ -4712,6 +5572,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "anyOf": [
                 {
@@ -4734,7 +5604,11 @@
                 "count_limit",
                 "byte_limit",
                 "outbound_pending_live",
-                "active_live_context"
+                "active_live_context",
+                "ambiguous_identity",
+                "not_finalized",
+                "invalid_range",
+                "unsupported_content"
               ],
               "type": "string"
             },
@@ -4770,6 +5644,16 @@
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "onion": {
               "anyOf": [
@@ -4816,6 +5700,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "msg_id": {
               "type": "string"
             },
@@ -4847,7 +5741,11 @@
                 "count_limit",
                 "byte_limit",
                 "outbound_pending_live",
-                "active_live_context"
+                "active_live_context",
+                "ambiguous_identity",
+                "not_finalized",
+                "invalid_range",
+                "unsupported_content"
               ],
               "type": "string"
             },
@@ -4885,6 +5783,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "msg_id": {
               "type": "string"
             },
@@ -4910,7 +5818,11 @@
                 "count_limit",
                 "byte_limit",
                 "outbound_pending_live",
-                "active_live_context"
+                "active_live_context",
+                "ambiguous_identity",
+                "not_finalized",
+                "invalid_range",
+                "unsupported_content"
               ],
               "type": "string"
             },
@@ -4944,6 +5856,16 @@
         },
         "LocalAuthRateLimitedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -5028,6 +5950,16 @@
         },
         "MaxConnectionsReachedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "max_conn": {
               "type": "integer"
             },
@@ -5064,6 +5996,16 @@
         },
         "MessageDeleteRejectedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "msg_id": {
               "type": "string"
             },
@@ -5089,7 +6031,11 @@
                 "count_limit",
                 "byte_limit",
                 "outbound_pending_live",
-                "active_live_context"
+                "active_live_context",
+                "ambiguous_identity",
+                "not_finalized",
+                "invalid_range",
+                "unsupported_content"
               ],
               "type": "string"
             },
@@ -5129,6 +6075,16 @@
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "msg_id": {
               "type": "string"
@@ -5188,6 +6144,16 @@
                 "drop"
               ],
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "msg_id": {
               "anyOf": [
@@ -5250,6 +6216,16 @@
         },
         "MessagesClearFailedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -5276,6 +6252,16 @@
         },
         "MessagesClearedAllEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "profile": {
               "type": "string"
             },
@@ -5310,6 +6296,16 @@
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "onion": {
               "anyOf": [
@@ -5350,6 +6346,16 @@
         },
         "MessagesClearedNonContactsAllEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "profile": {
               "type": "string"
             },
@@ -5384,6 +6390,16 @@
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "onion": {
               "anyOf": [
@@ -5426,6 +6442,16 @@
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "messages": {
               "items": {},
@@ -5520,6 +6546,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "anyOf": [
                 {
@@ -5561,6 +6597,16 @@
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "onion": {
               "anyOf": [
@@ -5604,6 +6650,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "anyOf": [
                 {
@@ -5645,6 +6701,16 @@
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "onion": {
               "anyOf": [
@@ -5688,6 +6754,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "anyOf": [
                 {
@@ -5727,6 +6803,16 @@
         },
         "PasswordChangeFailedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -5753,6 +6839,16 @@
         },
         "PasswordChangeUnsupportedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -5779,6 +6875,16 @@
         },
         "PasswordChangedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -5807,6 +6913,16 @@
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "new_alias": {
               "type": "string"
@@ -5854,6 +6970,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "anyOf": [
                 {
@@ -5893,6 +7019,16 @@
         },
         "PeerNotFoundEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -5927,6 +7063,16 @@
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "onion": {
               "anyOf": [
@@ -5970,6 +7116,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "anyOf": [
                 {
@@ -6009,6 +7165,16 @@
         },
         "PendingConnectionExpiredEvent": {
           "properties": {
+            "action_handle": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "actor": {
               "enum": [
                 "local",
@@ -6019,6 +7185,16 @@
             },
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "onion": {
               "anyOf": [
@@ -6057,6 +7233,7 @@
                 "duplicate_incoming_pending",
                 "live_backlog_limit_reached",
                 "live_voice_limit_reached",
+                "invalid_peer_frame",
                 "idle_timeout"
               ],
               "type": "string"
@@ -6106,6 +7283,16 @@
         },
         "ProfileExitPreparedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "profile": {
               "type": "string"
             },
@@ -6138,6 +7325,16 @@
         },
         "ProfileOperationResultEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "operation_type": {
               "enum": [
                 "invalid_name",
@@ -6204,6 +7401,16 @@
         },
         "ProfilesDataEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "profiles": {
               "items": {},
               "type": "array"
@@ -6249,6 +7456,16 @@
             "daemon_min_supported": {
               "type": "integer"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -6284,6 +7501,16 @@
             "enabled": {
               "type": "boolean"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -6314,6 +7541,16 @@
         "QuickUnlockFailedEvent": {
           "properties": {
             "challenge": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "epoch": {
               "anyOf": [
                 {
                   "type": "string"
@@ -6364,6 +7601,16 @@
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "msg_id": {
               "type": "string"
@@ -6481,6 +7728,32 @@
           "title": "RejectCommand",
           "type": "object"
         },
+        "ReleaseVoiceCommand": {
+          "properties": {
+            "msg_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "msg_id"
+          ],
+          "title": "ReleaseVoiceCommand",
+          "type": "object"
+        },
         "RemoveContactCommand": {
           "properties": {
             "alias": {
@@ -6589,6 +7862,16 @@
         },
         "RenameSuccessEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "is_demotion": {
               "type": "boolean"
             },
@@ -6659,6 +7942,9 @@
                 }
               ]
             },
+            "device_lifecycle": {
+              "type": "boolean"
+            },
             "live_while_locked": {
               "type": "boolean"
             },
@@ -6718,6 +8004,16 @@
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "error": {
               "anyOf": [
@@ -6802,6 +8098,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "anyOf": [
                 {
@@ -6843,6 +8149,16 @@
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "onion": {
               "anyOf": [
@@ -6891,6 +8207,16 @@
               "items": {},
               "type": "array"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "live_contexts": {
               "items": {},
               "type": "array"
@@ -6936,6 +8262,145 @@
           "title": "RuntimeSnapshotEvent",
           "type": "object"
         },
+        "RuntimeSnapshotUnavailableEvent": {
+          "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "retryable": {
+              "type": "boolean"
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "RuntimeSnapshotUnavailableEvent",
+          "type": "object"
+        },
+        "RuntimeStateChangedEvent": {
+          "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scope": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "scope"
+          ],
+          "title": "RuntimeStateChangedEvent",
+          "type": "object"
+        },
+        "SelfDestructCleanupFailedEvent": {
+          "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "key_destroyed": {
+              "type": "boolean"
+            },
+            "phase": {
+              "type": "string"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "profile"
+          ],
+          "title": "SelfDestructCleanupFailedEvent",
+          "type": "object"
+        },
         "SelfDestructCommand": {
           "properties": {
             "request_id": {
@@ -6954,6 +8419,16 @@
         },
         "SelfDestructCompletedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -6980,6 +8455,16 @@
         },
         "SelfDestructInitiatedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -7002,6 +8487,48 @@
             }
           },
           "title": "SelfDestructInitiatedEvent",
+          "type": "object"
+        },
+        "SelfDestructKeyDestroyedEvent": {
+          "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "profile": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "profile"
+          ],
+          "title": "SelfDestructKeyDestroyedEvent",
           "type": "object"
         },
         "SendMessageCommand": {
@@ -7047,6 +8574,16 @@
         },
         "SessionAuthenticatedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -7173,6 +8710,16 @@
         },
         "SettingDataEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "key": {
               "type": "string"
             },
@@ -7209,6 +8756,16 @@
         },
         "SettingTypeErrorEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "key": {
               "anyOf": [
                 {
@@ -7255,6 +8812,16 @@
         },
         "SettingUpdateFailedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -7281,6 +8848,16 @@
         },
         "SettingUpdatedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "key": {
               "type": "string"
             },
@@ -7316,6 +8893,16 @@
             "entries": {
               "items": {},
               "type": "array"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "request_id": {
               "anyOf": [
@@ -7385,6 +8972,16 @@
                 }
               ]
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "anyOf": [
                 {
@@ -7437,6 +9034,16 @@
         },
         "TorKeyDecryptFailedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -7463,6 +9070,16 @@
         },
         "TorKeyWriteFailedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -7489,6 +9106,16 @@
         },
         "TorProcessTerminatedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "error": {
               "anyOf": [
                 {
@@ -7556,6 +9183,16 @@
         },
         "TorStartFailedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "error": {
               "anyOf": [
                 {
@@ -7636,6 +9273,16 @@
                 }
               ]
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "focus_count": {
               "type": "integer"
             },
@@ -7688,6 +9335,16 @@
         },
         "UnknownCommandEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -7739,6 +9396,16 @@
             "alias": {
               "type": "string"
             },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "messages": {
               "items": {},
               "type": "array"
@@ -7781,8 +9448,74 @@
           "title": "UnreadMessagesEvent",
           "type": "object"
         },
+        "VoiceCancelledEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "msg_id": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias",
+            "msg_id"
+          ],
+          "title": "VoiceCancelledEvent",
+          "type": "object"
+        },
         "VoiceChunkAcceptedEvent": {
           "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "msg_id": {
               "type": "string"
             },
@@ -7822,8 +9555,35 @@
             "alias": {
               "type": "string"
             },
+            "codec": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "data": {
               "type": "string"
+            },
+            "delivery": {
+              "enum": [
+                "live",
+                "drop"
+              ],
+              "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "msg_id": {
               "type": "string"
@@ -7871,10 +9631,230 @@
           "title": "VoiceChunkReceivedEvent",
           "type": "object"
         },
-        "VoiceFinalizedEvent": {
+        "VoiceCommittedEvent": {
           "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "msg_id": {
               "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias",
+            "msg_id"
+          ],
+          "title": "VoiceCommittedEvent",
+          "type": "object"
+        },
+        "VoiceDataEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "codec": {
+              "type": "string"
+            },
+            "complete": {
+              "type": "boolean"
+            },
+            "data": {
+              "type": "string"
+            },
+            "delivery": {
+              "enum": [
+                "live",
+                "drop"
+              ],
+              "type": "string"
+            },
+            "direction": {
+              "enum": [
+                "in",
+                "out"
+              ],
+              "type": "string"
+            },
+            "duration_ms": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "msg_id": {
+              "type": "string"
+            },
+            "next_offset": {
+              "type": "integer"
+            },
+            "offset": {
+              "type": "integer"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "size_bytes": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "alias",
+            "msg_id",
+            "direction",
+            "delivery",
+            "codec",
+            "offset",
+            "next_offset",
+            "size_bytes",
+            "data",
+            "complete"
+          ],
+          "title": "VoiceDataEvent",
+          "type": "object"
+        },
+        "VoiceFinalizedEvent": {
+          "properties": {
+            "delivery": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "live",
+                    "drop"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "direction": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "in",
+                    "out"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "duration_ms": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "msg_id": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "request_id": {
               "anyOf": [
@@ -7907,14 +9887,276 @@
           "title": "VoiceFinalizedEvent",
           "type": "object"
         },
+        "VoiceIncomingStartedEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "codec": {
+              "type": "string"
+            },
+            "delivery": {
+              "enum": [
+                "live",
+                "drop"
+              ],
+              "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "msg_id": {
+              "type": "string"
+            },
+            "next_offset": {
+              "type": "integer"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias",
+            "msg_id",
+            "delivery",
+            "codec",
+            "next_offset"
+          ],
+          "title": "VoiceIncomingStartedEvent",
+          "type": "object"
+        },
+        "VoiceOperationRejectedEvent": {
+          "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "msg_id": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "enum": [
+                "invalid_selection",
+                "wrong_peer",
+                "not_pending_live",
+                "not_drop",
+                "pending_delivery",
+                "not_found",
+                "no_recovery",
+                "count_limit",
+                "byte_limit",
+                "outbound_pending_live",
+                "active_live_context",
+                "ambiguous_identity",
+                "not_finalized",
+                "invalid_range",
+                "unsupported_content"
+              ],
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "msg_id",
+            "reason"
+          ],
+          "title": "VoiceOperationRejectedEvent",
+          "type": "object"
+        },
+        "VoiceReleasedEvent": {
+          "properties": {
+            "alias": {
+              "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "msg_id": {
+              "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "alias",
+            "msg_id"
+          ],
+          "title": "VoiceReleasedEvent",
+          "type": "object"
+        },
         "VoiceResourceLimitEvent": {
           "properties": {
+            "delivery": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "live",
+                    "drop"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "limit_bytes": {
               "type": "integer"
             },
             "msg_id": {
               "anyOf": [
                 {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "invalid_selection",
+                    "wrong_peer",
+                    "not_pending_live",
+                    "not_drop",
+                    "pending_delivery",
+                    "not_found",
+                    "no_recovery",
+                    "count_limit",
+                    "byte_limit",
+                    "outbound_pending_live",
+                    "active_live_context",
+                    "ambiguous_identity",
+                    "not_finalized",
+                    "invalid_range",
+                    "unsupported_content"
+                  ],
                   "type": "string"
                 },
                 {
@@ -7955,10 +10197,44 @@
         },
         "VoiceResourcePressureEvent": {
           "properties": {
+            "delivery": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "live",
+                    "drop"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "limit_bytes": {
               "type": "integer"
             },
             "msg_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "onion": {
               "anyOf": [
                 {
                   "type": "string"
@@ -8010,6 +10286,16 @@
                 "drop"
               ],
               "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "msg_id": {
               "type": "string"
@@ -8394,11 +10680,23 @@
         "runtime_snapshot": {
           "$ref": "#/definitions/RuntimeSnapshotEvent"
         },
+        "runtime_snapshot_unavailable": {
+          "$ref": "#/definitions/RuntimeSnapshotUnavailableEvent"
+        },
+        "runtime_state_changed": {
+          "$ref": "#/definitions/RuntimeStateChangedEvent"
+        },
+        "self_destruct_cleanup_failed": {
+          "$ref": "#/definitions/SelfDestructCleanupFailedEvent"
+        },
         "self_destruct_completed": {
           "$ref": "#/definitions/SelfDestructCompletedEvent"
         },
         "self_destruct_initiated": {
           "$ref": "#/definitions/SelfDestructInitiatedEvent"
+        },
+        "self_destruct_key_destroyed": {
+          "$ref": "#/definitions/SelfDestructKeyDestroyedEvent"
         },
         "session_authenticated": {
           "$ref": "#/definitions/SessionAuthenticatedEvent"
@@ -8442,14 +10740,32 @@
         "unread_messages": {
           "$ref": "#/definitions/UnreadMessagesEvent"
         },
+        "voice_cancelled": {
+          "$ref": "#/definitions/VoiceCancelledEvent"
+        },
         "voice_chunk_accepted": {
           "$ref": "#/definitions/VoiceChunkAcceptedEvent"
         },
         "voice_chunk_received": {
           "$ref": "#/definitions/VoiceChunkReceivedEvent"
         },
+        "voice_committed": {
+          "$ref": "#/definitions/VoiceCommittedEvent"
+        },
+        "voice_data": {
+          "$ref": "#/definitions/VoiceDataEvent"
+        },
         "voice_finalized": {
           "$ref": "#/definitions/VoiceFinalizedEvent"
+        },
+        "voice_incoming_started": {
+          "$ref": "#/definitions/VoiceIncomingStartedEvent"
+        },
+        "voice_operation_rejected": {
+          "$ref": "#/definitions/VoiceOperationRejectedEvent"
+        },
+        "voice_released": {
+          "$ref": "#/definitions/VoiceReleasedEvent"
         },
         "voice_resource_limit": {
           "$ref": "#/definitions/VoiceResourceLimitEvent"
@@ -8502,6 +10818,7 @@
         "/challenge",
         "/disconnect",
         "/drop",
+        "/drop_ack",
         "/drop_voice_begin",
         "/drop_voice_chunk",
         "/drop_voice_end",
@@ -8512,12 +10829,13 @@
         "/voice_ack",
         "/voice_begin",
         "/voice_chunk",
+        "/voice_commit_ack",
         "/voice_end"
       ],
       "framing": "newline-delimited UTF-8 command frames",
       "negotiation": "highest generation in the inclusive range overlap"
     },
-    "current": 2,
-    "minimum_supported": 2
+    "current": 3,
+    "minimum_supported": 3
   }
 }

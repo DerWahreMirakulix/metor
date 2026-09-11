@@ -24,7 +24,6 @@ from metor.data import (
     SettingKey,
 )
 from metor.data.blob import BlobLifecycle, BlobStore
-from metor.utils import Constants
 
 # Local Package Imports
 from ..network import StateTracker, TcpStreamReader
@@ -64,7 +63,29 @@ def is_expected_ack_line(msg_id: str, ack_line: Optional[str]) -> bool:
     if ack_line is None:
         return False
     parts: list[str] = ack_line.strip().split()
-    return len(parts) == 2 and parts[0] == TorCommand.ACK.value and parts[1] == msg_id
+    return (
+        len(parts) == 2 and parts[0] == TorCommand.DROP_ACK.value and parts[1] == msg_id
+    )
+
+
+def is_expected_voice_commit_line(msg_id: str, ack_line: Optional[str]) -> bool:
+    """Validates a durable Voice completion acknowledgement.
+
+    Args:
+        msg_id (str): Logical Voice identity awaiting confirmation.
+        ack_line (Optional[str]): Raw newline-delimited peer frame.
+
+    Returns:
+        bool: True only for a matching terminal Voice completion frame.
+    """
+    if ack_line is None:
+        return False
+    parts = ack_line.strip().split()
+    return (
+        len(parts) == 2
+        and parts[0] == TorCommand.VOICE_COMMIT_ACK.value
+        and parts[1] == msg_id
+    )
 
 
 def build_drop_message(payload: str, msg_id: str, timestamp: str) -> str:
@@ -104,6 +125,7 @@ class DropDelivery:
         stop_flag: threading.Event,
         config: 'Config',
         blob_store: Optional[BlobStore] = None,
+        operation_lock: Optional[threading.RLock] = None,
     ) -> None:
         """Initializes drop delivery with its explicit collaborators.
 
@@ -116,6 +138,7 @@ class DropDelivery:
             stop_flag (threading.Event): Worker shutdown signal.
             config (Config): Profile configuration.
             blob_store (Optional[BlobStore]): Profile object store for Voice drops.
+            operation_lock (Optional[threading.RLock]): State publication barrier.
 
         Returns:
             None
@@ -128,6 +151,7 @@ class DropDelivery:
         self._stop_flag: threading.Event = stop_flag
         self._config: 'Config' = config
         self._blobs = blob_store
+        self._operation_lock = operation_lock or threading.RLock()
 
     def process_pending(self) -> None:
         """Groups and attempts all currently pending drop rows.
@@ -188,7 +212,12 @@ class DropDelivery:
                     if self._handle_rejection(onion, msg_id, ack_line):
                         self._tunnels.close(onion)
                         break
-                    if not is_expected_ack_line(msg_id, ack_line):
+                    expected_ack = (
+                        is_expected_voice_commit_line(msg_id, ack_line)
+                        if content_type == ContentType.VOICE.value
+                        else is_expected_ack_line(msg_id, ack_line)
+                    )
+                    if not expected_ack:
                         raise ConnectionError('Tunnel dropped or invalid ACK received.')
                     self._finalize_delivery(
                         db_id,
@@ -244,7 +273,12 @@ class DropDelivery:
             ack_line: Optional[str] = early_ack or stream.read_line()
             if self._handle_rejection(onion, msg_id, ack_line):
                 return
-            if not is_expected_ack_line(msg_id, ack_line):
+            expected_ack = (
+                is_expected_voice_commit_line(msg_id, ack_line)
+                if content_type == ContentType.VOICE.value
+                else is_expected_ack_line(msg_id, ack_line)
+            )
+            if not expected_ack:
                 raise ConnectionError('Tunnel dropped or invalid ACK received.')
             self._finalize_delivery(
                 db_id,
@@ -281,8 +315,8 @@ class DropDelivery:
                 return
             _, _, _, payload, msg_id, timestamp = row
             try:
-                conn.sendall(
-                    build_drop_message(payload, msg_id, timestamp).encode('utf-8')
+                self._state.send_frame(
+                    conn, build_drop_message(payload, msg_id, timestamp).encode('utf-8')
                 )
             except Exception:
                 return
@@ -296,30 +330,52 @@ class DropDelivery:
         """Sends one text or bounded resumable Voice DROP, leaving final ACK unread."""
         _, _, content_type, payload, msg_id, timestamp = row
         if content_type == ContentType.TEXT.value:
-            conn.sendall(build_drop_message(payload, msg_id, timestamp).encode('utf-8'))
+            self._state.send_frame(
+                conn, build_drop_message(payload, msg_id, timestamp).encode('utf-8')
+            )
             return None
         if content_type != ContentType.VOICE.value or self._blobs is None:
             raise ValueError('Unsupported DROP content type.')
         metadata = json.loads(payload)
         if not isinstance(metadata, dict):
             raise ValueError('Invalid Voice DROP metadata.')
-        blob_id = str(metadata['blob_id'])
         codec = str(metadata['codec'])
-        data = self._blobs.read(blob_id, BlobLifecycle.PERSISTENT)
+        chunk_ids = metadata.get('chunk_ids')
+        size_bytes = metadata.get('size_bytes')
+        if (
+            not isinstance(chunk_ids, list)
+            or any(not isinstance(chunk_id, str) for chunk_id in chunk_ids)
+            or type(size_bytes) is not int
+            or size_bytes < 0
+        ):
+            raise ValueError('Invalid segmented Voice DROP metadata.')
         begin: Dict[str, JsonValue] = {
             'id': msg_id,
             'codec': codec,
             'timestamp': timestamp,
         }
-        conn.sendall(self._voice_frame(TorCommand.DROP_VOICE_BEGIN, begin))
+        self._state.send_frame(
+            conn, self._voice_frame(TorCommand.DROP_VOICE_BEGIN, begin)
+        )
         resume_line = stream.read_line()
-        if resume_line is not None and is_expected_ack_line(msg_id, resume_line):
+        if resume_line is not None and is_expected_voice_commit_line(
+            msg_id, resume_line
+        ):
             return resume_line
-        offset = self._parse_voice_offset(msg_id, resume_line, len(data))
-        while offset < len(data):
+        offset = self._parse_voice_offset(msg_id, resume_line, size_bytes)
+        stored_offset = 0
+        for chunk_id in chunk_ids:
+            chunk = self._blobs.read(chunk_id, BlobLifecycle.PERSISTENT)
+            chunk_end = stored_offset + len(chunk)
+            if offset >= chunk_end:
+                stored_offset = chunk_end
+                continue
+            if offset < stored_offset:
+                raise ConnectionError('Voice DROP resume offset is not contiguous.')
+            chunk = chunk[offset - stored_offset :]
             previous_offset = offset
-            chunk = data[offset : offset + Constants.VOICE_CHUNK_MAX_BYTES]
-            conn.sendall(
+            self._state.send_frame(
+                conn,
                 self._voice_frame(
                     TorCommand.DROP_VOICE_CHUNK,
                     {
@@ -327,16 +383,24 @@ class DropDelivery:
                         'offset': offset,
                         'data': base64.b64encode(chunk).decode('ascii'),
                     },
-                )
+                ),
             )
-            offset = self._parse_voice_offset(msg_id, stream.read_line(), len(data))
+            offset = self._parse_voice_offset(msg_id, stream.read_line(), size_bytes)
             if offset <= previous_offset:
                 raise ConnectionError('Voice DROP acknowledgement did not advance.')
-        conn.sendall(
+            stored_offset = chunk_end
+        if offset != size_bytes:
+            raise ConnectionError('Voice DROP retained size does not match metadata.')
+        self._state.send_frame(
+            conn,
             self._voice_frame(
                 TorCommand.DROP_VOICE_END,
-                {'id': msg_id, 'size': len(data)},
-            )
+                {
+                    'id': msg_id,
+                    'size': size_bytes,
+                    'duration_ms': metadata.get('duration_ms'),
+                },
+            ),
         )
         return None
 
@@ -438,33 +502,40 @@ class DropDelivery:
         Returns:
             None
         """
-        self._mm.update_message_status(db_id, MessageStatus.DELIVERED)
-        if (
-            content_type == ContentType.VOICE.value
-            and self._blobs is not None
-            and not self._mm.has_drop_payload(onion, msg_id)
-        ):
-            try:
-                metadata = json.loads(payload)
-                if isinstance(metadata, dict):
-                    self._blobs.delete(
-                        str(metadata['blob_id']), BlobLifecycle.PERSISTENT
-                    )
-            except (KeyError, OSError, TypeError, ValueError):
-                pass
-        self._hm.log_event(
-            HistoryEvent.SENT,
-            onion,
-            actor=HistoryActor.LOCAL,
-            transport=transport,
-        )
-        self._broadcast(
-            AckEvent(
-                msg_id=msg_id,
-                timestamp=timestamp,
-                request_id=self._state.pop_message_request_id(msg_id),
+        if self._stop_flag.is_set():
+            return
+        with self._operation_lock:
+            if self._stop_flag.is_set():
+                return
+            self._mm.update_message_status(db_id, MessageStatus.DELIVERED)
+            if (
+                content_type == ContentType.VOICE.value
+                and self._blobs is not None
+                and not self._mm.has_drop_payload(onion, msg_id)
+            ):
+                try:
+                    metadata = json.loads(payload)
+                    if isinstance(metadata, dict):
+                        for blob_id in (
+                            str(metadata['blob_id']),
+                            *[str(item) for item in metadata.get('chunk_ids', [])],
+                        ):
+                            self._blobs.delete(blob_id, BlobLifecycle.PERSISTENT)
+                except (KeyError, OSError, TypeError, ValueError):
+                    pass
+            self._hm.log_event(
+                HistoryEvent.SENT,
+                onion,
+                actor=HistoryActor.LOCAL,
+                transport=transport,
             )
-        )
+            self._broadcast(
+                AckEvent(
+                    msg_id=msg_id,
+                    timestamp=timestamp,
+                    request_id=self._state.pop_message_request_id(msg_id),
+                )
+            )
 
     def _log_tunnel_failure(self, onion: str) -> None:
         """Records one failed Tor tunnel establishment.

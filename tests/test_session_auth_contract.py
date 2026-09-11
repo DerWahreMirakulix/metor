@@ -15,6 +15,7 @@ import nacl.pwhash
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.core.api import (
+    AcceptCommand,
     AuthenticateSessionCommand,
     AppendVoiceChunkCommand,
     AuthRequiredEvent,
@@ -28,12 +29,20 @@ from metor.core.api import (
     Delivery,
     GetContactsListCommand,
     LockedAcceptPolicy,
+    LocalAuthRateLimitedEvent,
+    IncomingConnectionEvent,
+    PendingConnectionExpiredEvent,
+    PrepareProfileExitCommand,
     NotificationPrivacy,
     QuickUnlockFailedEvent,
     QuickUnlockAction,
     ReauthorizeClientCommand,
     RestrictClientCommand,
+    RejectCommand,
+    SelfDestructCommand,
     SessionAuthenticatedEvent,
+    VoiceChunkReceivedEvent,
+    VoiceIncomingStartedEvent,
 )
 from metor.core.daemon.managed.engine.session_access import SessionAccessController
 from metor.core.daemon.managed.local_auth import (
@@ -88,6 +97,18 @@ class SessionAuthContractTests(unittest.TestCase):
             self.assertIsInstance(sent[-1], SessionAuthenticatedEvent)
             self.assertTrue(controller.authorize(command, conn, True))
 
+    def test_quick_unlock_verifier_has_owner_only_permissions(self) -> None:
+        """Treats the persisted PIN verifier as protected credential material."""
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / 'protected' / 'quick-unlock.json'
+            store = QuickUnlockStore(path)
+            salt, verifier = create_pin_verifier('1234')
+
+            store.configure(salt, verifier)
+
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+
     def test_restricted_client_enforces_scope_and_pin_password_escalation(self) -> None:
         """Blocks normal access and requires password after three failed PIN proofs."""
         with TemporaryDirectory() as temp_dir:
@@ -100,7 +121,7 @@ class SessionAuthContractTests(unittest.TestCase):
                 require_auth=False,
                 send_callback=lambda _conn, event: sent.append(event),
                 lockout_timeout_callback=lambda: 30.0,
-                failure_limit_callback=lambda: 3,
+                failure_limit_callback=lambda: 6,
                 live_consumer_available_callback=lambda: None,
                 quick_unlock_store=store,
                 resolve_target_callback=lambda target: {
@@ -181,6 +202,218 @@ class SessionAuthContractTests(unittest.TestCase):
             )
             self.assertIsInstance(sent[-1], ClientReauthorizedEvent)
             self.assertTrue(controller.authorize(GetContactsListCommand(), conn, True))
+
+    def test_restricted_password_retries_share_global_cooldown(self) -> None:
+        """Applies the established auth failure limit to restricted passwords."""
+        sent: list[IpcEvent] = []
+        conn = cast(socket.socket, object())
+        controller = SessionAccessController(
+            require_auth=False,
+            send_callback=lambda _conn, event: sent.append(event),
+            lockout_timeout_callback=lambda: 30.0,
+            failure_limit_callback=lambda: 3,
+            live_consumer_available_callback=lambda: None,
+        )
+        controller.install_context(create_session_auth_context('profile-password'))
+        controller.restrict(
+            conn,
+            RestrictClientCommand(unlock_method=ClientUnlockMethod.PROFILE_PASSWORD),
+        )
+
+        for _ in range(3):
+            controller.authorize(
+                ReauthorizeClientCommand(
+                    method=ClientUnlockMethod.PROFILE_PASSWORD,
+                    proof='00' * 32,
+                ),
+                conn,
+                True,
+            )
+
+        self.assertIsInstance(sent[-1], LocalAuthRateLimitedEvent)
+
+    def test_forgot_pin_issues_password_challenge_without_failed_attempt(self) -> None:
+        """Switches proof methods explicitly and accepts the resulting challenge."""
+        with TemporaryDirectory() as temp_dir:
+            store = QuickUnlockStore(Path(temp_dir) / 'quick-unlock.json')
+            pin_salt, verifier = create_pin_verifier('1234')
+            store.configure(pin_salt, verifier)
+            sent: list[IpcEvent] = []
+            conn = cast(socket.socket, object())
+            controller = SessionAccessController(
+                require_auth=False,
+                send_callback=lambda _conn, event: sent.append(event),
+                lockout_timeout_callback=lambda: 30.0,
+                failure_limit_callback=lambda: 3,
+                live_consumer_available_callback=lambda: None,
+                quick_unlock_store=store,
+            )
+            controller.install_context(create_session_auth_context('profile-password'))
+            controller.restrict(
+                conn,
+                RestrictClientCommand(unlock_method=ClientUnlockMethod.PIN),
+            )
+
+            controller.authorize(
+                ReauthorizeClientCommand(
+                    method=ClientUnlockMethod.PROFILE_PASSWORD,
+                    proof=None,
+                ),
+                conn,
+                True,
+            )
+            challenge_event = cast(QuickUnlockFailedEvent, sent[-1])
+            self.assertTrue(challenge_event.password_required)
+            assert challenge_event.challenge is not None
+            assert challenge_event.salt is not None
+            proof = build_session_auth_proof(
+                'profile-password',
+                challenge_event.challenge,
+                challenge_event.salt,
+            )
+            controller.authorize(
+                ReauthorizeClientCommand(
+                    method=ClientUnlockMethod.PROFILE_PASSWORD,
+                    proof=proof,
+                ),
+                conn,
+                True,
+            )
+
+            self.assertIsInstance(sent[-1], ClientReauthorizedEvent)
+
+    def test_locked_media_scope_is_independent_of_notification_privacy(self) -> None:
+        """G18: Alice Voice remains available while Bob Voice stays filtered."""
+        for privacy in NotificationPrivacy:
+            with self.subTest(privacy=privacy):
+                conn = cast(socket.socket, object())
+                controller = SessionAccessController(
+                    require_auth=False,
+                    send_callback=lambda _conn, _event: None,
+                    lockout_timeout_callback=lambda: 30.0,
+                    failure_limit_callback=lambda: 3,
+                    live_consumer_available_callback=lambda: None,
+                    resolve_target_callback=lambda target: f'{target}-onion',
+                )
+                controller.restrict(
+                    conn,
+                    RestrictClientCommand(
+                        continued_live_target='alice',
+                        live_while_locked=True,
+                        notification_privacy=privacy,
+                    ),
+                )
+                alice_start = VoiceIncomingStartedEvent(
+                    alias='alice',
+                    onion='alice-onion',
+                    msg_id='alice-voice',
+                    delivery=Delivery.LIVE,
+                    codec='opus',
+                    next_offset=0,
+                )
+                alice_chunk = VoiceChunkReceivedEvent(
+                    alias='alice',
+                    onion='alice-onion',
+                    msg_id='alice-voice',
+                    offset=0,
+                    data='YQ==',
+                    delivery=Delivery.LIVE,
+                    codec='opus',
+                )
+                bob_chunk = VoiceChunkReceivedEvent(
+                    alias='bob',
+                    onion='bob-onion',
+                    msg_id='bob-voice',
+                    offset=0,
+                    data='Yg==',
+                    delivery=Delivery.LIVE,
+                    codec='opus',
+                )
+                self.assertIs(
+                    controller.filter_restricted_event(conn, alice_start), alice_start
+                )
+                self.assertIs(
+                    controller.filter_restricted_event(conn, alice_chunk), alice_chunk
+                )
+                self.assertIsNone(controller.filter_restricted_event(conn, bob_chunk))
+
+    def test_anonymized_call_handles_are_unique_actionable_and_expirable(self) -> None:
+        """G19: two callers remain independently actionable without identity leakage."""
+        conn = cast(socket.socket, object())
+        controller = SessionAccessController(
+            require_auth=False,
+            send_callback=lambda _conn, _event: None,
+            lockout_timeout_callback=lambda: 30.0,
+            failure_limit_callback=lambda: 3,
+            live_consumer_available_callback=lambda: None,
+        )
+        controller.restrict(
+            conn,
+            RestrictClientCommand(
+                accept_while_locked=LockedAcceptPolicy.ALL,
+                notification_privacy=NotificationPrivacy.ANONYMIZE,
+            ),
+        )
+        alice = cast(
+            IncomingConnectionEvent,
+            controller.filter_restricted_event(
+                conn, IncomingConnectionEvent(alias='alice', onion='alice-onion')
+            ),
+        )
+        bob = cast(
+            IncomingConnectionEvent,
+            controller.filter_restricted_event(
+                conn, IncomingConnectionEvent(alias='bob', onion='bob-onion')
+            ),
+        )
+        self.assertEqual((alice.alias, alice.onion), ('unknown', None))
+        self.assertEqual((bob.alias, bob.onion), ('unknown', None))
+        self.assertIsNotNone(alice.action_handle)
+        self.assertIsNotNone(bob.action_handle)
+        self.assertNotEqual(alice.action_handle, bob.action_handle)
+
+        accept = AcceptCommand(cast(str, alice.action_handle))
+        self.assertTrue(controller.authorize(accept, conn, True))
+        self.assertEqual(accept.target, 'alice-onion')
+        expired = cast(
+            PendingConnectionExpiredEvent,
+            controller.filter_restricted_event(
+                conn,
+                PendingConnectionExpiredEvent(alias='bob', onion='bob-onion'),
+            ),
+        )
+        self.assertEqual(expired.action_handle, bob.action_handle)
+        reject = RejectCommand(cast(str, bob.action_handle))
+        self.assertFalse(controller.authorize(reject, conn, True))
+
+    def test_device_lifecycle_scope_requires_prior_authenticated_session(self) -> None:
+        """G27: destructive locked controls are a narrow authenticated capability."""
+        sent: list[IpcEvent] = []
+        trusted = cast(socket.socket, object())
+        untrusted = cast(socket.socket, object())
+        controller = SessionAccessController(
+            require_auth=False,
+            send_callback=lambda _conn, event: sent.append(event),
+            lockout_timeout_callback=lambda: 30.0,
+            failure_limit_callback=lambda: 3,
+            live_consumer_available_callback=lambda: None,
+        )
+        controller.mark_authenticated(trusted)
+        trusted_event = controller.restrict(
+            trusted,
+            RestrictClientCommand(device_lifecycle=True),
+        )
+        untrusted_event = controller.restrict(
+            untrusted,
+            RestrictClientCommand(device_lifecycle=True),
+        )
+        self.assertTrue(getattr(trusted_event, 'device_lifecycle'))
+        self.assertFalse(getattr(untrusted_event, 'device_lifecycle'))
+        self.assertTrue(controller.authorize(SelfDestructCommand(), trusted, True))
+        self.assertTrue(
+            controller.authorize(PrepareProfileExitCommand(), trusted, True)
+        )
+        self.assertFalse(controller.authorize(SelfDestructCommand(), untrusted, True))
 
     def test_authenticate_session_command_uses_proof_field(self) -> None:
         """

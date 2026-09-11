@@ -371,8 +371,9 @@ class InboundListener:
             tor_timeout: float = self._config.get_float(SettingKey.TOR_TIMEOUT)
             conn.settimeout(tor_timeout)
             challenge: str = secrets.token_hex(Constants.TOR_HANDSHAKE_CHALLENGE_BYTES)
-            conn.sendall(
-                HandshakeProtocol.build_challenge_line(challenge).encode('utf-8')
+            self._state.send_frame(
+                conn,
+                HandshakeProtocol.build_challenge_line(challenge).encode('utf-8'),
             )
 
             stream = TcpStreamReader(conn)
@@ -571,11 +572,12 @@ class InboundListener:
 
         if has_recovery_hint and self._state.has_local_recovery_opt_out(onion):
             try:
-                conn.sendall(
+                self._state.send_frame(
+                    conn,
                     (
                         f'{TorCommand.REJECT.value} '
                         f'{RejectIntent.MANUAL.value} {self._tm.onion}\n'
-                    ).encode('utf-8')
+                    ).encode('utf-8'),
                 )
             except Exception:
                 pass
@@ -600,8 +602,9 @@ class InboundListener:
 
         if should_reject:
             try:
-                conn.sendall(
-                    f'{TorCommand.REJECT.value} {self._tm.onion}\n'.encode('utf-8')
+                self._state.send_frame(
+                    conn,
+                    f'{TorCommand.REJECT.value} {self._tm.onion}\n'.encode('utf-8'),
                 )
             except Exception:
                 pass
@@ -696,7 +699,9 @@ class InboundListener:
             accepted_now = True
         else:
             try:
-                conn.sendall(f'{TorCommand.PENDING.value}\n'.encode('utf-8'))
+                self._state.send_frame(
+                    conn, f'{TorCommand.PENDING.value}\n'.encode('utf-8')
+                )
             except Exception:
                 pass
             if should_auto_accept_now:
@@ -722,7 +727,9 @@ class InboundListener:
 
         if accepted_now:
             try:
-                conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8'))
+                self._state.send_frame(
+                    conn, f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8')
+                )
             except Exception:
                 pass
 
