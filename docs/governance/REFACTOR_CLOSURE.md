@@ -490,9 +490,43 @@ python scripts/validate_installed_artifacts.py <bundles>
 python scripts/validate_release_installers.py <bundles>
 ```
 
-Initial focused suite: **38 tests passed**, 32.829s. Final full-suite, native fresh
-checkout, artifact and hosted CI results will be appended after completion.
+Implementation SHA: `05fd181e6084597cc02d4d8fd7a7c1b3ddb1f6db`.
+Initial focused suite: **38 tests passed**, 32.829s. Final Linux full suite:
+**461 tests passed**, 118.364s, no skips. The existing hardening suite separately
+passed **93 tests**, 14.786s. Native fresh-checkout and hosted results follow below.
 Historical failed CI remains run `34651975594`, attempt2, Windows job
 `103437618588`; its skipped artifact gate is not counted as passing.
+
+Exact new tests in `tests/test_remaining_closure_contract.py`:
+
+| Workstream | Test method |
+| --- | --- |
+| R01 ordered ordinary public RejectCommand + responsive IPC | `test_ordinary_reject_dispatch_drains_before_eof_and_other_ipc` |
+| R01/R02 saturated final admission | `test_ordinary_reject_saturated_final_admission_retires` |
+| R01/R02 oversized final admission | `test_reject_oversized_final_admission_retires_exact_writer` |
+| R02 active and pending replacement; usable winner | `test_replacement_retires_drained_active_and_pending_writers` |
+| R02 twelve real receiver DISCONNECT/EOF cycles | `test_remote_disconnect_and_eof_repeatedly_retire_drained_writers` |
+| R02 receiver cleanup, duplicate finish/cleanup, late admission | `test_receiver_cleanup_preserves_admitted_final_and_duplicate_cleanup` |
+| R02 finite final timeout and destructive shutdown | `test_reject_final_timeout_and_shutdown_release_retiring_writer` |
+| R02 timer/worker completion race; IPC remains responsive | `test_timeout_registry_retirement_waits_for_physical_descriptor_close` |
+| R03 stale semantic fixture, unstable second pass, CRLF rejection | `test_semantically_stale_and_nondeterministic_outputs_are_distinguished` |
+
+All transport retirement assertions join/inspect the actual production worker and
+registry before fixture cleanup; tests do not close writers to manufacture success.
+Previously passing exact-anonymous-pending, manual DISCONNECT, stale-writer winning
+context and unrelated-IPC regressions remain included in the complete suite.
+
+The first separate fresh-Windows run of `05fd181` caught a final-timeout race:
+**461 tests, one failure, two existing skips**, 256.962s. Worker exit and registry
+removal could precede the timer owner's physical close, leaving `fileno() != -1`
+at retirement. A close barrier reproduced this deterministically on Linux (one
+failing test, 0.139s). The writer now waits for physical release before its exit
+callback; only the writer waits, never a state/IPC thread. The new enclosing test
+keeps closure paused, checks worker/registry ownership and unrelated IPC progress,
+then releases closure and requires descriptor/worker/registry retirement. This
+native failure was repaired, not dismissed as a platform flake or retried to green.
+Logs: `/tmp/metor-remaining-windows-final.log`,
+`/tmp/metor-remaining-close-race-red.log`,
+`/tmp/metor-remaining-close-race-green.log`.
 
 Stop before GUI implementation. Independent approval remains the owner's review.

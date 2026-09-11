@@ -208,6 +208,53 @@ class RemainingTransportTests(unittest.TestCase):
         self.retired(local, writer)
         self.assertEqual(peer.recv(4096), b'')
 
+    def test_timeout_registry_retirement_waits_for_physical_descriptor_close(
+        self,
+    ) -> None:
+        local, peer = self.pair()
+        self.state.add_pending_connection(self.onion, local, b'')
+        release_writer = self.pause(local)
+        writer = self.state._socket_writers[local]
+        closing, release_close, failed = (
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+        )
+        self.addCleanup(release_close.set)
+        physical_close = socket.socket.close
+        failure_callback = writer._on_failure
+
+        def observe_failure(conn: socket.socket, error: Exception) -> None:
+            if failure_callback is not None:
+                failure_callback(conn, error)
+            failed.set()
+
+        writer._on_failure = observe_failure
+
+        def close(conn: socket.socket) -> None:
+            if conn is local:
+                closing.set()
+                self.assertTrue(release_close.wait(5))
+            physical_close(conn)
+
+        with (
+            patch.object(socket.socket, 'close', close),
+            patch.object(Constants, 'SOCKET_WRITER_FLUSH_TIMEOUT_SEC', 0.1),
+        ):
+            self.assertIsNotNone(
+                self.client.request(RejectCommand(self.onion), ConnectionRejectedEvent)
+            )
+            self.assertTrue(closing.wait(2))
+            release_writer.set()
+            self.assertTrue(failed.wait(2))
+            writer._thread.join(0.1)
+            self.assertTrue(writer._thread.is_alive())
+            self.assertIs(self.state._socket_writers.get(local), writer)
+            self.assertIsNotNone(self.client.runtime_snapshot())
+            release_close.set()
+            self.retired(local, writer)
+        self.assertEqual(peer.recv(4096), b'')
+
 
 class RemainingGeneratedReferenceTests(unittest.TestCase):
     """Freshness remains byte-exact and distinct from second-pass determinism."""

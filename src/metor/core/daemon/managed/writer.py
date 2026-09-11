@@ -53,6 +53,7 @@ class BoundedSocketWriter:
         self._accepting = True
         self._finishing = False
         self._socket_closed = False
+        self._socket_released = threading.Event()
         self._drained = threading.Event()
         self._drained.set()
         self._closed = threading.Event()
@@ -166,6 +167,8 @@ class BoundedSocketWriter:
             self._conn.close()
         except (OSError, TypeError):
             pass
+        finally:
+            self._socket_released.set()
         while True:
             try:
                 item = self._queue.get_nowait()
@@ -214,6 +217,9 @@ class BoundedSocketWriter:
                     self._queue.task_done()
         finally:
             self.close()
+            # Another cancellation owner may still be physically closing the socket.
+            # Only this worker waits; state mutation and IPC never join that owner.
+            self._socket_released.wait()
             if self._on_exit is not None:
                 try:
                     self._on_exit(self)
