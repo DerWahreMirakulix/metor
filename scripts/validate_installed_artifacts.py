@@ -119,7 +119,8 @@ def audit_wheel_records(wheels: tuple[Path, ...]) -> None:
     }
     if len(selected) != 3:
         raise RuntimeError('Expected exactly three coordinated Metor wheel names.')
-    owned: set[str] = set()
+    owned: dict[str, str] = {}
+    contents: dict[str, bytes] = {}
     expected_markers = {
         'metor/client/py.typed',
         'metor/core/api/py.typed',
@@ -127,7 +128,7 @@ def audit_wheel_records(wheels: tuple[Path, ...]) -> None:
         'metor/shared/py.typed',
         'metor/versioning/py.typed',
     }
-    for path in selected.values():
+    for path in sorted(path for path in wheels if path.name in selected):
         with ZipFile(path) as archive:
             members = set(archive.namelist())
             record = next(
@@ -156,9 +157,16 @@ def audit_wheel_records(wheels: tuple[Path, ...]) -> None:
             }
             if files & obsolete:
                 raise RuntimeError('Wheel contains superseded implementation files.')
-            if files & owned:
+            if any(name in owned and owned[name] != path.name for name in files):
                 raise RuntimeError('Overlapping installed namespace files.')
-            owned.update(files)
+            for name in files:
+                digest_bytes = hashlib.sha256(archive.read(name)).digest()
+                if name in contents and contents[name] != digest_bytes:
+                    raise RuntimeError(
+                        'Bundle variants contain different runtime code.'
+                    )
+                owned[name] = path.name
+                contents[name] = digest_bytes
             markers = {name for name in files if name.endswith('/py.typed')}
             if markers != (
                 expected_markers if path.name.startswith('metor_sdk-') else set()
@@ -166,6 +174,7 @@ def audit_wheel_records(wheels: tuple[Path, ...]) -> None:
                 raise RuntimeError(f'Incorrect typing-marker ownership: {path.name}')
         print(
             'WHEEL_RECORD_OWNERSHIP_OK',
+            path.parent.parent.name,
             path.name,
             path.stat().st_size,
             hashlib.sha256(path.read_bytes()).hexdigest(),

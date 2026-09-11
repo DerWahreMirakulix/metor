@@ -6,16 +6,16 @@ Metor is a highly secure, Tor-based terminal messenger using a strict Client-Dae
 ## 1. Core Directives & Architecture
 
 - **Read the Guidelines:** Before writing or modifying code, read and enforce [CONTRIBUTE.md](./CONTRIBUTE.md), then load only the additional task-specific references routed below.
-- **Domain-Driven Design (DDD):** The UI (Client) is completely stateless. You MUST NEVER write code where the UI directly accesses the SQLite database, Tor keys, or daemon settings. All interactions MUST be routed via strictly typed IPC Data Transfer Objects (DTOs).
+- **State ownership:** Frontends own presentation and interaction state, not transport, durable delivery, cryptographic lifecycle or authorization truth. Never access SQL, Tor keys or host-profile files from a frontend. Use typed IPC and the narrow public frontend host/settings boundary.
 - **No Magic Numbers:** You MUST NEVER hardcode timeouts, buffer sizes, or retry limits. Always use the centralized `Constants`, `Settings`, or `Config` classes.
-- **Centralized Parsing:** Never write custom string-to-type parsing logic. Always use `metor.utils.TypeCaster`.
+- **Parsing:** Base human-input adapters use `metor.utils.TypeCaster` where appropriate. SDK/wire code uses strict SDK-owned validation, never a base dependency or permissive user-input coercion.
 - **Security First:** Treat every network socket, file read, and database query as a potential attack vector. Always use parameterized SQL queries and handle partial TCP stream fragments safely.
 - **No Conversational Filler:** When generating code, do not include self-referential remarks in comments (e.g., absolutely no "NEW:", "As requested:", "Fixed the bug here"). Write comments for a production codebase.
 
-## 2. Proactive Refactoring (The Boy Scout Rule)
+## 2. Bounded maintenance
 
-- **Auto-Correction:** Whenever you analyze, modify, or rewrite a file, you MUST proactively and silently fix any existing code in that file that violates the relevant rules in [CONTRIBUTE.md](./CONTRIBUTE.md) or the task-specific [audit checklist](./governance/AUDIT.md) (e.g., missing type hints, legacy `os.path` usage, unprotected thread dictionaries, missing docstring args, raw numeric timeouts).
-- **Exceptions:** Do this alongside your requested task UNLESS the user explicitly instructs you to "do not refactor" or "only modify the specified lines".
+- **Scope:** Routine local cleanup is allowed. The owner's explicit task takes precedence over opportunistic refactoring; do not silently expand it.
+- **Ownership rationale:** Package-boundary changes, new abstractions and substantial extractions require a short ownership and compatibility rationale in the implementation report or canonical architecture decision.
 - **God-File Prevention:** Proactively enforce the canonical Module Cohesion & Size policy in [CONTRIBUTE.md](./CONTRIBUTE.md): do not add substantial behavior to an oversized production module without evaluating a cohesive, domain-boundary extraction.
 - **Package-Structure Enforcement:** God-File extraction MUST preserve or improve subsystem ownership. Do not solve file-size problems by creating flat `<concept>_*.py` siblings; promote cohesive multi-module concepts into dedicated subpackages according to [CONTRIBUTE.md](./CONTRIBUTE.md).
 
@@ -27,13 +27,13 @@ Load the minimum relevant context for the task:
 - Architecture changes: [CONTRIBUTE.md](./CONTRIBUTE.md) and [ARCHITECTURE.md](./ARCHITECTURE.md).
 - IPC/API work: the IPC sections of [ARCHITECTURE.md](./ARCHITECTURE.md), generated [API.md](./generated/API.md), and [api.schema.json](./generated/api.schema.json).
 - Settings work: generated [SETTINGS.md](./generated/SETTINGS.md), [GLOSSARY.md](./GLOSSARY.md), and the settings implementation.
-- Release/versioning work: [RELEASING.md](./RELEASING.md), `src/metor/versioning.py`, and generated [compatibility.json](./generated/compatibility.json) where relevant.
+- Release/versioning work: [RELEASING.md](./RELEASING.md), `src/metor/versioning/__init__.py`, and generated [compatibility.json](./generated/compatibility.json) where relevant.
 - Embedded UI work: [EMBEDDED_UI.md](./contracts/EMBEDDED_UI.md).
 - Security, persistence, concurrency, or audit work: [AUDIT.md](./governance/AUDIT.md).
 
 For work affecting release automation, packaging, version values, wire
 contracts, database schemas, keyslot/blob persistence, cryptographic derivation,
-or compatibility, inspect `src/metor/versioning.py` and [RELEASING.md](./RELEASING.md),
+or compatibility, inspect `src/metor/versioning/__init__.py` and [RELEASING.md](./RELEASING.md),
 then determine whether an explicit compatibility-axis bump is required. Never
 automatically bump a compatibility generation.
 

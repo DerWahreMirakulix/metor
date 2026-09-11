@@ -1,7 +1,7 @@
 # Releasing Metor
 
 This is the canonical release and compatibility-version policy for Metor. The
-only authoritative version values are in `src/metor/versioning.py`. Application
+only authoritative version values are in `src/metor/versioning/__init__.py`. Application
 releases and compatibility generations are independent.
 
 ## Version axes
@@ -92,7 +92,7 @@ python scripts/versioning.py bump blob
 python scripts/versioning.py set-min ipc 2
 ```
 
-The CLI edits only `src/metor/versioning.py`. Review the implementation and
+The CLI edits only `src/metor/versioning/__init__.py`. Review the implementation and
 migration implications before invoking it. `set-app` is reserved for release
 automation.
 
@@ -104,6 +104,25 @@ python scripts/generate_settings_docs.py
 python scripts/generate_compatibility_manifest.py
 python scripts/check_release_compatibility.py --current docs/generated/compatibility.json
 ```
+
+Acceptance gates run on each native host, after the full three-distribution
+developer install described in the README:
+
+```console
+python scripts/check_boundaries.py
+python scripts/validate_generated_docs.py
+python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir closure-bundles
+python scripts/validate_installed_artifacts.py closure-bundles
+python scripts/validate_release_installers.py closure-bundles
+```
+
+The installed-consumer gate uses fresh non-editable environments outside the
+checkout, offline wheel resolution, positive and intentionally negative strict
+SDK typechecks, dynamic IPC through a non-shipped frontend, and uninstall/reinstall
+checks. The installer gate executes each actual ZIP installer on its native host.
+Do not run concurrent source-wheel builds in one checkout: setuptools shares its
+build directory. Generated-reference validation checks the original bytes as well
+as repeated generation; an initially stale file fails even if generation is stable.
 
 ## Automated release process
 

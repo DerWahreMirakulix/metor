@@ -72,7 +72,7 @@ field is omitted from ALL rows — uniform absence, never selective absence.
 | ----------------- | ----------------------------------------- | ---------------------------------------- |
 | `client.*`        | Client-machine behavior, paradigm-neutral | Core client layer                        |
 | `daemon.*`        | Daemon-host behavior                      | Daemon (only scope the daemon validates) |
-| `ui.<frontend>.*` | Frontend-owned presentation/behavior      | Registering UI frontend                  |
+| `ui.<frontend>.*` | Frontend-owned presentation/behavior      | Inert official base metadata catalog; narrow frontend values view |
 
 The daemon validates only `daemon.*` keys against its own registry. Any other
 prefix is client scope and rejected with `CLIENT_SCOPE_KEY_REJECTED`.
@@ -89,6 +89,10 @@ prefix is client scope and rejected with `CLIENT_SCOPE_KEY_REJECTED`.
 | `keyslot`             | Versioned protector metadata containing only an authenticated PMK wrap. |
 | `blob_id`             | Opaque identifier for an encrypted object; never a filesystem path.     |
 | `temporary blob`      | Encrypted crash-safe spool object that is not normal persisted history. |
+| unsent draft | Core-owned capture staging, not an eligible outbox message; finalization is distinct from explicit DROP commit. |
+| fallback repair intent | `fallback_committed` receipt payload metadata authorizes exact outbound media promotion after committed LIVE→DROP conversion. |
+| request lease | One SDK exchange's connection generation, socket and registration identity; reused wire request IDs do not transfer it. |
+| configured endpoint | Host-resolved local/forwarded port; successful SDK connect and bootstrap are separate checks. |
 | `persistent blob`     | Encrypted durable object referenced by structured database metadata.    |
 | `KeyProtector`        | Boundary that protects, unwraps, rewraps, and destroys PMK access.      |
 | `cryptographic erase` | Destruction of PMK access before best-effort ciphertext cleanup.        |

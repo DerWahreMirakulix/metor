@@ -5,6 +5,10 @@ UI must consume. It does not define or implement screens, navigation, playback,
 hardware drivers, or other presentation behavior. The Terminal remains an equal
 client of the same typed contract.
 
+Implementation status and evidence are tracked in
+[the current closure report](../governance/REFACTOR_CLOSURE.md).
+This integration contract does not approve or replace GUI/layout specifications.
+
 ## Ownership boundary
 
 - Core owns profiles, identity, contacts, message identity, DROP/LIVE semantics,
@@ -29,8 +33,9 @@ After the normal IPC version/auth handshake, a rich frontend must:
 1. send `RegisterLiveConsumerCommand` so it receives typed asynchronous events;
 2. request `GetRuntimeSnapshotCommand`;
 3. install `RuntimeSnapshotEvent` as its projection baseline;
-4. apply only buffered or later events whose `revision` is greater than the
-   snapshot revision.
+4. apply newer projection invalidations within the same epoch. Always process
+   command outcomes, media and lifecycle control events independently of that
+   projection revision filter.
 
 Every IPC event carries the daemon-authored monotonic `revision`. The aggregate
 snapshot contains profile and Onion identity, saved/discovered contacts,
@@ -43,7 +48,9 @@ revision ordering when the epoch changes. `RuntimeSnapshotUnavailableEvent`
 means the bounded stable-read retries were exhausted and the request is safe to
 retry; it is never an unchecked snapshot. The client IPC layer owns the only
 socket reader, registers a request before writing it, demultiplexes correlated
-responses, and queues unsolicited events without loss. A shared
+responses, and queues unsolicited events within bounded capacity. Overload fails
+the connection with one reliable loss notification requiring reattachment/resync;
+it never silently claims complete delivery. A shared
 `RuntimeStateChangedEvent` has no request correlation and invalidates only its
 content-free scope for every authorized client. Connection and pending-request
 events are absolute keyed upserts, not counters to apply more than once.

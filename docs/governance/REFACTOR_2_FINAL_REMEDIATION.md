@@ -1,5 +1,10 @@
 # Refactor 2 final remediation evidence
 
+Historical implementer report for `b8a172c16013118e1526dece25fcaea40221e926`.
+Its PASS labels are limited to the evidence recorded at that baseline; they are
+not current acceptance. Remaining findings and native-platform results are
+tracked in [the current closure report](REFACTOR_CLOSURE.md).
+
 This report records the corrective C01–C11 implementation and the V01 evidence
 available on 11 September 2026. It is a handoff for independent review, not a
 self-declaration of final acceptance.

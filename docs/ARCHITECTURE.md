@@ -319,7 +319,7 @@ Use this document when you need to answer one of these questions:
 
 ## Core System Boundaries
 
-1. The UI is stateless.
+1. The UI owns presentation and interaction state only.
    It may hold transient presentation state such as focus or scroll position, but it must not own Tor, database, or cryptographic lifecycle.
 
 2. The daemon owns operational state.
@@ -350,7 +350,7 @@ Settings keys live in exactly three namespaces (see [GLOSSARY.md](./GLOSSARY.md)
 | ----------------- | ----------------------------------------------------------------------- | ---------------------------- |
 | `client.*`        | Client-machine behavior, paradigm-neutral (e.g. `client.history_limit`) | Client registry              |
 | `daemon.*`        | Daemon-host behavior                                                    | Daemon `SettingKey` registry |
-| `ui.<frontend>.*` | Frontend-owned presentation and behavior                                | Registering UI frontend      |
+| `ui.<frontend>.*` | Frontend-owned presentation and behavior                                | Inert base-owned official metadata catalog |
 
 Validation is a two-registry rule: the daemon accepts only `daemon.*` keys that
 exist in its own `SettingKey` registry. Any client-scope key (`client.*` or
@@ -462,7 +462,9 @@ The canonical wire sequence is:
 5. **Initial State & Event Loop:** Terminal may fetch its compatibility projection
    with `GetChatStartupStateCommand`. Rich clients request
    `GetRuntimeSnapshotCommand`, install its `revision` as the projection
-   baseline, then apply buffered/later events with greater revisions. Process
+   baseline, then apply newer projection invalidations in the same epoch. Never
+   discard command outcomes, media or lifecycle control events merely because
+   their revision precedes the snapshot. Process
    continuous streaming events delimited by newlines.
 
 ### Aggregate Runtime Projection
@@ -811,10 +813,10 @@ The UI may translate them differently, but it must not reinterpret them.
    The user may keep typing, but new outgoing messages remain local until the daemon reports retunnel success or terminal failure.
 
 2. `RECONNECTING` means the daemon is recovering a lost live session through grace reconnect or auto reconnect.
-   The prompt changes immediately, but the UI still waits for typed IPC events before deciding whether to flush or drop buffered content.
+   The prompt changes immediately; typed IPC events report Core-owned pending spool and fallback state. The UI does not flush a recoverable transport buffer.
 
 3. `DROP` means live transport is unavailable now.
-   New outgoing messages no longer stay in the UI buffer and instead follow normal drop behavior.
+   New outgoing messages request DROP semantics through Core; they are not queued in a UI transport buffer.
 
 4. Recovery prompt state and transport history state are intentionally coupled but not identical.
    Prompt decoration reacts immediately to typed lifecycle events, while visible chat lines such as `FallbackSuccessEvent`, `AckEvent`, and drop conversions continue to reflect daemon transport truth.
@@ -920,6 +922,52 @@ filter-bound opaque cursor. Inventory entries expose identity and safe metadata,
 never message bytes or storage paths. `GetVoiceChunkCommand` performs bounded
 non-consuming exact-identity reads; only `ReleaseVoiceCommand` consumes one
 eligible finalized inbound Voice item.
+
+### Public integration and deterministic shared ownership
+
+`metor.core.auth` owns PIN/session proof primitives; `metor.shared` owns pure
+onion/identity helpers, mutable-buffer clearing and shared contract bounds.
+Base `metor.utils` re-exports intentional public primitives and owns host paths,
+file cleanup and runtime limits. SDK imports do not inspect HOME, load dotenv,
+open profiles or start processes. Base CLI/daemon explicitly call
+`initialize_runtime_environment` after side-effect-free help/version gates.
+
+Frontend launch contract v2 defers host work until the selected frontend starts.
+`FrontendHost.bootstrap` returns a non-null active local or configured forwarded
+port, a consumable startup secret, storage prompt mode and `FrontendSettings`.
+This is endpoint resolution, not successful authentication: use `MetorClient`
+connect/bootstrap and handle their outcomes. Bootstrap reasons are typed;
+missing-profile, cancellation and transient failures permit another attempt.
+Concurrent selection/start is rejected. Remote profiles never start local daemons.
+Terminal uses this same boundary, not `ProfileManager`. Official frontend setting
+metadata remains an inert base catalog for CLI/docs, not duplicated UI defaults.
+
+The SDK correlates results by exchange lease through send, wait and cleanup.
+Expected terminal responses belong to the request caller; nonterminal fallback,
+pressure and runtime-change events go once to the callback. Actual rejection is
+typed; timeout and loss are transport outcomes. A bounded independent loss signal
+survives a full callback queue. Arbitrary user callbacks cannot be forcibly killed;
+replacement admission bounds retained callback generations and prevents their
+old request authority from reaching a new transport.
+
+Normal final peer frames drain in FIFO order with a bounded writer-owned deadline;
+enqueue is not delivery or peer acknowledgement. Purge cancels rather than draining
+ordinary reliability work. Exact socket removal prevents stale failures from
+disconnecting replacements. Runtime release attempts each sensitive phase even
+after failure, remains LOCKING on failure, and permits retry; keyslot removal is
+not proof of successful live-key or physical media erasure.
+
+Unfinalized DROP drafts retain temporary ownership. Exact committed fallback
+intents are additive internal receipt JSON (`fallback_committed`), not a new
+wire/schema/crypto generation. They authorize same-identity repair after partial
+blob promotion; absence of a LIVE generation alone never authorizes a sweep.
+
+StateTracker's facade is declarative; its coordinator owns a real reentrant lock.
+The domain-operation barrier precedes canonical state/store locks during snapshot
+composition and mutations. Stop/lock acquire domain then release serialization,
+never the reverse; external stop cannot race dispatch into a lock inversion.
+Writer admission is nonblocking; physical I/O is outside
+domain locks. SQL message mixins share an explicitly typed receipt collaborator.
 
 ## Terminal UI Design Guidelines
 

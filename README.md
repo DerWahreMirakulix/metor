@@ -2,7 +2,7 @@
 
 **Metor** is a highly secure, Tor-based terminal messenger written in Python. It provides a persistent Tor Hidden Service (.onion address) along with an interactive, multiplexed live chat and asynchronous offline messaging.
 
-Built on a robust **Client-Daemon Architecture** and structured via **Domain-Driven Design (DDD)**, the user interface is completely stateless. You can manage multiple secure connections simultaneously, maintain an address book, queue offline messages, and view connection history — all seamlessly from the console, whether running locally or remotely.
+Built on a **Client-Daemon Architecture**, frontends own interaction and presentation while the daemon owns transport, durable delivery and authorization. You can manage connections, maintain an address book, queue offline messages and view connection history locally or remotely.
 
 ## 📚 Documentation
 
@@ -17,19 +17,21 @@ system model, then use the focused references when you need exact contracts.
 - Contribute using the [contribution guide](docs/CONTRIBUTE.md) and
   [security audit checklist](docs/governance/AUDIT.md).
 - Prepare a release with the [release and versioning guide](docs/RELEASING.md).
+- Review the corrected foundation and native/artifact evidence in the
+  [closure report](docs/governance/REFACTOR_CLOSURE.md).
 
 ## 🌟 Key Features
 
-- **Client-Daemon Architecture (Stateless UI):**
+- **Client-Daemon Architecture (Daemon-owned operational state):**
   The heavy lifting (Tor process management, cryptography, network sockets, outbox routing) runs in the background as a headless daemon. The Chat UI merely acts as a client communicating via a strictly typed IPC interface. You can close the UI at any time without dropping active Tor connections.
 - **Asynchronous Offline Messaging ("Drops"):**
   Send messages even when your contact is offline. The daemon safely queues outgoing messages in a local SQLite Outbox and automatically delivers them in the background as soon as the peer comes online (Drop & Go).
 - **Network Resilience & Retunneling:**
   Built-in auto-reconnect logic handles intermittent network drops. If a route stalls completely, you can manually force a Tor circuit rotation (`NEWNYM`) and seamlessly retunnel the active connection to your peer on the fly.
-- **Zero-Trace & Ephemeral Messages:**
-  Configurable "Burn-After-Read" policies. Read messages can be permanently destroyed using cryptographic file shredding to meet strict OPSEC requirements.
+- **Retention and Local Deletion:**
+  Configurable read/release policies remove local retained content. File overwrite and Python memory clearing are best effort; storage snapshots, backups, SSD wear leveling and remote copies prevent an unconditional physical-erasure guarantee.
 - **Cryptographic Peer Authentication:**
-  Connections are secured by a deterministic Ed25519 Challenge-Response handshake. Identity spoofing is mathematically impossible—every peer must cryptographically prove ownership of their `.onion` key before a session is established.
+  Connections use an Ed25519 challenge-response handshake: each peer must prove ownership of its `.onion` key. This depends on key secrecy, correct implementation and the underlying cryptographic assumptions; it is not unconditional protection against endpoint compromise.
 - **Multi-Profile Support:**
   Manage completely isolated identities (`metor -p work`, `metor -p private`). Each encrypted profile gets a random Profile Master Key (PMK), its own `.onion` address, a SQLCipher-encrypted database, and authenticated external blob storage.
 - **Dynamic Contact Management:**
@@ -140,8 +142,17 @@ pip install --no-deps --no-build-isolation packaging/terminal
 # Recommended security-conscious developer installation
 python -m pip install --upgrade pip==26.0.1
 pip install -r requirements/dev.lock
+pip install --no-deps --no-build-isolation -e packaging/sdk
 pip install --no-deps --no-build-isolation -e .
+pip install --no-deps --no-build-isolation -e packaging/terminal
+python -m pip check
+python -m metor chat --list-ui
 ```
+
+For deliberately base-only development omit the Terminal install, not the SDK.
+Source visibility alone does not register frontend entry points. The managed
+`metor-daemon` entry needs no interactive display; it is distinct from the
+short-lived offline executor used by applicable one-shot CLI commands.
 
 The lock files pin the full tested dependency set so normal resolver drift does not silently pull newer transitive packages.
 
