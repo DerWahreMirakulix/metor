@@ -44,22 +44,6 @@ class StreamReceiver:
     """Manages the background read-loop for fully established Tor sockets."""
 
     @staticmethod
-    def _close_socket_quietly(conn: socket.socket) -> None:
-        """
-        Closes one socket while suppressing transport teardown noise.
-
-        Args:
-            conn (socket.socket): The socket to close.
-
-        Returns:
-            None
-        """
-        try:
-            conn.close()
-        except OSError:
-            pass
-
-    @staticmethod
     def _socket_appears_closed(conn: socket.socket) -> bool:
         """
         Performs one cheap liveness probe after an idle timeout.
@@ -287,13 +271,12 @@ class StreamReceiver:
         late_acceptance_timeout: float = self._config.get_float(
             SettingKey.LATE_ACCEPTANCE_TIMEOUT
         )
-        conn.settimeout(
-            late_acceptance_timeout if awaiting_acceptance else idle_timeout
-        )
-
         stream: TcpStreamReader = TcpStreamReader(conn, initial_buffer)
 
         try:
+            conn.settimeout(
+                late_acceptance_timeout if awaiting_acceptance else idle_timeout
+            )
             while True:
                 try:
                     msg: Optional[str] = stream.read_line()
@@ -523,42 +506,46 @@ class StreamReceiver:
         except Exception:
             pass
         finally:
-            if self._state.consume_locally_terminated_socket(conn):
-                return
+            try:
+                if self._state.consume_locally_terminated_socket(conn):
+                    return
 
-            if self._is_stale_pending_acceptance_socket(
-                onion,
-                conn,
-                awaiting_acceptance,
-            ):
-                self._close_socket_quietly(conn)
-                return
+                if self._is_stale_pending_acceptance_socket(
+                    onion,
+                    conn,
+                    awaiting_acceptance,
+                ):
+                    self._state.retire_connection(conn, preserve_final=True)
+                    return
 
-            if remote_rejected:
-                self._reject_cb(
-                    onion,
-                    False,
-                    conn,
-                    connection_origin,
-                    remote_reject_intent,
-                )
-            elif remote_disconnected:
-                self._disconnect_cb(
-                    onion,
-                    False,
-                    remote_disconnect_is_fallback,
-                    conn,
-                    False,
-                    connection_origin,
-                    None,
-                )
-            else:
-                self._disconnect_cb(
-                    onion,
-                    False,
-                    True,
-                    conn,
-                    False,
-                    connection_origin,
-                    None,
-                )
+                if remote_rejected:
+                    self._reject_cb(
+                        onion,
+                        False,
+                        conn,
+                        connection_origin,
+                        remote_reject_intent,
+                    )
+                elif remote_disconnected:
+                    self._disconnect_cb(
+                        onion,
+                        False,
+                        remote_disconnect_is_fallback,
+                        conn,
+                        False,
+                        connection_origin,
+                        None,
+                    )
+                else:
+                    self._disconnect_cb(
+                        onion,
+                        False,
+                        True,
+                        conn,
+                        False,
+                        connection_origin,
+                        None,
+                    )
+
+            finally:
+                self._state.retire_connection(conn, preserve_final=True)

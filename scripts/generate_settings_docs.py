@@ -8,7 +8,6 @@ Prettier formatting to the final output.
 # ruff: noqa: E402
 
 import sys
-import subprocess
 from pathlib import Path
 from typing import Dict, List
 
@@ -27,6 +26,7 @@ from metor.data.profile import (
     ProfileConfigKey,
     ProfileConfigSpec,
 )
+from scripts.format_generated_docs import format_document
 from scripts.release.paths import SETTINGS_DOC_PATH
 
 
@@ -342,24 +342,7 @@ def main() -> None:
         f'Settings documentation successfully generated at: {output_file.absolute()}\n'
     )
 
-    sys.stdout.write('Running Prettier on the generated file...\n')
-    try:
-        npx_cmd: str = 'npx.cmd' if sys.platform == 'win32' else 'npx'
-        subprocess.run(
-            [npx_cmd, 'prettier', '--write', str(output_file.absolute())],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        sys.stdout.write('Prettier formatting applied successfully.\n')
-    except subprocess.CalledProcessError:
-        sys.stdout.write(
-            f'Warning: Prettier formatting failed for {output_file.name}. Ensure it is configured correctly.\n'
-        )
-    except FileNotFoundError:
-        sys.stdout.write(
-            'Warning: npx command not found. Skipping Prettier formatting. (Is Node.js installed?)\n'
-        )
+    format_document(output_file)
 
 
 if __name__ == '__main__':

@@ -1,0 +1,5 @@
+# Generated references are byte-checked against canonical UTF-8/LF output.
+/docs/generated/API.md text eol=lf
+/docs/generated/SETTINGS.md text eol=lf
+/docs/generated/api.schema.json text eol=lf
+/docs/generated/compatibility.json text eol=lf

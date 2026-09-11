@@ -4,6 +4,7 @@ import socket
 import threading
 from contextlib import contextmanager
 from typing import Callable, Dict, Iterator, List, Optional, Set, Tuple
+from weakref import WeakSet
 
 from metor.core.api import ConnectionActor, ConnectionOrigin, ConnectionReasonCode
 from metor.utils import Constants
@@ -55,7 +56,7 @@ class StateTracker(
         self._unacked_messages: Dict[str, Dict[str, Tuple[str, str]]] = {}
         self._message_request_ids: Dict[str, str] = {}
         self._recent_live_msg_ids: Dict[str, List[str]] = {}
-        self._locally_terminated_sockets: Set[socket.socket] = set()
+        self._locally_terminated_sockets: WeakSet[socket.socket] = WeakSet()
         self._drop_tunnels: Dict[str, TunnelState] = {}
         self._live_reconnect_grace: Dict[str, float] = {}
         self._local_recovery_opt_outs: Dict[str, float] = {}
@@ -69,6 +70,7 @@ class StateTracker(
         self._last_disconnect_actors: Dict[str, ConnectionActor] = {}
         self._socket_write_locks: Dict[socket.socket, threading.Lock] = {}
         self._socket_writers: Dict[socket.socket, BoundedSocketWriter] = {}
+        self._retired_sockets: WeakSet[socket.socket] = WeakSet()
         self._live_generations: Dict[Tuple[str, str], int] = {}
         self._next_live_generation = 1
         self._live_context_generations: Dict[str, int] = {}
@@ -104,10 +106,39 @@ class StateTracker(
         self._peer_writer_failure_callback = callback
 
     def _writer_exited(self, conn: socket.socket, writer: BoundedSocketWriter) -> None:
-        """Drops an idle or failed socket writer without retaining bookkeeping."""
+        """Drops an exited writer; idle writers retain sole admission ownership."""
         with self._lock:
             if self._socket_writers.get(conn) is writer:
                 self._socket_writers.pop(conn, None)
+                self._socket_write_locks.pop(conn, None)
+
+    def retire_connection(
+        self, conn: socket.socket, *, preserve_final: bool = False
+    ) -> None:
+        """Retires exact transport ownership without touching a replacement.
+
+        Args:
+            conn (socket.socket): Descriptor whose ownership has ended.
+            preserve_final (bool): Allow a previously admitted local final drain.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            writer = self._socket_writers.get(conn)
+            self._retired_sockets.add(conn)
+            self._socket_write_locks.pop(conn, None)
+        if writer is not None:
+            writer.close(preserve_final=preserve_final)
+            return
+        try:
+            conn.shutdown(socket.SHUT_RDWR)
+        except (OSError, TypeError):
+            pass
+        try:
+            conn.close()
+        except OSError:
+            pass
 
     def send_frame(
         self,
@@ -133,6 +164,8 @@ class StateTracker(
                 conn.sendall(frame)
             return
         with self._lock:
+            if conn in self._retired_sockets or conn.fileno() < 0:
+                raise ConnectionError('Peer socket is already retired.')
             writer = self._socket_writers.get(conn)
             if writer is None:
                 writer = BoundedSocketWriter(
@@ -147,13 +180,14 @@ class StateTracker(
         try:
             writer.enqueue(frame, claim)
         except Exception:
-            self._peer_writer_failed(conn)
+            if not writer.is_finishing():
+                self._peer_writer_failed(conn)
             raise
 
     def _peer_writer_failed(self, conn: socket.socket) -> None:
         """Retires transport ownership when an asynchronous peer write fails."""
         with self._lock:
-            writer = self._socket_writers.pop(conn, None)
+            writer = self._socket_writers.get(conn)
             self._socket_write_locks.pop(conn, None)
             onion = next(
                 (
@@ -167,7 +201,7 @@ class StateTracker(
                 None,
             )
         if writer is not None:
-            writer.close()
+            self.retire_connection(conn)
         if onion is not None and self._peer_writer_failure_callback is not None:
             try:
                 self._peer_writer_failure_callback(onion, conn)
@@ -189,23 +223,30 @@ class StateTracker(
             conn.shutdown(socket.SHUT_WR)
             conn.close()
             return
-        with self._lock:
-            writer = self._socket_writers.get(conn)
-            if writer is None:
-                writer = BoundedSocketWriter(
-                    conn,
-                    capacity=Constants.PEER_WRITER_QUEUE_FRAMES,
-                    byte_capacity=Constants.PEER_WRITER_QUEUE_BYTES,
-                    max_frame_bytes=Constants.MAX_STREAM_BYTES,
-                    on_failure=lambda failed, _exc: self._peer_writer_failed(failed),
-                    on_exit=lambda exited: self._writer_exited(conn, exited),
-                )
-                self._socket_writers[conn] = writer
-            try:
+        try:
+            with self._lock:
+                writer = self._socket_writers.get(conn)
+                if writer is not None and writer.is_finishing():
+                    return
+                if conn in self._retired_sockets or conn.fileno() < 0:
+                    raise ConnectionError('Peer socket is already retired.')
+                self._locally_terminated_sockets.add(conn)
+                if writer is None:
+                    writer = BoundedSocketWriter(
+                        conn,
+                        capacity=Constants.PEER_WRITER_QUEUE_FRAMES,
+                        byte_capacity=Constants.PEER_WRITER_QUEUE_BYTES,
+                        max_frame_bytes=Constants.MAX_STREAM_BYTES,
+                        on_failure=lambda failed, _exc: self._peer_writer_failed(
+                            failed
+                        ),
+                        on_exit=lambda exited: self._writer_exited(conn, exited),
+                    )
+                    self._socket_writers[conn] = writer
                 writer.finish(frame, Constants.SOCKET_WRITER_FLUSH_TIMEOUT_SEC)
-            except Exception:
-                writer.close()
-                raise
+        except Exception:
+            self.retire_connection(conn)
+            raise
 
     def live_generation(self, onion: str, msg_id: str) -> int:
         """Admits and returns a generation for a newly retained LIVE identity."""

@@ -3,6 +3,7 @@
 import socket
 import threading
 from typing import Dict, List, Optional, Set, Tuple
+from weakref import WeakSet
 
 from metor.core.daemon.managed.writer import BoundedSocketWriter
 
@@ -12,6 +13,20 @@ from metor.utils import Constants
 class StateTrackerMessagesMixin:
     """Encapsulates in-flight message and raw socket state."""
 
+    def retire_connection(
+        self, conn: socket.socket, *, preserve_final: bool = False
+    ) -> None:
+        """Delegates exact socket retirement to the state coordinator.
+
+        Args:
+            conn (socket.socket): Retiring transport.
+            preserve_final (bool): Preserve admitted local final control.
+
+        Returns:
+            None
+        """
+        raise NotImplementedError
+
     _lock: threading.RLock
     _connections: Dict[str, socket.socket]
     _pending_connections: Dict[str, socket.socket]
@@ -20,7 +35,7 @@ class StateTrackerMessagesMixin:
     _message_request_ids: Dict[str, str]
     _recent_live_msg_ids: Dict[str, List[str]]
     _unauthenticated_connections: Set[socket.socket]
-    _locally_terminated_sockets: Set[socket.socket]
+    _locally_terminated_sockets: WeakSet[socket.socket]
     _outbound_attempts: Set[str]
     _scheduled_auto_reconnects: Set[str]
     _live_reconnect_grace: Dict[str, float]
@@ -311,6 +326,7 @@ class StateTrackerMessagesMixin:
                 | set(self._pending_connections.values())
                 | set(self._outbound_sockets.values())
                 | set(self._unauthenticated_connections)
+                | set(self._socket_writers)
             )
             self._connections.clear()
             self._pending_connections.clear()
@@ -321,13 +337,6 @@ class StateTrackerMessagesMixin:
             self._live_reconnect_grace.clear()
             self._retunnel_in_progress.clear()
             self._socket_write_locks.clear()
-            writers = list(self._socket_writers.values())
-            self._socket_writers.clear()
             self._live_generations.clear()
-        for writer in writers:
-            writer.close()
         for sock in sockets:
-            try:
-                sock.close()
-            except OSError:
-                pass
+            self.retire_connection(sock)

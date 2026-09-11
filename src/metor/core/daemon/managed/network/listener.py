@@ -304,7 +304,7 @@ class InboundListener:
                         )
                     )
                     try:
-                        conn.close()
+                        self._state.retire_connection(conn)
                     except Exception:
                         pass
                     continue
@@ -317,7 +317,7 @@ class InboundListener:
                 except Exception:
                     self._state.remove_unauthenticated_connection(conn)
                     try:
-                        conn.close()
+                        self._state.retire_connection(conn)
                     except Exception:
                         pass
                     self._hm.log_event(
@@ -413,7 +413,7 @@ class InboundListener:
 
         if not auth_successful or not onion or not stream:
             try:
-                conn.close()
+                self._state.retire_connection(conn)
             except Exception:
                 pass
             return
@@ -489,7 +489,7 @@ class InboundListener:
         )
 
         try:
-            conn.close()
+            self._state.retire_connection(conn)
         except Exception:
             pass
 
@@ -547,7 +547,7 @@ class InboundListener:
         """
         alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
         if not alias:
-            conn.close()
+            self._state.retire_connection(conn)
             return
 
         is_outbound_attempt: bool = self._state.has_active_or_recent_outbound_attempt(
@@ -572,7 +572,7 @@ class InboundListener:
 
         if has_recovery_hint and self._state.has_local_recovery_opt_out(onion):
             try:
-                self._state.send_frame(
+                self._state.finish_connection(
                     conn,
                     (
                         f'{TorCommand.REJECT.value} '
@@ -580,8 +580,7 @@ class InboundListener:
                     ).encode('utf-8'),
                 )
             except Exception:
-                pass
-            conn.close()
+                self._state.retire_connection(conn)
             return
 
         duplicate_reason_code: Optional[HistoryReasonCode] = None
@@ -602,13 +601,12 @@ class InboundListener:
 
         if should_reject:
             try:
-                self._state.send_frame(
+                self._state.finish_connection(
                     conn,
                     f'{TorCommand.REJECT.value} {self._tm.onion}\n'.encode('utf-8'),
                 )
             except Exception:
-                pass
-            conn.close()
+                self._state.retire_connection(conn)
 
             if duplicate_reason_code is not None:
                 self._hm.log_event(

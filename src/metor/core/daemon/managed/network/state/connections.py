@@ -12,22 +12,6 @@ from metor.core.daemon.managed.network.state.types import PendingConnectionReaso
 from metor.utils import Constants
 
 
-def _close_socket(sock: socket.socket) -> None:
-    """
-    Closes one superseded socket while suppressing teardown noise.
-
-    Args:
-        sock (socket.socket): The socket to close.
-
-    Returns:
-        None
-    """
-    try:
-        sock.close()
-    except OSError:
-        pass
-
-
 @dataclass(frozen=True)
 class PendingConnectionSnapshot:
     """Represents one pending live-request snapshot for startup rendering."""
@@ -40,6 +24,20 @@ class PendingConnectionSnapshot:
 
 class StateTrackerConnectionsMixin:
     """Encapsulates live, pending, and outbound connection state operations."""
+
+    def retire_connection(
+        self, conn: socket.socket, *, preserve_final: bool = False
+    ) -> None:
+        """Delegates exact socket retirement to the state coordinator.
+
+        Args:
+            conn (socket.socket): Retiring transport.
+            preserve_final (bool): Preserve admitted local final control.
+
+        Returns:
+            None
+        """
+        raise NotImplementedError
 
     _lock: threading.RLock
     _connections: Dict[str, socket.socket]
@@ -453,10 +451,10 @@ class StateTrackerConnectionsMixin:
             self._last_disconnect_actors.pop(onion, None)
 
         if replaced_active is not None and replaced_active is not conn:
-            _close_socket(replaced_active)
+            self.retire_connection(replaced_active)
 
         if replaced_pending is not None and replaced_pending is not conn:
-            _close_socket(replaced_pending)
+            self.retire_connection(replaced_pending)
 
     def add_pending_connection(
         self,
@@ -520,10 +518,10 @@ class StateTrackerConnectionsMixin:
                 self._live_reconnect_grace.pop(onion, None)
 
         if replaced_pending is not None and replaced_pending is not conn:
-            _close_socket(replaced_pending)
+            self.retire_connection(replaced_pending)
 
         if not should_track:
-            _close_socket(conn)
+            self.retire_connection(conn)
 
         return should_track
 
@@ -809,7 +807,7 @@ class StateTrackerConnectionsMixin:
             and pending_conn is not None
             and pending_conn is not active_conn
         ):
-            _close_socket(pending_conn)
+            self.retire_connection(pending_conn)
 
         return conn
 

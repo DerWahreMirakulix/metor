@@ -33,25 +33,6 @@ from metor.core.daemon.managed.network.controller.session.protocols import (
 from metor.core.daemon.managed.network.stream import TcpStreamReader
 
 
-def _close_socket(conn: Optional[socket.socket]) -> None:
-    """
-    Closes one failed outbound socket quietly.
-
-    Args:
-        conn (Optional[socket.socket]): The socket to close.
-
-    Returns:
-        None
-    """
-    if conn is None:
-        return
-
-    try:
-        conn.close()
-    except OSError:
-        pass
-
-
 def connect_to(
     controller: ConnectControllerProtocol,
     target: str,
@@ -165,12 +146,12 @@ def connect_to(
                 signature: Optional[str] = controller._crypto.sign_challenge(challenge)
 
                 if not signature:
-                    conn.close()
+                    controller._state.retire_connection(conn)
                     raise ConnectionError('Failed to sign live handshake challenge.')
 
                 local_onion: Optional[str] = controller._tm.onion
                 if not local_onion:
-                    conn.close()
+                    controller._state.retire_connection(conn)
                     raise ConnectionError('Local onion unavailable for live handshake.')
 
                 controller._state.send_frame(
@@ -204,8 +185,8 @@ def connect_to(
                 conn = None
                 return
             except Exception as exc:
-                _close_socket(conn)
                 if conn is not None:
+                    controller._state.retire_connection(conn)
                     controller._state.clear_bound_outbound_socket(onion, conn)
                 if not controller._state.has_outbound_attempt(onion):
                     return

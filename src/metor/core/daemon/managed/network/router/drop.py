@@ -234,16 +234,14 @@ class DropMessageRouter:
         if not self._config.get_bool(SettingKey.ALLOW_DROPS):
             if self._config.get_bool(SettingKey.EXPOSE_DROP_REJECTION):
                 try:
-                    self._state.send_frame(
+                    self._state.finish_connection(
                         conn,
                         f'{TorCommand.REJECT.value} drops_disabled\n'.encode('utf-8'),
                     )
                 except Exception:
-                    pass
-            try:
-                conn.close()
-            except Exception:
-                pass
+                    self._state.retire_connection(conn)
+            else:
+                self._state.retire_connection(conn)
             return
 
         try:
@@ -275,7 +273,4 @@ class DropMessageRouter:
         except Exception:
             pass
         finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
+            self._state.retire_connection(conn)

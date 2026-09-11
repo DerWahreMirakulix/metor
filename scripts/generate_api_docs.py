@@ -11,7 +11,6 @@ Prettier formatting to the final output.
 import sys
 import json
 import inspect
-import subprocess
 import dataclasses
 from enum import Enum
 from pathlib import Path
@@ -40,6 +39,7 @@ sys.path.insert(0, str(SRC_DIR))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from metor.core.api import CMD_MAP, EVENT_MAP
+from scripts.format_generated_docs import format_document
 from scripts.release.paths import API_DOC_PATH, API_SCHEMA_PATH
 
 if TYPE_CHECKING:
@@ -494,26 +494,7 @@ def main() -> None:
         f'IPC schema documentation successfully generated at: {schema_file.absolute()}\n'
     )
 
-    sys.stdout.write('Running Prettier on the generated file...\n')
-    try:
-        # Cross-platform binary resolution for npx
-        npx_cmd: str = 'npx.cmd' if sys.platform == 'win32' else 'npx'
-
-        subprocess.run(
-            [npx_cmd, 'prettier', '--write', str(output_file.absolute())],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        sys.stdout.write('Prettier formatting applied successfully.\n')
-    except subprocess.CalledProcessError:
-        sys.stdout.write(
-            f'Warning: Prettier formatting failed for {output_file.name}. Ensure it is configured correctly.\n'
-        )
-    except FileNotFoundError:
-        sys.stdout.write(
-            'Warning: npx command not found. Skipping Prettier formatting. (Is Node.js installed?)\n'
-        )
+    format_document(output_file)
 
 
 if __name__ == '__main__':

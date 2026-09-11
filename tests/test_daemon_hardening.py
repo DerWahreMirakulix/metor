@@ -802,6 +802,18 @@ class _NetworkSocket:
         self.closed: bool = False
         self.sent: list[bytes] = []
         self.timeouts: list[float] = []
+        self.shutdown_modes: list[int] = []
+
+    def shutdown(self, how: int) -> None:
+        """Records the socket owner's directional shutdown.
+
+        Args:
+            how (int): Native socket shutdown mode.
+
+        Returns:
+            None
+        """
+        self.shutdown_modes.append(how)
 
     def settimeout(self, timeout: float) -> None:
         """
@@ -1398,6 +1410,21 @@ class _DummyState:
     Provides a dummy state test double.
     """
 
+    def retire_connection(
+        self, conn: socket.socket, *, preserve_final: bool = False
+    ) -> None:
+        """Retires the exact descriptor in tests without queued writers.
+
+        Args:
+            conn (socket.socket): Retiring receiver descriptor.
+            preserve_final (bool): No asynchronous final queue exists in this double.
+
+        Returns:
+            None
+        """
+        conn.shutdown(socket.SHUT_RDWR)
+        conn.close()
+
     def touch_session_activity(self, _onion: str) -> None:
         """Records test-session activity without side effects.
 
@@ -1626,6 +1653,18 @@ class _DummyReceiverSocket:
         """
 
         self.timeouts: list[float] = []
+        self.shutdown_modes: list[int] = []
+
+    def shutdown(self, how: int) -> None:
+        """Records exact receiver descriptor shutdown.
+
+        Args:
+            how (int): Native socket shutdown mode.
+
+        Returns:
+            None
+        """
+        self.shutdown_modes.append(how)
 
     def settimeout(self, timeout: float) -> None:
         """

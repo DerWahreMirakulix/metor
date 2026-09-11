@@ -42,6 +42,16 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Set up pinned documentation tooling
+      uses: actions/setup-node@v6
+      with:
+        node-version: "22.17.1"
+        cache: npm
+
+    - name: Install pinned documentation tooling
+      shell: bash
+      run: npm ci
+
     - name: Set up Python
       uses: actions/setup-python@v6
       with:

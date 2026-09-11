@@ -4,6 +4,7 @@
 
 import subprocess
 import sys
+import hashlib
 from pathlib import Path
 from typing import Sequence
 
@@ -76,12 +77,24 @@ def validate_reproducibility() -> tuple[Path, ...]:
     first_generation: dict[Path, bytes] = generated_artifacts()
     run_generators()
     second_generation: dict[Path, bytes] = generated_artifacts()
-    return tuple(
-        path
-        for path in GENERATED_ARTIFACT_PATHS
-        if original[path] != first_generation[path]
-        or first_generation[path] != second_generation[path]
-    )
+    changed = []
+    for path in GENERATED_ARTIFACT_PATHS:
+        stale = original[path] != first_generation[path]
+        unstable = first_generation[path] != second_generation[path]
+        if stale or unstable:
+            changed.append(path)
+            print(f'{path}: stale={stale}, non-deterministic={unstable}')
+            for label, data in (
+                ('original', original[path]),
+                ('first', first_generation[path]),
+                ('second', second_generation[path]),
+            ):
+                crlf = data.count(b'\r\n')
+                print(
+                    f'  {label}: bytes={len(data)}, CRLF={crlf}, '
+                    f'sha256={hashlib.sha256(data).hexdigest()}'
+                )
+    return tuple(changed)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

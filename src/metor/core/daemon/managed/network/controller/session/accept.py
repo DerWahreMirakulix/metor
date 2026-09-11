@@ -128,7 +128,7 @@ def accept(
                 )
             )
         try:
-            conn.close()
+            controller._state.retire_connection(conn)
         except OSError:
             pass
         return

@@ -51,6 +51,7 @@ class BoundedSocketWriter:
         self._state_lock = threading.RLock()
         self._finish_timer: threading.Timer | None = None
         self._accepting = True
+        self._finishing = False
         self._socket_closed = False
         self._drained = threading.Event()
         self._drained.set()
@@ -95,11 +96,26 @@ class BoundedSocketWriter:
             None
         """
         with self._state_lock:
+            if self._finishing:
+                return
             self.enqueue(payload, final=True)
+            self._finishing = True
             self._accepting = False
             self._finish_timer = threading.Timer(max(0.0, timeout), self.close)
             self._finish_timer.daemon = True
             self._finish_timer.start()
+
+    def is_finishing(self) -> bool:
+        """Reports ownership of an admitted final frame.
+
+        Args:
+            None
+
+        Returns:
+            bool: Whether graceful shutdown owns the remaining queue.
+        """
+        with self._state_lock:
+            return self._finishing
 
     def flush(self, timeout: float) -> bool:
         """Waits a bounded time for accepted frames to finish.
@@ -123,9 +139,18 @@ class BoundedSocketWriter:
         """
         return self._started.wait(max(0.0, timeout))
 
-    def close(self) -> None:
-        """Cancels queued work and interrupts a blocked socket write."""
+    def close(self, *, preserve_final: bool = False) -> None:
+        """Cancels work, optionally leaving an admitted final drain to its deadline.
+
+        Args:
+            preserve_final (bool): Receiver cleanup must not cancel local control.
+
+        Returns:
+            None
+        """
         with self._state_lock:
+            if preserve_final and self._finishing:
+                return
             self._accepting = False
             if self._socket_closed:
                 return
