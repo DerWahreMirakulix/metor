@@ -666,22 +666,21 @@ def disconnect(
     effective_reason = system_reason
     if effective_reason is None and not initiated_by_self and not is_fallback:
         effective_reason = ConnectionReasonCode.PEER_ENDED_SESSION
-    controller._state.set_last_disconnect_reason(onion, effective_reason)
+    connection_actor = (
+        ConnectionActor.SYSTEM
+        if is_fallback or system_reason is not None
+        else (ConnectionActor.LOCAL if initiated_by_self else ConnectionActor.REMOTE)
+    )
+    controller._state.set_last_disconnect_reason(
+        onion, effective_reason, connection_actor
+    )
 
     if not suppress_events:
         controller._broadcast(
             DisconnectedEvent(
                 alias=alias,
                 onion=onion,
-                actor=(
-                    ConnectionActor.SYSTEM
-                    if is_fallback or system_reason is not None
-                    else (
-                        ConnectionActor.LOCAL
-                        if initiated_by_self
-                        else ConnectionActor.REMOTE
-                    )
-                ),
+                actor=connection_actor,
                 origin=origin or ConnectionOrigin.MANUAL,
                 reason_code=effective_reason,
             )

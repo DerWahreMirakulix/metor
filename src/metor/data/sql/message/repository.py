@@ -1,7 +1,9 @@
 """Centralized durable message spool, archive, and receipt helpers."""
 
-import secrets
+import base64
+import hashlib
 import json
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, List, Optional, Tuple, cast
@@ -12,6 +14,8 @@ from metor.data.message.models import (
     MessageDirection,
     MessageStatus,
     QueuedMessageResult,
+    RetainedMessagePage,
+    RetainedMessageRecord,
 )
 
 # Local Package Imports
@@ -152,6 +156,207 @@ class MessageRepository(MessageInboundMixin, MessageOutboxMixin, MessageHistoryM
         if not rows:
             return None
         return self._receipt_from_row(rows[0])
+
+    @staticmethod
+    def _retained_filter(
+        contact_onion: Optional[str],
+        delivery: Optional[Delivery],
+        direction: Optional[MessageDirection],
+    ) -> tuple[str, list[SqlParam], str]:
+        """Builds the bounded inventory predicate and stable filter identity."""
+        clauses = [
+            "((r.direction = 'out' AND r.status IN ('pending', 'draft')) "
+            "OR (r.direction = 'in' AND r.content_type = 'voice' "
+            "AND r.status = 'unread'))",
+            '(i.receipt_id IS NOT NULL OR o.receipt_id IS NOT NULL '
+            'OR a.receipt_id IS NOT NULL)',
+        ]
+        params: list[SqlParam] = []
+        normalized_onion = clean_onion(contact_onion) if contact_onion else None
+        if normalized_onion is not None:
+            clauses.append('r.peer_onion = ?')
+            params.append(normalized_onion)
+        if delivery is not None:
+            clauses.append('r.delivery = ?')
+            params.append(delivery.value)
+        if direction is not None:
+            clauses.append('r.direction = ?')
+            params.append(direction.value)
+        identity = json.dumps(
+            {
+                'target': normalized_onion,
+                'delivery': delivery.value if delivery is not None else None,
+                'direction': direction.value if direction is not None else None,
+            },
+            sort_keys=True,
+            separators=(',', ':'),
+        )
+        fingerprint = hashlib.sha256(identity.encode('utf-8')).hexdigest()[:24]
+        return ' AND '.join(clauses), params, fingerprint
+
+    @staticmethod
+    def _decode_retained_cursor(cursor: str) -> dict[str, object]:
+        """Decodes one opaque bounded inventory cursor."""
+        if not cursor or len(cursor) > 1024:
+            raise ValueError('Invalid retained-message cursor.')
+        try:
+            padding = '=' * (-len(cursor) % 4)
+            raw = base64.urlsafe_b64decode((cursor + padding).encode('ascii'))
+            if len(raw) > 768:
+                raise ValueError
+            value = json.loads(raw.decode('utf-8'))
+        except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+            raise ValueError('Invalid retained-message cursor.') from exc
+        if not isinstance(value, dict):
+            raise ValueError('Invalid retained-message cursor.')
+        return value
+
+    @staticmethod
+    def _encode_retained_cursor(
+        last_id: int, ceiling_id: int, version: str, fingerprint: str
+    ) -> str:
+        """Encodes one content-free inventory continuation token."""
+        raw = json.dumps(
+            {
+                'v': 1,
+                'after': last_id,
+                'ceiling': ceiling_id,
+                'revision': version,
+                'filter': fingerprint,
+            },
+            sort_keys=True,
+            separators=(',', ':'),
+        ).encode('utf-8')
+        return base64.urlsafe_b64encode(raw).decode('ascii').rstrip('=')
+
+    @staticmethod
+    def _retained_record(row: Tuple[SqlParam, ...]) -> RetainedMessageRecord:
+        """Converts a retained receipt row without returning serialized content."""
+        content_type = ContentType(str(row[4]))
+        retained_bytes = int(str(row[7]))
+        finalized = content_type is ContentType.TEXT
+        codec: Optional[str] = None
+        duration_ms: Optional[int] = None
+        if content_type is ContentType.VOICE:
+            payload = str(row[8])
+            try:
+                metadata = json.loads(payload)
+            except (TypeError, ValueError):
+                metadata = None
+            if isinstance(metadata, dict):
+                finalized = metadata.get('finalized') is True
+                raw_codec = metadata.get('codec')
+                if isinstance(raw_codec, str) and 0 < len(raw_codec) <= 64:
+                    codec = raw_codec
+                raw_duration = metadata.get('duration_ms')
+                if type(raw_duration) is int and raw_duration >= 0:
+                    duration_ms = raw_duration
+        return RetainedMessageRecord(
+            peer_onion=str(row[1]),
+            direction=MessageDirection(str(row[2])),
+            delivery=str(row[3]),
+            content_type=content_type.value,
+            msg_id=str(row[5]),
+            status=str(row[6]),
+            finalized=finalized,
+            retained_bytes=retained_bytes,
+            codec=codec,
+            duration_ms=duration_ms,
+        )
+
+    def list_retained_messages(
+        self,
+        contact_onion: Optional[str] = None,
+        delivery: Optional[Delivery] = None,
+        direction: Optional[MessageDirection] = None,
+        cursor: Optional[str] = None,
+        limit: int = Constants.DEFAULT_RETAINED_PAGE_SIZE,
+    ) -> RetainedMessagePage:
+        """Returns a non-consuming, stable page of retained logical identities.
+
+        Continuations are rejected if any matching receipt changed between pages,
+        forcing clients to restart instead of merging a torn inventory.
+        """
+        if type(limit) is not int or not 1 <= limit <= Constants.MAX_RETAINED_PAGE_SIZE:
+            raise ValueError('Invalid retained-message page size.')
+        predicate, params, fingerprint = self._retained_filter(
+            contact_onion, delivery, direction
+        )
+        joins = (
+            ' FROM message_receipts AS r '
+            'LEFT JOIN inbound_spool AS i ON i.receipt_id = r.id '
+            'LEFT JOIN outbox_spool AS o ON o.receipt_id = r.id '
+            'LEFT JOIN message_archive AS a ON a.receipt_id = r.id '
+        )
+        with self._sql.transaction() as sql_cursor:
+            aggregate = cast(
+                Optional[Tuple[SqlParam, ...]],
+                sql_cursor.execute(
+                    'SELECT COUNT(*), COALESCE(MAX(r.id), 0), '
+                    "COALESCE(MAX(r.updated_at), ''), COALESCE(SUM(r.id), 0)"
+                    + joins
+                    + 'WHERE '
+                    + predicate,
+                    tuple(params),
+                ).fetchone(),
+            )
+            if aggregate is None:
+                raise ValueError('Retained-message inventory is unavailable.')
+            count = int(str(aggregate[0]))
+            current_ceiling = int(str(aggregate[1]))
+            version = hashlib.sha256(
+                ':'.join(
+                    (
+                        str(count),
+                        str(current_ceiling),
+                        str(aggregate[2]),
+                        str(aggregate[3]),
+                    )
+                ).encode('utf-8')
+            ).hexdigest()[:24]
+            after_id = 0
+            ceiling_id = current_ceiling
+            if cursor is not None:
+                decoded = self._decode_retained_cursor(cursor)
+                if (
+                    decoded.get('v') != 1
+                    or decoded.get('filter') != fingerprint
+                    or decoded.get('revision') != version
+                    or type(decoded.get('after')) is not int
+                    or type(decoded.get('ceiling')) is not int
+                ):
+                    raise ValueError('Retained-message inventory changed; retry.')
+                after_id = cast(int, decoded['after'])
+                ceiling_id = cast(int, decoded['ceiling'])
+                if not 0 <= after_id <= ceiling_id or ceiling_id != current_ceiling:
+                    raise ValueError('Invalid retained-message cursor.')
+
+            page_params = [*params, after_id, ceiling_id, limit + 1]
+            rows = cast(
+                List[Tuple[SqlParam, ...]],
+                sql_cursor.execute(
+                    'SELECT r.id, r.peer_onion, r.direction, r.delivery, '
+                    'r.content_type, r.msg_id, r.status, r.retained_bytes, '
+                    'COALESCE(i.payload, o.payload, a.payload)'
+                    + joins
+                    + 'WHERE '
+                    + predicate
+                    + ' AND r.id > ? AND r.id <= ? ORDER BY r.id ASC LIMIT ?',
+                    tuple(page_params),
+                ).fetchall(),
+            )
+        has_more = len(rows) > limit
+        visible_rows = rows[:limit]
+        next_cursor = None
+        if has_more:
+            next_cursor = self._encode_retained_cursor(
+                int(str(visible_rows[-1][0])), ceiling_id, version, fingerprint
+            )
+        return RetainedMessagePage(
+            messages=[self._retained_record(row) for row in visible_rows],
+            next_cursor=next_cursor,
+            inventory_version=version,
+        )
 
     def queue_message(
         self,

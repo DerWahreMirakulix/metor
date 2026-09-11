@@ -17,8 +17,10 @@ class VoiceTurn:
     codec: str
     blob_id: str
     chunk_ids: list[str]
+    chunk_sizes: list[int]
     data: bytearray
     timestamp: str
+    size_bytes: int = 0
     acknowledged_offset: int = 0
     duration_ms: Optional[int] = None
     finalized: bool = False

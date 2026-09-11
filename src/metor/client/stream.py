@@ -5,7 +5,7 @@ import socket
 from typing import Dict, Optional
 
 from metor.core.api import IpcEvent, JsonValue
-from metor.utils import Constants
+from metor.shared.constants import Constants
 
 
 class BufferedIpcEventReader:

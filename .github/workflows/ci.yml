@@ -32,8 +32,8 @@ jobs:
         shell: bash
         run: |
           python -m pip wheel --no-deps --no-build-isolation . -w dist
-          python -m pip wheel --no-deps --no-build-isolation packaging/daemon -w dist
           python -m pip wheel --no-deps --no-build-isolation packaging/sdk -w dist
+          python -m pip wheel --no-deps --no-build-isolation packaging/terminal -w dist
           python scripts/validate_wheel_versions.py dist/*.whl
 
       - name: Validate Central Version Registry

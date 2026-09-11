@@ -174,8 +174,8 @@ class VersionRegistryTests(unittest.TestCase):
         root: Path = Path(__file__).resolve().parents[1]
         for relative_path in (
             'pyproject.toml',
-            'packaging/daemon/pyproject.toml',
             'packaging/sdk/pyproject.toml',
+            'packaging/terminal/pyproject.toml',
         ):
             content: str = (root / relative_path).read_text(encoding='utf-8')
             self.assertRegex(content, r'dynamic = \[[^\]]*"version"[^\]]*\]')
@@ -719,7 +719,7 @@ class ReleaseCompatibilityTests(unittest.TestCase):
         )
 
     def test_all_built_wheels_report_central_application_version(self) -> None:
-        """Builds and validates the full, daemon, and SDK wheel metadata.
+        """Builds and validates base, Terminal, and SDK wheel metadata.
 
         Args:
             None
@@ -732,8 +732,8 @@ class ReleaseCompatibilityTests(unittest.TestCase):
             wheel_dir: Path = Path(temp_dir)
             for source in (
                 root,
-                root / 'packaging' / 'daemon',
                 root / 'packaging' / 'sdk',
+                root / 'packaging' / 'terminal',
             ):
                 subprocess.run(
                     [
@@ -756,14 +756,22 @@ class ReleaseCompatibilityTests(unittest.TestCase):
             )
             for wheel_path in wheel_dir.glob('*.whl'):
                 with ZipFile(wheel_path) as archive:
-                    self.assertIn('metor/versioning.py', archive.namelist())
-                    if wheel_path.name.startswith('metor_daemon-'):
-                        metadata_name: str = next(
-                            name
-                            for name in archive.namelist()
-                            if name.endswith('.dist-info/METADATA')
+                    owns_versioning = 'metor/versioning.py' in archive.namelist()
+                    self.assertEqual(
+                        owns_versioning, wheel_path.name.startswith('metor_sdk-')
+                    )
+                    metadata_name: str = next(
+                        name
+                        for name in archive.namelist()
+                        if name.endswith('.dist-info/METADATA')
+                    )
+                    metadata: str = archive.read(metadata_name).decode('utf-8')
+                    if wheel_path.name.startswith('metor-'):
+                        self.assertIn(
+                            f'Requires-Dist: metor-sdk=={APP_VERSION}', metadata
                         )
-                        metadata: str = archive.read(metadata_name).decode('utf-8')
+                    if wheel_path.name.startswith('metor_ui_terminal-'):
+                        self.assertIn(f'Requires-Dist: metor=={APP_VERSION}', metadata)
                         self.assertIn(
                             f'Requires-Dist: metor-sdk=={APP_VERSION}', metadata
                         )

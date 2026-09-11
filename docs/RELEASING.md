@@ -134,6 +134,15 @@ commit is tagged directly.
 The tag convention is `v0.2.0`, `v0.3.0`, or `v1.0.0`. Protocol and format
 generations are metadata in each product release, not separate tags.
 
+The three package builds are `metor-sdk`, the headless/base `metor`, and
+`metor-ui-terminal`. Their wheels must have no overlapping files and must use
+the same application version. The release builder accepts `sdk`, `base`,
+`terminal`, or `all`; `terminal` creates a base-plus-Terminal wheelhouse. The
+obsolete separate `metor-daemon` distribution and `daemon` bundle variant do
+not exist. The `metor-daemon` executable remains a base-package entry point.
+Offline installers select the intended distribution by name from the
+wheelhouse, allowing pip to resolve only its exact dependencies.
+
 ## Compatibility gates and human decisions
 
 The release manifest is generated from the registry and implementation

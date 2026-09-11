@@ -47,6 +47,26 @@ Selects the profile used when the CLI is started without `-p`.
 
 ---
 
+#### `client.default_ui`
+
+Selects the interactive frontend used by `metor chat`.
+
+| Property         | Value                                    |
+| ---------------- | ---------------------------------------- |
+| Type             | `str`                                    |
+| Default          | `terminal`                               |
+| Category         | `Client`                                 |
+| Scope            | `UI client-local`                        |
+| Profile Override | `No`                                     |
+| Constraints      | Non-empty installed frontend identifier. |
+
+**CLI Examples**
+
+- `metor settings get client.default_ui`
+- `metor settings set client.default_ui terminal`
+
+---
+
 #### `client.ipc_timeout`
 
 Client-side timeout for CLI and chat IPC requests.
@@ -423,6 +443,28 @@ Requires every UI session to authenticate even when the daemon is already runnin
 - `metor settings set daemon.require_local_auth true`
 - `metor -p <profile> config get daemon.require_local_auth`
 - `metor -p <profile> config set daemon.require_local_auth true`
+
+---
+
+#### `daemon.self_destruct_requires_unlock`
+
+Requires normal client reauthorization before a restricted device-lifecycle session may request profile destruction.
+
+| Property         | Value                                                       |
+| ---------------- | ----------------------------------------------------------- |
+| Type             | `bool`                                                      |
+| Default          | `True`                                                      |
+| Category         | `Core Daemon`                                               |
+| Scope            | `Daemon runtime`                                            |
+| Profile Override | `Yes`                                                       |
+| Constraints      | Boolean. New and unauthenticated clients are always denied. |
+
+**CLI Examples**
+
+- `metor settings get daemon.self_destruct_requires_unlock`
+- `metor settings set daemon.self_destruct_requires_unlock true`
+- `metor -p <profile> config get daemon.self_destruct_requires_unlock`
+- `metor -p <profile> config set daemon.self_destruct_requires_unlock true`
 
 ---
 

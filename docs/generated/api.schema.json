@@ -974,6 +974,73 @@
         "min_supported"
       ]
     },
+    "ListRetainedMessagesCommand": {
+      "title": "ListRetainedMessagesCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "delivery": {
+          "anyOf": [
+            {
+              "enum": [
+                "live",
+                "drop"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "direction": {
+          "anyOf": [
+            {
+              "enum": [
+                "in",
+                "out"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "type": "integer"
+        }
+      }
+    },
     "LockCommand": {
       "title": "LockCommand",
       "type": "object",
@@ -4395,7 +4462,11 @@
             "ambiguous_identity",
             "not_finalized",
             "invalid_range",
-            "unsupported_content"
+            "unsupported_content",
+            "media_limit",
+            "malformed_chunk",
+            "stale_capture",
+            "persistence_failed"
           ],
           "type": "string"
         },
@@ -5397,7 +5468,11 @@
             "ambiguous_identity",
             "not_finalized",
             "invalid_range",
-            "unsupported_content"
+            "unsupported_content",
+            "media_limit",
+            "malformed_chunk",
+            "stale_capture",
+            "persistence_failed"
           ],
           "type": "string"
         },
@@ -5528,7 +5603,11 @@
             "ambiguous_identity",
             "not_finalized",
             "invalid_range",
-            "unsupported_content"
+            "unsupported_content",
+            "media_limit",
+            "malformed_chunk",
+            "stale_capture",
+            "persistence_failed"
           ],
           "type": "string"
         },
@@ -5621,7 +5700,11 @@
             "ambiguous_identity",
             "not_finalized",
             "invalid_range",
-            "unsupported_content"
+            "unsupported_content",
+            "media_limit",
+            "malformed_chunk",
+            "stale_capture",
+            "persistence_failed"
           ],
           "type": "string"
         }
@@ -5775,7 +5858,11 @@
             "ambiguous_identity",
             "not_finalized",
             "invalid_range",
-            "unsupported_content"
+            "unsupported_content",
+            "media_limit",
+            "malformed_chunk",
+            "stale_capture",
+            "persistence_failed"
           ],
           "type": "string"
         },
@@ -7376,6 +7463,104 @@
       "required": [
         "old_alias",
         "new_alias"
+      ]
+    },
+    "RetainedMessagesEvent": {
+      "title": "RetainedMessagesEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "messages": {
+          "type": "array",
+          "items": {}
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inventory_version": {
+          "type": "string"
+        }
+      }
+    },
+    "RetainedMessagesUnavailableEvent": {
+      "title": "RetainedMessagesUnavailableEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "reason"
       ]
     },
     "RetunnelFailedEvent": {
@@ -9169,7 +9354,11 @@
             "ambiguous_identity",
             "not_finalized",
             "invalid_range",
-            "unsupported_content"
+            "unsupported_content",
+            "media_limit",
+            "malformed_chunk",
+            "stale_capture",
+            "persistence_failed"
           ],
           "type": "string"
         },
@@ -9337,7 +9526,11 @@
                 "ambiguous_identity",
                 "not_finalized",
                 "invalid_range",
-                "unsupported_content"
+                "unsupported_content",
+                "media_limit",
+                "malformed_chunk",
+                "stale_capture",
+                "persistence_failed"
               ],
               "type": "string"
             },
@@ -9608,6 +9801,9 @@
     },
     "init": {
       "$ref": "#/definitions/InitCommand"
+    },
+    "list_retained_messages": {
+      "$ref": "#/definitions/ListRetainedMessagesCommand"
     },
     "lock": {
       "$ref": "#/definitions/LockCommand"
@@ -10003,6 +10199,12 @@
     },
     "rename_success": {
       "$ref": "#/definitions/RenameSuccessEvent"
+    },
+    "retained_messages": {
+      "$ref": "#/definitions/RetainedMessagesEvent"
+    },
+    "retained_messages_unavailable": {
+      "$ref": "#/definitions/RetainedMessagesUnavailableEvent"
     },
     "retunnel_failed": {
       "$ref": "#/definitions/RetunnelFailedEvent"

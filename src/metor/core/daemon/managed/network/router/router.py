@@ -86,6 +86,8 @@ class MessageRouter:
             has_live_consumers_callback=has_live_consumers_callback,
             notify_callback=notify_callback,
             config=config,
+            transition_lock=self._operation_lock,
+            purge_fence=self._purge_fence,
         )
         transition_lock = self._operation_lock
         self._voice: Optional[VoiceTransferManager] = (

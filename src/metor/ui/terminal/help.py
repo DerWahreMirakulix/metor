@@ -1,7 +1,5 @@
 """
-Module providing static help texts, CLI command documentation, and a centralized Command Registry.
-Enforces the DRY principle by dynamically generating help menus from strongly-typed dataclasses,
-supporting nested subcommands for clean terminal alignment.
+Terminal-owned interactive chat command definitions and help rendering.
 """
 
 from dataclasses import dataclass, field
@@ -28,7 +26,7 @@ class SubCommandDef:
 @dataclass
 class CommandDef:
     """
-    Strongly typed definition of a CLI or Chat command.
+    Strongly typed definition of an interactive chat command.
 
     Args:
         name (str): The primary command invocation.
@@ -51,197 +49,12 @@ class Help:
     DESC_COLUMN: int = 58
     SUBCOMMAND_DESC_COLUMN: int = 58
 
-    CLI_CATEGORIES: List[str] = [
-        'Global Options',
-        'Core Operations',
-        'Messaging & History',
-        'Contact Management',
-        'Profile & Identity',
-        'System & Settings',
-    ]
-
     CHAT_CATEGORIES: List[str] = [
         'Session & Connection',
         'Messaging & Display',
         'Contact Management',
         'System',
     ]
-
-    CLI_COMMANDS: Dict[str, CommandDef] = {
-        'profile': CommandDef(
-            name='profile',
-            usage='-p, --profile <name>',
-            description="Set the active profile (default: 'default').",
-            category='Global Options',
-        ),
-        'help': CommandDef(
-            name='help',
-            usage='metor help',
-            description='Show this help overview.',
-            category='Core Operations',
-        ),
-        'daemon': CommandDef(
-            name='daemon',
-            usage='metor daemon [--locked]',
-            description='Start the Tor & IPC engine, optionally locked (IPC-only).',
-            category='Core Operations',
-        ),
-        'unlock': CommandDef(
-            name='unlock',
-            usage='metor unlock',
-            description='Unlock a locked daemon instance over IPC.',
-            category='Core Operations',
-        ),
-        'chat': CommandDef(
-            name='chat',
-            usage='metor chat [--start-daemon|--no-start-daemon]',
-            description='Enter the interactive multi-chat UI and optionally override local daemon autostart for this invocation.',
-            category='Core Operations',
-        ),
-        'send': CommandDef(
-            name='send',
-            usage='metor send <onion|alias> "msg"',
-            description='Drop an offline message to a contact.',
-            category='Messaging & History',
-        ),
-        'inbox': CommandDef(
-            name='inbox',
-            usage='metor inbox [onion|alias]',
-            description='Check unread message counts or read them.',
-            category='Messaging & History',
-        ),
-        'messages': CommandDef(
-            name='messages',
-            usage='metor messages',
-            description='View or delete stored message history with a contact.',
-            category='Messaging & History',
-            subcommands=[
-                SubCommandDef(
-                    'show <onion|alias> [limit]',
-                    'View stored message history.',
-                ),
-                SubCommandDef(
-                    'clear [onion|alias] [--non-contacts]',
-                    'Delete message history.',
-                ),
-            ],
-        ),
-        'history': CommandDef(
-            name='history',
-            usage='metor history',
-            description='View projected history or inspect the raw transport ledger.',
-            category='Messaging & History',
-            subcommands=[
-                SubCommandDef(
-                    'show [onion|alias] [limit] [--raw]',
-                    'View projected history or use `--raw` for the transport ledger.',
-                ),
-                SubCommandDef('clear [onion|alias]', 'Wipe the connection event log.'),
-            ],
-        ),
-        'transport': CommandDef(
-            name='transport',
-            usage='metor transport [onion|alias]',
-            description='Show the current transport state for one peer or the whole daemon.',
-            category='Messaging & History',
-        ),
-        'contacts': CommandDef(
-            name='contacts',
-            usage='metor contacts',
-            description='Manage your address book.',
-            category='Contact Management',
-            subcommands=[
-                SubCommandDef('list', 'List saved and discovered peers.'),
-                SubCommandDef(
-                    'add <alias> [onion]',
-                    'Promote a discovered peer or add a new contact.',
-                ),
-                SubCommandDef(
-                    'rm <onion|alias>',
-                    'Anonymize (and demote) a saved or discovered peer.',
-                ),
-                SubCommandDef(
-                    'rename <old> <new>', 'Rename a saved or discovered peer.'
-                ),
-                SubCommandDef('clear', 'Wipe the address book completely.'),
-            ],
-        ),
-        'profiles': CommandDef(
-            name='profiles',
-            usage='metor profiles',
-            description='Manage isolated profiles.',
-            category='Profile & Identity',
-            subcommands=[
-                SubCommandDef('list', 'List all isolated profiles.'),
-                SubCommandDef(
-                    'add <name> [--remote] [--port] [--plaintext]',
-                    'Create a new isolated profile.',
-                ),
-                SubCommandDef(
-                    'migrate <name> --to <encrypted|plaintext>',
-                    'Migrate a local profile between encrypted and plaintext.',
-                ),
-                SubCommandDef(
-                    'rm <name> [--nuke-remote]',
-                    'Remove a profile and optionally its daemon.',
-                ),
-                SubCommandDef('rename <old> <new>', 'Rename an existing profile.'),
-                SubCommandDef('set-default <name>', 'Set the default startup profile.'),
-                SubCommandDef('clear <name>', 'Wipe the SQLite database of a profile.'),
-            ],
-        ),
-        'address': CommandDef(
-            name='address',
-            usage='metor address',
-            description='View or cycle your hidden service address.',
-            category='Profile & Identity',
-            subcommands=[
-                SubCommandDef('show', 'View your current hidden service address.'),
-                SubCommandDef('generate', 'Generate a new hidden service address.'),
-            ],
-        ),
-        'settings': CommandDef(
-            name='settings',
-            usage='metor settings',
-            description='Configure global settings (affects all profiles).',
-            category='System & Settings',
-            subcommands=[
-                SubCommandDef('get <domain.key>', 'Retrieve a global setting.'),
-                SubCommandDef('set <domain.key> <val>', 'Update a global setting.'),
-                SubCommandDef('list', 'List all current global settings.'),
-            ],
-        ),
-        'config': CommandDef(
-            name='config',
-            usage='metor config',
-            description='Configure profile-specific overrides.',
-            category='System & Settings',
-            subcommands=[
-                SubCommandDef(
-                    'get <domain.key>', 'Retrieve the resolved value for this profile.'
-                ),
-                SubCommandDef(
-                    'set <domain.key> <val>', 'Override a global setting locally.'
-                ),
-                SubCommandDef('list', 'List the effective settings for this profile.'),
-                SubCommandDef(
-                    'sync', 'Wipe all profile overrides to restore global defaults.'
-                ),
-            ],
-        ),
-        'cleanup': CommandDef(
-            name='cleanup',
-            usage='metor cleanup [--force]',
-            description='Kill managed daemon/Tor processes and clear daemon state.',
-            category='System & Settings',
-        ),
-        'purge': CommandDef(
-            name='purge',
-            usage='metor purge [--nuke-remote]',
-            description='Wipe ALL profiles, keys, and databases.',
-            category='System & Settings',
-        ),
-    }
 
     CHAT_COMMANDS: Dict[str, CommandDef] = {
         'connect': CommandDef(
@@ -369,8 +182,7 @@ class Help:
     @classmethod
     def show_command_help(cls, cmd: str, sub: Optional[str] = None) -> str:
         """
-        Generates the isolated usage string and description for a specific command.
-        Automatically routes to Chat or CLI registries based on the '/' prefix.
+        Generates isolated usage for a Terminal interactive command.
         Returns compactly formatted error strings without trailing newlines if the command is unknown.
 
         Args:
@@ -380,11 +192,8 @@ class Help:
         Returns:
             str: The formatted isolated help text.
         """
-        is_chat: bool = cmd.startswith('/')
         lookup_cmd: str = cmd.lstrip('/')
-        registry: Dict[str, CommandDef] = (
-            cls.CHAT_COMMANDS if is_chat else cls.CLI_COMMANDS
-        )
+        registry: Dict[str, CommandDef] = cls.CHAT_COMMANDS
 
         if lookup_cmd in registry:
             c: CommandDef = registry[lookup_cmd]
@@ -394,7 +203,7 @@ class Help:
             if c.subcommands:
                 out += f'\n{Theme.PURPLE}Subcommands:{Theme.RESET}\n'
                 for subcmd in c.subcommands:
-                    base_cmd: str = c.usage.split()[0] if is_chat else c.name
+                    base_cmd: str = c.usage.split()[0]
                     out += cls._format_line(
                         '  ',
                         f'{base_cmd} {subcmd.usage}',
@@ -404,31 +213,7 @@ class Help:
 
             return out
 
-        if is_chat:
-            return f"Unknown command: '{cmd}'."
-        return f"Unknown command: '{cmd}'. Use 'metor help' to see available commands."
-
-    @classmethod
-    def show_quick_start(cls) -> str:
-        """
-        Generates a compact quick start guide for beginners.
-
-        Args:
-            None
-
-        Returns:
-            str: The formatted quick start menu.
-        """
-        out: str = f'\n{Theme.GREEN}Metor - Quick Start Guide{Theme.RESET}\n\n'
-        out += 'Welcome to Metor. Here are the core commands to get you started:\n\n'
-
-        for key in ('daemon', 'chat', 'help'):
-            if key in cls.CLI_COMMANDS:
-                c: CommandDef = cls.CLI_COMMANDS[key]
-                out += cls._format_line('  ', c.usage, c.description, cls.DESC_COLUMN)
-
-        out += f"\nUse {Theme.CYAN}'metor help'{Theme.RESET} to see the complete list of commands.\n"
-        return out
+        return f"Unknown command: '{cmd}'."
 
     @classmethod
     def show_chat_help(cls, start: int = 0, intend: int = 2) -> str:
@@ -471,45 +256,3 @@ class Help:
             out += '\n'
 
         return out.rstrip('\n') + '\n'
-
-    @classmethod
-    def show_main_help(cls, start: int = 0, intend: int = 2) -> str:
-        """
-        Generates the exhaustive help text for the main CLI application dynamically.
-        Renders nested subcommands automatically to maintain neat alignment.
-
-        Args:
-            start (int): The starting indentation level.
-            intend (int): The number of spaces per indentation level.
-
-        Returns:
-            str: The formatted main help text.
-        """
-        ind: str = ' ' * intend * start
-        sub_ind: str = ' ' * intend * (start + 1)
-        sub_sub_ind: str = ' ' * intend * (start + 2)
-
-        out: str = (
-            f'\n{ind}{Theme.GREEN}Metor - A Tor Messenger Framework{Theme.RESET}\n\n'
-            f'{ind}Usage: metor [-p PROFILE] <command> [subcommand] [args...]\n\n'
-        )
-
-        for cat in cls.CLI_CATEGORIES:
-            out += f'{ind}{Theme.YELLOW}{cat}:{Theme.RESET}\n'
-            for cmd in cls.CLI_COMMANDS.values():
-                if cmd.category == cat:
-                    out += cls._format_line(
-                        sub_ind, cmd.usage, cmd.description, cls.DESC_COLUMN
-                    )
-                    if cmd.subcommands:
-                        for subcmd in cmd.subcommands:
-                            out += cls._format_line(
-                                sub_sub_ind,
-                                subcmd.usage,
-                                subcmd.description,
-                                cls.SUBCOMMAND_DESC_COLUMN,
-                            )
-            out += '\n'
-
-        out += cls.show_chat_help(start, intend)
-        return out

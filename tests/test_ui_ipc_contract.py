@@ -26,8 +26,8 @@ from metor.core.api import (
 )
 from metor.data import ProfileManager, ProfileSecurityMode
 from metor.data.settings import SettingKey
-from metor.ui.terminal.cli.ipc.request import IpcRequestSession
-from metor.ui.terminal.cli.handlers import CommandHandlers
+from metor.cli.ipc.request import IpcRequestSession
+from metor.cli.handlers import CommandHandlers
 from metor.client import BufferedIpcEventReader, IpcAuthExchange
 from metor.ui.terminal import get_session_auth_prompt
 from metor.utils import Constants
@@ -494,11 +494,11 @@ class UiIpcContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.terminal.cli.ipc.request.session.socket.socket',
+                'metor.cli.ipc.request.session.socket.socket',
                 return_value=fake_socket,
             ),
             patch(
-                'metor.ui.terminal.cli.ipc.request.session.prompt_session_auth_proof',
+                'metor.cli.ipc.request.session.prompt_session_auth_proof',
                 return_value='proof',
             ),
         ):
@@ -573,11 +573,11 @@ class UiIpcContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.terminal.cli.ipc.request.session.socket.socket',
+                'metor.cli.ipc.request.session.socket.socket',
                 return_value=fake_socket,
             ),
             patch(
-                'metor.ui.terminal.cli.ipc.request.session.prompt_session_auth_proof',
+                'metor.cli.ipc.request.session.prompt_session_auth_proof',
                 return_value='proof',
             ),
         ):
@@ -639,11 +639,11 @@ class UiIpcContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.terminal.cli.ipc.request.session.socket.socket',
+                'metor.cli.ipc.request.session.socket.socket',
                 return_value=fake_socket,
             ),
             patch(
-                'metor.ui.terminal.cli.ipc.request.session.prompt_session_auth_proof',
+                'metor.cli.ipc.request.session.prompt_session_auth_proof',
                 return_value='proof',
             ),
         ):
@@ -698,11 +698,11 @@ class UiIpcContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.terminal.cli.ipc.request.session.socket.socket',
+                'metor.cli.ipc.request.session.socket.socket',
                 return_value=fake_socket,
             ),
             patch(
-                'metor.ui.terminal.cli.ipc.request.session.prompt_session_auth_proof',
+                'metor.cli.ipc.request.session.prompt_session_auth_proof',
                 return_value=None,
             ),
         ):
@@ -844,11 +844,11 @@ class UiIpcContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.terminal.cli.handlers.prompt_hidden',
+                'metor.cli.handlers.prompt_hidden',
                 return_value='session-secret',
             ) as prompt_mock,
-            patch('metor.ui.terminal.cli.handlers.configure_daemon_runtime_logging'),
-            patch('metor.ui.terminal.cli.handlers.run_managed_daemon') as run_daemon,
+            patch('metor.cli.handlers.configure_daemon_runtime_logging'),
+            patch('metor.cli.handlers.run_managed_daemon') as run_daemon,
             patch('builtins.print'),
         ):
             CommandHandlers.handle_daemon(pm)
@@ -881,9 +881,9 @@ class UiIpcContractTests(unittest.TestCase):
         )
 
         with (
-            patch('metor.ui.terminal.cli.handlers.prompt_hidden', return_value=''),
-            patch('metor.ui.terminal.cli.handlers.configure_daemon_runtime_logging'),
-            patch('metor.ui.terminal.cli.handlers.run_managed_daemon') as run_daemon,
+            patch('metor.cli.handlers.prompt_hidden', return_value=''),
+            patch('metor.cli.handlers.configure_daemon_runtime_logging'),
+            patch('metor.cli.handlers.run_managed_daemon') as run_daemon,
             patch('builtins.print') as print_mock,
         ):
             CommandHandlers.handle_daemon(pm)
@@ -908,9 +908,9 @@ class UiIpcContractTests(unittest.TestCase):
         )
 
         with (
-            patch('metor.ui.terminal.cli.handlers.prompt_hidden', return_value=''),
-            patch('metor.ui.terminal.cli.handlers.configure_daemon_runtime_logging'),
-            patch('metor.ui.terminal.cli.handlers.run_managed_daemon') as run_daemon,
+            patch('metor.cli.handlers.prompt_hidden', return_value=''),
+            patch('metor.cli.handlers.configure_daemon_runtime_logging'),
+            patch('metor.cli.handlers.run_managed_daemon') as run_daemon,
             patch('builtins.print') as print_mock,
         ):
             CommandHandlers.handle_daemon(pm)
@@ -938,12 +938,12 @@ class UiIpcContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.terminal.cli.handlers.sys.stdin.readline',
+                'metor.cli.handlers.sys.stdin.readline',
                 return_value='session-secret\n',
             ),
-            patch('metor.ui.terminal.cli.handlers.prompt_hidden') as prompt_mock,
-            patch('metor.ui.terminal.cli.handlers.configure_daemon_runtime_logging'),
-            patch('metor.ui.terminal.cli.handlers.run_managed_daemon') as run_daemon,
+            patch('metor.cli.handlers.prompt_hidden') as prompt_mock,
+            patch('metor.cli.handlers.configure_daemon_runtime_logging'),
+            patch('metor.cli.handlers.run_managed_daemon') as run_daemon,
             patch('builtins.print'),
         ):
             CommandHandlers.handle_daemon(pm, startup_session_auth_stdin=True)
@@ -1023,23 +1023,19 @@ class UiIpcContractTests(unittest.TestCase):
         pm.config = Mock()
         pm.config.get_str.return_value = 'never'
 
-        chat_instance = Mock()
-
         with (
+            patch('metor.cli.handlers.load_frontend', return_value=Mock()),
+            patch('metor.cli.handlers.invoke_frontend') as invoke_frontend,
             patch(
-                'metor.ui.terminal.cli.handlers.start_managed_daemon_process',
+                'metor.cli.handlers.start_managed_daemon_process',
                 return_value=True,
             ) as start_mock,
-            patch(
-                'metor.ui.terminal.cli.handlers.Chat', return_value=chat_instance
-            ) as chat_cls,
             patch('builtins.print') as print_mock,
         ):
             CommandHandlers.handle_chat(cast(ProfileManager, pm))
 
         start_mock.assert_not_called()
-        chat_cls.assert_not_called()
-        chat_instance.run.assert_not_called()
+        invoke_frontend.assert_not_called()
         self.assertEqual(
             print_mock.call_args.args[0],
             "Daemon is not running! Use 'metor daemon' to start it or rerun with 'metor chat --start-daemon'.",
@@ -1066,19 +1062,16 @@ class UiIpcContractTests(unittest.TestCase):
         pm.config = Mock()
         pm.config.get_str.return_value = 'ask'
 
-        chat_instance = Mock()
-
         with (
+            patch('metor.cli.handlers.load_frontend', return_value=Mock()),
             patch(
-                'metor.ui.terminal.cli.handlers.prompt_text', return_value='yes'
-            ) as prompt_mock,
+                'metor.cli.handlers.invoke_frontend', return_value=0
+            ) as invoke_frontend,
+            patch('metor.cli.handlers.prompt_text', return_value='yes') as prompt_mock,
             patch(
-                'metor.ui.terminal.cli.handlers.start_managed_daemon_process',
+                'metor.cli.handlers.start_managed_daemon_process',
                 return_value=True,
             ) as start_mock,
-            patch(
-                'metor.ui.terminal.cli.handlers.Chat', return_value=chat_instance
-            ) as chat_cls,
             patch('builtins.print') as print_mock,
         ):
             CommandHandlers.handle_chat(cast(ProfileManager, pm))
@@ -1092,11 +1085,9 @@ class UiIpcContractTests(unittest.TestCase):
         self.assertEqual(
             print_mock.call_args_list[0].args[0], '\nStarting local daemon...'
         )
-        chat_cls.assert_called_once_with(
-            cast(ProfileManager, pm),
-            prefilled_session_auth_password=None,
-        )
-        chat_instance.run.assert_called_once_with()
+        context = invoke_frontend.call_args.args[1]
+        self.assertTrue(context.daemon_started_by_launcher)
+        self.assertIsNone(context.session_auth_secret)
 
     def test_handle_chat_start_override_beats_never_policy(self) -> None:
         """
@@ -1119,14 +1110,13 @@ class UiIpcContractTests(unittest.TestCase):
         pm.config = Mock()
         pm.config.get_str.return_value = 'never'
 
-        chat_instance = Mock()
-
         with (
+            patch('metor.cli.handlers.load_frontend', return_value=Mock()),
+            patch('metor.cli.handlers.invoke_frontend', return_value=0),
             patch(
-                'metor.ui.terminal.cli.handlers.start_managed_daemon_process',
+                'metor.cli.handlers.start_managed_daemon_process',
                 return_value=True,
             ) as start_mock,
-            patch('metor.ui.terminal.cli.handlers.Chat', return_value=chat_instance),
             patch('builtins.print'),
         ):
             CommandHandlers.handle_chat(
@@ -1162,9 +1152,9 @@ class UiIpcContractTests(unittest.TestCase):
         pm.config.get_str.return_value = 'always'
 
         with (
-            patch(
-                'metor.ui.terminal.cli.handlers.start_managed_daemon_process'
-            ) as start_mock,
+            patch('metor.cli.handlers.load_frontend', return_value=Mock()),
+            patch('metor.cli.handlers.invoke_frontend') as invoke_frontend,
+            patch('metor.cli.handlers.start_managed_daemon_process') as start_mock,
             patch('builtins.print') as print_mock,
         ):
             CommandHandlers.handle_chat(
@@ -1173,6 +1163,7 @@ class UiIpcContractTests(unittest.TestCase):
             )
 
         start_mock.assert_not_called()
+        invoke_frontend.assert_not_called()
         self.assertEqual(
             print_mock.call_args.args[0],
             "Daemon is not running! Use 'metor daemon' to start it or rerun with 'metor chat --start-daemon'.",
@@ -1202,20 +1193,19 @@ class UiIpcContractTests(unittest.TestCase):
             key is SettingKey.REQUIRE_LOCAL_AUTH
         )
 
-        chat_instance = Mock()
-
         with (
+            patch('metor.cli.handlers.load_frontend', return_value=Mock()),
             patch(
-                'metor.ui.terminal.cli.handlers.prompt_hidden',
+                'metor.cli.handlers.invoke_frontend', return_value=0
+            ) as invoke_frontend,
+            patch(
+                'metor.cli.handlers.prompt_hidden',
                 return_value='session-secret',
             ),
             patch(
-                'metor.ui.terminal.cli.handlers.start_managed_daemon_process',
+                'metor.cli.handlers.start_managed_daemon_process',
                 return_value=True,
             ) as start_mock,
-            patch(
-                'metor.ui.terminal.cli.handlers.Chat', return_value=chat_instance
-            ) as chat_cls,
         ):
             CommandHandlers.handle_chat(cast(ProfileManager, pm))
 
@@ -1224,11 +1214,9 @@ class UiIpcContractTests(unittest.TestCase):
             start_locked=False,
             session_auth_password='session-secret',
         )
-        chat_cls.assert_called_once_with(
-            cast(ProfileManager, pm),
-            prefilled_session_auth_password='session-secret',
-        )
-        chat_instance.run.assert_called_once_with()
+        context = invoke_frontend.call_args.args[1]
+        self.assertTrue(context.daemon_started_by_launcher)
+        self.assertEqual(context.session_auth_secret, 'session-secret')
 
     def test_handle_daemon_sanitizes_sensitive_value_errors(self) -> None:
         """
@@ -1248,12 +1236,12 @@ class UiIpcContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.terminal.cli.handlers.prompt_hidden',
+                'metor.cli.handlers.prompt_hidden',
                 return_value='secret',
             ),
-            patch('metor.ui.terminal.cli.handlers.configure_daemon_runtime_logging'),
+            patch('metor.cli.handlers.configure_daemon_runtime_logging'),
             patch(
-                'metor.ui.terminal.cli.handlers.run_managed_daemon',
+                'metor.cli.handlers.run_managed_daemon',
                 side_effect=ValueError('/home/yoda/secret/storage.db: invalid state'),
             ),
             patch('builtins.print') as print_mock,
@@ -1282,11 +1270,9 @@ class UiIpcContractTests(unittest.TestCase):
         )
 
         with (
-            patch(
-                'metor.ui.terminal.cli.handlers.prompt_hidden', return_value='secret'
-            ),
-            patch('metor.ui.terminal.cli.handlers.configure_daemon_runtime_logging'),
-            patch('metor.ui.terminal.cli.handlers.run_managed_daemon') as run_daemon,
+            patch('metor.cli.handlers.prompt_hidden', return_value='secret'),
+            patch('metor.cli.handlers.configure_daemon_runtime_logging'),
+            patch('metor.cli.handlers.run_managed_daemon') as run_daemon,
             patch('builtins.print'),
             patch('sys.stdout.write') as write_mock,
             patch('sys.stdout.flush'),
@@ -1322,11 +1308,9 @@ class UiIpcContractTests(unittest.TestCase):
         pm.get_security_mode.return_value = ProfileSecurityMode.ENCRYPTED
 
         with (
-            patch('metor.ui.terminal.cli.handlers.ProfileManager', return_value=pm),
-            patch(
-                'metor.ui.terminal.cli.handlers.prompt_hidden', return_value='secret'
-            ),
-            patch('metor.ui.terminal.cli.handlers.prompt_text', return_value='yes'),
+            patch('metor.cli.handlers.ProfileManager', return_value=pm),
+            patch('metor.cli.handlers.prompt_hidden', return_value='secret'),
+            patch('metor.cli.handlers.prompt_text', return_value='yes'),
         ):
             result = CommandHandlers.handle_profile_security_migration(
                 proxy,
@@ -1353,13 +1337,9 @@ class UiIpcContractTests(unittest.TestCase):
         proxy.nuke_daemon_event.return_value = create_event(EventType.INTERNAL_ERROR)
 
         with (
-            patch(
-                'metor.ui.terminal.cli.handlers.ProfileManager', return_value=remote_pm
-            ),
-            patch('metor.ui.terminal.cli.handlers.CliProxy', return_value=proxy),
-            patch(
-                'metor.ui.terminal.cli.handlers.prompt_text', return_value='n'
-            ) as prompt_mock,
+            patch('metor.cli.handlers.ProfileManager', return_value=remote_pm),
+            patch('metor.cli.handlers.CliProxy', return_value=proxy),
+            patch('metor.cli.handlers.prompt_text', return_value='n') as prompt_mock,
             patch('builtins.print'),
         ):
             result = CommandHandlers._nuke_remote_profiles(['remote-a'])
@@ -1387,11 +1367,9 @@ class UiIpcContractTests(unittest.TestCase):
         )
 
         with (
-            patch(
-                'metor.ui.terminal.cli.handlers.ProfileManager', return_value=remote_pm
-            ),
-            patch('metor.ui.terminal.cli.handlers.CliProxy', return_value=proxy),
-            patch('metor.ui.terminal.cli.handlers.prompt_text') as prompt_mock,
+            patch('metor.cli.handlers.ProfileManager', return_value=remote_pm),
+            patch('metor.cli.handlers.CliProxy', return_value=proxy),
+            patch('metor.cli.handlers.prompt_text') as prompt_mock,
             patch('builtins.print'),
         ):
             result = CommandHandlers._nuke_remote_profiles(['remote-a'])
@@ -1445,7 +1423,7 @@ class UiIpcContractTests(unittest.TestCase):
         )
 
         with patch(
-            'metor.ui.terminal.cli.ipc.request.session.socket.socket',
+            'metor.cli.ipc.request.session.socket.socket',
             return_value=fake_socket,
         ):
             result = session.execute_result(4312, cmd, wait_for_response=True)
@@ -1493,7 +1471,7 @@ class UiIpcContractTests(unittest.TestCase):
         )
 
         with patch(
-            'metor.ui.terminal.cli.ipc.request.session.socket.socket',
+            'metor.cli.ipc.request.session.socket.socket',
             return_value=fake_socket,
         ):
             result = session.execute_result(4312, cmd, wait_for_response=True)

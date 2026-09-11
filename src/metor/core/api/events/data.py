@@ -12,6 +12,7 @@ from metor.core.api.events.entries import (
     LiveContextEntry,
     MessageEntry,
     PendingConnectionEntry,
+    RetainedMessageEntry,
     ProfileEntry,
     SettingSnapshotEntry,
     UnreadInboxSummaryEntry,
@@ -75,6 +76,33 @@ class MessagesDataEvent(NestedEntryCastingMixin, IpcEvent):
         'messages': MessageEntry,
     }
     event_type: EventType = field(default=EventType.MESSAGES_DATA, init=False)
+
+
+@register_event(EventType.RETAINED_MESSAGES)
+@dataclass
+class RetainedMessagesEvent(NestedEntryCastingMixin, IpcEvent):
+    """Returns one stable page of non-consuming retained-item descriptors."""
+
+    messages: List[RetainedMessageEntry] = field(default_factory=list)
+    next_cursor: Optional[str] = None
+    inventory_version: str = '0'
+    _nested_entry_types: ClassVar[Dict[str, type[object]]] = {
+        'messages': RetainedMessageEntry,
+    }
+    event_type: EventType = field(default=EventType.RETAINED_MESSAGES, init=False)
+
+
+@register_event(EventType.RETAINED_MESSAGES_UNAVAILABLE)
+@dataclass
+class RetainedMessagesUnavailableEvent(IpcEvent):
+    """Rejects an invalid or no-longer-consistent inventory cursor."""
+
+    reason: str
+    retryable: bool = True
+    event_type: EventType = field(
+        default=EventType.RETAINED_MESSAGES_UNAVAILABLE,
+        init=False,
+    )
 
 
 @register_event(EventType.INBOX_COUNTS)

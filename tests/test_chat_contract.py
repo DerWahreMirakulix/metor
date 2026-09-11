@@ -1378,6 +1378,25 @@ class LivePushContentTests(unittest.TestCase):
         self.assertIn('/help', rendered)
         self.assertIn('Show the chat command overview.', rendered)
 
+    def test_terminal_header_owns_chat_help_for_startup_and_redraw(self) -> None:
+        """R2-T31: chat help is inserted into Terminal's redraw-owned buffer."""
+        chat = object.__new__(Chat)
+        chat._renderer = Mock()
+        chat._session = Mock()
+        chat._session.my_onion = 'a' * 56
+        chat._session.header_active = []
+        chat._session.header_pending = []
+        panel = Help.show_chat_help()
+
+        chat._print_header(refresh_state=False, show_prompt=False)
+
+        rendered_messages = [
+            call.args[0] for call in chat._renderer.print_message.call_args_list
+        ]
+        self.assertIn(panel, rendered_messages)
+        self.assertIn('/help', panel)
+        self.assertNotIn('metor daemon', panel)
+
     @unittest.skipIf(
         os.name == 'nt',
         'termios TTY guard is POSIX-only; Windows input uses msvcrt',

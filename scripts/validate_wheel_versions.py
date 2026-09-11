@@ -44,6 +44,16 @@ def wheel_metadata(wheel_path: Path) -> tuple[str, str, tuple[str, ...]]:
     )
 
 
+def wheel_owned_files(wheel_path: Path) -> set[str]:
+    """Returns installed namespace files, excluding distribution metadata."""
+    with ZipFile(wheel_path) as archive:
+        return {
+            name
+            for name in archive.namelist()
+            if name.startswith('metor/') and '.dist-info/' not in name
+        }
+
+
 def validate_wheel_versions(wheel_paths: Sequence[Path]) -> tuple[str, ...]:
     """Checks all three release distributions against ``APP_VERSION``.
 
@@ -53,26 +63,47 @@ def validate_wheel_versions(wheel_paths: Sequence[Path]) -> tuple[str, ...]:
     Returns:
         tuple[str, ...]: Validation errors; empty on success.
     """
-    expected_names: set[str] = {'metor', 'metor-daemon', 'metor-sdk'}
+    expected_names: set[str] = {'metor', 'metor-sdk', 'metor-ui-terminal'}
     found_names: set[str] = set()
+    ownership: dict[str, set[str]] = {}
     errors: list[str] = []
     for wheel_path in wheel_paths:
         name, version, requirements = wheel_metadata(wheel_path)
         if name not in expected_names:
             continue
         found_names.add(name)
+        ownership[name] = wheel_owned_files(wheel_path)
         if version != APP_VERSION:
             errors.append(f'{name} reports {version}; expected {APP_VERSION}.')
-        if name == 'metor-daemon':
+        if name == 'metor':
             expected_sdk: str = f'metor-sdk=={APP_VERSION}'
             if expected_sdk not in requirements:
                 errors.append(
-                    f'metor-daemon must require {expected_sdk}; found '
+                    f'metor must require {expected_sdk}; found '
                     f'{", ".join(requirements) or "no dependencies"}.'
                 )
+        if name == 'metor-ui-terminal':
+            expected_requirements = (
+                f'metor=={APP_VERSION}',
+                f'metor-sdk=={APP_VERSION}',
+            )
+            for expected_requirement in expected_requirements:
+                if expected_requirement not in requirements:
+                    errors.append(
+                        'metor-ui-terminal must require '
+                        f'{expected_requirement}; found '
+                        f'{", ".join(requirements) or "no dependencies"}.'
+                    )
     missing: set[str] = expected_names - found_names
     if missing:
         errors.append(f'Missing Metor wheels: {", ".join(sorted(missing))}.')
+    for left_index, left in enumerate(sorted(ownership)):
+        for right in sorted(ownership)[left_index + 1 :]:
+            overlap = ownership[left] & ownership[right]
+            if overlap:
+                errors.append(
+                    f'{left} and {right} overlap: {", ".join(sorted(overlap))}.'
+                )
     return tuple(errors)
 
 

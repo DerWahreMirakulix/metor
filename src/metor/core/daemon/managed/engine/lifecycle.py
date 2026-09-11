@@ -2,16 +2,40 @@
 
 from __future__ import annotations
 
-import threading
 from enum import Enum
 from pathlib import Path
-from typing import Any
+import threading
+from typing import TYPE_CHECKING
 
 from metor.core.api import EventType, create_event
 from metor.core.daemon.managed.network import StateTracker
 from metor.core.profile_destruction import destroy_profile_storage
 from metor.data.sql import SqlManager
 from metor.utils import Constants, secure_shred_file
+
+if TYPE_CHECKING:
+    from metor.core.daemon.managed.crypto import Crypto
+    from metor.core.daemon.managed.engine.command_dispatch import (
+        DaemonCommandDispatcher,
+    )
+    from metor.core.daemon.managed.engine.session_access import (
+        SessionAccessController,
+    )
+    from metor.core.daemon.managed.engine.session_maintenance import (
+        SessionMaintenance,
+    )
+    from metor.core.daemon.managed.ipc import IpcServer
+    from metor.core.daemon.managed.outbox import OutboxWorker
+    from metor.core.daemon.managed.network import NetworkManager
+    from metor.core.key import KeyManager
+    from metor.core.tor import TorManager
+    from metor.data import (
+        ContactManager,
+        HistoryManager,
+        MessageManager,
+        ProfileManager,
+    )
+    from metor.data.blob import BlobStore
 
 
 class DaemonLifecycle(str, Enum):
@@ -26,28 +50,31 @@ class DaemonLifecycle(str, Enum):
 class DaemonLifecycleMixin:
     """Owns normal runtime release and key-first destructive teardown."""
 
-    _blob_store: Any
-    _cm: Any
-    _command_dispatcher: Any
-    _crypto: Any
-    _domain_operation_lock: Any
-    _hm: Any
-    _ipc: Any
-    _km: Any
-    _lifecycle: Any
-    _mm: Any
-    _network: Any
-    _outbox: Any
-    _pm: Any
-    _runtime_stop_flag: Any
-    _session_access: Any
-    _session_maintenance: Any
-    _tm: Any
-    _transport_state: Any
+    _blob_store: 'BlobStore | None'
+    _cm: 'ContactManager | None'
+    _command_dispatcher: 'DaemonCommandDispatcher'
+    _crypto: 'Crypto | None'
+    _hm: 'HistoryManager | None'
+    _ipc: 'IpcServer'
+    _km: 'KeyManager | None'
+    _lifecycle: DaemonLifecycle
+    _mm: 'MessageManager | None'
+    _network: 'NetworkManager | None'
+    _outbox: 'OutboxWorker | None'
+    _pm: 'ProfileManager'
+    _runtime_stop_flag: threading.Event
+    _session_access: 'SessionAccessController'
+    _session_maintenance: 'SessionMaintenance | None'
+    _tm: 'TorManager | None'
+    _transport_state: StateTracker
 
-    def __getattr__(self, name: str) -> Any:
-        """Defers typed collaborators to the composed daemon."""
-        raise AttributeError(name)
+    def _on_runtime_internal_error(self, message: str) -> None:
+        """Reports one lifecycle failure through the concrete daemon."""
+        raise NotImplementedError
+
+    def stop(self) -> None:
+        """Stops the concrete daemon after destructive teardown."""
+        raise NotImplementedError
 
     def _lock_runtime(self, preserve_reliability: bool = True) -> bool:
         """Tears down all profile-scoped state while keeping IPC available.
@@ -138,45 +165,48 @@ class DaemonLifecycleMixin:
         Returns:
             None
         """
-        operation_lock = getattr(self, '_domain_operation_lock', threading.RLock())
-        with operation_lock:
-            failure_phase = 'unknown'
-            key_destroyed = False
+        failure_phase = 'unknown'
+        key_destroyed = False
 
-            def report_key_destroyed() -> None:
-                """Publishes the irreversible key-destruction milestone."""
-                nonlocal key_destroyed
-                key_destroyed = True
-                ipc = getattr(self, '_ipc', None)
-                if ipc is not None:
+        def report_key_destroyed() -> None:
+            """Publishes the irreversible key-destruction milestone."""
+            nonlocal key_destroyed
+            key_destroyed = True
+            ipc = getattr(self, '_ipc', None)
+            if ipc is not None:
+                try:
                     ipc.broadcast(
                         create_event(
                             EventType.SELF_DESTRUCT_KEY_DESTROYED,
                             {'profile': self._pm.profile_name},
                         )
                     )
+                except Exception:
+                    pass
 
-            def record_failure(phase: str, destroyed: bool) -> None:
-                """Captures the destruction phase before the original error propagates."""
-                nonlocal failure_phase, key_destroyed
-                failure_phase = phase
-                key_destroyed = destroyed
+        def record_failure(phase: str, destroyed: bool) -> None:
+            """Captures the destruction phase before the original error propagates."""
+            nonlocal failure_phase, key_destroyed
+            failure_phase = phase
+            key_destroyed = destroyed
 
-            try:
-                destroy_profile_storage(
-                    self._pm,
-                    prepare_runtime=lambda: self._lock_runtime(
-                        preserve_reliability=False
-                    ),
-                    key_destroyed_callback=report_key_destroyed,
-                    failure_callback=record_failure,
-                )
-                ipc = getattr(self, '_ipc', None)
-                if ipc is not None:
+        try:
+            destroy_profile_storage(
+                self._pm,
+                prepare_runtime=lambda: self._lock_runtime(preserve_reliability=False),
+                key_destroyed_callback=report_key_destroyed,
+                failure_callback=record_failure,
+            )
+            ipc = getattr(self, '_ipc', None)
+            if ipc is not None:
+                try:
                     ipc.broadcast(create_event(EventType.SELF_DESTRUCT_COMPLETED))
-            except Exception:
-                ipc = getattr(self, '_ipc', None)
-                if ipc is not None:
+                except Exception:
+                    pass
+        except Exception:
+            ipc = getattr(self, '_ipc', None)
+            if ipc is not None:
+                try:
                     ipc.broadcast(
                         create_event(
                             EventType.SELF_DESTRUCT_CLEANUP_FAILED,
@@ -187,9 +217,11 @@ class DaemonLifecycleMixin:
                             },
                         )
                     )
-                self._on_runtime_internal_error(
-                    'Profile destruction failed during '
-                    f'{failure_phase}; key_destroyed={key_destroyed}.'
-                )
-            finally:
-                self.stop()
+                except Exception:
+                    pass
+            self._on_runtime_internal_error(
+                'Profile destruction failed during '
+                f'{failure_phase}; key_destroyed={key_destroyed}.'
+            )
+        finally:
+            self.stop()

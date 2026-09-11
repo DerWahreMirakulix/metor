@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools==80.10.2", "wheel==0.46.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "metor-ui-terminal"
+dynamic = ["version", "dependencies"]
+description = "Interactive Terminal frontend for Metor."
+authors = [{ name = "LuRex" }]
+requires-python = ">=3.11"
+license = { text = "GPLv3" }
+
+[project.entry-points."metor.ui_frontends"]
+terminal = "metor.ui.terminal.launcher:launch"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.dynamic]
+version = { attr = "metor.versioning.APP_VERSION" }
+
+[tool.setuptools.package-dir]
+"" = "../../src"
+
+[tool.setuptools.packages.find]
+where = ["../../src"]
+include = ["metor.ui.terminal", "metor.ui.terminal.*"]

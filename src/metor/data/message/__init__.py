@@ -15,6 +15,8 @@ from metor.data.message.models import (
     InboundDropOutcome,
     PendingLiveAdmission,
     VoicePayloadRecord,
+    RetainedMessagePage,
+    RetainedMessageRecord,
     UnreadInboxSummaryRecord,
 )
 
@@ -36,6 +38,8 @@ __all__ = [
     'InboundDropOutcome',
     'PendingLiveAdmission',
     'VoicePayloadRecord',
+    'RetainedMessagePage',
+    'RetainedMessageRecord',
     'UnreadInboxSummaryRecord',
 ]
 

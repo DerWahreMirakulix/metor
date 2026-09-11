@@ -67,13 +67,17 @@ For security reasons and to prevent supply-chain attacks, Metor **does not** bun
 
 ### Distribution Matrix
 
-Metor is split into three modular packages to support different deployment roles:
+Metor is split into three non-overlapping packages:
 
 | Package            | Contents                                                                                 | Typical Use Case                          | Install Target             |
 | :----------------- | :--------------------------------------------------------------------------------------- | :---------------------------------------- | :------------------------- |
-| **`metor`**        | Terminal UI, CLI dispatcher, headless daemon, and SDK                                    | Full desktop/laptop installation          | `pip install metor`        |
-| **`metor-daemon`** | Headless Tor runtime, SQLCipher database, and profile management (**no UI code**)        | 24/7 background daemon on a VPS or server | `pip install metor-daemon` |
-| **`metor-sdk`**    | Lightweight IPC client library and typed wire contract (**no SQLCipher, no Tor, no UI**) | Custom app development, GUIs, or bots     | `pip install metor-sdk`    |
+| **`metor-sdk`**         | IPC client, typed API/wire DTOs, proof helpers, and the public frontend launcher contract | Client integration or a third-party frontend | `pip install metor-sdk` |
+| **`metor`**             | General CLI, daemon, storage, Tor and local profile/process orchestration; no interactive UI | Headless/base installation | `pip install metor` |
+| **`metor-ui-terminal`** | Interactive Terminal chat, slash-command help, rendering, theme and frontend resources | Current interactive frontend | `pip install metor-ui-terminal` |
+
+Official package versions are coordinated exactly. `metor` depends on the
+matching SDK; installing the Terminal UI pulls in matching base and SDK
+packages. Neither base nor SDK depends on an interactive UI.
 
 Choose the install path that matches your role:
 
@@ -90,7 +94,10 @@ The wheel bundle is a **release artifact**, not a normal repository file. A plai
 
 ### 2. Install From The Release Wheel Bundle
 
-GitHub Releases publish one wheel bundle per supported host platform. Each archive contains the Metor wheel plus all Python runtime wheels needed for an offline install, including the SQLCipher backend.
+The release workflow builds separate SDK, base, and base-plus-Terminal
+wheelhouses for each supported host. Each archive resolves one explicit install
+target and its pinned dependencies; installers never install every wheel by
+glob.
 
 This path is intended for end users consuming an official release. If you cloned the repository directly, use the source checkout path below instead.
 
@@ -125,8 +132,10 @@ cd metor
 ```bash
 # Recommended security-conscious runtime installation
 python -m pip install --upgrade pip==26.0.1
-pip install -r requirements/runtime.lock
+pip install -r requirements/base.lock
+pip install --no-deps --no-build-isolation packaging/sdk
 pip install --no-deps --no-build-isolation .
+pip install --no-deps --no-build-isolation packaging/terminal
 
 # Recommended security-conscious developer installation
 python -m pip install --upgrade pip==26.0.1
@@ -161,7 +170,7 @@ If you want the daemon to expose IPC first and defer all key/database access unt
 metor daemon --locked
 ```
 
-For daemon-only deployments (no UI code, e.g. on a VPS or in minimal bundles) a headless entry is available:
+The base `metor` package includes a headless daemon entry without installing UI code:
 
 ```bash
 # Encrypted profiles (default) require locked startup in headless mode:
@@ -243,7 +252,7 @@ same PMK; they do not rewrite the database, secrets, or blobs.
 
 Want to run Metor on a server and connect securely from your laptop?
 
-1. **On the Server (VPS):** Run `metor-daemon -p my_server --locked daemon` (using the headless `metor-daemon` package).
+1. **On the Server (VPS):** Install `metor`, then run `metor-daemon -p my_server --locked daemon`.
 2. **On your Laptop:** Run `metor profiles add remote_node --remote --port 50051`.
 3. **Establish SSH Tunnel:** `ssh -N -L 50051:127.0.0.1:50051 user@server_ip`.
 4. **Start Chatting:** Run `metor -p remote_node chat` (Your local UI now securely controls the remote daemon over the forwarded port).

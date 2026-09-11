@@ -4,6 +4,8 @@ import socket
 import threading
 from typing import Dict, List, Optional, Set, Tuple
 
+from metor.core.daemon.managed.writer import BoundedSocketWriter
+
 from metor.utils import Constants
 
 
@@ -24,6 +26,8 @@ class StateTrackerMessagesMixin:
     _live_reconnect_grace: Dict[str, float]
     _retunnel_in_progress: Set[str]
     _socket_write_locks: Dict[socket.socket, threading.Lock]
+    _socket_writers: Dict[socket.socket, BoundedSocketWriter]
+    _live_generations: Dict[Tuple[str, str], int]
 
     def remember_message_request_id(
         self,
@@ -312,6 +316,11 @@ class StateTrackerMessagesMixin:
             self._live_reconnect_grace.clear()
             self._retunnel_in_progress.clear()
             self._socket_write_locks.clear()
+            writers = list(self._socket_writers.values())
+            self._socket_writers.clear()
+            self._live_generations.clear()
+        for writer in writers:
+            writer.close()
         for sock in sockets:
             try:
                 sock.close()

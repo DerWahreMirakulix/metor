@@ -7,18 +7,21 @@ import binascii
 from datetime import datetime, timezone
 import json
 import socket
-from typing import Any, Optional
+import threading
+from typing import Callable, Optional, TYPE_CHECKING
 
 from metor.core.api import (
     ContentType,
     Delivery,
     FallbackSuccessEvent,
+    IpcEvent,
     LiveMessageUnavailableEvent,
     MessageDirectionCode,
     MessageOperationReason,
     VoiceChunkAcceptedEvent,
     VoiceContent,
     VoiceFinalizedEvent,
+    VoiceOperationRejectedEvent,
     VoiceResourceLimitEvent,
     VoiceResourcePressureEvent,
     VoiceStartedEvent,
@@ -31,18 +34,76 @@ from metor.data import (
     PendingLiveAdmission,
     SettingKey,
 )
-from metor.data.blob import BlobLifecycle
+from metor.data.blob import BlobLifecycle, BlobStore
 from metor.utils import Constants
+from metor.core.daemon.managed.network.state import StateTracker
 
 from .models import VoiceTurn
+
+if TYPE_CHECKING:
+    from metor.data import ContactManager, MessageManager
+    from metor.data.profile import Config
 
 
 class VoiceOutboundMixin:
     """Owns outbound Voice draft, LIVE replay, fallback, and ACK behavior."""
 
-    def __getattr__(self, name: str) -> Any:
-        """Defers typed collaborator attributes to the composed manager."""
-        raise AttributeError(name)
+    _contacts: 'ContactManager'
+    _messages: 'MessageManager'
+    _blobs: BlobStore
+    _state: StateTracker
+    _broadcast: Callable[[IpcEvent], None]
+    _config: 'Config'
+    _lock: threading.RLock
+    _purge_fence: threading.Event
+    _outbound: dict[str, VoiceTurn]
+    _inbound: dict[tuple[str, str], VoiceTurn]
+
+    @staticmethod
+    def _metadata(turn: VoiceTurn) -> str:
+        """Returns metadata through the concrete transfer manager."""
+        raise NotImplementedError
+
+    @staticmethod
+    def _metadata_blob_ids(payload: str) -> Optional[tuple[str, ...]]:
+        """Returns segmented IDs through the concrete transfer manager."""
+        raise NotImplementedError
+
+    @staticmethod
+    def _metadata_finalized(payload: str) -> bool:
+        """Checks finalized metadata through the concrete transfer manager."""
+        raise NotImplementedError
+
+    def _limit(self) -> int:
+        """Returns the configured Voice limit from the concrete manager."""
+        raise NotImplementedError
+
+    def _used_bytes(self) -> int:
+        """Returns retained bytes from the concrete manager."""
+        raise NotImplementedError
+
+    def _read_turn_range(
+        self,
+        turn: VoiceTurn,
+        offset: int,
+        max_bytes: int,
+        lifecycle: BlobLifecycle = BlobLifecycle.TEMPORARY,
+    ) -> bytes:
+        """Reads a bounded segment range through the concrete manager."""
+        raise NotImplementedError
+
+    def _delete_turn_blobs(self, turn: VoiceTurn, lifecycle: BlobLifecycle) -> None:
+        """Deletes turn segments through the concrete manager."""
+        raise NotImplementedError
+
+    def _promote_turn_blobs(self, turn: VoiceTurn) -> None:
+        """Promotes turn segments through the concrete manager."""
+        raise NotImplementedError
+
+    @staticmethod
+    def _wire(command: TorCommand, payload: dict[str, object]) -> bytes:
+        """Serializes a wire frame through the concrete manager."""
+        raise NotImplementedError
 
     def begin(self, target: str, delivery: Delivery, msg_id: str, codec: str) -> None:
         """Begins one outbound logical Voice turn.
@@ -102,6 +163,7 @@ class VoiceOutboundMixin:
                 codec=codec,
                 blob_id=blob_id,
                 chunk_ids=[],
+                chunk_sizes=[],
                 data=bytearray(),
                 timestamp=datetime.now(timezone.utc).isoformat(),
             )
@@ -193,7 +255,8 @@ class VoiceOutboundMixin:
         if conn is None or turn.delivery is not Delivery.LIVE:
             return
         try:
-            self._state.send_frame(
+            self._send_outbound_frame(
+                turn,
                 conn,
                 self._wire(
                     TorCommand.VOICE_BEGIN,
@@ -207,6 +270,24 @@ class VoiceOutboundMixin:
             )
         except OSError:
             return
+
+    def _send_outbound_frame(
+        self, turn: VoiceTurn, conn: socket.socket, payload: bytes
+    ) -> None:
+        """Queues one LIVE frame with a fallback/purge generation claim."""
+        generation = self._state.live_generation(turn.onion, turn.msg_id)
+
+        def claim() -> bool:
+            with self._lock:
+                return (
+                    not self._purge_fence.is_set()
+                    and turn.delivery is Delivery.LIVE
+                    and self._state.is_live_generation(
+                        turn.onion, turn.msg_id, generation
+                    )
+                )
+
+        self._state.send_frame(conn, payload, claim)
 
     def append(self, msg_id: str, offset: int, encoded_data: str) -> None:
         """Appends and durably retains one exact-offset Voice chunk.
@@ -224,8 +305,20 @@ class VoiceOutboundMixin:
         try:
             chunk = base64.b64decode(encoded_data, validate=True)
         except (binascii.Error, ValueError):
+            self._broadcast(
+                VoiceOperationRejectedEvent(
+                    msg_id=msg_id,
+                    reason=MessageOperationReason.MALFORMED_CHUNK,
+                )
+            )
             return
         if not chunk or len(chunk) > Constants.VOICE_CHUNK_MAX_BYTES:
+            self._broadcast(
+                VoiceOperationRejectedEvent(
+                    msg_id=msg_id,
+                    reason=MessageOperationReason.MALFORMED_CHUNK,
+                )
+            )
             return
         should_finalize = False
         accepted_turn: Optional[VoiceTurn] = None
@@ -233,11 +326,21 @@ class VoiceOutboundMixin:
             if self._purge_fence.is_set():
                 return
             turn = self._outbound.get(msg_id)
-            if turn is None or turn.finalized or offset != len(turn.data):
+            if turn is None or turn.finalized or offset != turn.size_bytes:
+                self._broadcast(
+                    VoiceOperationRejectedEvent(
+                        msg_id=msg_id,
+                        reason=MessageOperationReason.STALE_CAPTURE,
+                    )
+                )
                 return
             limit = self._limit()
             used = self._used_bytes()
-            if limit >= 0 and used + len(chunk) > limit:
+            if (
+                len(turn.chunk_ids) >= Constants.VOICE_MAX_SEGMENTS
+                or limit >= 0
+                and used + len(chunk) > limit
+            ):
                 self._broadcast(
                     VoiceResourceLimitEvent(
                         msg_id=msg_id,
@@ -245,31 +348,42 @@ class VoiceOutboundMixin:
                         delivery=turn.delivery,
                         used_bytes=used,
                         limit_bytes=limit,
+                        reason=MessageOperationReason.MEDIA_LIMIT,
                     )
                 )
+                frame = self._finalize_locked(turn, None)
+                if frame is not None:
+                    try:
+                        self._send_outbound_frame(turn, *frame)
+                    except OSError:
+                        pass
                 return
             chunk_id = self._blobs.put(chunk, BlobLifecycle.TEMPORARY)
             turn.chunk_ids.append(chunk_id)
+            turn.chunk_sizes.append(len(chunk))
             turn.data.extend(chunk)
+            turn.size_bytes += len(chunk)
             if turn.delivery is Delivery.LIVE:
                 admission = self._messages.grow_pending_live_voice_if_capacity(
                     turn.onion,
                     msg_id,
                     offset,
-                    len(turn.data),
+                    turn.size_bytes,
                     self._metadata(turn),
                     self._config.get_int(SettingKey.MAX_PENDING_LIVE_BYTES),
                 )
                 updated = admission is PendingLiveAdmission.ACCEPTED
             else:
                 updated = self._messages.update_retained_bytes(
-                    turn.onion, msg_id, len(turn.data), self._metadata(turn)
+                    turn.onion, msg_id, turn.size_bytes, self._metadata(turn)
                 )
                 admission = PendingLiveAdmission.ACCEPTED
             if not updated:
                 self._blobs.delete(chunk_id, BlobLifecycle.TEMPORARY)
                 turn.chunk_ids.pop()
+                turn.chunk_sizes.pop()
                 del turn.data[-len(chunk) :]
+                turn.size_bytes -= len(chunk)
                 if admission is PendingLiveAdmission.BYTE_LIMIT:
                     self._broadcast(
                         VoiceResourceLimitEvent(
@@ -283,10 +397,24 @@ class VoiceOutboundMixin:
                             reason=MessageOperationReason.BYTE_LIMIT,
                         )
                     )
+                    frame = self._finalize_locked(turn, None)
+                    if frame is not None:
+                        try:
+                            self._send_outbound_frame(turn, *frame)
+                        except OSError:
+                            pass
+                else:
+                    self._broadcast(
+                        VoiceOperationRejectedEvent(
+                            msg_id=msg_id,
+                            onion=turn.onion,
+                            reason=MessageOperationReason.PERSISTENCE_FAILED,
+                        )
+                    )
                 return
             accepted_turn = turn
             self._broadcast(
-                VoiceChunkAcceptedEvent(msg_id=msg_id, next_offset=len(turn.data))
+                VoiceChunkAcceptedEvent(msg_id=msg_id, next_offset=turn.size_bytes)
             )
             used += len(chunk)
             if (
@@ -335,7 +463,8 @@ class VoiceOutboundMixin:
         if conn is None or turn.delivery is not Delivery.LIVE:
             return
         try:
-            self._state.send_frame(
+            self._send_outbound_frame(
+                turn,
                 conn,
                 self._wire(
                     TorCommand.VOICE_CHUNK,
@@ -366,7 +495,8 @@ class VoiceOutboundMixin:
                 frame = self._finalize_locked(turn, duration_ms)
         if frame is not None:
             try:
-                self._state.send_frame(*frame)
+                assert turn is not None
+                self._send_outbound_frame(turn, *frame)
             except OSError:
                 pass
 
@@ -384,9 +514,19 @@ class VoiceOutboundMixin:
         """
         turn.duration_ms = duration_ms
         turn.finalized = True
-        self._messages.update_retained_bytes(
-            turn.onion, turn.msg_id, len(turn.data), self._metadata(turn)
-        )
+        if not self._messages.update_retained_bytes(
+            turn.onion, turn.msg_id, turn.size_bytes, self._metadata(turn)
+        ):
+            turn.duration_ms = None
+            turn.finalized = False
+            self._broadcast(
+                VoiceOperationRejectedEvent(
+                    msg_id=turn.msg_id,
+                    onion=turn.onion,
+                    reason=MessageOperationReason.PERSISTENCE_FAILED,
+                )
+            )
+            return None
         conn = self._state.get_connection(turn.onion)
         frame = (
             (
@@ -395,7 +535,7 @@ class VoiceOutboundMixin:
                     TorCommand.VOICE_END,
                     {
                         'id': turn.msg_id,
-                        'size': len(turn.data),
+                        'size': turn.size_bytes,
                         'duration_ms': turn.duration_ms,
                     },
                 ),
@@ -415,6 +555,7 @@ class VoiceOutboundMixin:
             if records:
                 self._promote_turn_blobs(turn)
                 turn.delivery = Delivery.DROP
+                self._state.invalidate_live_generations(turn.onion, [turn.msg_id])
                 self._state.remove_unacked_message(turn.onion, turn.msg_id)
                 self._outbound.pop(turn.msg_id, None)
                 self._broadcast(
@@ -431,7 +572,7 @@ class VoiceOutboundMixin:
         self._broadcast(
             VoiceFinalizedEvent(
                 msg_id=turn.msg_id,
-                size_bytes=len(turn.data),
+                size_bytes=turn.size_bytes,
                 onion=turn.onion,
                 delivery=turn.delivery,
                 direction=MessageDirectionCode.OUT,
@@ -503,17 +644,17 @@ class VoiceOutboundMixin:
             turn = self._outbound.get(msg_id)
             if turn is None or turn.onion != onion:
                 return
-            if next_offset < turn.acknowledged_offset or next_offset > len(turn.data):
+            if next_offset < turn.acknowledged_offset or next_offset > turn.size_bytes:
                 return
             turn.acknowledged_offset = next_offset
             self._messages.update_retained_bytes(
-                onion, msg_id, len(turn.data), self._metadata(turn)
+                onion, msg_id, turn.size_bytes, self._metadata(turn)
             )
-            if next_offset < len(turn.data):
-                chunk = bytes(
-                    turn.data[
-                        next_offset : next_offset + Constants.VOICE_CHUNK_MAX_BYTES
-                    ]
+            if next_offset < turn.size_bytes:
+                chunk = self._read_turn_range(
+                    turn,
+                    next_offset,
+                    Constants.VOICE_CHUNK_MAX_BYTES,
                 )
                 conn = self._state.get_connection(onion)
                 if conn is not None:
@@ -537,14 +678,15 @@ class VoiceOutboundMixin:
                             TorCommand.VOICE_END,
                             {
                                 'id': turn.msg_id,
-                                'size': len(turn.data),
+                                'size': turn.size_bytes,
                                 'duration_ms': turn.duration_ms,
                             },
                         ),
                     )
         if frame is not None:
             try:
-                self._state.send_frame(*frame)
+                assert turn is not None
+                self._send_outbound_frame(turn, *frame)
             except OSError:
                 pass
 
@@ -563,10 +705,19 @@ class VoiceOutboundMixin:
                 or not turn.finalized
             ):
                 return
-            self._messages.update_outbound_message_status(
+            if not self._messages.update_outbound_message_status(
                 onion, msg_id, MessageStatus.DELIVERED
-            )
+            ):
+                self._broadcast(
+                    VoiceOperationRejectedEvent(
+                        msg_id=msg_id,
+                        onion=onion,
+                        reason=MessageOperationReason.PERSISTENCE_FAILED,
+                    )
+                )
+                return
             self._state.remove_unacked_message(onion, msg_id)
+            self._state.invalidate_live_generations(onion, [msg_id])
             self._delete_turn_blobs(turn, BlobLifecycle.TEMPORARY)
             self._outbound.pop(msg_id, None)
 
@@ -634,6 +785,8 @@ class VoiceOutboundMixin:
         if record is None:
             return None, None, None, offset, False, MessageOperationReason.NOT_FOUND
         try:
+            if len(record.payload.encode('utf-8')) > Constants.VOICE_METADATA_MAX_BYTES:
+                raise ValueError
             metadata = json.loads(record.payload)
             if not isinstance(metadata, dict):
                 raise ValueError
@@ -644,11 +797,41 @@ class VoiceOutboundMixin:
             ):
                 raise ValueError
             chunk_ids = [str(chunk_id) for chunk_id in raw_chunk_ids]
-            codec = str(metadata['codec'])
-            size_bytes = int(metadata['size_bytes'])
+            if len(chunk_ids) > Constants.VOICE_MAX_SEGMENTS:
+                raise ValueError
+            raw_chunk_sizes = metadata.get('chunk_sizes')
+            chunk_sizes: Optional[list[int]] = None
+            if isinstance(raw_chunk_sizes, list) and len(raw_chunk_sizes) == len(
+                chunk_ids
+            ):
+                if any(type(size) is not int for size in raw_chunk_sizes):
+                    raise ValueError
+                candidate_sizes = list(raw_chunk_sizes)
+                if all(
+                    0 < size <= Constants.VOICE_CHUNK_MAX_BYTES
+                    for size in candidate_sizes
+                ):
+                    chunk_sizes = candidate_sizes
+            if chunk_sizes is None:
+                raise ValueError
+            codec = metadata['codec']
+            size_bytes = metadata['size_bytes']
+            if (
+                not isinstance(codec, str)
+                or not codec
+                or len(codec) > Constants.VOICE_CODEC_MAX_CHARS
+                or type(size_bytes) is not int
+                or not 0 <= size_bytes <= Constants.VOICE_TURN_HARD_MAX_BYTES
+                or sum(chunk_sizes) != size_bytes
+            ):
+                raise ValueError
             finalized = metadata.get('finalized') is True
             duration_raw = metadata.get('duration_ms')
-            duration_ms = int(duration_raw) if duration_raw is not None else None
+            if duration_raw is not None and (
+                type(duration_raw) is not int or duration_raw < 0
+            ):
+                raise ValueError
+            duration_ms = duration_raw
             delivery = Delivery(record.delivery)
             lifecycle = (
                 BlobLifecycle.PERSISTENT
@@ -660,8 +843,14 @@ class VoiceOutboundMixin:
             remaining = max_bytes
             position = 0
             selected = bytearray()
-            for chunk_id in chunk_ids:
+            for index, chunk_id in enumerate(chunk_ids):
+                expected_size = chunk_sizes[index] if chunk_sizes is not None else None
+                if expected_size is not None and offset >= position + expected_size:
+                    position += expected_size
+                    continue
                 chunk = self._blobs.read(chunk_id, lifecycle)
+                if expected_size is not None and len(chunk) != expected_size:
+                    raise ValueError
                 chunk_end = position + len(chunk)
                 if offset >= chunk_end:
                     position = chunk_end

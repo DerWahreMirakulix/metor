@@ -5,10 +5,13 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.core.api import (
+    ConnectionActor,
+    ConnectionReasonCode,
     ContentType,
     Delivery,
     IpcCommand,
@@ -21,6 +24,8 @@ from metor.core.api import (
     VoiceContent,
 )
 from metor.core.daemon.managed.handlers.network import NetworkCommandHandler
+from metor.core.daemon.managed.models import SessionState
+from metor.core.daemon.managed.network.state import StateTracker
 from metor.ui.terminal.content import render_content
 from metor.utils import Constants
 
@@ -116,6 +121,8 @@ class MessageArchitectureContractTests(unittest.TestCase):
 
         handler._current_revision = lambda: next(revisions)
         handler._compose_runtime_snapshot = compose
+        handler._network = Mock()
+        handler._network.get_snapshot_token.return_value = ('stable',)
 
         snapshot = handler._build_runtime_snapshot()
 
@@ -127,6 +134,8 @@ class MessageArchitectureContractTests(unittest.TestCase):
         handler = cast(Any, object.__new__(NetworkCommandHandler))
         revisions = iter(range(Constants.RUNTIME_SNAPSHOT_MAX_RETRIES * 2))
         handler._current_revision = lambda: next(revisions)
+        handler._network = Mock()
+        handler._network.get_snapshot_token.return_value = ('stable',)
         handler._compose_runtime_snapshot = lambda: RuntimeSnapshotEvent(
             profile='default', onion='peer-onion'
         )
@@ -135,6 +144,51 @@ class MessageArchitectureContractTests(unittest.TestCase):
 
         self.assertIsInstance(result, RuntimeSnapshotUnavailableEvent)
         self.assertTrue(cast(RuntimeSnapshotUnavailableEvent, result).retryable)
+
+    def test_runtime_snapshot_retries_when_state_mutates_before_publication(
+        self,
+    ) -> None:
+        """R2-T22: a stable revision alone cannot bless a torn state snapshot."""
+        handler = cast(Any, object.__new__(NetworkCommandHandler))
+        handler._current_revision = lambda: 9
+        tokens = iter((('before',), ('after',), ('stable',), ('stable',)))
+        handler._network = Mock()
+        handler._network.get_snapshot_token.side_effect = lambda: next(tokens)
+        compose_count = 0
+
+        def compose() -> RuntimeSnapshotEvent:
+            nonlocal compose_count
+            compose_count += 1
+            return RuntimeSnapshotEvent(profile='default', onion='peer')
+
+        handler._compose_runtime_snapshot = compose
+        result = handler._build_runtime_snapshot()
+        self.assertEqual(compose_count, 2)
+        self.assertEqual(result.revision, 9)
+
+    def test_snapshot_state_distinguishes_recovery_and_terminal_disconnect(
+        self,
+    ) -> None:
+        """R2-T24: recovery grace/scheduling are not projected as disconnected."""
+        state = StateTracker()
+        state.mark_live_reconnect_grace('grace', 30.0)
+        state.mark_scheduled_auto_reconnect('scheduled')
+        state.set_last_disconnect_reason(
+            'terminal',
+            ConnectionReasonCode.IDLE_TIMEOUT,
+            ConnectionActor.SYSTEM,
+        )
+
+        self.assertIs(state.get_live_state('grace'), SessionState.RECONNECT_GRACE)
+        self.assertIs(
+            state.get_live_state('scheduled'), SessionState.RECONNECT_SCHEDULED
+        )
+        self.assertIs(state.get_live_state('terminal'), SessionState.DISCONNECTED)
+        self.assertEqual(
+            state.get_last_disconnect_reason('terminal'),
+            ConnectionReasonCode.IDLE_TIMEOUT,
+        )
+        self.assertIn('terminal', state.get_relevant_live_onions())
 
 
 if __name__ == '__main__':

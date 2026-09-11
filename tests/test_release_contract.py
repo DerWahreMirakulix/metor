@@ -33,8 +33,8 @@ from metor.data.profile.models import ProfileSecurityMode
 from metor.data.sql import SqlCipherDbApi, _load_sqlcipher_dbapi
 from metor.data.sql.schema import create_core_schema
 from metor.data.settings import Settings, SettingKey
-from metor.ui.terminal.cli.dispatcher import CliDispatcher
-from metor.ui.terminal.cli.proxy import CliProxy
+from metor.cli.dispatcher import CliDispatcher
+from metor.cli.proxy import CliProxy
 
 
 class _DummyProfileManager:
@@ -285,7 +285,7 @@ class ReleaseContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.terminal.cli.dispatcher.profiles.CliProxy.add_profile',
+                'metor.cli.dispatcher.profiles.CliProxy.add_profile',
                 return_value='ok',
             ) as add_profile,
             patch('builtins.print'),
@@ -316,7 +316,7 @@ class ReleaseContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.terminal.cli.dispatcher.profiles.CliProxy.add_profile',
+                'metor.cli.dispatcher.profiles.CliProxy.add_profile',
                 return_value='ok',
             ) as add_profile,
             patch('builtins.print'),
@@ -390,7 +390,7 @@ class ReleaseContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.terminal.cli.dispatcher.base.CliProxy.handle_settings_list',
+                'metor.cli.dispatcher.base.CliProxy.handle_settings_list',
                 return_value='settings-list',
             ) as handle_settings_list,
             patch('builtins.print') as print_mock,
@@ -428,11 +428,16 @@ class ReleaseContractTests(unittest.TestCase):
         )
 
         with patch(
-            'metor.ui.terminal.cli.dispatcher.base.CommandHandlers.handle_chat'
+            'metor.cli.dispatcher.base.CommandHandlers.handle_chat'
         ) as handle_chat:
             dispatcher.dispatch()
 
-        handle_chat.assert_called_once_with(pm, start_daemon_override=True)
+        handle_chat.assert_called_once_with(
+            pm,
+            start_daemon_override=True,
+            frontend_id=None,
+            list_uis=False,
+        )
 
     def test_config_defaults_to_list_when_no_subcommand_is_given(self) -> None:
         """
@@ -461,7 +466,7 @@ class ReleaseContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.terminal.cli.dispatcher.base.CliProxy.handle_config_list',
+                'metor.cli.dispatcher.base.CliProxy.handle_config_list',
                 return_value='config-list',
             ) as handle_config_list,
             patch('builtins.print') as print_mock,
@@ -565,7 +570,7 @@ class ReleaseContractTests(unittest.TestCase):
         proxy = CliProxy(cast(ProfileManager, _DummyUiProfileManager('9.5')))
 
         with patch(
-            'metor.ui.terminal.cli.proxy.settings.Settings.get_str',
+            'metor.cli.proxy.settings.Settings.get_str',
             return_value='7.5',
         ):
             result = proxy.handle_settings_get(SettingKey.IPC_TIMEOUT.value)
@@ -606,7 +611,7 @@ class ReleaseContractTests(unittest.TestCase):
 
         self.assertEqual(bundle_name, 'metor-wheelhouse-windows-x86_64-py311')
 
-    def test_release_bundle_name_supports_daemon_and_sdk_variants(self) -> None:
+    def test_release_bundle_name_supports_terminal_and_sdk_variants(self) -> None:
         """
         Verifies that release bundle names distinguish daemon and SDK variants.
 
@@ -616,10 +621,15 @@ class ReleaseContractTests(unittest.TestCase):
         Returns:
             None
         """
-        daemon_bundle = build_bundle_name('Linux', 'x86_64', 3, 11, variant='daemon')
+        terminal_bundle = build_bundle_name(
+            'Linux', 'x86_64', 3, 11, variant='terminal'
+        )
         sdk_bundle = build_bundle_name('Linux', 'x86_64', 3, 11, variant='sdk')
 
-        self.assertEqual(daemon_bundle, 'metor-daemon-wheelhouse-linux-x86_64-py311')
+        self.assertEqual(
+            terminal_bundle,
+            'metor-ui-terminal-wheelhouse-linux-x86_64-py311',
+        )
         self.assertEqual(sdk_bundle, 'metor-sdk-wheelhouse-linux-x86_64-py311')
 
     def test_release_install_guide_uses_offline_bundle_install(self) -> None:
@@ -744,7 +754,7 @@ class ReleaseContractTests(unittest.TestCase):
             )
         )
 
-    def test_release_builder_supports_sdk_and_daemon_variants(self) -> None:
+    def test_release_builder_supports_sdk_and_terminal_variants(self) -> None:
         """
         Verifies that release builder targets variant-specific lockfiles and packages.
 
@@ -755,7 +765,7 @@ class ReleaseContractTests(unittest.TestCase):
             None
         """
         commands_sdk: list[list[str]] = []
-        commands_daemon: list[list[str]] = []
+        commands_terminal: list[list[str]] = []
 
         def fake_run_sdk(command: Sequence[str], cwd: Path) -> None:
             """
@@ -771,7 +781,7 @@ class ReleaseContractTests(unittest.TestCase):
             del cwd
             commands_sdk.append(list(command))
 
-        def fake_run_daemon(command: Sequence[str], cwd: Path) -> None:
+        def fake_run_terminal(command: Sequence[str], cwd: Path) -> None:
             """
             Records fake commands executed for the Daemon variant.
 
@@ -783,7 +793,7 @@ class ReleaseContractTests(unittest.TestCase):
                 None
             """
             del cwd
-            commands_daemon.append(list(command))
+            commands_terminal.append(list(command))
 
         with TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir)
@@ -804,7 +814,7 @@ class ReleaseContractTests(unittest.TestCase):
             with (
                 patch(
                     'metor.utils.release_bundle.run_command',
-                    side_effect=fake_run_daemon,
+                    side_effect=fake_run_terminal,
                 ),
                 patch(
                     'metor.utils.release_bundle.archive_bundle',
@@ -812,7 +822,7 @@ class ReleaseContractTests(unittest.TestCase):
                 ),
             ):
                 build_release_wheelhouse(
-                    output_dir, skip_pip_upgrade=True, variant='daemon'
+                    output_dir, skip_pip_upgrade=True, variant='terminal'
                 )
 
         self.assertTrue(
@@ -829,14 +839,14 @@ class ReleaseContractTests(unittest.TestCase):
         )
         self.assertTrue(
             any(
-                'requirements/daemon.lock' in command and 'wheel' in command
-                for command in commands_daemon
+                'requirements/base.lock' in command and 'wheel' in command
+                for command in commands_terminal
             )
         )
         self.assertTrue(
             any(
-                'packaging/daemon' in command and 'wheel' in command
-                for command in commands_daemon
+                'packaging/terminal' in command and 'wheel' in command
+                for command in commands_terminal
             )
         )
 
@@ -863,6 +873,7 @@ class ReleaseContractTests(unittest.TestCase):
                     'wheel',
                     '.',
                     '--no-deps',
+                    '--no-build-isolation',
                     '-w',
                     str(output_dir),
                 ],
@@ -879,11 +890,11 @@ class ReleaseContractTests(unittest.TestCase):
             with ZipFile(wheel_files[0]) as wheel_archive:
                 archive_names = set(wheel_archive.namelist())
 
-            self.assertIn('metor/ui/terminal/cli/proxy/core.py', archive_names)
-            self.assertNotIn('metor/ui/cli/proxy/core.py', archive_names)
+            self.assertIn('metor/cli/proxy/core.py', archive_names)
+            self.assertNotIn('metor/ui/terminal/help.py', archive_names)
 
-    def test_daemon_wheel_contains_profile_security_runtime(self) -> None:
-        """Verifies the split daemon wheel includes PMK and blob implementations.
+    def test_terminal_wheel_contains_only_interactive_frontend(self) -> None:
+        """Verifies the Terminal wheel owns its UI and not base runtime modules.
 
         Args:
             None
@@ -901,8 +912,9 @@ class ReleaseContractTests(unittest.TestCase):
                     '-m',
                     'pip',
                     'wheel',
-                    'packaging/daemon',
+                    'packaging/terminal',
                     '--no-deps',
+                    '--no-build-isolation',
                     '-w',
                     str(output_dir),
                 ],
@@ -911,14 +923,15 @@ class ReleaseContractTests(unittest.TestCase):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            wheel_files = sorted(output_dir.glob('metor_daemon-*.whl'))
+            wheel_files = sorted(output_dir.glob('metor_ui_terminal-*.whl'))
             self.assertEqual(len(wheel_files), 1)
             with ZipFile(wheel_files[0]) as wheel_archive:
                 archive_names = set(wheel_archive.namelist())
 
-            self.assertIn('metor/core/profile_keys.py', archive_names)
-            self.assertIn('metor/core/profile_destruction.py', archive_names)
-            self.assertIn('metor/data/blob/store.py', archive_names)
+            self.assertIn('metor/ui/terminal/launcher.py', archive_names)
+            self.assertIn('metor/ui/terminal/help.py', archive_names)
+            self.assertNotIn('metor/core/profile_keys.py', archive_names)
+            self.assertNotIn('metor/data/blob/store.py', archive_names)
 
     def test_release_bundle_import_avoids_optional_runtime_utils_dependencies(
         self,
@@ -1140,7 +1153,7 @@ class ReleaseContractTests(unittest.TestCase):
             exit_code = dispatcher.dispatch()
         self.assertEqual(exit_code, 1)
 
-    def test_unknown_frontend_flag_exits_with_code_2(self) -> None:
+    def test_ui_flag_is_not_consumed_by_general_help(self) -> None:
         """
         Verifies that an unknown --ui frontend id exits with code 2.
 
@@ -1153,14 +1166,15 @@ class ReleaseContractTests(unittest.TestCase):
         from metor.main import main as frontend_main
 
         with (
-            patch('sys.argv', ['metor', '--ui', 'unbekannt', 'help']),
+            patch('sys.argv', ['metor', 'help', '--ui', 'unbekannt']),
+            patch('sys.stdout'),
             patch('sys.stderr'),
             patch('sys.exit', side_effect=_raise_system_exit),
         ):
             with self.assertRaises(SystemExit) as ctx:
                 frontend_main()
 
-        self.assertEqual(ctx.exception.code, 2)
+        self.assertEqual(ctx.exception.code, 0)
 
     def test_daemon_main_unlock_guard_exits_with_code_1(self) -> None:
         """

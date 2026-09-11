@@ -4,12 +4,14 @@
 
 import json
 import sys
+import threading
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
-from metor.client.ipc import IpcClient
+from metor.client.ipc import IpcClient, IpcDisconnectedError
 from metor.core.api import (
     AckEvent,
     IpcEvent,
@@ -77,6 +79,77 @@ class ClientDemuxContractTests(unittest.TestCase):
         decoded = IpcEvent.from_dict(json.loads(original.to_json()))
         self.assertEqual(decoded.epoch, 'new-daemon')
         self.assertEqual(decoded.revision, 1)
+
+    def test_concurrent_first_requests_start_exactly_one_reader(self) -> None:
+        """R2-T27: serialized startup cannot create competing socket readers."""
+        client = IpcClient(1, 0.2, lambda _event: None, lambda: None)
+        client._socket = Mock()
+
+        class _Thread:
+            def __init__(self, **_kwargs: object) -> None:
+                self.alive = False
+
+            def start(self) -> None:
+                self.alive = True
+
+            def is_alive(self) -> bool:
+                return self.alive
+
+        barrier = threading.Barrier(3)
+
+        def begin(request_id: str) -> None:
+            barrier.wait()
+            client.begin_request(request_id)
+
+        left = threading.Thread(target=begin, args=('left',))
+        right = threading.Thread(target=begin, args=('right',))
+        with patch('metor.client.ipc.threading.Thread', side_effect=_Thread) as factory:
+            left.start()
+            right.start()
+            barrier.wait()
+            left.join()
+            right.join()
+
+        self.assertEqual(factory.call_count, 2)
+        self.assertEqual(client._response_waiters, {'left', 'right'})
+
+    def test_connection_loss_wakes_every_waiter_and_reconnect_resets_state(
+        self,
+    ) -> None:
+        """R2-T27: loss is explicit for all waiters and a new stream starts clean."""
+        disconnected = threading.Event()
+        client = IpcClient(1, 1.0, lambda _event: None, disconnected.set)
+        client.begin_request('left')
+        client.begin_request('right')
+        failures: list[type[BaseException]] = []
+        ready = threading.Barrier(3)
+
+        def wait(request_id: str) -> None:
+            ready.wait()
+            try:
+                client.wait_for_response(request_id)
+            except BaseException as exc:
+                failures.append(type(exc))
+
+        left = threading.Thread(target=wait, args=('left',))
+        right = threading.Thread(target=wait, args=('right',))
+        left.start()
+        right.start()
+        ready.wait()
+        client._notify_disconnect()
+        left.join(timeout=1.0)
+        right.join(timeout=1.0)
+
+        self.assertEqual(failures, [IpcDisconnectedError, IpcDisconnectedError])
+        self.assertTrue(disconnected.is_set())
+        with client._response_condition:
+            client._connection_lost = False
+            client._response_waiters.clear()
+            client._responses.clear()
+        client.begin_request('new-stream')
+        response = AckEvent(msg_id='new', request_id='new-stream')
+        client._dispatch_event(response)
+        self.assertIs(client.wait_for_response('new-stream'), response)
 
 
 if __name__ == '__main__':

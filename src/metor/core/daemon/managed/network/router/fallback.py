@@ -129,6 +129,9 @@ class FallbackRouter:
             if not records:
                 return {}
             self._promote_voice([record.msg_id for record in records])
+            self._state.invalidate_live_generations(
+                onion, [record.msg_id for record in records]
+            )
             unacked: Dict[str, Tuple[str, str]] = {
                 record.msg_id: (record.payload, record.timestamp) for record in records
             }
@@ -176,6 +179,19 @@ class FallbackRouter:
             if self._purge_fence.is_set():
                 break
             try:
+                generation = self._state.live_generation(onion, msg_id)
+
+                def claim(
+                    peer: str = onion,
+                    identity: str = msg_id,
+                    expected: int = generation,
+                ) -> bool:
+                    with self._transition_lock:
+                        return (
+                            not self._purge_fence.is_set()
+                            and self._state.is_live_generation(peer, identity, expected)
+                        )
+
                 self._state.send_frame(
                     conn,
                     build_message_frame(
@@ -184,6 +200,7 @@ class FallbackRouter:
                         content,
                         timestamp,
                     ).encode('utf-8'),
+                    claim,
                 )
             except Exception:
                 break
@@ -223,6 +240,9 @@ class FallbackRouter:
                     },
                 )
             self._promote_voice([record.msg_id for record in records])
+            self._state.invalidate_live_generations(
+                onion, [record.msg_id for record in records]
+            )
             for record in records:
                 self._state.remove_unacked_message(onion, record.msg_id)
                 self._hm.log_event(

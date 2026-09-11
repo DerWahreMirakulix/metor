@@ -8,6 +8,7 @@ from metor.core.api.base import IpcCommand
 from metor.core.api.codes import CommandType, MessageDirectionCode
 from metor.core.api.content import Delivery, MessageContent
 from metor.core.api.registry import register_command
+from metor.shared.constants import Constants
 
 
 @register_command(CommandType.SEND_MESSAGE)
@@ -147,6 +148,22 @@ class GetVoiceChunkCommand(IpcCommand):
     max_bytes: int
     command_type: CommandType = field(
         default=CommandType.GET_VOICE_CHUNK,
+        init=False,
+    )
+
+
+@register_command(CommandType.LIST_RETAINED_MESSAGES)
+@dataclass
+class ListRetainedMessagesCommand(IpcCommand):
+    """Enumerates retained message identities without reading or consuming content."""
+
+    target: Optional[str] = None
+    delivery: Optional[Delivery] = None
+    direction: Optional[MessageDirectionCode] = None
+    cursor: Optional[str] = None
+    limit: int = Constants.DEFAULT_RETAINED_PAGE_SIZE
+    command_type: CommandType = field(
+        default=CommandType.LIST_RETAINED_MESSAGES,
         init=False,
     )
 

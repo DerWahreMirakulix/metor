@@ -38,3 +38,7 @@ class MessageOperationReason(str, Enum):
     NOT_FINALIZED = 'not_finalized'
     INVALID_RANGE = 'invalid_range'
     UNSUPPORTED_CONTENT = 'unsupported_content'
+    MEDIA_LIMIT = 'media_limit'
+    MALFORMED_CHUNK = 'malformed_chunk'
+    STALE_CAPTURE = 'stale_capture'
+    PERSISTENCE_FAILED = 'persistence_failed'

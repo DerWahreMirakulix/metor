@@ -3,12 +3,13 @@
 # ruff: noqa: E402
 
 import socket
+import os
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import cast
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import nacl.pwhash
 
@@ -51,6 +52,7 @@ from metor.core.daemon.managed.local_auth import (
 )
 from metor.core.daemon.managed.quick_unlock import (
     QuickUnlockStore,
+    QuickUnlockStorageError,
     create_pin_verifier,
 )
 from metor.utils import Constants, build_session_auth_proof
@@ -108,6 +110,46 @@ class SessionAuthContractTests(unittest.TestCase):
 
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+
+    @unittest.skipIf(
+        os.name == 'nt', 'POSIX permission bits do not define Windows ACLs.'
+    )
+    def test_quick_unlock_rejects_unsafe_parent_and_oversized_metadata(self) -> None:
+        """R2-T03: unsafe ownership boundaries and oversized data fail closed."""
+        with TemporaryDirectory() as temp_dir:
+            parent = Path(temp_dir) / 'protected'
+            parent.mkdir(mode=0o700)
+            path = parent / 'quick-unlock.json'
+            path.write_text('{}', encoding='utf-8')
+            path.chmod(0o600)
+            parent.chmod(0o755)
+            store = QuickUnlockStore(path)
+            with self.assertRaises(QuickUnlockStorageError):
+                store.metadata()
+            parent.chmod(0o700)
+            path.write_bytes(b'x' * (Constants.QUICK_UNLOCK_METADATA_MAX_BYTES + 1))
+            with self.assertRaises(QuickUnlockStorageError):
+                store.metadata()
+
+    def test_windows_acl_validation_rejects_extra_trustee(self) -> None:
+        """R2-T02: effective ACL validation rejects inherited or extra access."""
+        result = Mock()
+        result.returncode = 0
+        result.stdout = (
+            '{"Protected":true,"Current":"S-1-5-21-1","Rules":['
+            '{"Sid":"S-1-5-21-1","Inherited":false,"Type":"Allow",'
+            '"Rights":"FullControl"},'
+            '{"Sid":"S-1-5-18","Inherited":false,"Type":"Allow",'
+            '"Rights":"FullControl"},'
+            '{"Sid":"S-1-1-0","Inherited":false,"Type":"Allow",'
+            '"Rights":"Read"}]}'
+        )
+        with patch(
+            'metor.core.daemon.managed.quick_unlock.subprocess.run',
+            return_value=result,
+        ):
+            with self.assertRaises(QuickUnlockStorageError):
+                QuickUnlockStore._validate_windows_acl(Path('credential'))
 
     def test_restricted_client_enforces_scope_and_pin_password_escalation(self) -> None:
         """Blocks normal access and requires password after three failed PIN proofs."""
@@ -409,11 +451,23 @@ class SessionAuthContractTests(unittest.TestCase):
         )
         self.assertTrue(getattr(trusted_event, 'device_lifecycle'))
         self.assertFalse(getattr(untrusted_event, 'device_lifecycle'))
-        self.assertTrue(controller.authorize(SelfDestructCommand(), trusted, True))
+        self.assertFalse(controller.authorize(SelfDestructCommand(), trusted, True))
         self.assertTrue(
             controller.authorize(PrepareProfileExitCommand(), trusted, True)
         )
         self.assertFalse(controller.authorize(SelfDestructCommand(), untrusted, True))
+
+        permissive = SessionAccessController(
+            require_auth=False,
+            send_callback=lambda _conn, event: sent.append(event),
+            lockout_timeout_callback=lambda: 30.0,
+            failure_limit_callback=lambda: 3,
+            live_consumer_available_callback=lambda: None,
+            self_destruct_requires_unlock_callback=lambda: False,
+        )
+        permissive.mark_authenticated(trusted)
+        permissive.restrict(trusted, RestrictClientCommand(device_lifecycle=True))
+        self.assertTrue(permissive.authorize(SelfDestructCommand(), trusted, True))
 
     def test_authenticate_session_command_uses_proof_field(self) -> None:
         """

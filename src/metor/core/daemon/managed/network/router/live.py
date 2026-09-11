@@ -1,6 +1,7 @@
 """Live-message routing, durable acceptance, and acknowledgement handling."""
 
 import socket
+import threading
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable, Optional, Tuple, cast
 
@@ -56,6 +57,8 @@ class LiveMessageRouter:
         has_live_consumers_callback: Callable[[], bool],
         notify_callback: Callable[[NotificationPayload], None],
         config: 'Config',
+        transition_lock: Optional[threading.RLock] = None,
+        purge_fence: Optional[threading.Event] = None,
     ) -> None:
         """Initializes live routing with its explicit collaborators.
 
@@ -84,6 +87,21 @@ class LiveMessageRouter:
         )
         self._notify_callback: Callable[[NotificationPayload], None] = notify_callback
         self._config: 'Config' = config
+        self._transition_lock = transition_lock or threading.RLock()
+        self._purge_fence = purge_fence or threading.Event()
+
+    def _live_frame_claim(self, onion: str, msg_id: str) -> Callable[[], bool]:
+        """Creates a last-moment emission claim ordered with fallback."""
+        generation = self._state.live_generation(onion, msg_id)
+
+        def claim() -> bool:
+            with self._transition_lock:
+                return (
+                    not self._purge_fence.is_set()
+                    and self._state.is_live_generation(onion, msg_id, generation)
+                )
+
+        return claim
 
     def _should_defer_live_message(self, onion: str) -> bool:
         """Checks whether one outbound live message should stay recoverable.
@@ -233,6 +251,7 @@ class LiveMessageRouter:
                 build_message_frame(TorCommand.MSG, msg_id, msg, timestamp).encode(
                     'utf-8'
                 ),
+                self._live_frame_claim(onion, msg_id),
             )
             self._state.touch_session_activity(onion)
         except Exception:
@@ -355,6 +374,7 @@ class LiveMessageRouter:
         timestamp = self._mm.mark_live_text_delivered(onion, msg_id)
         if timestamp is None:
             return
+        self._state.invalidate_live_generations(onion, [msg_id])
         self._state.remove_unacked_message(onion, msg_id)
         self._broadcast(
             AckEvent(

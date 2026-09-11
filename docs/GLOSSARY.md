@@ -39,6 +39,8 @@ Examples that keep this vocabulary: `SendMessageCommand`, `Delivery.LIVE` /
 | graceful profile exit | Reliability-preserving local commit/connection shutdown/hard-lock flow that does not wait for remote DROP delivery. |
 | purge / self-destruct | Reliability-preempting destruction flow: abort communication work, destroy key access, then perform best-effort cleanup. |
 | revision | Daemon-authored monotonic sequence on IPC events used to reconcile an aggregate runtime snapshot with buffered events. |
+| frontend ID | Stable entry-point name in `metor.ui_frontends`, selected only by `metor chat`. |
+| retained inventory | Content-free, paginated discovery of pending outbound or unseen Voice identities; listing never consumes payload. |
 
 ## Dimension 2 — Connection Type (Backend, `transport` field)
 

@@ -6,7 +6,7 @@ from typing import Union
 import json
 import re
 
-from metor.utils import Constants
+from metor.shared.constants import Constants
 
 
 _MESSAGE_ID_PATTERN = re.compile(

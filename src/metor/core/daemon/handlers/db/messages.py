@@ -9,6 +9,7 @@ from metor.core.api import (
     EventType,
     GetInboxCommand,
     GetMessagesCommand,
+    ListRetainedMessagesCommand,
     InboxCountsEvent,
     IpcEvent,
     MarkReadCommand,
@@ -17,6 +18,8 @@ from metor.core.api import (
     MessageEntry,
     MessageStatusCode,
     MessagesDataEvent,
+    RetainedMessageEntry,
+    RetainedMessagesEvent,
     RuntimeStateChangedEvent,
     UnreadMessageEntry,
     UnreadMessagesEvent,
@@ -109,6 +112,54 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
             for message in messages_raw
         ]
         return MessagesDataEvent(messages=messages, alias=alias, onion=onion)
+
+    def _handle_list_retained_messages(
+        self, cmd: ListRetainedMessagesCommand
+    ) -> IpcEvent:
+        """Returns retained identities without reading or consuming payloads."""
+        onion: Optional[str] = None
+        if cmd.target:
+            resolved = self._cm.resolve_target(cmd.target)
+            if not resolved:
+                return create_event(EventType.INVALID_TARGET, {'target': cmd.target})
+            _, onion = resolved
+        direction = (
+            MessageDirection(cmd.direction.value) if cmd.direction is not None else None
+        )
+        try:
+            page = self._mm.list_retained_messages(
+                contact_onion=onion,
+                delivery=cmd.delivery,
+                direction=direction,
+                cursor=cmd.cursor,
+                limit=cmd.limit,
+            )
+        except ValueError as exc:
+            return create_event(
+                EventType.RETAINED_MESSAGES_UNAVAILABLE,
+                {'reason': str(exc), 'retryable': True},
+            )
+        entries = [
+            RetainedMessageEntry(
+                onion=message.peer_onion,
+                alias=self._cm.require_alias_by_onion(message.peer_onion),
+                direction=MessageDirectionCode(message.direction.value),
+                delivery=Delivery(message.delivery),
+                status=MessageStatusCode(message.status),
+                content_type=ContentType(message.content_type),
+                msg_id=message.msg_id,
+                finalized=message.finalized,
+                size_bytes=message.retained_bytes,
+                codec=message.codec,
+                duration_ms=message.duration_ms,
+            )
+            for message in page.messages
+        ]
+        return RetainedMessagesEvent(
+            messages=entries,
+            next_cursor=page.next_cursor,
+            inventory_version=page.inventory_version,
+        )
 
     def _handle_clear_messages(self, cmd: ClearMessagesCommand) -> IpcEvent:
         """

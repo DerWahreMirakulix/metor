@@ -132,8 +132,8 @@ jobs:
         run: |
           mkdir -p dist/wheels
           python -m pip wheel --no-deps --no-build-isolation . -w dist/wheels
-          python -m pip wheel --no-deps --no-build-isolation packaging/daemon -w dist/wheels
           python -m pip wheel --no-deps --no-build-isolation packaging/sdk -w dist/wheels
+          python -m pip wheel --no-deps --no-build-isolation packaging/terminal -w dist/wheels
           python scripts/validate_wheel_versions.py dist/wheels/*.whl
 
       - name: Build platform release bundles
@@ -147,28 +147,29 @@ jobs:
           set -e
           extract_dir='dist/release-smoke'
 
-          full_zip="$(find dist/release -maxdepth 1 -type f -name 'metor-wheelhouse-*.zip' ! -name 'metor-daemon*' ! -name 'metor-sdk*' | head -n 1)"
-          python -m zipfile -e "$full_zip" "$extract_dir/full"
-          full_dir="$(find "$extract_dir/full" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
-          sh "$full_dir/install.sh"
-          "$full_dir/.venv/bin/python" -m pip check
-          "$full_dir/.venv/bin/python" -c "import metor; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
-          "$full_dir/.venv/bin/metor" --help
-
-          daemon_zip="$(find dist/release -maxdepth 1 -type f -name 'metor-daemon-wheelhouse-*.zip' | head -n 1)"
-          python -m zipfile -e "$daemon_zip" "$extract_dir/daemon"
-          daemon_dir="$(find "$extract_dir/daemon" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
-          sh "$daemon_dir/install.sh"
-          "$daemon_dir/.venv/bin/python" -m pip check
-          "$daemon_dir/.venv/bin/python" -c "import metor.daemon_main; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
-          "$daemon_dir/.venv/bin/metor-daemon" --help
-          "$daemon_dir/.venv/bin/python" -c "
+          base_zip="$(find dist/release -maxdepth 1 -type f -name 'metor-wheelhouse-*.zip' | head -n 1)"
+          python -m zipfile -e "$base_zip" "$extract_dir/base"
+          base_dir="$(find "$extract_dir/base" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          sh "$base_dir/install.sh"
+          "$base_dir/.venv/bin/python" -m pip check
+          "$base_dir/.venv/bin/python" -c "import metor.daemon_main; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
+          "$base_dir/.venv/bin/metor" --help
+          "$base_dir/.venv/bin/metor-daemon" --help
+          "$base_dir/.venv/bin/python" -c "
           try:
-            import metor.ui
+            import metor.ui.terminal
             raise SystemExit(1)
           except ModuleNotFoundError:
             pass
           "
+
+          terminal_zip="$(find dist/release -maxdepth 1 -type f -name 'metor-ui-terminal-wheelhouse-*.zip' | head -n 1)"
+          python -m zipfile -e "$terminal_zip" "$extract_dir/terminal"
+          terminal_dir="$(find "$extract_dir/terminal" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          sh "$terminal_dir/install.sh"
+          "$terminal_dir/.venv/bin/python" -m pip check
+          "$terminal_dir/.venv/bin/python" -c "import metor.ui.terminal"
+          "$terminal_dir/.venv/bin/metor" chat --list-uis
 
           sdk_zip="$(find dist/release -maxdepth 1 -type f -name 'metor-sdk-wheelhouse-*.zip' | head -n 1)"
           python -m zipfile -e "$sdk_zip" "$extract_dir/sdk"
@@ -198,22 +199,23 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $extractDir = Join-Path $PWD 'dist/release-smoke'
 
-          $fullZip = (Get-ChildItem 'dist/release' -Filter 'metor-wheelhouse-*.zip' | Where-Object { $_.Name -notlike 'metor-daemon*' -and $_.Name -notlike 'metor-sdk*' } | Select-Object -First 1).FullName
-          python -m zipfile -e $fullZip (Join-Path $extractDir 'full')
-          $fullDir = (Get-ChildItem (Join-Path $extractDir 'full') -Directory | Select-Object -First 1).FullName
-          & "$fullDir\install.cmd"
-          & "$fullDir\.venv\Scripts\python.exe" -m pip check
-          & "$fullDir\.venv\Scripts\python.exe" -c "import metor; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
-          & "$fullDir\.venv\Scripts\metor.exe" --help
+          $baseZip = (Get-ChildItem 'dist/release' -Filter 'metor-wheelhouse-*.zip' | Select-Object -First 1).FullName
+          python -m zipfile -e $baseZip (Join-Path $extractDir 'base')
+          $baseDir = (Get-ChildItem (Join-Path $extractDir 'base') -Directory | Select-Object -First 1).FullName
+          & "$baseDir\install.cmd"
+          & "$baseDir\.venv\Scripts\python.exe" -m pip check
+          & "$baseDir\.venv\Scripts\python.exe" -c "import metor.daemon_main; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
+          & "$baseDir\.venv\Scripts\metor.exe" --help
+          & "$baseDir\.venv\Scripts\metor-daemon.exe" --help
+          & "$baseDir\.venv\Scripts\python.exe" -c "try:`n    import metor.ui.terminal`n    raise SystemExit(1)`nexcept ModuleNotFoundError:`n    pass"
 
-          $daemonZip = (Get-ChildItem 'dist/release' -Filter 'metor-daemon-wheelhouse-*.zip' | Select-Object -First 1).FullName
-          python -m zipfile -e $daemonZip (Join-Path $extractDir 'daemon')
-          $daemonDir = (Get-ChildItem (Join-Path $extractDir 'daemon') -Directory | Select-Object -First 1).FullName
-          & "$daemonDir\install.cmd"
-          & "$daemonDir\.venv\Scripts\python.exe" -m pip check
-          & "$daemonDir\.venv\Scripts\python.exe" -c "import metor.daemon_main; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
-          & "$daemonDir\.venv\Scripts\metor-daemon.exe" --help
-          & "$daemonDir\.venv\Scripts\python.exe" -c "try:`n    import metor.ui`n    raise SystemExit(1)`nexcept ModuleNotFoundError:`n    pass"
+          $terminalZip = (Get-ChildItem 'dist/release' -Filter 'metor-ui-terminal-wheelhouse-*.zip' | Select-Object -First 1).FullName
+          python -m zipfile -e $terminalZip (Join-Path $extractDir 'terminal')
+          $terminalDir = (Get-ChildItem (Join-Path $extractDir 'terminal') -Directory | Select-Object -First 1).FullName
+          & "$terminalDir\install.cmd"
+          & "$terminalDir\.venv\Scripts\python.exe" -m pip check
+          & "$terminalDir\.venv\Scripts\python.exe" -c "import metor.ui.terminal"
+          & "$terminalDir\.venv\Scripts\metor.exe" chat --list-uis
 
           $sdkZip = (Get-ChildItem 'dist/release' -Filter 'metor-sdk-wheelhouse-*.zip' | Select-Object -First 1).FullName
           python -m zipfile -e $sdkZip (Join-Path $extractDir 'sdk')

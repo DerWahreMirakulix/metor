@@ -22,6 +22,7 @@ from metor.core.api import (
     Delivery,
     EventType,
     GetVoiceChunkCommand,
+    ListRetainedMessagesCommand,
     IpcEvent,
     MarkReadCommand,
     MessageDirectionCode,
@@ -29,6 +30,7 @@ from metor.core.api import (
     ReleaseVoiceCommand,
     RestrictClientCommand,
     RuntimeStateChangedEvent,
+    RetainedMessagesEvent,
     VoiceDataEvent,
     VoiceReleasedEvent,
     request_context,
@@ -36,6 +38,7 @@ from metor.core.api import (
 from metor.core.daemon.handlers.db import DatabaseCommandHandler
 from metor.core.daemon.managed.engine.session_access import SessionAccessController
 from metor.core.daemon.managed.models import TorCommand
+from metor.core.daemon.managed.writer import BoundedSocketWriter, FrameQueueFull
 from metor.core.daemon.managed.handlers.network import NetworkCommandHandler
 from metor.core.daemon.managed.network.router import MessageRouter
 from metor.core.daemon.managed.network.router.admission import FrameAdmission
@@ -114,6 +117,14 @@ class _BlockingSocket(_VoiceSocket):
         self._entered.set()
         self._release.wait(timeout=2.0)
         super().sendall(payload)
+
+    def shutdown(self, _how: int) -> None:
+        """Interrupts the artificial blocked write."""
+        self._release.set()
+
+    def close(self) -> None:
+        """Interrupts the artificial blocked write."""
+        self._release.set()
 
 
 class AcceptanceRepairContractTests(unittest.TestCase):
@@ -727,6 +738,59 @@ class AcceptanceRepairContractTests(unittest.TestCase):
             self.receiver_messages.get_inbound_voice(self.sender_onion, 'reattach')
         )
 
+    def test_fresh_client_discovers_reads_and_releases_retained_voice(self) -> None:
+        """R2-T25: a frontend with no remembered ID recovers through public DTOs."""
+        voice = self._voice(sender=False)
+        conn = cast(socket.socket, _VoiceSocket())
+        self.assertFalse(
+            voice.receive_begin(
+                conn, self.sender_onion, {'id': 'server-owned', 'codec': 'opus'}
+            )
+        )
+        self.assertFalse(
+            voice.receive_chunk(
+                conn,
+                self.sender_onion,
+                {
+                    'id': 'server-owned',
+                    'offset': 0,
+                    'data': base64.b64encode(b'discovered bytes').decode('ascii'),
+                },
+            )
+        )
+        self.assertFalse(
+            voice.receive_end(
+                conn, self.sender_onion, {'id': 'server-owned', 'size': 16}
+            )
+        )
+
+        database = DatabaseCommandHandler(
+            self.receiver_pm,
+            self.receiver_contacts,
+            HistoryManager(self.receiver_pm),
+            self.receiver_messages,
+            get_active_onions=lambda: [],
+            broadcast=lambda _event: None,
+        )
+        inventory = database.handle(ListRetainedMessagesCommand())
+        self.assertIsInstance(inventory, RetainedMessagesEvent)
+        retained = cast(RetainedMessagesEvent, inventory)
+        self.assertEqual(len(retained.messages), 1)
+        descriptor = retained.messages[0]
+        self.assertEqual(descriptor.content_type, ContentType.VOICE)
+        self.assertTrue(descriptor.finalized)
+        self.assertEqual(descriptor.size_bytes, 16)
+
+        recovered = voice.read_chunk(
+            descriptor.onion,
+            descriptor.msg_id,
+            MessageDirection.IN,
+            0,
+            Constants.VOICE_CHUNK_MAX_BYTES,
+        )
+        self.assertEqual(recovered[2], b'discovered bytes')
+        self.assertTrue(voice.release_inbound(descriptor.onion, descriptor.msg_id))
+
     def test_drop_disabled_rejects_voice_before_receipt_on_session(self) -> None:
         """G15: session-carried DROP Voice uses the common DROP policy."""
         original_get_bool = self.receiver_pm.config.get_bool
@@ -892,6 +956,46 @@ class AcceptanceRepairContractTests(unittest.TestCase):
                 b'B' * 128 + b'\n' + b'A' * 128 + b'\n',
             ),
         )
+
+    def test_bounded_writer_drops_invalidated_queued_generation(self) -> None:
+        """R2-T11/T12: fallback/purge claims win before queued writer admission."""
+        entered = threading.Event()
+        release = threading.Event()
+        conn = _BlockingSocket(entered, release)
+        state = StateTracker()
+        generation = state.live_generation('peer', 'logical-id')
+        writer = BoundedSocketWriter(cast(socket.socket, conn), capacity=3)
+        self.addCleanup(writer.close)
+        writer.enqueue(b'blocking\n')
+        self.assertTrue(entered.wait(timeout=1.0))
+        writer.enqueue(
+            b'stale-live\n',
+            lambda: state.is_live_generation('peer', 'logical-id', generation),
+        )
+        delivered = threading.Event()
+        writer.enqueue(b'fresh\n', lambda: delivered.set() or True)
+        state.invalidate_live_generations('peer', ['logical-id'])
+        release.set()
+        self.assertTrue(delivered.wait(timeout=1.0))
+        for _ in range(100):
+            if conn.sent and conn.sent[-1] == b'fresh\n':
+                break
+            threading.Event().wait(0.005)
+        self.assertEqual(conn.sent, [b'blocking\n', b'fresh\n'])
+
+    def test_writer_queue_saturation_is_typed_and_close_is_interruptible(self) -> None:
+        """R2-T10/T14: finite queues fail explicitly and shutdown wakes writes."""
+        entered = threading.Event()
+        release = threading.Event()
+        conn = _BlockingSocket(entered, release)
+        writer = BoundedSocketWriter(cast(socket.socket, conn), capacity=1)
+        writer.enqueue(b'blocking\n')
+        self.assertTrue(entered.wait(timeout=1.0))
+        writer.enqueue(b'queued\n')
+        with self.assertRaises(FrameQueueFull):
+            writer.enqueue(b'overflow\n')
+        writer.close()
+        self.assertTrue(release.is_set())
 
     def test_purge_fence_wins_after_voice_finalize_passes_initial_guard(self) -> None:
         """G25: a queued finalize cannot fallback after purge raises its fence."""

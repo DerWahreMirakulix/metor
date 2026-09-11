@@ -4,6 +4,9 @@ import hashlib
 import hmac
 import json
 import os
+import stat
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -14,15 +17,21 @@ from metor.core.auth import (
     create_pin_verifier,
     derive_pin_verifier,
 )
+from metor.utils import Constants
 
 __all__ = [
     'PIN_SALT_BYTES',
     'PIN_VERIFIER_BYTES',
     'QuickUnlockStore',
+    'QuickUnlockStorageError',
     'build_pin_unlock_proof',
     'create_pin_verifier',
     'derive_pin_verifier',
 ]
+
+
+class QuickUnlockStorageError(ValueError):
+    """Reports malformed or insufficiently protected credential storage."""
 
 
 class QuickUnlockStore:
@@ -49,26 +58,48 @@ class QuickUnlockStore:
         Returns:
             None
         """
-        salt = bytes.fromhex(salt_hex)
-        verifier = bytes.fromhex(verifier_hex)
+        try:
+            salt = bytes.fromhex(salt_hex)
+            verifier = bytes.fromhex(verifier_hex)
+        except ValueError as exc:
+            raise QuickUnlockStorageError(
+                'Invalid quick-unlock verifier encoding.'
+            ) from exc
         if len(salt) != PIN_SALT_BYTES or len(verifier) != PIN_VERIFIER_BYTES:
-            raise ValueError('Invalid quick-unlock verifier material.')
-        self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        temp = self._path.with_suffix('.tmp')
-        with temp.open('w', encoding='utf-8') as handle:
-            json.dump(
-                {'version': 1, 'salt': salt_hex, 'verifier': verifier_hex}, handle
-            )
-            handle.flush()
-            os.fsync(handle.fileno())
-        temp.chmod(0o600)
-        temp.replace(self._path)
-        if os.name != 'nt':
-            directory_fd = os.open(self._path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
+            raise QuickUnlockStorageError('Invalid quick-unlock verifier material.')
+        self._prepare_private_parent()
+        descriptor, temp_name = tempfile.mkstemp(
+            prefix=f'.{self._path.name}.',
+            suffix='.tmp',
+            dir=self._path.parent,
+            text=True,
+        )
+        temp_path = Path(temp_name)
+        try:
+            if os.name == 'nt':
+                self._protect_windows_path(temp_path, directory=False)
+            else:
+                os.fchmod(descriptor, stat.S_IRUSR | stat.S_IWUSR)
+            with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
+                descriptor = -1
+                json.dump(
+                    {'version': 1, 'salt': salt_hex, 'verifier': verifier_hex},
+                    handle,
+                    separators=(',', ':'),
+                )
+                handle.flush()
+                os.fsync(handle.fileno())
+            temp_path.replace(self._path)
+            self._validate_protection(self._path, directory=False)
+            self._sync_parent()
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise QuickUnlockStorageError(
+                'Could not persist a protected quick-unlock credential.'
+            ) from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+            temp_path.unlink(missing_ok=True)
 
     def remove(self) -> None:
         """Removes configured quick-unlock verifier material.
@@ -79,7 +110,13 @@ class QuickUnlockStore:
         Returns:
             None
         """
-        self._path.unlink(missing_ok=True)
+        try:
+            self._path.unlink(missing_ok=True)
+            self._sync_parent()
+        except OSError as exc:
+            raise QuickUnlockStorageError(
+                'Could not remove the quick-unlock credential.'
+            ) from exc
 
     def metadata(self) -> Optional[tuple[str, bytes]]:
         """Loads strict verifier metadata when configured.
@@ -92,22 +129,46 @@ class QuickUnlockStore:
         """
         if not self._path.exists():
             return None
-        with self._path.open('r', encoding='utf-8') as handle:
-            data = json.load(handle)
-        if not isinstance(data, dict) or set(data) != {'version', 'salt', 'verifier'}:
-            return None
-        if data.get('version') != 1:
-            return None
+        self._validate_protection(self._path.parent, directory=True)
+        self._validate_protection(self._path, directory=False)
         try:
-            salt = str(data['salt'])
-            verifier = bytes.fromhex(str(data['verifier']))
+            if self._path.stat().st_size > Constants.QUICK_UNLOCK_METADATA_MAX_BYTES:
+                raise QuickUnlockStorageError(
+                    'Quick-unlock credential metadata exceeds its size limit.'
+                )
+            with self._path.open('rb') as handle:
+                payload = handle.read(Constants.QUICK_UNLOCK_METADATA_MAX_BYTES + 1)
+            if len(payload) > Constants.QUICK_UNLOCK_METADATA_MAX_BYTES:
+                raise QuickUnlockStorageError(
+                    'Quick-unlock credential metadata exceeds its size limit.'
+                )
+            data = json.loads(payload.decode('utf-8'))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise QuickUnlockStorageError(
+                'Quick-unlock credential metadata is unreadable or malformed.'
+            ) from exc
+        if not isinstance(data, dict) or set(data) != {'version', 'salt', 'verifier'}:
+            raise QuickUnlockStorageError('Invalid quick-unlock credential shape.')
+        if data.get('version') != 1:
+            raise QuickUnlockStorageError(
+                'Unsupported quick-unlock credential version.'
+            )
+        try:
+            if not isinstance(data['salt'], str) or not isinstance(
+                data['verifier'], str
+            ):
+                raise ValueError('Credential fields must be hexadecimal strings.')
+            salt = data['salt']
+            verifier = bytes.fromhex(data['verifier'])
             if (
                 len(bytes.fromhex(salt)) != PIN_SALT_BYTES
                 or len(verifier) != PIN_VERIFIER_BYTES
             ):
-                return None
-        except ValueError:
-            return None
+                raise ValueError('Credential field length is invalid.')
+        except ValueError as exc:
+            raise QuickUnlockStorageError(
+                'Invalid quick-unlock credential material.'
+            ) from exc
         return salt, verifier
 
     def verify(self, challenge_hex: str, proof: str) -> bool:
@@ -120,7 +181,10 @@ class QuickUnlockStore:
         Returns:
             bool: True only for configured matching verifier material.
         """
-        metadata = self.metadata()
+        try:
+            metadata = self.metadata()
+        except QuickUnlockStorageError:
+            return False
         if metadata is None:
             return False
         try:
@@ -130,3 +194,181 @@ class QuickUnlockStore:
         except ValueError:
             return False
         return hmac.compare_digest(expected, proof)
+
+    def _prepare_private_parent(self) -> None:
+        """Creates and validates the immediate credential directory.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        try:
+            self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if os.name == 'nt':
+                self._protect_windows_path(self._path.parent, directory=True)
+            self._validate_protection(self._path.parent, directory=True)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise QuickUnlockStorageError(
+                'Quick-unlock credential directory is not private.'
+            ) from exc
+
+    @staticmethod
+    def _protect_windows_path(path: Path, *, directory: bool) -> None:
+        """Replaces Windows ACLs with exact current-user and SYSTEM access.
+
+        Args:
+            path (Path): File or directory to protect.
+            directory (bool): Whether child inheritance is required.
+
+        Returns:
+            None
+        """
+        inheritance = (
+            '[System.Security.AccessControl.InheritanceFlags]::ContainerInherit '
+            '-bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit'
+            if directory
+            else '[System.Security.AccessControl.InheritanceFlags]::None'
+        )
+        script = (
+            'param([string]$Target); '
+            '$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; '
+            '$system=New-Object System.Security.Principal.SecurityIdentifier('
+            "'S-1-5-18'); "
+            + (
+                '$acl=New-Object System.Security.AccessControl.DirectorySecurity; '
+                if directory
+                else '$acl=New-Object System.Security.AccessControl.FileSecurity; '
+            )
+            + '$acl.SetOwner($sid); $acl.SetAccessRuleProtection($true,$false); '
+            f'$inherit={inheritance}; '
+            '$prop=[System.Security.AccessControl.PropagationFlags]::None; '
+            '$rights=[System.Security.AccessControl.FileSystemRights]::FullControl; '
+            '$allow=[System.Security.AccessControl.AccessControlType]::Allow; '
+            '$acl.AddAccessRule((New-Object System.Security.AccessControl.'
+            'FileSystemAccessRule($sid,$rights,$inherit,$prop,$allow))); '
+            '$acl.AddAccessRule((New-Object System.Security.AccessControl.'
+            'FileSystemAccessRule($system,$rights,$inherit,$prop,$allow))); '
+            'Set-Acl -LiteralPath $Target -AclObject $acl -ErrorAction Stop'
+        )
+        completed = subprocess.run(
+            [
+                'powershell.exe',
+                '-NoProfile',
+                '-NonInteractive',
+                '-Command',
+                script,
+                '-Target',
+                str(path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            raise QuickUnlockStorageError(
+                'Windows ACL protection could not be established.'
+            )
+
+    @staticmethod
+    def _validate_windows_acl(path: Path) -> None:
+        """Verifies effective trustees after the ACL replacement."""
+        script = (
+            'param([string]$Target); '
+            '$current=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; '
+            '$acl=Get-Acl -LiteralPath $Target -ErrorAction Stop; '
+            '$rules=@($acl.Access | ForEach-Object { [pscustomobject]@{ '
+            'Sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value; '
+            'Inherited=$_.IsInherited; Type=$_.AccessControlType.ToString(); '
+            'Rights=$_.FileSystemRights.ToString() } }); '
+            '[pscustomobject]@{ Protected=$acl.AreAccessRulesProtected; '
+            'Current=$current; Rules=$rules } | ConvertTo-Json -Compress -Depth 4'
+        )
+        completed = subprocess.run(
+            [
+                'powershell.exe',
+                '-NoProfile',
+                '-NonInteractive',
+                '-Command',
+                script,
+                '-Target',
+                str(path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            raise QuickUnlockStorageError('Windows ACL protection is unreadable.')
+        try:
+            result = json.loads(completed.stdout)
+            current = result['Current']
+            rules = result['Rules']
+            if isinstance(rules, dict):
+                rules = [rules]
+            if (
+                result.get('Protected') is not True
+                or not isinstance(current, str)
+                or not isinstance(rules, list)
+                or len(rules) != 2
+            ):
+                raise ValueError
+            expected = {current, 'S-1-5-18'}
+            actual = {rule.get('Sid') for rule in rules if isinstance(rule, dict)}
+            if actual != expected or any(
+                not isinstance(rule, dict)
+                or rule.get('Inherited') is not False
+                or rule.get('Type') != 'Allow'
+                or 'FullControl' not in str(rule.get('Rights'))
+                for rule in rules
+            ):
+                raise ValueError
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise QuickUnlockStorageError(
+                'Windows ACL protection is not private.'
+            ) from exc
+
+    @staticmethod
+    def _validate_protection(path: Path, *, directory: bool) -> None:
+        """Validates the supported platform's credential protection boundary.
+
+        Args:
+            path (Path): Protected file or directory.
+            directory (bool): Whether the target must be a directory.
+
+        Returns:
+            None
+        """
+        if path.is_symlink():
+            raise QuickUnlockStorageError('Credential paths must not be symlinks.')
+        if directory != path.is_dir():
+            raise QuickUnlockStorageError('Credential path type is invalid.')
+        if os.name == 'nt':
+            QuickUnlockStore._validate_windows_acl(path)
+            return
+        status = path.stat(follow_symlinks=False)
+        if status.st_uid != os.getuid():
+            raise QuickUnlockStorageError('Credential path has an unsafe owner.')
+        forbidden = stat.S_IRWXG | stat.S_IRWXO
+        if status.st_mode & forbidden:
+            raise QuickUnlockStorageError(
+                'Credential path permissions are not private.'
+            )
+
+    def _sync_parent(self) -> None:
+        """Persists directory metadata on platforms supporting directory fsync.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if os.name == 'nt' or not self._path.parent.exists():
+            return
+        directory_fd = os.open(self._path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)

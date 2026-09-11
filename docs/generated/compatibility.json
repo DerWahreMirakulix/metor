@@ -777,6 +777,9 @@
         "init": {
           "$ref": "#/definitions/InitCommand"
         },
+        "list_retained_messages": {
+          "$ref": "#/definitions/ListRetainedMessagesCommand"
+        },
         "lock": {
           "$ref": "#/definitions/LockCommand"
         },
@@ -4184,7 +4187,11 @@
                 "ambiguous_identity",
                 "not_finalized",
                 "invalid_range",
-                "unsupported_content"
+                "unsupported_content",
+                "media_limit",
+                "malformed_chunk",
+                "stale_capture",
+                "persistence_failed"
               ],
               "type": "string"
             },
@@ -5567,6 +5574,73 @@
           "title": "IpcClientLimitReachedEvent",
           "type": "object"
         },
+        "ListRetainedMessagesCommand": {
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "delivery": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "live",
+                    "drop"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "direction": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "in",
+                    "out"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "limit": {
+              "type": "integer"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "ListRetainedMessagesCommand",
+          "type": "object"
+        },
         "LiveContextDismissRejectedEvent": {
           "properties": {
             "alias": {
@@ -5608,7 +5682,11 @@
                 "ambiguous_identity",
                 "not_finalized",
                 "invalid_range",
-                "unsupported_content"
+                "unsupported_content",
+                "media_limit",
+                "malformed_chunk",
+                "stale_capture",
+                "persistence_failed"
               ],
               "type": "string"
             },
@@ -5745,7 +5823,11 @@
                 "ambiguous_identity",
                 "not_finalized",
                 "invalid_range",
-                "unsupported_content"
+                "unsupported_content",
+                "media_limit",
+                "malformed_chunk",
+                "stale_capture",
+                "persistence_failed"
               ],
               "type": "string"
             },
@@ -5822,7 +5904,11 @@
                 "ambiguous_identity",
                 "not_finalized",
                 "invalid_range",
-                "unsupported_content"
+                "unsupported_content",
+                "media_limit",
+                "malformed_chunk",
+                "stale_capture",
+                "persistence_failed"
               ],
               "type": "string"
             },
@@ -6035,7 +6121,11 @@
                 "ambiguous_identity",
                 "not_finalized",
                 "invalid_range",
-                "unsupported_content"
+                "unsupported_content",
+                "media_limit",
+                "malformed_chunk",
+                "stale_capture",
+                "persistence_failed"
               ],
               "type": "string"
             },
@@ -7976,6 +8066,104 @@
             }
           },
           "title": "RestrictClientCommand",
+          "type": "object"
+        },
+        "RetainedMessagesEvent": {
+          "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "inventory_version": {
+              "type": "string"
+            },
+            "messages": {
+              "items": {},
+              "type": "array"
+            },
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "RetainedMessagesEvent",
+          "type": "object"
+        },
+        "RetainedMessagesUnavailableEvent": {
+          "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "retryable": {
+              "type": "boolean"
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "title": "RetainedMessagesUnavailableEvent",
           "type": "object"
         },
         "RetunnelCommand": {
@@ -10000,7 +10188,11 @@
                 "ambiguous_identity",
                 "not_finalized",
                 "invalid_range",
-                "unsupported_content"
+                "unsupported_content",
+                "media_limit",
+                "malformed_chunk",
+                "stale_capture",
+                "persistence_failed"
               ],
               "type": "string"
             },
@@ -10155,7 +10347,11 @@
                     "ambiguous_identity",
                     "not_finalized",
                     "invalid_range",
-                    "unsupported_content"
+                    "unsupported_content",
+                    "media_limit",
+                    "malformed_chunk",
+                    "stale_capture",
+                    "persistence_failed"
                   ],
                   "type": "string"
                 },
@@ -10667,6 +10863,12 @@
         },
         "rename_success": {
           "$ref": "#/definitions/RenameSuccessEvent"
+        },
+        "retained_messages": {
+          "$ref": "#/definitions/RetainedMessagesEvent"
+        },
+        "retained_messages_unavailable": {
+          "$ref": "#/definitions/RetainedMessagesUnavailableEvent"
         },
         "retunnel_failed": {
           "$ref": "#/definitions/RetunnelFailedEvent"

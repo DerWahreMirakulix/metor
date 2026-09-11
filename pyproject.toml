@@ -4,21 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "metor"
-dynamic = ["version"]
+dynamic = ["version", "dependencies"]
 description = "A Tor Messenger Framework."
 readme = "README.md"
 authors = [{ name = "LuRex" }]
 requires-python = ">=3.11"
 license = { text = "GPLv3" }
-dependencies = [
-    "stem==1.8.2",
-    "PySocks==1.7.1",
-    "pynacl==1.6.2",
-    "psutil==7.2.2",
-    "python-dotenv==1.2.2",
-    "sqlcipher3-binary==0.6.0; platform_system == 'Linux'",
-    "sqlcipher3==0.6.2; platform_system != 'Linux'",
-]
 
 [project.optional-dependencies]
 dev = ["ruff==0.15.8", "mypy==1.19.1"]
@@ -29,7 +20,15 @@ metor-daemon = "metor.daemon_main:main"
 
 [tool.setuptools]
 include-package-data = true
-py-modules = ["metor.versioning"]
+py-modules = [
+    "metor.__main__",
+    "metor.main",
+    "metor.daemon_main",
+    "metor.core.key",
+    "metor.core.profile_destruction",
+    "metor.core.profile_keys",
+    "metor.core.tor",
+]
 
 [tool.setuptools.dynamic]
 version = { attr = "metor.versioning.APP_VERSION" }
@@ -39,7 +38,18 @@ version = { attr = "metor.versioning.APP_VERSION" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["metor*"]
+include = [
+    "metor.application",
+    "metor.application.*",
+    "metor.cli",
+    "metor.cli.*",
+    "metor.core.daemon",
+    "metor.core.daemon.*",
+    "metor.data",
+    "metor.data.*",
+    "metor.utils",
+    "metor.utils.*",
+]
 
 [tool.ruff]
 line-length = 88

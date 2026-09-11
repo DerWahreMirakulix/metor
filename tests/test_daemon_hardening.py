@@ -30,6 +30,7 @@ from metor.core.api import (
     EventType,
     FallbackSuccessEvent,
     GetChatStartupStateCommand,
+    GetRuntimeSnapshotCommand,
     InitCommand,
     IpcEvent,
     RuntimeErrorCode,
@@ -98,7 +99,7 @@ from metor.data import (
 from metor.client import IpcClient
 from metor.data.profile import ProfileManager
 from metor.data.profile.config import Config
-from metor.ui.terminal.cli.handlers import CommandHandlers
+from metor.cli.handlers import CommandHandlers
 from metor.ui.terminal.theme import Theme
 from metor.utils import Constants
 from metor.versioning import (
@@ -2343,6 +2344,32 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(client.payloads, [b'{"event_type": "test"}\n'])
         self.assertFalse(client.lock_was_held)
 
+    def test_delayed_ipc_writer_preserves_revision_order(self) -> None:
+        """R2-T23: publication order remains FIFO after asynchronous enqueue."""
+        server = IpcServer(
+            cast(ProfileManager, _DummyProfileManager()),
+            lambda _cmd, _conn: None,
+        )
+        daemon_side, client_side = socket.socketpair()
+        client_side.settimeout(1.0)
+        try:
+            first = create_event(EventType.INTERNAL_ERROR)
+            second = create_event(EventType.RUNTIME_STATE_CHANGED, {'scope': 'test'})
+            server.send_to(daemon_side, first)
+            server.send_to(daemon_side, second)
+            payload = b''
+            while payload.count(b'\n') < 2:
+                payload += client_side.recv(Constants.TCP_BUFFER_SIZE)
+            decoded = [
+                IpcEvent.from_dict(json.loads(line))
+                for line in payload.decode('utf-8').splitlines()
+            ]
+            self.assertEqual([event.revision for event in decoded], [1, 2])
+            self.assertEqual(decoded[0].epoch, decoded[1].epoch)
+        finally:
+            server.stop()
+            client_side.close()
+
     def test_daemon_broadcast_targets_only_authenticated_clients(self) -> None:
         """
         Verifies that daemon broadcast targets only authenticated clients.
@@ -2565,7 +2592,7 @@ class DaemonHardeningTests(unittest.TestCase):
             thread_cls.assert_not_called()
             daemon._ipc.send_to.assert_called_once()
             sent_event = daemon._ipc.send_to.call_args.args[1]
-            self.assertIs(sent_event.event_type, EventType.DAEMON_LOCKED)
+            self.assertIs(sent_event.event_type, EventType.AUTH_REQUIRED)
         finally:
             conn.close()
             peer.close()
@@ -2591,7 +2618,7 @@ class DaemonHardeningTests(unittest.TestCase):
 
             thread.assert_not_called()
             sent_event = daemon._ipc.send_to.call_args.args[1]
-            self.assertIs(sent_event.event_type, EventType.DAEMON_LOCKED)
+            self.assertIs(sent_event.event_type, EventType.AUTH_REQUIRED)
         finally:
             conn.close()
             peer.close()
@@ -2660,6 +2687,54 @@ class DaemonHardeningTests(unittest.TestCase):
             daemon._ipc.send_to.assert_called_once()
             sent_event = daemon._ipc.send_to.call_args.args[1]
             self.assertIs(sent_event.event_type, EventType.AUTH_REQUIRED)
+        finally:
+            conn.close()
+            peer.close()
+
+    def test_self_destruct_dispatch_survives_abort_and_notification_failures(
+        self,
+    ) -> None:
+        """R2-T08/T09: accepted purge reaches key destruction exactly once."""
+        daemon = self._build_daemon()
+        daemon._ipc = Mock()
+        daemon._ipc.send_to.side_effect = OSError('notification failed')
+        daemon._ipc.broadcast.side_effect = OSError('broadcast failed')
+        daemon.stop = Mock()
+        network = Mock()
+        network.abort_all.side_effect = OSError('abort failed')
+        daemon._network = network
+        key_destruction = Mock()
+
+        def destroy(_pm: object, **kwargs: Any) -> None:
+            try:
+                kwargs['prepare_runtime']()
+            except Exception:
+                pass
+            key_destruction()
+            kwargs['key_destroyed_callback']()
+
+        conn, peer = socket.socketpair()
+        try:
+            daemon._session_access.mark_authenticated(conn)
+            with (
+                patch(
+                    'metor.core.daemon.managed.engine.lifecycle.destroy_profile_storage',
+                    side_effect=destroy,
+                ),
+                patch(
+                    'metor.core.daemon.managed.engine.daemon.threading.Thread',
+                    side_effect=lambda **kwargs: _ImmediateListenerThread(
+                        kwargs['target']
+                    ),
+                ) as thread_cls,
+            ):
+                daemon._process_ui_command(SelfDestructCommand(), conn)
+                daemon._process_ui_command(SelfDestructCommand(), conn)
+
+            self.assertTrue(daemon._purge_fence.is_set())
+            network.abort_all.assert_called_with()
+            key_destruction.assert_called_once_with()
+            thread_cls.assert_called_once_with(target=daemon._nuke_data, daemon=True)
         finally:
             conn.close()
             peer.close()
@@ -6900,6 +6975,57 @@ class DaemonHardeningTests(unittest.TestCase):
         finally:
             conn.close()
             peer.close()
+
+    def test_blocked_writer_does_not_stall_actual_daemon_command_dispatch(
+        self,
+    ) -> None:
+        """R2-T10: a stalled session cannot hold the canonical dispatch lock."""
+        daemon = self._build_daemon()
+        daemon._ipc.stop()
+        daemon._ipc = IpcServer(
+            cast(ProfileManager, _DummyProfileManager()),
+            daemon._process_ui_command,
+        )
+        stalled_server, stalled_client = socket.socketpair()
+        active_server, active_client = socket.socketpair()
+        active_client.settimeout(1.0)
+        stalled_server.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+        daemon._ipc._clients = [stalled_server, active_server]
+        daemon._ipc._enqueue_client_frame(stalled_server, b'x' * (2 * 1024 * 1024))
+
+        network_handler = Mock()
+
+        def answer(cmd: object, conn: socket.socket) -> None:
+            daemon._ipc.send_to(
+                conn,
+                AckEvent(msg_id=type(cmd).__name__),
+            )
+
+        network_handler.handle.side_effect = answer
+        daemon._command_dispatcher._network_handler = network_handler
+        try:
+            daemon._process_ui_command(
+                SendMessageCommand(
+                    'peer-b', Delivery.LIVE, TextContent('responsive'), 'text-b'
+                ),
+                active_server,
+            )
+            daemon._process_ui_command(GetRuntimeSnapshotCommand(), active_server)
+            payload = b''
+            while payload.count(b'\n') < 2:
+                payload += active_client.recv(Constants.TCP_BUFFER_SIZE)
+            events = [
+                IpcEvent.from_dict(json.loads(line))
+                for line in payload.decode('utf-8').splitlines()
+            ]
+            self.assertEqual(
+                [cast(AckEvent, event).msg_id for event in events],
+                ['SendMessageCommand', 'GetRuntimeSnapshotCommand'],
+            )
+        finally:
+            daemon._ipc.stop()
+            stalled_client.close()
+            active_client.close()
 
 
 if __name__ == '__main__':

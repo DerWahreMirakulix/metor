@@ -1,6 +1,5 @@
 """High-level endpoint-based reference client for interacting with a Metor daemon."""
 
-import socket
 from typing import Callable, Optional, Type, TypeVar
 
 from metor.client.auth import (
@@ -21,6 +20,7 @@ from metor.core.api import (
     IpcCommand,
     IpcEvent,
     LockCommand,
+    ListRetainedMessagesCommand,
     GetRuntimeSnapshotCommand,
     GetVoiceChunkCommand,
     FinalizeVoiceCommand,
@@ -32,6 +32,7 @@ from metor.core.api import (
     SendMessageCommand,
     RuntimeSnapshotEvent,
     RuntimeSnapshotUnavailableEvent,
+    RetainedMessagesEvent,
     MessageDirectionCode,
     TextContent,
     VoiceCancelledEvent,
@@ -44,7 +45,7 @@ from metor.core.api import (
     VoiceStartedEvent,
     ensure_request_id,
 )
-from metor.utils.constants import Constants
+from metor.shared.constants import Constants
 from metor.versioning import (
     APP_VERSION,
     IPC_PROTOCOL_MIN_SUPPORTED,
@@ -275,6 +276,27 @@ class MetorClient:
         """Returns the authoritative aggregate snapshot for the active runtime."""
         return self.request(GetRuntimeSnapshotCommand(), RuntimeSnapshotEvent)
 
+    def list_retained_messages(
+        self,
+        *,
+        target: Optional[str] = None,
+        delivery: Optional[Delivery] = None,
+        direction: Optional[MessageDirectionCode] = None,
+        cursor: Optional[str] = None,
+        limit: int = Constants.DEFAULT_RETAINED_PAGE_SIZE,
+    ) -> Optional[RetainedMessagesEvent]:
+        """Discovers retained identities without reading or consuming content."""
+        return self.request(
+            ListRetainedMessagesCommand(
+                target=target,
+                delivery=delivery,
+                direction=direction,
+                cursor=cursor,
+                limit=limit,
+            ),
+            RetainedMessagesEvent,
+        )
+
     def prepare_profile_exit(self) -> bool:
         """Runs the normal reliability-preserving profile exit phase."""
         return (
@@ -304,10 +326,7 @@ class MetorClient:
             auth_exchange: IpcAuthExchange = self._create_auth_exchange(request_id)
 
             while True:
-                try:
-                    event: Optional[IpcEvent] = self._ipc.wait_for_response(request_id)
-                except (socket.timeout, OSError, ValueError):
-                    return None
+                event: Optional[IpcEvent] = self._ipc.wait_for_response(request_id)
 
                 if event is None:
                     return None

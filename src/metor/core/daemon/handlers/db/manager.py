@@ -14,6 +14,7 @@ from metor.core.api import (
     GetHistoryCommand,
     GetInboxCommand,
     GetMessagesCommand,
+    ListRetainedMessagesCommand,
     GetRawHistoryCommand,
     IpcCommand,
     IpcEvent,
@@ -122,6 +123,9 @@ class DatabaseCommandHandler(
 
         if isinstance(cmd, GetMessagesCommand):
             return self._handle_get_messages(cmd)
+
+        if isinstance(cmd, ListRetainedMessagesCommand):
+            return self._handle_list_retained_messages(cmd)
 
         if isinstance(cmd, ClearMessagesCommand):
             return self._handle_clear_messages(cmd)

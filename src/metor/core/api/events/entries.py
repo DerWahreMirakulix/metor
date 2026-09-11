@@ -5,7 +5,9 @@ from enum import Enum
 from typing import Optional, TypeVar
 
 from metor.core.api.codes import (
+    ConnectionActor,
     ConnectionOrigin,
+    ConnectionReasonCode,
     MessageDirectionCode,
     MessageStatusCode,
     PendingConnectionReasonCode,
@@ -82,6 +84,37 @@ class MessageEntry:
 
 
 @dataclass
+class RetainedMessageEntry:
+    """Identifies one retained item without exposing its content or storage path."""
+
+    onion: str
+    alias: str
+    direction: MessageDirectionCode
+    delivery: Delivery
+    status: MessageStatusCode
+    content_type: ContentType
+    msg_id: str
+    finalized: bool
+    size_bytes: int = 0
+    codec: Optional[str] = None
+    duration_ms: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        """Coerces serialized enum fields into their typed representations.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self.direction = _coerce_enum(MessageDirectionCode, self.direction)
+        self.delivery = _coerce_enum(Delivery, self.delivery)
+        self.status = _coerce_enum(MessageStatusCode, self.status)
+        self.content_type = _coerce_enum(ContentType, self.content_type)
+
+
+@dataclass
 class UnreadMessageEntry:
     """Represents one unread message awaiting explicit consume."""
 
@@ -141,7 +174,18 @@ class LiveContextEntry:
     session_state: str
     unseen_count: int = 0
     pending_outbound_count: int = 0
-    disconnect_reason: Optional[str] = None
+    recovery_eligible: bool = False
+    disconnect_actor: Optional[ConnectionActor] = None
+    disconnect_reason: Optional[ConnectionReasonCode] = None
+
+    def __post_init__(self) -> None:
+        """Coerces optional disconnect fields to their public enums."""
+        if self.disconnect_actor is not None:
+            self.disconnect_actor = _coerce_enum(ConnectionActor, self.disconnect_actor)
+        if self.disconnect_reason is not None:
+            self.disconnect_reason = _coerce_enum(
+                ConnectionReasonCode, self.disconnect_reason
+            )
 
 
 @dataclass

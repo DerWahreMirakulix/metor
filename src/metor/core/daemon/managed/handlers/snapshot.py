@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import hashlib
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from metor.core.api import (
     ChatStartupStateEvent,
@@ -27,13 +27,22 @@ from metor.core.daemon.managed.network.state import PendingConnectionSnapshot
 from metor.data import SettingKey
 from metor.utils import Constants
 
+if TYPE_CHECKING:
+    from metor.core.tor import TorManager
+    from metor.core.daemon.managed.network import NetworkManager
+    from metor.data import ContactManager, MessageManager
+    from metor.data.profile import Config
+
 
 class RuntimeSnapshotProjectionMixin:
     """Builds race-validated aggregate and transport state projections."""
 
-    def __getattr__(self, name: str) -> Any:
-        """Defers typed collaborator attributes to the composed handler."""
-        raise AttributeError(name)
+    _tm: 'TorManager'
+    _cm: 'ContactManager'
+    _mm: 'MessageManager'
+    _network: 'NetworkManager'
+    _config: 'Config'
+    _current_revision: Callable[[], int]
 
     @staticmethod
     def _format_pending_expiry(expires_at: Optional[float]) -> Optional[str]:
@@ -142,8 +151,12 @@ class RuntimeSnapshotProjectionMixin:
         """
         for _ in range(Constants.RUNTIME_SNAPSHOT_MAX_RETRIES):
             revision = self._current_revision()
+            state_token = self._network.get_snapshot_token()
             snapshot = self._compose_runtime_snapshot()
-            if self._current_revision() == revision:
+            if (
+                self._current_revision() == revision
+                and self._network.get_snapshot_token() == state_token
+            ):
                 snapshot.revision = revision
                 return snapshot
         return create_event(
@@ -187,19 +200,27 @@ class RuntimeSnapshotProjectionMixin:
         for onion in sorted(relevant_onions):
             summary = unread_by_onion.get(onion)
             disconnect_reason = self._network.get_last_disconnect_reason(onion)
+            disconnect_actor = self._network.get_last_disconnect_actor(onion)
+            session_state = self._network.get_live_state(onion)
             live_contexts.append(
                 LiveContextEntry(
                     alias=self._cm.ensure_alias_for_onion(onion) or onion,
                     onion=onion,
                     saved=onion in saved_onions,
-                    session_state=self._network.get_live_state(onion).value,
+                    session_state=session_state.value,
                     unseen_count=summary.live_unread if summary else 0,
                     pending_outbound_count=len(self._mm.get_pending_live_outbox(onion)),
-                    disconnect_reason=(
-                        disconnect_reason.value
-                        if disconnect_reason is not None
-                        else None
-                    ),
+                    recovery_eligible=session_state
+                    in {
+                        SessionState.CONNECTED,
+                        SessionState.CONNECTING,
+                        SessionState.PENDING,
+                        SessionState.RETUNNELING,
+                        SessionState.RECONNECT_GRACE,
+                        SessionState.RECONNECT_SCHEDULED,
+                    },
+                    disconnect_actor=disconnect_actor,
+                    disconnect_reason=disconnect_reason,
                 )
             )
         return RuntimeSnapshotEvent(

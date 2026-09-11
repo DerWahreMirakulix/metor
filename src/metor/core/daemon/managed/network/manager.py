@@ -8,6 +8,7 @@ import threading
 from typing import Dict, List, Callable, Optional, Tuple, TYPE_CHECKING
 
 from metor.core.api import (
+    ConnectionActor,
     ConnectionOrigin,
     ConnectionReasonCode,
     Delivery,
@@ -528,6 +529,14 @@ class NetworkManager:
     def get_last_disconnect_reason(self, onion: str) -> Optional[ConnectionReasonCode]:
         """Returns the last machine-readable disconnect reason for snapshots."""
         return self._state.get_last_disconnect_reason(onion)
+
+    def get_last_disconnect_actor(self, onion: str) -> Optional[ConnectionActor]:
+        """Returns the last machine-readable disconnect actor for snapshots."""
+        return self._state.get_last_disconnect_actor(onion)
+
+    def get_snapshot_token(self) -> Tuple[object, ...]:
+        """Returns an atomic fingerprint used to reject torn projections."""
+        return self._state.snapshot_token()
 
     def get_drop_tunnel_state(self, onion: str) -> Optional[TunnelState]:
         """

@@ -63,6 +63,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [GetTransportStateCommand](#gettransportstatecommand)
 - [GetVoiceChunkCommand](#getvoicechunkcommand)
 - [InitCommand](#initcommand)
+- [ListRetainedMessagesCommand](#listretainedmessagescommand)
 - [LockCommand](#lockcommand)
 - [MarkReadCommand](#markreadcommand)
 - [MigrateProfileSecurityCommand](#migrateprofilesecuritycommand)
@@ -197,6 +198,8 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [QuickUnlockFailedEvent](#quickunlockfailedevent)
 - [ReadReceiptEvent](#readreceiptevent)
 - [RenameSuccessEvent](#renamesuccessevent)
+- [RetainedMessagesEvent](#retainedmessagesevent)
+- [RetainedMessagesUnavailableEvent](#retainedmessagesunavailableevent)
 - [RetunnelFailedEvent](#retunnelfailedevent)
 - [RetunnelInitiatedEvent](#retunnelinitiatedevent)
 - [RetunnelSuccessEvent](#retunnelsuccessevent)
@@ -1075,6 +1078,31 @@ Requests initialization and advertises the client IPC support range.
   "command_type": "init",
   "current_version": 0,
   "min_supported": 0
+}
+```
+
+---
+
+### `ListRetainedMessagesCommand`
+
+Enumerates retained message identities without reading or consuming content.
+
+| Field        | Type                                         | Default |
+| ------------ | -------------------------------------------- | ------- |
+| `request_id` | `Union[str, None]`                           | `None`  |
+| `target`     | `Union[str, None]`                           | `None`  |
+| `delivery`   | `Union[<enum 'Delivery'>, None]`             | `None`  |
+| `direction`  | `Union[<enum 'MessageDirectionCode'>, None]` | `None`  |
+| `cursor`     | `Union[str, None]`                           | `None`  |
+| `limit`      | `int`                                        | `50`    |
+
+**Wire Value:** `list_retained_messages`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "list_retained_messages"
 }
 ```
 
@@ -4361,6 +4389,56 @@ Synchronizes a peer alias rename across UIs.
   "event_type": "rename_success",
   "old_alias": "string",
   "new_alias": "string"
+}
+```
+
+---
+
+### `RetainedMessagesEvent`
+
+Returns one stable page of non-consuming retained-item descriptors.
+
+| Field               | Type                         | Default     |
+| ------------------- | ---------------------------- | ----------- |
+| `request_id`        | `Union[str, None]`           | `None`      |
+| `revision`          | `Union[int, None]`           | `None`      |
+| `epoch`             | `Union[str, None]`           | `None`      |
+| `messages`          | `List[RetainedMessageEntry]` | `Factory()` |
+| `next_cursor`       | `Union[str, None]`           | `None`      |
+| `inventory_version` | `str`                        | `0`         |
+
+**Wire Value:** `retained_messages`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "retained_messages"
+}
+```
+
+---
+
+### `RetainedMessagesUnavailableEvent`
+
+Rejects an invalid or no-longer-consistent inventory cursor.
+
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
+| `reason`     | `str`              | Required |
+| `retryable`  | `bool`             | `True`   |
+
+**Wire Value:** `retained_messages_unavailable`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "retained_messages_unavailable",
+  "reason": "string"
 }
 ```
 

@@ -80,6 +80,31 @@ class VoicePayloadRecord:
     status: str
 
 
+@dataclass(frozen=True)
+class RetainedMessageRecord:
+    """Content-free descriptor for one durably retained logical message."""
+
+    peer_onion: str
+    direction: MessageDirection
+    delivery: str
+    content_type: str
+    msg_id: str
+    status: str
+    finalized: bool
+    retained_bytes: int
+    codec: Optional[str] = None
+    duration_ms: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class RetainedMessagePage:
+    """One stable page of retained-message descriptors."""
+
+    messages: list[RetainedMessageRecord]
+    next_cursor: Optional[str]
+    inventory_version: str
+
+
 class MessageDeleteOutcome(str, Enum):
     """Domain outcomes for local single-message deletion."""
 

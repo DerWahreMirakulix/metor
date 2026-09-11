@@ -47,6 +47,10 @@ responses, and queues unsolicited events without loss. A shared
 `RuntimeStateChangedEvent` has no request correlation and invalidates only its
 content-free scope for every authorized client. Connection and pending-request
 events are absolute keyed upserts, not counters to apply more than once.
+Snapshot composition validates both the publication revision and an atomic,
+content-free state token. Reconnect grace and scheduled reconnect are explicit
+states, distinct from terminal disconnect with a machine-readable actor and
+reason.
 
 ## Messaging contract
 
@@ -92,6 +96,13 @@ For DROP Voice, finalize creates a non-visible `DRAFT`. The frontend must issue
 or retained Voice is read only through bounded `GetVoiceChunkCommand` /
 `VoiceDataEvent` ranges. After a safe playback handoff, the client explicitly
 issues `ReleaseVoiceCommand`; reads never consume content implicitly.
+
+A newly attached frontend discovers retained identities with
+`ListRetainedMessagesCommand`. Its opaque cursor is filter-bound and tied to a
+stable inventory version; stale pages fail explicitly. Entries expose only safe
+identity/status/media metadata, never bytes, text, previews, or storage paths.
+Enumeration and range reads preserve unread/payload state. Pending outbound IDs
+also provide the public discovery path for selective fallback after restart.
 
 Peer wire generation 3 separates `/ack` (LIVE text), `/drop_ack` (DROP text),
 `/voice_ack <id> <offset>` (resumable progress), and
@@ -157,8 +168,11 @@ is disabled, pending LIVE data remains recoverable and is not auto-reconnected
 on a later return.
 
 Self-destruct is a separate emergency path. Hard-locked anonymous clients cannot
-invoke it; a previously authenticated restricted session needs the explicit
-`device_lifecycle` capability. Once accepted, it preempts Voice
+invoke it. `daemon.self_destruct_requires_unlock` defaults to `true`, so a
+restricted previously authenticated client normally reauthorizes first. When
+an operator explicitly sets it to `false`, only a restricted session with the
+frozen `device_lifecycle` capability may proceed; a new/anonymous session is
+still denied. Once accepted, it preempts Voice
 finalization, fallback, reconnect, outbox delivery, and ordinary notification
 work. Core aborts reliability workers and attempts protected-key destruction
 even if nonessential runtime preparation fails. It emits

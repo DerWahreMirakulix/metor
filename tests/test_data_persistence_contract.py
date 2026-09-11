@@ -83,6 +83,51 @@ class DataPersistenceContractTests(unittest.TestCase):
             tuple(entry.alias for entry in snapshot.discovered), ('renamed',)
         )
 
+    def test_retained_inventory_is_paginated_non_consuming_and_stale_safe(self) -> None:
+        """R2-T26: inventory pagination neither consumes nor tears across change."""
+        onion = 'f' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
+        self._cm.ensure_alias_for_onion(onion)
+        for index in range(3):
+            outcome = self._mm.queue_pending_live_if_capacity(
+                onion,
+                ContentType.TEXT,
+                f'payload-{index}',
+                f'retained-{index}',
+                f'2025-01-01T00:00:0{index}+00:00',
+                0,
+                10,
+                1024,
+            )
+            self.assertEqual(outcome.value, 'accepted')
+
+        first = self._mm.list_retained_messages(limit=2)
+        self.assertEqual(
+            [message.msg_id for message in first.messages],
+            ['retained-0', 'retained-1'],
+        )
+        self.assertIsNotNone(first.next_cursor)
+        assert first.next_cursor is not None
+        second = self._mm.list_retained_messages(cursor=first.next_cursor, limit=2)
+        self.assertEqual(
+            [message.msg_id for message in second.messages], ['retained-2']
+        )
+        self.assertEqual(len(self._mm.get_pending_live_outbox(onion)), 3)
+
+        changed = self._mm.list_retained_messages(limit=1)
+        assert changed.next_cursor is not None
+        self._mm.queue_pending_live_if_capacity(
+            onion,
+            ContentType.TEXT,
+            'new payload',
+            'retained-new',
+            '2025-01-01T00:00:04+00:00',
+            0,
+            10,
+            1024,
+        )
+        with self.assertRaises(ValueError):
+            self._mm.list_retained_messages(cursor=changed.next_cursor, limit=1)
+
     def test_promotion_keeps_the_same_discovered_peer_identity(self) -> None:
         """
         Verifies that promotion keeps the same discovered peer identity.

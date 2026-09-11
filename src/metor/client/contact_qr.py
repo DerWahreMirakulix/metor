@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Optional, cast
 
 from metor.core.api import JsonValue
-from metor.utils import decode_tor_v3_onion_public_key, ensure_onion_format
+from metor.shared.network import decode_tor_v3_onion_public_key, ensure_onion_format
 
 
 class ContactQrError(str, Enum):

@@ -19,6 +19,7 @@ from metor.data.message.models import (
     InboundDropOutcome,
     PendingLiveAdmission,
     VoicePayloadRecord,
+    RetainedMessagePage,
     UnreadInboxSummaryRecord,
 )
 from metor.data.profile import ProfileManager
@@ -203,6 +204,19 @@ class MessageManager:
     ) -> Optional[VoicePayloadRecord]:
         """Returns one exact-direction retained Voice metadata record."""
         return self._messages.get_voice_payload(contact_onion, msg_id, direction)
+
+    def list_retained_messages(
+        self,
+        contact_onion: Optional[str] = None,
+        delivery: Optional[Delivery] = None,
+        direction: Optional[MessageDirection] = None,
+        cursor: Optional[str] = None,
+        limit: int = Constants.DEFAULT_RETAINED_PAGE_SIZE,
+    ) -> RetainedMessagePage:
+        """Returns a non-consuming page of retained logical identities."""
+        return self._messages.list_retained_messages(
+            contact_onion, delivery, direction, cursor, limit
+        )
 
     def release_inbound_voice(
         self, contact_onion: str, msg_id: str

@@ -882,6 +882,45 @@ When you add a new architecture-relevant behavior:
 3. Update the generated [settings](./generated/SETTINGS.md) or [IPC API](./generated/API.md) references through their generators; [api.schema.json](./generated/api.schema.json) is generated with the API reference.
 4. Update the [audit checklist](./governance/AUDIT.md) and [contribution guide](./CONTRIBUTE.md) if the new behavior changes review or implementation rules.
 
+## CLI and frontend distribution boundary
+
+The `metor` distribution owns the general command parser, one-shot renderers,
+daemon/profile orchestration, and both `metor` and `metor-daemon` executable
+entries. It contains no interactive frontend. `metor-sdk` owns `metor.client`,
+typed `metor.core.api` DTOs, shared proof helpers, protocol/version data, and the
+versioned `FrontendLaunchContext`. `metor-ui-terminal` owns
+`metor.ui.terminal`, including slash-command definitions, the upper help panel,
+rendering and key handling. These distributions share PEP 420 namespace paths
+but never ship the same file.
+
+`metor chat` discovers metadata from the `metor.ui_frontends` entry-point group.
+Selection is explicit `--ui`, then `METOR_UI`, then `client.default_ui`. The
+base loads only the selected callable and validates its contract version before
+profile validation or daemon startup. Missing, duplicate, broken and
+incompatible frontends are explicit errors. General help and chat launcher help
+return before profile construction and never import or enumerate a UI. UI and
+daemon-autostart options are scoped to `chat`; other commands retain `--ui`
+text as ordinary user data.
+
+Peer and IPC sockets use finite per-socket FIFO writers. Canonical state locks
+cover mutation and generation assignment, never blocking socket writes. LIVE
+Text and Voice emissions carry last-moment generation claims so fallback or
+purge invalidation wins over queued stale work. Queue saturation is an explicit
+connection error and shutdown closes sockets to interrupt blocked writers.
+
+Runtime snapshots validate both the event revision and an atomic content-free
+network-state token around composition. Per-client FIFO writers stamp events
+before enqueue, so a delayed writer preserves revision order. Recovery state is
+typed as connected, connecting, pending, retunneling, reconnect grace,
+scheduled reconnect, or terminal disconnected with machine-readable actor and
+reason; receipt existence is not a recovery signal.
+
+Retained media discovery uses `ListRetainedMessagesCommand` and a stable,
+filter-bound opaque cursor. Inventory entries expose identity and safe metadata,
+never message bytes or storage paths. `GetVoiceChunkCommand` performs bounded
+non-consuming exact-identity reads; only `ReleaseVoiceCommand` consumes one
+eligible finalized inbound Voice item.
+
 ## Terminal UI Design Guidelines
 
 One convention for every CLI and chat surface. These rules are the
@@ -937,8 +976,9 @@ applied after every colored span.
 
 ### Enforcement
 
-- `UIPresenter` formatters (transport, history, data snapshots, contacts)
-  are the single source for these layouts — chat and CLI share them.
+- Each distribution owns its presentation helpers. Base CLI formatters and
+  Terminal chat renderers may follow the same conventions but do not import
+  one another.
 - The chat renderer only adds the prefix and continuation indentation; it
   does not decorate content.
 - Tests assert the convention (no leading blank line, no `---`, header

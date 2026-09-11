@@ -61,6 +61,8 @@ class SessionState(str, Enum):
     PENDING = 'pending'
     CONNECTED = 'connected'
     RETUNNELING = 'retunneling'
+    RECONNECT_GRACE = 'reconnect_grace'
+    RECONNECT_SCHEDULED = 'reconnect_scheduled'
 
 
 @dataclass(frozen=True)

@@ -45,6 +45,7 @@ class SettingKey(str, Enum):
 
     # 1. Client (paradigm-neutral)
     DEFAULT_PROFILE = 'client.default_profile'
+    DEFAULT_UI = 'client.default_ui'
     IPC_TIMEOUT = 'client.ipc_timeout'
     CHAT_DAEMON_AUTOSTART = 'client.chat_daemon_autostart'
     HISTORY_LIMIT = 'client.history_limit'
@@ -64,6 +65,7 @@ class SettingKey(str, Enum):
     ALLOW_PLAINTEXT_PROFILES = 'daemon.allow_plaintext_profiles'
     AUTO_ACCEPT_CONTACTS = 'daemon.auto_accept_contacts'
     REQUIRE_LOCAL_AUTH = 'daemon.require_local_auth'
+    SELF_DESTRUCT_REQUIRES_UNLOCK = 'daemon.self_destruct_requires_unlock'
     LOCAL_AUTH_FAILURE_LIMIT = 'daemon.local_auth_failure_limit'
     LOCAL_AUTH_LOCKOUT_TIMEOUT = 'daemon.local_auth_lockout_timeout'
     ALLOW_DROPS = 'daemon.allow_drops'
@@ -236,6 +238,15 @@ class Settings:
             allow_profile_override=False,
             allow_empty_string=False,
         ),
+        SettingKey.DEFAULT_UI: SettingSpec(
+            key=SettingKey.DEFAULT_UI,
+            default='terminal',
+            category='Client',
+            description='Selects the interactive frontend used by `metor chat`.',
+            constraints='Non-empty installed frontend identifier.',
+            allow_profile_override=False,
+            allow_empty_string=False,
+        ),
         SettingKey.IPC_TIMEOUT: SettingSpec(
             key=SettingKey.IPC_TIMEOUT,
             default=15.0,
@@ -377,6 +388,13 @@ class Settings:
             description='Requires every UI session to authenticate even when the daemon is already running.',
             constraints='Boolean.',
             security_note='Enabled by default for encrypted profiles. Disable it only on trusted single-user hosts.',
+        ),
+        SettingKey.SELF_DESTRUCT_REQUIRES_UNLOCK: SettingSpec(
+            key=SettingKey.SELF_DESTRUCT_REQUIRES_UNLOCK,
+            default=True,
+            category='Core Daemon',
+            description='Requires normal client reauthorization before a restricted device-lifecycle session may request profile destruction.',
+            constraints='Boolean. New and unauthenticated clients are always denied.',
         ),
         SettingKey.LOCAL_AUTH_FAILURE_LIMIT: SettingSpec(
             key=SettingKey.LOCAL_AUTH_FAILURE_LIMIT,
@@ -677,7 +695,7 @@ class Settings:
                     f"Invalid type for '{key.value}'. Expected str, got {type(value).__name__}."
                 )
 
-            if key is SettingKey.DEFAULT_PROFILE:
+            if key in {SettingKey.DEFAULT_PROFILE, SettingKey.DEFAULT_UI}:
                 normalized = value.strip()
             elif key is SettingKey.CHAT_DAEMON_AUTOSTART:
                 normalized = value.strip().lower()
@@ -699,7 +717,7 @@ class Settings:
                         f"Setting '{key.value}' must be a valid JSON string or empty."
                     ) from exc
 
-            if key is SettingKey.DEFAULT_PROFILE:
+            if key in {SettingKey.DEFAULT_PROFILE, SettingKey.DEFAULT_UI}:
                 safe_name: str = ''.join(
                     c for c in normalized if c.isalnum() or c in ('-', '_')
                 )
@@ -961,7 +979,11 @@ class Settings:
         Returns:
             Dict[str, Dict[str, SettingValue]]: The loaded settings dictionary partitioned by domain.
         """
-        path: Path = cls.get_global_settings_path()
+        path: Path = (
+            cls.get_global_settings_path()
+            if persist_defaults
+            else Constants.DATA / Constants.SETTINGS_FILE
+        )
         if path.exists():
             try:
                 with path.open('r', encoding='utf-8') as f:
@@ -990,17 +1012,26 @@ class Settings:
         return data
 
     @classmethod
-    def get(cls, key: SettingKey) -> Optional[SettingValue]:
+    def get(
+        cls,
+        key: SettingKey,
+        *,
+        persist_defaults: bool = True,
+    ) -> Optional[SettingValue]:
         """
         Retrieves a setting value by its strongly-typed key. Uses default if not found.
 
         Args:
             key (SettingKey): The setting key enum to retrieve.
+            persist_defaults (bool): Whether a missing settings file should be
+                created while resolving the default value.
 
         Returns:
             Optional[SettingValue]: The value of the setting, or None if completely missing.
         """
-        data: Dict[str, Dict[str, SettingValue]] = cls._load_settings()
+        data: Dict[str, Dict[str, SettingValue]] = cls._load_settings(
+            persist_defaults=persist_defaults,
+        )
         category: str
         sub_key: str
         category, sub_key = key.value.split('.', 1)
@@ -1015,17 +1046,27 @@ class Settings:
         return cls._DEFAULTS.get(key.value)
 
     @classmethod
-    def get_str(cls, key: SettingKey) -> str:
+    def get_str(
+        cls,
+        key: SettingKey,
+        *,
+        persist_defaults: bool = True,
+    ) -> str:
         """
         Retrieves a setting and guarantees a string return type.
 
         Args:
             key (SettingKey): The setting key enum.
+            persist_defaults (bool): Whether a missing settings file should be
+                created while resolving the default value.
 
         Returns:
             str: The configuration value as a string.
         """
-        val: Optional[SettingValue] = cls.get(key)
+        val: Optional[SettingValue] = cls.get(
+            key,
+            persist_defaults=persist_defaults,
+        )
         if val is not None:
             return TypeCaster.to_str(val)
 

@@ -174,6 +174,9 @@ class Daemon(DaemonLifecycleMixin):
             resolve_target_callback=self._resolve_contact_target,
             voice_target_callback=self._voice_target,
             voice_delivery_callback=self._voice_delivery,
+            self_destruct_requires_unlock_callback=lambda: self._pm.config.get_bool(
+                SettingKey.SELF_DESTRUCT_REQUIRES_UNLOCK
+            ),
         )
 
         if (
@@ -620,27 +623,29 @@ class Daemon(DaemonLifecycleMixin):
         """
         with request_context(cmd.request_id):
             if self._purge_fence.is_set():
-                self._ipc.send_to(
-                    conn,
-                    create_event(
-                        EventType.SELF_DESTRUCT_INITIATED
-                        if isinstance(cmd, SelfDestructCommand)
-                        else EventType.DAEMON_OFFLINE
-                    ),
-                )
+                if isinstance(cmd, SelfDestructCommand):
+                    self._send_self_destruct_initiated(conn)
+                else:
+                    self._ipc.send_to(conn, create_event(EventType.DAEMON_OFFLINE))
                 return
             with self._domain_operation_lock:
                 if self._purge_fence.is_set():
-                    self._ipc.send_to(
-                        conn,
-                        create_event(
-                            EventType.SELF_DESTRUCT_INITIATED
-                            if isinstance(cmd, SelfDestructCommand)
-                            else EventType.DAEMON_OFFLINE
-                        ),
-                    )
+                    if isinstance(cmd, SelfDestructCommand):
+                        self._send_self_destruct_initiated(conn)
+                    else:
+                        self._ipc.send_to(conn, create_event(EventType.DAEMON_OFFLINE))
                     return
                 self._process_ui_command_in_context(cmd, conn)
+
+    def _send_self_destruct_initiated(self, conn: socket.socket) -> None:
+        """Best-effort notification that never gates destructive work."""
+        try:
+            self._ipc.send_to(
+                conn,
+                create_event(EventType.SELF_DESTRUCT_INITIATED),
+            )
+        except Exception:
+            pass
 
     def _process_ui_command_in_context(
         self,
@@ -760,7 +765,9 @@ class Daemon(DaemonLifecycleMixin):
             return
 
         if isinstance(cmd, ConfigureQuickUnlockCommand):
-            self._ipc.send_to(conn, self._session_access.configure_quick_unlock(cmd))
+            self._ipc.send_to(
+                conn, self._session_access.configure_quick_unlock(conn, cmd)
+            )
             return
 
         if isinstance(cmd, PrepareProfileExitCommand):
@@ -779,15 +786,14 @@ class Daemon(DaemonLifecycleMixin):
 
         if isinstance(cmd, SelfDestructCommand):
             self._purge_fence.set()
+            self._transport_state.invalidate_all_live_generations()
             self._lifecycle = DaemonLifecycle.LOCKING
             self._runtime_stop_flag.set()
-            if self._network is not None:
-                self._network.abort_all()
-            self._ipc.send_to(
-                conn,
-                create_event(EventType.SELF_DESTRUCT_INITIATED),
-            )
-            threading.Thread(target=self._nuke_data, daemon=True).start()
+            self._send_self_destruct_initiated(conn)
+            try:
+                threading.Thread(target=self._nuke_data, daemon=True).start()
+            except Exception:
+                self._nuke_data()
             return
 
         self._command_dispatcher.dispatch(cmd, conn)

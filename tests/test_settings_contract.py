@@ -35,9 +35,9 @@ from metor.data.settings import (
     SettingValidationError,
 )
 from metor.ui.terminal import Theme, UIPresenter
-from metor.ui.terminal.cli.ipc.request.models import IpcRequestResult
-from metor.ui.terminal.cli.proxy.settings import CliProxySettingsActions
-from metor.ui.terminal.cli.proxy.transport import CliProxyTransport
+from metor.cli.ipc.request.models import IpcRequestResult
+from metor.cli.proxy.settings import CliProxySettingsActions
+from metor.cli.proxy.transport import CliProxyTransport
 from metor.data.settings_registry import (
     get_ui_setting_spec,
     validate_ui_setting_value,
@@ -741,7 +741,7 @@ class SettingsContractTests(unittest.TestCase):
         )
 
         with patch(
-            'metor.ui.terminal.cli.proxy.transport.run_with_headless_daemon',
+            'metor.cli.proxy.transport.run_with_headless_daemon',
             side_effect=_build_headless_result_callback(
                 captured_passwords,
                 'settings-output\nline-2',
@@ -777,7 +777,7 @@ class SettingsContractTests(unittest.TestCase):
         )
 
         with patch(
-            'metor.ui.terminal.cli.proxy.transport.run_with_headless_daemon',
+            'metor.cli.proxy.transport.run_with_headless_daemon',
             return_value='history-output\nline-2',
         ):
             result = transport.request_ipc(GetHistoryCommand())
@@ -809,7 +809,7 @@ class SettingsContractTests(unittest.TestCase):
         )
 
         with patch(
-            'metor.ui.terminal.cli.proxy.transport.run_with_headless_daemon',
+            'metor.cli.proxy.transport.run_with_headless_daemon',
             return_value='setting-value',
         ):
             result = transport.request_ipc(
@@ -842,7 +842,7 @@ class SettingsContractTests(unittest.TestCase):
         )
 
         with patch(
-            'metor.ui.terminal.cli.proxy.transport.run_with_headless_daemon',
+            'metor.cli.proxy.transport.run_with_headless_daemon',
             side_effect=_build_headless_result_callback(
                 captured_passwords,
                 'ok',

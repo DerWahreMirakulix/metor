@@ -29,7 +29,10 @@ from metor.core.api import (
     IpcEvent,
     create_event,
 )
-from metor.core.daemon.managed.quick_unlock import QuickUnlockStore
+from metor.core.daemon.managed.quick_unlock import (
+    QuickUnlockStorageError,
+    QuickUnlockStore,
+)
 
 # Local Package Imports
 from ..local_auth import (
@@ -68,6 +71,7 @@ class SessionAccessController(SessionEventMixin):
         resolve_target_callback: Optional[Callable[[str], Optional[str]]] = None,
         voice_target_callback: Optional[Callable[[str], Optional[str]]] = None,
         voice_delivery_callback: Optional[Callable[[str], Optional[Delivery]]] = None,
+        self_destruct_requires_unlock_callback: Optional[Callable[[], bool]] = None,
     ) -> None:
         """Initializes session access with policy and event callbacks.
 
@@ -83,6 +87,8 @@ class SessionAccessController(SessionEventMixin):
             voice_target_callback (Optional[Callable]): Active Voice owner resolver.
             voice_delivery_callback (Optional[Callable]): Active Voice delivery
                 semantics resolver.
+            self_destruct_requires_unlock_callback (Optional[Callable[[], bool]]):
+                Current conservative restricted-session purge policy.
 
         Returns:
             None
@@ -96,6 +102,8 @@ class SessionAccessController(SessionEventMixin):
         )
         self._lock: threading.Lock = threading.Lock()
         self._authenticated_clients: Set[socket.socket] = set()
+        self._full_auth_clients: Set[socket.socket] = set()
+        self._sensitive_auth_pending: Set[socket.socket] = set()
         self._session_consumers: Set[socket.socket] = set()
         self._local_auth: LocalAuthTracker = LocalAuthTracker()
         self._quick_unlock = quick_unlock_store
@@ -103,6 +111,9 @@ class SessionAccessController(SessionEventMixin):
         self._resolve_target = resolve_target_callback or (lambda target: target)
         self._voice_target = voice_target_callback or (lambda _msg_id: None)
         self._voice_delivery = voice_delivery_callback or (lambda _msg_id: None)
+        self._self_destruct_requires_unlock = (
+            self_destruct_requires_unlock_callback or (lambda: True)
+        )
         self._restricted: dict[socket.socket, RestrictedSessionPolicy] = {}
         self._restricted_challenges: dict[socket.socket, str] = {}
         self._pin_failures: dict[socket.socket, int] = {}
@@ -181,6 +192,8 @@ class SessionAccessController(SessionEventMixin):
         """
         with self._lock:
             self._authenticated_clients.discard(conn)
+            self._full_auth_clients.discard(conn)
+            self._sensitive_auth_pending.discard(conn)
             self._session_consumers.discard(conn)
             self._restricted.pop(conn, None)
             self._restricted_challenges.pop(conn, None)
@@ -200,6 +213,8 @@ class SessionAccessController(SessionEventMixin):
         """
         with self._lock:
             self._authenticated_clients.clear()
+            self._full_auth_clients.clear()
+            self._sensitive_auth_pending.clear()
             self._session_consumers.clear()
             self._restricted.clear()
             self._restricted_challenges.clear()
@@ -208,17 +223,22 @@ class SessionAccessController(SessionEventMixin):
             self._call_handles.clear()
         self._local_auth.install_context(None)
 
-    def mark_authenticated(self, conn: socket.socket) -> None:
+    def mark_authenticated(
+        self, conn: socket.socket, *, full_password: bool = True
+    ) -> None:
         """Marks one IPC client authenticated for the active runtime.
 
         Args:
             conn (socket.socket): The authenticated client socket.
+            full_password (bool): Whether root-profile proof established the session.
 
         Returns:
             None
         """
         with self._lock:
             self._authenticated_clients.add(conn)
+            if full_password:
+                self._full_auth_clients.add(conn)
 
     def clear_connection_auth(self, conn: socket.socket) -> None:
         """Clears pending authentication state for one IPC connection.
@@ -272,6 +292,8 @@ class SessionAccessController(SessionEventMixin):
         """
         with self._lock:
             is_authenticated: bool = conn in self._authenticated_clients
+            has_full_auth: bool = conn in self._full_auth_clients
+            sensitive_auth_pending: bool = conn in self._sensitive_auth_pending
             restricted_policy = self._restricted.get(conn)
 
         if restricted_policy is not None:
@@ -291,8 +313,14 @@ class SessionAccessController(SessionEventMixin):
                     return False
                 self._handle_reauthorize(cmd, conn, restricted_policy)
                 return False
-            if isinstance(cmd, (PrepareProfileExitCommand, SelfDestructCommand)):
+            if isinstance(cmd, PrepareProfileExitCommand):
                 if restricted_policy.device_lifecycle:
+                    return True
+            if isinstance(cmd, SelfDestructCommand):
+                if (
+                    restricted_policy.device_lifecycle
+                    and not self._self_destruct_requires_unlock()
+                ):
                     return True
             if isinstance(cmd, RejectCommand):
                 if (
@@ -355,9 +383,11 @@ class SessionAccessController(SessionEventMixin):
             )
             return False
 
-        if isinstance(cmd, ConfigureQuickUnlockCommand) and not is_authenticated:
+        if isinstance(cmd, ConfigureQuickUnlockCommand) and not has_full_auth:
             quick_unlock_prompt = self._local_auth.issue_session_challenge(conn)
             if quick_unlock_prompt is not None:
+                with self._lock:
+                    self._sensitive_auth_pending.add(conn)
                 self._send(
                     conn,
                     self._session_auth_event(
@@ -366,6 +396,17 @@ class SessionAccessController(SessionEventMixin):
                 )
             else:
                 self._send(conn, create_event(EventType.QUICK_UNLOCK_FAILED))
+            return False
+
+        if isinstance(cmd, SelfDestructCommand) and not is_authenticated:
+            purge_prompt = self._local_auth.issue_session_challenge(conn)
+            if purge_prompt is not None:
+                self._send(
+                    conn,
+                    self._session_auth_event(EventType.AUTH_REQUIRED, purge_prompt),
+                )
+            else:
+                self._send(conn, create_event(EventType.AUTH_REQUIRED))
             return False
 
         retry_after: Optional[int] = self.retry_after_seconds()
@@ -393,7 +434,7 @@ class SessionAccessController(SessionEventMixin):
         if not runtime_unlocked:
             self._send(conn, create_event(EventType.DAEMON_LOCKED))
             return False
-        if is_authenticated:
+        if is_authenticated and not sensitive_auth_pending:
             self.mark_authenticated(conn)
             self._send(conn, create_event(EventType.SESSION_AUTHENTICATED))
             return False
@@ -410,6 +451,8 @@ class SessionAccessController(SessionEventMixin):
         )
         if result.authenticated:
             self.mark_authenticated(conn)
+            with self._lock:
+                self._sensitive_auth_pending.discard(conn)
             self._send(conn, create_event(EventType.SESSION_AUTHENTICATED))
             return False
 
@@ -444,6 +487,8 @@ class SessionAccessController(SessionEventMixin):
             device_lifecycle = (
                 cmd.device_lifecycle and conn in self._authenticated_clients
             )
+            self._full_auth_clients.discard(conn)
+            self._sensitive_auth_pending.discard(conn)
         policy = RestrictedSessionPolicy(
             unlock_method=cmd.unlock_method,
             continued_live_target=(
@@ -469,7 +514,10 @@ class SessionAccessController(SessionEventMixin):
             cmd.unlock_method is ClientUnlockMethod.PIN
             and self._quick_unlock is not None
         ):
-            metadata = self._quick_unlock.metadata()
+            try:
+                metadata = self._quick_unlock.metadata()
+            except QuickUnlockStorageError:
+                metadata = None
             if metadata is not None:
                 salt = metadata[0]
             else:
@@ -483,6 +531,7 @@ class SessionAccessController(SessionEventMixin):
                 )
                 with self._lock:
                     self._restricted[conn] = policy
+                salt = self._local_auth.proof_salt()
         elif cmd.unlock_method is ClientUnlockMethod.PROFILE_PASSWORD:
             salt = self._local_auth.proof_salt()
         return create_event(
@@ -495,15 +544,22 @@ class SessionAccessController(SessionEventMixin):
             },
         )
 
-    def configure_quick_unlock(self, cmd: ConfigureQuickUnlockCommand) -> IpcEvent:
+    def configure_quick_unlock(
+        self, conn: socket.socket, cmd: ConfigureQuickUnlockCommand
+    ) -> IpcEvent:
         """Installs or removes client-derived PIN verifier material.
 
         Args:
+            conn (socket.socket): Fully authorized requesting session.
             cmd (ConfigureQuickUnlockCommand): Authenticated configuration request.
 
         Returns:
             IpcEvent: Typed configuration result.
         """
+        with self._lock:
+            if conn not in self._full_auth_clients:
+                return create_event(EventType.QUICK_UNLOCK_FAILED)
+            self._full_auth_clients.discard(conn)
         if self._quick_unlock is None:
             return create_event(EventType.QUICK_UNLOCK_FAILED)
         try:
@@ -516,7 +572,7 @@ class SessionAccessController(SessionEventMixin):
                 return create_event(EventType.QUICK_UNLOCK_FAILED)
             self._quick_unlock.configure(cmd.salt, cmd.verifier)
             return create_event(EventType.QUICK_UNLOCK_CONFIGURED, {'enabled': True})
-        except (ValueError, OSError):
+        except (QuickUnlockStorageError, ValueError, OSError):
             return create_event(EventType.QUICK_UNLOCK_FAILED)
 
     def _handle_reauthorize(
@@ -539,7 +595,7 @@ class SessionAccessController(SessionEventMixin):
             cmd.method is ClientUnlockMethod.NONE
             and policy.unlock_method is ClientUnlockMethod.NONE
         ):
-            self._complete_reauthorization(conn)
+            self._complete_reauthorization(conn, full_password=False)
             return
         with self._lock:
             pin_disabled = conn in self._pin_disabled
@@ -573,7 +629,7 @@ class SessionAccessController(SessionEventMixin):
                 authenticated = result.authenticated
                 should_disconnect = result.should_disconnect
         if authenticated:
-            self._complete_reauthorization(conn)
+            self._complete_reauthorization(conn, full_password=password_attempt)
             return
         retry_after = self.retry_after_seconds()
         if retry_after is not None:
@@ -630,7 +686,10 @@ class SessionAccessController(SessionEventMixin):
         if use_password_salt:
             salt = self._local_auth.proof_salt()
         elif self._quick_unlock is not None:
-            metadata = self._quick_unlock.metadata()
+            try:
+                metadata = self._quick_unlock.metadata()
+            except QuickUnlockStorageError:
+                metadata = None
             salt = metadata[0] if metadata else None
         self._send(
             conn,
@@ -644,11 +703,14 @@ class SessionAccessController(SessionEventMixin):
             ),
         )
 
-    def _complete_reauthorization(self, conn: socket.socket) -> None:
+    def _complete_reauthorization(
+        self, conn: socket.socket, *, full_password: bool
+    ) -> None:
         """Clears only one client's restricted state after valid proof.
 
         Args:
             conn (socket.socket): Reauthorized IPC socket.
+            full_password (bool): Whether profile-password proof completed the flow.
 
         Returns:
             None
@@ -658,6 +720,10 @@ class SessionAccessController(SessionEventMixin):
             self._restricted_challenges.pop(conn, None)
             self._pin_failures.pop(conn, None)
             self._pin_disabled.discard(conn)
+            if full_password:
+                self._full_auth_clients.add(conn)
+            else:
+                self._full_auth_clients.discard(conn)
         self._send(conn, create_event(EventType.CLIENT_REAUTHORIZED))
 
     def restricted_policy(

@@ -346,6 +346,7 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
                             'voice_content',
                             'voice_inbound_descriptor',
                             'voice_bounded_read',
+                            'retained_message_inventory',
                             'voice_resume',
                             'voice_terminal_commit',
                             'voice_draft_commit',

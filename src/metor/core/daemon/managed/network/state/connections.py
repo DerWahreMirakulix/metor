@@ -6,7 +6,7 @@ import threading
 import time
 from typing import Dict, List, Optional, Set, Tuple
 
-from metor.core.api import ConnectionOrigin, ConnectionReasonCode
+from metor.core.api import ConnectionActor, ConnectionOrigin, ConnectionReasonCode
 from metor.core.daemon.managed.models import SessionState
 from metor.core.daemon.managed.network.state.types import PendingConnectionReason
 from metor.utils import Constants
@@ -61,9 +61,13 @@ class StateTrackerConnectionsMixin:
     _session_last_activity: Dict[str, float]
     _unacked_messages: Dict[str, Dict[str, Tuple[str, str]]]
     _last_disconnect_reasons: Dict[str, ConnectionReasonCode]
+    _last_disconnect_actors: Dict[str, ConnectionActor]
 
     def set_last_disconnect_reason(
-        self, onion: str, reason: Optional[ConnectionReasonCode]
+        self,
+        onion: str,
+        reason: Optional[ConnectionReasonCode],
+        actor: Optional[ConnectionActor] = None,
     ) -> None:
         """Stores only machine-readable lifecycle state for later snapshots."""
         with self._lock:
@@ -71,11 +75,20 @@ class StateTrackerConnectionsMixin:
                 self._last_disconnect_reasons.pop(onion, None)
             else:
                 self._last_disconnect_reasons[onion] = reason
+            if actor is None:
+                self._last_disconnect_actors.pop(onion, None)
+            else:
+                self._last_disconnect_actors[onion] = actor
 
     def get_last_disconnect_reason(self, onion: str) -> Optional[ConnectionReasonCode]:
         """Returns the last relevant disconnect reason for one peer."""
         with self._lock:
             return self._last_disconnect_reasons.get(onion)
+
+    def get_last_disconnect_actor(self, onion: str) -> Optional[ConnectionActor]:
+        """Returns the actor associated with the last relevant disconnect."""
+        with self._lock:
+            return self._last_disconnect_actors.get(onion)
 
     def get_active_onions(self) -> List[str]:
         """
@@ -110,6 +123,8 @@ class StateTrackerConnectionsMixin:
                 | set(self._live_reconnect_grace)
                 | set(self._retunnel_in_progress)
                 | set(self._unacked_messages)
+                | set(self._last_disconnect_reasons)
+                | set(self._last_disconnect_actors)
             )
             return sorted(onions)
 
@@ -184,6 +199,10 @@ class StateTrackerConnectionsMixin:
                 return SessionState.RETUNNELING
             if onion in self._outbound_attempts:
                 return SessionState.CONNECTING
+            if onion in self._live_reconnect_grace:
+                return SessionState.RECONNECT_GRACE
+            if onion in self._scheduled_auto_reconnects:
+                return SessionState.RECONNECT_SCHEDULED
             return SessionState.DISCONNECTED
 
     def has_outbound_attempt(self, onion: str) -> bool:
@@ -411,6 +430,7 @@ class StateTrackerConnectionsMixin:
             self._initial_buffers.pop(onion, None)
             self._expired_pending_connections.pop(onion, None)
             self._last_disconnect_reasons.pop(onion, None)
+            self._last_disconnect_actors.pop(onion, None)
 
         if replaced_active is not None and replaced_active is not conn:
             _close_socket(replaced_active)

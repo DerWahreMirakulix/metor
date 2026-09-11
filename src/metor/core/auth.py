@@ -6,7 +6,7 @@ import secrets
 
 import nacl.pwhash
 
-from metor.utils.security import secure_clear_buffer
+from metor.shared.security import secure_clear_buffer
 
 PIN_VERIFIER_BYTES: int = 32
 PIN_SALT_BYTES: int = nacl.pwhash.argon2id.SALTBYTES

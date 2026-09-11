@@ -18,6 +18,7 @@ INSTALL_GUIDE_NAME: str = 'INSTALL.txt'
 INSTALL_SHELL_NAME: str = 'install.sh'
 INSTALL_WINDOWS_NAME: str = 'install.cmd'
 CHECKSUM_FILE_NAME: str = 'SHA256SUMS.txt'
+RELEASE_VARIANTS: tuple[str, ...] = ('base', 'terminal', 'sdk')
 
 
 def clean_packaging_artifacts(repo_root: Path) -> None:
@@ -31,6 +32,10 @@ def clean_packaging_artifacts(repo_root: Path) -> None:
     """
     shutil.rmtree(repo_root / 'build', ignore_errors=True)
     shutil.rmtree(repo_root / 'src' / 'metor.egg-info', ignore_errors=True)
+    shutil.rmtree(repo_root / 'packaging' / 'sdk' / 'build', ignore_errors=True)
+    shutil.rmtree(repo_root / 'packaging' / 'terminal' / 'build', ignore_errors=True)
+    shutil.rmtree(repo_root / 'src' / 'metor_sdk.egg-info', ignore_errors=True)
+    shutil.rmtree(repo_root / 'src' / 'metor_ui_terminal.egg-info', ignore_errors=True)
 
 
 def normalize_machine(machine: str) -> str:
@@ -60,7 +65,7 @@ def build_bundle_name(
     machine: str,
     python_major: int,
     python_minor: int,
-    variant: str = 'full',
+    variant: str = 'base',
 ) -> str:
     """
     Builds the release bundle folder name for one platform, Python version, and variant.
@@ -70,16 +75,18 @@ def build_bundle_name(
         machine (str): The host architecture label.
         python_major (int): The Python major version.
         python_minor (int): The Python minor version.
-        variant (str): The distribution variant ('full', 'daemon', or 'sdk').
+        variant (str): The distribution variant ('base', 'terminal', or 'sdk').
 
     Returns:
         str: The bundle directory name.
     """
+    if variant not in RELEASE_VARIANTS:
+        raise ValueError(f'Unsupported release variant: {variant}.')
     system_slug: str = system_name.strip().lower() or 'unknown'
     machine_slug: str = normalize_machine(machine)
     prefix: str = 'metor-wheelhouse'
-    if variant == 'daemon':
-        prefix = 'metor-daemon-wheelhouse'
+    if variant == 'terminal':
+        prefix = 'metor-ui-terminal-wheelhouse'
     elif variant == 'sdk':
         prefix = 'metor-sdk-wheelhouse'
 
@@ -142,7 +149,7 @@ def build_install_shell_script(package_name: str = 'metor') -> str:
         str: The shell installer script.
     """
     verification_line: str = (
-        f'echo "Run $venv_dir/bin/{package_name} --help to verify the install."'
+        'echo "Run $venv_dir/bin/metor --help to verify the install."'
         if package_name != 'metor-sdk'
         else 'echo "Run $venv_dir/bin/python -c \\"import metor.client; print(\'metor-sdk ready\')\\" to verify the install."'
     )
@@ -193,7 +200,7 @@ def build_install_windows_script(package_name: str = 'metor') -> str:
         str: The Windows batch installer script.
     """
     verification_line: str = (
-        f'echo Run "%VENV_DIR%\\Scripts\\{package_name}.exe --help" to verify the install.'
+        'echo Run "%VENV_DIR%\\Scripts\\metor.exe --help" to verify the install.'
         if package_name != 'metor-sdk'
         else 'echo metor-sdk ready in "%VENV_DIR%"'
     )
@@ -351,7 +358,7 @@ def archive_bundle(bundle_dir: Path) -> Path:
 def build_release_wheelhouse(
     output_dir: Path,
     skip_pip_upgrade: bool = False,
-    variant: str = 'full',
+    variant: str = 'base',
 ) -> Path:
     """
     Builds the platform-specific runtime wheel bundle in the target directory.
@@ -359,11 +366,13 @@ def build_release_wheelhouse(
     Args:
         output_dir (Path): The directory that should contain the bundle folder.
         skip_pip_upgrade (bool): Whether to skip upgrading pip first.
-        variant (str): The distribution variant ('full', 'daemon', or 'sdk').
+        variant (str): The distribution variant ('base', 'terminal', or 'sdk').
 
     Returns:
         Path: The generated bundle directory.
     """
+    if variant not in RELEASE_VARIANTS:
+        raise ValueError(f'Unsupported release variant: {variant}.')
     repo_root: Path = Path(__file__).resolve().parents[3]
     bundle_name: str = build_bundle_name(
         platform.system(),
@@ -400,18 +409,19 @@ def build_release_wheelhouse(
         repo_root,
     )
 
+    wheel_sources: tuple[str, ...]
     if variant == 'sdk':
         req_lock = 'requirements/sdk.lock'
-        wheel_src = 'packaging/sdk'
         package_name = 'metor-sdk'
-    elif variant == 'daemon':
-        req_lock = 'requirements/daemon.lock'
-        wheel_src = 'packaging/daemon'
-        package_name = 'metor-daemon'
+        wheel_sources = ('packaging/sdk',)
+    elif variant == 'terminal':
+        req_lock = 'requirements/base.lock'
+        package_name = 'metor-ui-terminal'
+        wheel_sources = ('packaging/sdk', '.', 'packaging/terminal')
     else:
-        req_lock = 'requirements/runtime.lock'
-        wheel_src = '.'
+        req_lock = 'requirements/base.lock'
         package_name = 'metor'
+        wheel_sources = ('packaging/sdk', '.')
 
     run_command(
         [
@@ -424,7 +434,7 @@ def build_release_wheelhouse(
         ],
         repo_root,
     )
-    if variant == 'daemon':
+    for wheel_src in wheel_sources:
         run_command(
             [
                 *pip_prefix,
@@ -432,21 +442,10 @@ def build_release_wheelhouse(
                 '--wheel-dir',
                 str(wheelhouse_dir),
                 '--no-deps',
-                'packaging/sdk',
+                wheel_src,
             ],
             repo_root,
         )
-    run_command(
-        [
-            *pip_prefix,
-            'wheel',
-            '--wheel-dir',
-            str(wheelhouse_dir),
-            '--no-deps',
-            wheel_src,
-        ],
-        repo_root,
-    )
 
     write_text_file(
         bundle_dir / INSTALL_GUIDE_NAME,
@@ -494,8 +493,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         '--variant',
-        choices=('full', 'daemon', 'sdk', 'all'),
-        default='full',
+        choices=('base', 'terminal', 'sdk', 'all'),
+        default='base',
         help='Distribution bundle variant to build.',
     )
     return parser.parse_args()
@@ -513,7 +512,7 @@ def main() -> None:
     """
     args = parse_args()
     if args.variant == 'all':
-        for variant in ('full', 'daemon', 'sdk'):
+        for variant in ('base', 'terminal', 'sdk'):
             build_release_wheelhouse(
                 args.output_dir,
                 skip_pip_upgrade=args.skip_pip_upgrade,

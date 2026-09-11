@@ -36,12 +36,19 @@ class Constants:
     MAX_STREAM_BYTES: int = 1048576  # 1 MB Limit for Tor TCP streams (OOM Protection)
     MAX_IPC_BYTES: int = 5242880  # 5 MB Limit for local IPC streams (OOM Protection)
     VOICE_CHUNK_MAX_BYTES: int = 65536
+    DEFAULT_RETAINED_PAGE_SIZE: int = 50
+    MAX_RETAINED_PAGE_SIZE: int = 200
+    VOICE_TURN_HARD_MAX_BYTES: int = 1073741824
+    VOICE_MAX_SEGMENTS: int = 16384
+    VOICE_METADATA_MAX_BYTES: int = 2097152
     VOICE_CODEC_MAX_CHARS: int = 64
     VOICE_PRESSURE_PERCENT: int = 90
     MESSAGE_ID_MAX_CHARS: int = 128
     TCP_BUFFER_SIZE: int = 4096  # Standard TCP chunk size for socket.recv
     SERVER_BACKLOG: int = 5  # Standard socket backlog for daemon IPC and listeners
     SERVER_BACKLOG_HEADLESS: int = 1  # Minimal socket backlog for ephemeral daemons
+    PEER_WRITER_QUEUE_FRAMES: int = 256
+    IPC_WRITER_QUEUE_FRAMES: int = 256
 
     # Tor Bootstrapping
     UNIX_TOR_TIMEOUT: int = 45  # Process launch timeout for Unix Tor binaries
@@ -132,6 +139,7 @@ class Constants:
     PROTECTED_KEY_DIR: str = 'protected-key-material'
     PROFILE_KEYSLOT_FILE: str = 'keyslot.json'
     QUICK_UNLOCK_FILE: str = 'quick-unlock.json'
+    QUICK_UNLOCK_METADATA_MAX_BYTES: int = 4096
     BLOBS_DIR: str = 'blobs'
     PERSISTENT_BLOBS_DIR: str = 'persistent'
     TEMPORARY_BLOBS_DIR: str = 'temporary'

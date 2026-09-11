@@ -23,6 +23,7 @@ from metor.core.api import (
 from metor.data import SettingKey
 from metor.data.profile import ProfileManager
 from metor.utils import Constants
+from metor.core.daemon.managed.writer import BoundedSocketWriter, FrameQueueFull
 
 
 class IpcServer:
@@ -93,6 +94,7 @@ class IpcServer:
         self._clients: List[socket.socket] = []
         self._lock: threading.Lock = threading.Lock()
         self._client_write_locks: Dict[socket.socket, threading.Lock] = {}
+        self._client_writers: Dict[socket.socket, BoundedSocketWriter] = {}
         self._revision_lock: threading.Lock = threading.Lock()
         self._state_revision: int = 0
         self._epoch: str = secrets.token_hex(Constants.UUID_MSG_BYTES)
@@ -183,6 +185,10 @@ class IpcServer:
             clients: List[socket.socket] = list(self._clients)
             self._clients.clear()
             self._client_write_locks.clear()
+            writers = list(self._client_writers.values())
+            self._client_writers.clear()
+        for writer in writers:
+            writer.close()
         for client in clients:
             try:
                 client.close()
@@ -219,8 +225,6 @@ class IpcServer:
         stamp_request_id(event)
         self._stamp_revision(event)
         msg: bytes = (event.to_json() + '\n').encode('utf-8')
-        dead_clients: List[socket.socket] = []
-
         with self._lock:
             clients: List[socket.socket] = list(self._clients)
 
@@ -230,27 +234,9 @@ class IpcServer:
 
         for client in clients:
             try:
-                with self._lock:
-                    write_lock = self._client_write_locks.setdefault(
-                        client, threading.Lock()
-                    )
-                with write_lock:
-                    client.sendall(msg)
-            except Exception:
-                dead_clients.append(client)
-
-        if dead_clients:
-            with self._lock:
-                for dead_client in dead_clients:
-                    if dead_client in self._clients:
-                        self._clients.remove(dead_client)
-                    self._client_write_locks.pop(dead_client, None)
-
-            for dead_client in dead_clients:
-                try:
-                    dead_client.close()
-                except Exception:
-                    pass
+                self._enqueue_client_frame(client, msg)
+            except (ConnectionError, FrameQueueFull):
+                self._drop_client(client)
 
     def send_to(self, conn: socket.socket, event: IpcEvent) -> None:
         """
@@ -263,16 +249,54 @@ class IpcServer:
         Returns:
             None
         """
+        stamp_request_id(event)
+        self._stamp_revision(event)
+        msg: bytes = (event.to_json() + '\n').encode('utf-8')
         try:
-            stamp_request_id(event)
-            self._stamp_revision(event)
-            msg: bytes = (event.to_json() + '\n').encode('utf-8')
+            self._enqueue_client_frame(conn, msg)
+        except (ConnectionError, FrameQueueFull):
+            self._drop_client(conn)
+
+    def _enqueue_client_frame(self, conn: socket.socket, msg: bytes) -> None:
+        """Queues one client frame without holding daemon state across I/O."""
+        if not isinstance(conn, socket.socket):
             with self._lock:
                 write_lock = self._client_write_locks.setdefault(conn, threading.Lock())
             with write_lock:
                 conn.sendall(msg)
-        except Exception:
-            pass
+            return
+        with self._lock:
+            writer = self._client_writers.get(conn)
+            if writer is None:
+                writer = BoundedSocketWriter(
+                    conn,
+                    capacity=Constants.IPC_WRITER_QUEUE_FRAMES,
+                    on_failure=lambda failed, _exc: self._drop_client(failed),
+                    on_exit=lambda exited: self._writer_exited(conn, exited),
+                )
+                self._client_writers[conn] = writer
+        writer.enqueue(msg)
+
+    def _writer_exited(self, conn: socket.socket, writer: BoundedSocketWriter) -> None:
+        """Releases an idle IPC writer from the bounded inventory."""
+        with self._lock:
+            if self._client_writers.get(conn) is writer:
+                self._client_writers.pop(conn, None)
+
+    def _drop_client(self, conn: socket.socket) -> None:
+        """Disconnects one failed or saturated client and releases its writer."""
+        with self._lock:
+            if conn in self._clients:
+                self._clients.remove(conn)
+            self._client_write_locks.pop(conn, None)
+            writer = self._client_writers.pop(conn, None)
+        if writer is not None:
+            writer.close()
+        else:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def _stamp_revision(self, event: IpcEvent) -> None:
         """Assigns one monotonic daemon event revision exactly once.
@@ -324,8 +348,11 @@ class IpcServer:
         Returns:
             None
         """
-        self.send_to(conn, self._build_client_limit_event(max_clients))
+        event = self._build_client_limit_event(max_clients)
+        stamp_request_id(event)
+        self._stamp_revision(event)
         try:
+            conn.sendall((event.to_json() + '\n').encode('utf-8'))
             conn.close()
         except Exception:
             pass
@@ -373,13 +400,15 @@ class IpcServer:
                     )
                     with self._lock:
                         self._clients.append(conn)
-                        self._client_write_locks.setdefault(conn, threading.Lock())
                     handler_thread.start()
                 except Exception:
                     with self._lock:
                         if conn in self._clients:
                             self._clients.remove(conn)
                         self._client_write_locks.pop(conn, None)
+                        writer = self._client_writers.pop(conn, None)
+                    if writer is not None:
+                        writer.close()
                     try:
                         conn.close()
                     except Exception:
@@ -482,9 +511,13 @@ class IpcServer:
                 if conn in self._clients:
                     self._clients.remove(conn)
                 self._client_write_locks.pop(conn, None)
-            try:
-                conn.close()
-            except Exception:
-                pass
+                writer = self._client_writers.pop(conn, None)
+            if writer is not None:
+                writer.close()
+            else:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
             if self._disconnect_callback:
                 self._disconnect_callback(conn)
