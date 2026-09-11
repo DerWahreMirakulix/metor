@@ -274,8 +274,8 @@ class ConnectionControllerSupportMixin:
         unacked = self._state.pop_unacked_messages(onion)
         get_pending_live_outbox = getattr(self._mm, 'get_pending_live_outbox', None)
         if callable(get_pending_live_outbox):
-            for _, _, payload, msg_id, timestamp in get_pending_live_outbox(onion):
-                unacked.setdefault(msg_id, (payload, timestamp))
+            for record in get_pending_live_outbox(onion):
+                unacked.setdefault(record.msg_id, (record.payload, record.timestamp))
         if not unacked:
             return False
 

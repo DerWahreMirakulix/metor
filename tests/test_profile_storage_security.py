@@ -1583,10 +1583,11 @@ class ProfileStorageSecurityTests(unittest.TestCase):
             'metor.core.daemon.managed.engine.daemon.destroy_profile_storage'
         ) as destroy:
             daemon._nuke_data()
-        destroy.assert_called_once_with(
-            daemon._pm,
-            prepare_runtime=daemon._lock_runtime,
-        )
+        destroy.assert_called_once()
+        self.assertIs(destroy.call_args.args[0], daemon._pm)
+        prepare_runtime = destroy.call_args.kwargs['prepare_runtime']
+        self.assertTrue(prepare_runtime())
+        daemon._lock_runtime.assert_called_once_with(preserve_reliability=False)
         daemon.stop.assert_called_once_with()
 
     def test_profile_destruction_is_idempotent_when_files_are_missing(self) -> None:

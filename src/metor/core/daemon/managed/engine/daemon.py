@@ -20,10 +20,14 @@ from pathlib import Path
 
 from metor.core.api import (
     ChangePasswordCommand,
+    ConfigureQuickUnlockCommand,
+    Delivery,
     create_event,
     IpcEvent,
     IpcCommand,
     LockCommand,
+    RestrictClientCommand,
+    PrepareProfileExitCommand,
     SelfDestructCommand,
     UnlockCommand,
     EventType,
@@ -43,7 +47,7 @@ from metor.data import (
     SettingKey,
 )
 from metor.data.sql import SqlManager
-from metor.data.blob import BlobStore
+from metor.data.blob import BlobLifecycle, BlobStore
 from metor.utils import Constants, clean_onion, secure_shred_file
 
 # Local Package Imports
@@ -60,6 +64,7 @@ from metor.core.daemon.managed.network import NetworkManager, StateTracker
 from metor.core.daemon.managed.notify import NotificationService
 from metor.core.daemon import InvalidMasterPasswordError
 from metor.core.daemon.managed.local_auth import SessionAuthContext
+from metor.core.daemon.managed.quick_unlock import QuickUnlockStore
 from metor.core.daemon.managed.status import DaemonStatus
 from metor.core.daemon.handlers import (
     ConfigCommandHandler,
@@ -159,12 +164,23 @@ class Daemon:
             ConfigCommandHandler(self._pm),
             self._send_to_client,
         )
+        profile_paths = getattr(self._pm, 'paths', None)
+        quick_unlock_store = (
+            QuickUnlockStore(profile_paths.get_quick_unlock_file())
+            if profile_paths is not None
+            else None
+        )
         self._session_access: SessionAccessController = SessionAccessController(
             require_auth=require_session_auth,
             send_callback=self._send_to_client,
             lockout_timeout_callback=self._get_local_auth_lockout_timeout,
             failure_limit_callback=self._get_local_auth_failure_limit,
             live_consumer_available_callback=self._on_live_consumer_available,
+            quick_unlock_store=quick_unlock_store,
+            is_saved_contact_callback=self._is_saved_contact_target,
+            resolve_target_callback=self._resolve_contact_target,
+            voice_target_callback=self._voice_target,
+            voice_delivery_callback=self._voice_delivery,
         )
 
         if (
@@ -228,6 +244,7 @@ class Daemon:
             self._runtime_stop_flag,
             config=self._pm.config,
             state=self._transport_state,
+            blob_store=runtime.blob_store,
         )
         self._outbox = OutboxWorker(
             runtime.tm,
@@ -239,12 +256,22 @@ class Daemon:
             config=self._pm.config,
             state=self._transport_state,
             error_callback=self._on_runtime_internal_error,
+            blob_store=runtime.blob_store,
         )
         self._session_maintenance = SessionMaintenance(
             network=self._network,
             state=self._transport_state,
             mm=runtime.mm,
             config=self._pm.config,
+        )
+        active_blob_store = runtime.blob_store
+
+        def delete_persistent_blob_object(blob_id: str) -> None:
+            if active_blob_store is not None:
+                active_blob_store.delete(blob_id, BlobLifecycle.PERSISTENT)
+
+        delete_persistent_blob: Optional[Callable[[str], None]] = (
+            delete_persistent_blob_object if active_blob_store is not None else None
         )
         database_handler = DatabaseCommandHandler(
             self._pm,
@@ -254,6 +281,8 @@ class Daemon:
             self._network.get_active_onions,
             self._broadcast_ipc_event,
             self._session_maintenance.send_read_receipts,
+            self._network.release_consumed_voice,
+            delete_persistent_blob,
         )
         system_handler = SystemCommandHandler(self._pm, runtime.tm)
         network_handler = NetworkCommandHandler(
@@ -267,6 +296,7 @@ class Daemon:
             self._send_to_client,
             self._session_access.register_session_consumer,
             config=self._pm.config,
+            current_revision_cb=self._ipc.current_revision,
         )
         self._command_dispatcher.install_runtime_handlers(
             network=network_handler,
@@ -304,18 +334,18 @@ class Daemon:
         Returns:
             None
         """
-        stamp_request_id(event)
-        if self._session_access.requires_auth():
-            recipients: set[socket.socket] = (
-                self._session_access.authenticated_recipients()
-            )
-            if not recipients:
-                return
-
-            self._ipc.broadcast_to(event, recipients)
+        if self._lifecycle is DaemonLifecycle.LOCKING:
             return
-
-        self._ipc.broadcast(event)
+        stamp_request_id(event)
+        recipients = (
+            self._session_access.authenticated_recipients()
+            if self._session_access.requires_auth()
+            else self._ipc.active_clients()
+        )
+        for recipient in recipients:
+            filtered = self._session_access.filter_restricted_event(recipient, event)
+            if filtered is not None:
+                self._ipc.broadcast_to(filtered, {recipient})
 
     def _on_live_consumer_available(self) -> None:
         """Notifies the active network runtime about its first live consumer.
@@ -506,11 +536,11 @@ class Daemon:
         except Exception:
             pass
 
-    def _lock_runtime(self) -> bool:
+    def _lock_runtime(self, preserve_reliability: bool = True) -> bool:
         """Tears down all profile-scoped state while keeping IPC available.
 
         Args:
-            None
+            preserve_reliability (bool): Whether normal pending LIVE fallback policy runs.
 
         Returns:
             bool: True only when every security-sensitive cleanup step completed.
@@ -534,7 +564,10 @@ class Daemon:
             cleanup_succeeded = False
         try:
             if self._network is not None:
-                self._network.disconnect_all()
+                if preserve_reliability:
+                    self._network.disconnect_all()
+                else:
+                    self._network.abort_all()
         except Exception:
             cleanup_succeeded = False
         try:
@@ -595,8 +628,11 @@ class Daemon:
         try:
             destroy_profile_storage(
                 self._pm,
-                prepare_runtime=self._lock_runtime,
+                prepare_runtime=lambda: self._lock_runtime(preserve_reliability=False),
             )
+            ipc = getattr(self, '_ipc', None)
+            if ipc is not None:
+                ipc.broadcast(create_event(EventType.SELF_DESTRUCT_COMPLETED))
         except OSError:
             self._on_runtime_internal_error(
                 'Encrypted profile cleanup was incomplete after PMK destruction.'
@@ -640,6 +676,39 @@ class Daemon:
             int: The maximum invalid attempts before disconnect.
         """
         return max(1, self._pm.config.get_int(SettingKey.LOCAL_AUTH_FAILURE_LIMIT))
+
+    def _is_saved_contact_target(self, target: str) -> bool:
+        """Checks whether a target resolves to a saved contact in the active runtime.
+
+        Args:
+            target (str): Alias or onion identity.
+
+        Returns:
+            bool: True only for an active-runtime saved contact.
+        """
+        if self._cm is None:
+            return False
+        resolved = self._cm.resolve_target(target)
+        if resolved is None:
+            return False
+        return resolved[0] in self._cm.get_all_contacts()
+
+    def _resolve_contact_target(self, target: str) -> Optional[str]:
+        """Resolves aliases to the stable onion identity used by lock policy."""
+        if self._cm is None:
+            return None
+        resolved = self._cm.resolve_target(target)
+        return resolved[1] if resolved is not None else None
+
+    def _voice_target(self, msg_id: str) -> Optional[str]:
+        """Returns the stable target bound to an active outbound Voice turn."""
+        return self._network.voice_target(msg_id) if self._network is not None else None
+
+    def _voice_delivery(self, msg_id: str) -> Optional[Delivery]:
+        """Returns delivery semantics bound to an active outbound Voice turn."""
+        return (
+            self._network.voice_delivery(msg_id) if self._network is not None else None
+        )
 
     def _process_ui_command(self, cmd: IpcCommand, conn: socket.socket) -> None:
         """
@@ -782,8 +851,33 @@ class Daemon:
             self._ipc.send_to(conn, create_event(EventType.PASSWORD_CHANGED))
             return
 
+        if isinstance(cmd, RestrictClientCommand):
+            self._ipc.send_to(conn, self._session_access.restrict(conn, cmd))
+            return
+
+        if isinstance(cmd, ConfigureQuickUnlockCommand):
+            self._ipc.send_to(conn, self._session_access.configure_quick_unlock(cmd))
+            return
+
+        if isinstance(cmd, PrepareProfileExitCommand):
+            profile = self._pm.profile_name
+            if not self._lock_runtime(preserve_reliability=True):
+                self._ipc.send_to(conn, create_event(EventType.INTERNAL_ERROR))
+                return
+            self._ipc.send_to(
+                conn,
+                create_event(
+                    EventType.PROFILE_EXIT_PREPARED,
+                    {'profile': profile},
+                ),
+            )
+            return
+
         if isinstance(cmd, SelfDestructCommand):
             self._lifecycle = DaemonLifecycle.LOCKING
+            self._runtime_stop_flag.set()
+            if self._network is not None:
+                self._network.abort_all()
             self._ipc.send_to(
                 conn,
                 create_event(EventType.SELF_DESTRUCT_INITIATED),

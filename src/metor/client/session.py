@@ -17,9 +17,13 @@ from metor.core.api import (
     IpcCommand,
     IpcEvent,
     LockCommand,
+    GetRuntimeSnapshotCommand,
+    PrepareProfileExitCommand,
+    ProfileExitPreparedEvent,
     ProtocolMismatchEvent,
     RegisterLiveConsumerCommand,
     SendMessageCommand,
+    RuntimeSnapshotEvent,
     TextContent,
     ensure_request_id,
 )
@@ -199,6 +203,17 @@ class MetorClient:
             bool: True after the daemon confirms the locked state.
         """
         return self.request(LockCommand(), DaemonLockedEvent) is not None
+
+    def runtime_snapshot(self) -> Optional[RuntimeSnapshotEvent]:
+        """Returns the authoritative aggregate snapshot for the active runtime."""
+        return self.request(GetRuntimeSnapshotCommand(), RuntimeSnapshotEvent)
+
+    def prepare_profile_exit(self) -> bool:
+        """Runs the normal reliability-preserving profile exit phase."""
+        return (
+            self.request(PrepareProfileExitCommand(), ProfileExitPreparedEvent)
+            is not None
+        )
 
     def request(
         self,

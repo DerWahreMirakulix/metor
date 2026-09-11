@@ -6,7 +6,7 @@ import threading
 import time
 from typing import Dict, List, Optional, Set, Tuple
 
-from metor.core.api import ConnectionOrigin
+from metor.core.api import ConnectionOrigin, ConnectionReasonCode
 from metor.core.daemon.managed.models import SessionState
 from metor.core.daemon.managed.network.state.types import PendingConnectionReason
 from metor.utils import Constants
@@ -59,6 +59,23 @@ class StateTrackerConnectionsMixin:
     _local_recovery_opt_outs: Dict[str, float]
     _retunnel_in_progress: Set[str]
     _session_last_activity: Dict[str, float]
+    _unacked_messages: Dict[str, Dict[str, Tuple[str, str]]]
+    _last_disconnect_reasons: Dict[str, ConnectionReasonCode]
+
+    def set_last_disconnect_reason(
+        self, onion: str, reason: Optional[ConnectionReasonCode]
+    ) -> None:
+        """Stores only machine-readable lifecycle state for later snapshots."""
+        with self._lock:
+            if reason is None:
+                self._last_disconnect_reasons.pop(onion, None)
+            else:
+                self._last_disconnect_reasons[onion] = reason
+
+    def get_last_disconnect_reason(self, onion: str) -> Optional[ConnectionReasonCode]:
+        """Returns the last relevant disconnect reason for one peer."""
+        with self._lock:
+            return self._last_disconnect_reasons.get(onion)
 
     def get_active_onions(self) -> List[str]:
         """
@@ -74,6 +91,27 @@ class StateTrackerConnectionsMixin:
             return list(self._connections.keys()) + list(
                 self._pending_connections.keys()
             )
+
+    def get_relevant_live_onions(self) -> List[str]:
+        """Returns peers with active, recovery, or pending outbound LIVE state.
+
+        Args:
+            None
+
+        Returns:
+            List[str]: Stable snapshot of LIVE-relevant peer identities.
+        """
+        with self._lock:
+            onions = (
+                set(self._connections)
+                | set(self._pending_connections)
+                | set(self._outbound_attempts)
+                | set(self._scheduled_auto_reconnects)
+                | set(self._live_reconnect_grace)
+                | set(self._retunnel_in_progress)
+                | set(self._unacked_messages)
+            )
+            return sorted(onions)
 
     def get_active_connections_keys(self) -> List[str]:
         """
@@ -372,6 +410,7 @@ class StateTrackerConnectionsMixin:
             self._pending_connection_deadlines.pop(onion, None)
             self._initial_buffers.pop(onion, None)
             self._expired_pending_connections.pop(onion, None)
+            self._last_disconnect_reasons.pop(onion, None)
 
         if replaced_active is not None and replaced_active is not conn:
             _close_socket(replaced_active)

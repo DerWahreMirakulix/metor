@@ -25,6 +25,7 @@ from metor.core.api import (
     ConnectionConnectingEvent,
     ConnectionOrigin,
     ConnectionReasonCode,
+    ContentType,
     ConnectedEvent,
     EventType,
     FallbackSuccessEvent,
@@ -89,6 +90,7 @@ from metor.data import (
     MessageManager,
     MessageDirection,
     MessageStatus,
+    PendingLiveRecord,
     SettingKey,
 )
 from metor.client import IpcClient
@@ -134,6 +136,11 @@ class _DummyConfig:
             int: The computed return value.
         """
 
+        if _key in {
+            SettingKey.MAX_PENDING_LIVE_MSGS,
+            SettingKey.MAX_PENDING_LIVE_BYTES,
+        }:
+            return -1
         return 1
 
     def get_float(self, _key: Any) -> float:
@@ -470,7 +477,7 @@ class _DummyMessageManager:
         """
 
         self.queued: list[dict[str, Any]] = []
-        self.pending_live_outbox: list[tuple[int, str, str, str, str]] = []
+        self.pending_live_outbox: list[PendingLiveRecord] = []
         self.unread_drop_count: int = 0
         self.updated_outbound_statuses: list[tuple[str, str, MessageStatus]] = []
 
@@ -495,7 +502,7 @@ class _DummyMessageManager:
         payload: str = str(kwargs['payload'])
 
         self.pending_live_outbox = [
-            row for row in self.pending_live_outbox if row[3] != msg_id
+            row for row in self.pending_live_outbox if row.msg_id != msg_id
         ]
         if (
             direction is MessageDirection.OUT
@@ -503,12 +510,13 @@ class _DummyMessageManager:
             and delivery is Delivery.LIVE
         ):
             self.pending_live_outbox.append(
-                (
-                    len(self.pending_live_outbox) + 1,
-                    contact_onion,
-                    payload,
-                    msg_id,
-                    timestamp,
+                PendingLiveRecord(
+                    receipt_id=len(self.pending_live_outbox) + 1,
+                    peer_onion=contact_onion,
+                    content_type='text',
+                    payload=payload,
+                    msg_id=msg_id,
+                    timestamp=timestamp,
                 )
             )
         return _QueueResult()
@@ -574,7 +582,7 @@ class _DummyMessageManager:
     def get_pending_live_outbox(
         self,
         contact_onion: Optional[str] = None,
-    ) -> list[tuple[int, str, str, str, str]]:
+    ) -> list[PendingLiveRecord]:
         """
         Returns pending durable live rows for the test scenario.
 
@@ -587,7 +595,41 @@ class _DummyMessageManager:
 
         if contact_onion is None:
             return list(self.pending_live_outbox)
-        return [row for row in self.pending_live_outbox if row[1] == contact_onion]
+        return [
+            row for row in self.pending_live_outbox if row.peer_onion == contact_onion
+        ]
+
+    def get_pending_live_usage(self) -> tuple[int, int]:
+        """Returns current pending message count and retained text bytes."""
+        return len(self.pending_live_outbox), sum(
+            len(row.payload.encode('utf-8')) for row in self.pending_live_outbox
+        )
+
+    def promote_pending_live_to_drop(
+        self, onion: str, msg_ids: Optional[list[str]] = None
+    ) -> Optional[list[PendingLiveRecord]]:
+        """Atomically promotes the selected canonical pending records."""
+        selected = [
+            row
+            for row in self.pending_live_outbox
+            if row.peer_onion == onion and (msg_ids is None or row.msg_id in msg_ids)
+        ]
+        if msg_ids is not None and {row.msg_id for row in selected} != set(msg_ids):
+            return None
+        selected_ids = {row.msg_id for row in selected}
+        self.pending_live_outbox = [
+            row for row in self.pending_live_outbox if row.msg_id not in selected_ids
+        ]
+        for row in selected:
+            self.queued.append(
+                {
+                    'contact_onion': row.peer_onion,
+                    'delivery': Delivery.DROP,
+                    'payload': row.payload,
+                    'msg_id': row.msg_id,
+                }
+            )
+        return selected
 
     def update_outbound_message_status(
         self,
@@ -610,7 +652,7 @@ class _DummyMessageManager:
         self.updated_outbound_statuses.append((contact_onion, msg_id, new_status))
         if new_status is not MessageStatus.PENDING:
             self.pending_live_outbox = [
-                row for row in self.pending_live_outbox if row[3] != msg_id
+                row for row in self.pending_live_outbox if row.msg_id != msg_id
             ]
         return True
 
@@ -3567,12 +3609,13 @@ class DaemonHardeningTests(unittest.TestCase):
         conn = _DummyConn()
         state.add_active_connection('peer-onion', cast(socket.socket, conn))
         message_manager.pending_live_outbox.append(
-            (
-                1,
-                'peer-onion',
-                'hello after recovery',
-                'msg-1',
-                '2026-04-29T11:00:00+00:00',
+            PendingLiveRecord(
+                receipt_id=1,
+                peer_onion='peer-onion',
+                content_type='text',
+                payload='hello after recovery',
+                msg_id='msg-1',
+                timestamp='2026-04-29T11:00:00+00:00',
             )
         )
         router = MessageRouter(
@@ -3670,12 +3713,13 @@ class DaemonHardeningTests(unittest.TestCase):
         message_manager = _DummyMessageManager()
         state = StateTracker()
         message_manager.pending_live_outbox.append(
-            (
-                1,
-                'peer-onion',
-                'hello before shutdown',
-                'msg-1',
-                '2026-04-29T11:05:00+00:00',
+            PendingLiveRecord(
+                receipt_id=1,
+                peer_onion='peer-onion',
+                content_type='text',
+                payload='hello before shutdown',
+                msg_id='msg-1',
+                timestamp='2026-04-29T11:05:00+00:00',
             )
         )
         router = MessageRouter(
@@ -3793,7 +3837,7 @@ class DaemonHardeningTests(unittest.TestCase):
                 (
                     1,
                     'peer-onion',
-                    'out',
+                    ContentType.TEXT.value,
                     'hello',
                     'msg-1',
                     '2026-04-04T12:00:00+00:00',
@@ -3969,7 +4013,14 @@ class DaemonHardeningTests(unittest.TestCase):
 
             self.assertEqual(
                 parsed,
-                ('peer-onion', 'signature', 1, 1, False, True),
+                (
+                    'peer-onion',
+                    'signature',
+                    PEER_PROTOCOL_VERSION,
+                    PEER_PROTOCOL_MIN_SUPPORTED,
+                    False,
+                    True,
+                ),
             )
 
     def test_handshake_protocol_rejects_unsupported_recovery_hint(self) -> None:
@@ -5490,12 +5541,13 @@ class DaemonHardeningTests(unittest.TestCase):
         controller = _DisconnectControllerHarness(state, cast(Config, _DummyConfig()))
         message_manager = cast(_DummyMessageManager, controller._mm)
         message_manager.pending_live_outbox.append(
-            (
-                1,
-                'peer-onion',
-                'hello after disconnect',
-                'msg-1',
-                '2026-04-29T13:57:04+00:00',
+            PendingLiveRecord(
+                receipt_id=1,
+                peer_onion='peer-onion',
+                content_type='text',
+                payload='hello after disconnect',
+                msg_id='msg-1',
+                timestamp='2026-04-29T13:57:04+00:00',
             )
         )
         broadcast_mock = cast(Mock, controller._broadcast)
@@ -5520,7 +5572,7 @@ class DaemonHardeningTests(unittest.TestCase):
         )
         self.assertEqual(message_manager.pending_live_outbox, [])
         self.assertEqual(len(message_manager.queued), 1)
-        self.assertEqual(message_manager.queued[0]['delivery'], Delivery.DROP)
+        self.assertEqual(message_manager.queued[-1]['delivery'], Delivery.DROP)
         self.assertEqual(message_manager.queued[0]['msg_id'], 'msg-1')
 
     def test_manual_disconnect_during_retunnel_cancels_outbound_reconnect(self) -> None:
@@ -5577,12 +5629,13 @@ class DaemonHardeningTests(unittest.TestCase):
         controller = _DisconnectControllerHarness(state, cast(Config, _DummyConfig()))
         message_manager = cast(_DummyMessageManager, controller._mm)
         message_manager.pending_live_outbox.append(
-            (
-                1,
-                'peer-onion',
-                'hello after reject',
-                'msg-peer-reject',
-                '2026-04-29T15:04:00+00:00',
+            PendingLiveRecord(
+                receipt_id=1,
+                peer_onion='peer-onion',
+                content_type='text',
+                payload='hello after reject',
+                msg_id='msg-peer-reject',
+                timestamp='2026-04-29T15:04:00+00:00',
             )
         )
         broadcast_mock = cast(Mock, controller._broadcast)
@@ -5658,12 +5711,13 @@ class DaemonHardeningTests(unittest.TestCase):
         controller = _DisconnectControllerHarness(state, cast(Config, _DummyConfig()))
         message_manager = cast(_DummyMessageManager, controller._mm)
         message_manager.pending_live_outbox.append(
-            (
-                1,
-                'peer-onion',
-                'hello after remote end',
-                'msg-remote-end',
-                '2026-04-29T14:10:00+00:00',
+            PendingLiveRecord(
+                receipt_id=1,
+                peer_onion='peer-onion',
+                content_type='text',
+                payload='hello after remote end',
+                msg_id='msg-remote-end',
+                timestamp='2026-04-29T14:10:00+00:00',
             )
         )
         broadcast_mock = cast(Mock, controller._broadcast)
@@ -6516,6 +6570,16 @@ class DaemonHardeningTests(unittest.TestCase):
             'hello',
             '2026-04-28T15:46:44',
         )
+        message_manager.queue_message(
+            contact_onion='peer-onion',
+            direction=MessageDirection.OUT,
+            delivery=Delivery.LIVE,
+            content_type=ContentType.TEXT,
+            payload='hello',
+            status=MessageStatus.PENDING,
+            msg_id='msg-1',
+            timestamp='2026-04-28T15:46:44',
+        )
         router = MessageRouter(
             cm=cast(ContactManager, _DummyContactManager()),
             hm=cast(HistoryManager, history_manager),
@@ -6555,6 +6619,16 @@ class DaemonHardeningTests(unittest.TestCase):
             'hello',
             '2026-04-28T15:46:44',
         )
+        message_manager.queue_message(
+            contact_onion='peer-onion',
+            direction=MessageDirection.OUT,
+            delivery=Delivery.LIVE,
+            content_type=ContentType.TEXT,
+            payload='hello',
+            status=MessageStatus.PENDING,
+            msg_id='msg-1',
+            timestamp='2026-04-28T15:46:44',
+        )
         router = MessageRouter(
             cm=cast(ContactManager, _DummyContactManager()),
             hm=cast(HistoryManager, history_manager),
@@ -6573,7 +6647,7 @@ class DaemonHardeningTests(unittest.TestCase):
             emit_event=False,
         )
 
-        self.assertEqual(message_manager.queued[0]['delivery'], Delivery.DROP)
+        self.assertEqual(message_manager.queued[-1]['delivery'], Delivery.DROP)
 
     def test_listener_tracks_remote_auto_reconnect_replacement_as_pending(
         self,

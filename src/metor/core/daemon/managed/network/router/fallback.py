@@ -1,24 +1,22 @@
 """Durable recovery and live-to-drop fallback for routed messages."""
 
 import socket
+import threading
 from typing import TYPE_CHECKING, Callable, Dict, Optional, Tuple
 
 from metor.core.api import (
-    ContentType,
-    Delivery,
     EventType,
     FallbackSuccessEvent,
     IpcEvent,
     JsonValue,
-    get_current_request_id,
+    MessageOperationReason,
 )
 from metor.core.daemon.managed.models import TorCommand
 from metor.data import (
     HistoryActor,
     HistoryEvent,
     HistoryReasonCode,
-    MessageDirection,
-    MessageStatus,
+    PendingLiveRecord,
     SettingKey,
 )
 
@@ -62,6 +60,7 @@ class FallbackRouter:
         self._state: StateTracker = state
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
         self._config: 'Config' = config
+        self._transition_lock: threading.RLock = threading.RLock()
 
     def _get_pending_live_messages(
         self,
@@ -81,13 +80,25 @@ class FallbackRouter:
             onion
         )
 
-        for _, _, payload, msg_id, timestamp in self._mm.get_pending_live_outbox(onion):
-            if msg_id not in state_messages:
-                self._state.add_unacked_message(onion, msg_id, payload, timestamp)
+        for record in self._mm.get_pending_live_outbox(onion):
+            if record.content_type != 'text':
+                continue
+            if record.msg_id not in state_messages:
+                self._state.add_unacked_message(
+                    onion, record.msg_id, record.payload, record.timestamp
+                )
             else:
-                payload, timestamp = state_messages[msg_id]
-            pending_messages.append((msg_id, payload, timestamp))
-            seen_msg_ids.add(msg_id)
+                payload, timestamp = state_messages[record.msg_id]
+                record = PendingLiveRecord(
+                    record.receipt_id,
+                    record.peer_onion,
+                    record.content_type,
+                    payload,
+                    record.msg_id,
+                    timestamp,
+                )
+            pending_messages.append((record.msg_id, record.payload, record.timestamp))
+            seen_msg_ids.add(record.msg_id)
 
         for msg_id, pending_msg in state_messages.items():
             if msg_id not in seen_msg_ids:
@@ -119,29 +130,21 @@ class FallbackRouter:
         Returns:
             Dict[str, Tuple[str, str]]: The converted unacknowledged messages.
         """
-        unacked: Dict[str, Tuple[str, str]] = self._state.pop_unacked_messages(onion)
-        for _, _, payload, msg_id, timestamp in self._mm.get_pending_live_outbox(onion):
-            unacked.setdefault(msg_id, (payload, timestamp))
-        if not unacked:
-            return {}
-
-        for msg_id, (content, timestamp) in unacked.items():
-            self._mm.queue_message(
-                contact_onion=onion,
-                direction=MessageDirection.OUT,
-                delivery=Delivery.DROP,
-                content_type=ContentType.TEXT,
-                payload=content,
-                status=MessageStatus.PENDING,
-                msg_id=msg_id,
-                timestamp=timestamp,
-            )
-            self._hm.log_event(
-                HistoryEvent.QUEUED,
-                onion,
-                actor=history_actor,
-                detail_code=history_reason_code,
-            )
+        with self._transition_lock:
+            records = self._mm.promote_pending_live_to_drop(onion)
+            if not records:
+                return {}
+            unacked: Dict[str, Tuple[str, str]] = {
+                record.msg_id: (record.payload, record.timestamp) for record in records
+            }
+            for record in records:
+                self._state.remove_unacked_message(onion, record.msg_id)
+                self._hm.log_event(
+                    HistoryEvent.QUEUED,
+                    onion,
+                    actor=history_actor,
+                    detail_code=history_reason_code,
+                )
 
         if emit_event:
             self._broadcast(
@@ -164,33 +167,35 @@ class FallbackRouter:
         Returns:
             list[str]: The message IDs replayed successfully.
         """
-        conn: Optional[socket.socket] = self._state.get_connection(onion)
-        if conn is None:
-            return []
+        with self._transition_lock:
+            conn: Optional[socket.socket] = self._state.get_connection(onion)
+            if conn is None:
+                return []
 
-        replayed_msg_ids: list[str] = []
-        for msg_id, content, timestamp in self._get_pending_live_messages(onion):
-            try:
-                conn.sendall(
-                    build_message_frame(
-                        TorCommand.MSG,
-                        msg_id,
-                        content,
-                        timestamp,
-                    ).encode('utf-8')
-                )
-            except Exception:
-                break
-            replayed_msg_ids.append(msg_id)
-        return replayed_msg_ids
+            replayed_msg_ids: list[str] = []
+            for msg_id, content, timestamp in self._get_pending_live_messages(onion):
+                try:
+                    conn.sendall(
+                        build_message_frame(
+                            TorCommand.MSG,
+                            msg_id,
+                            content,
+                            timestamp,
+                        ).encode('utf-8')
+                    )
+                except Exception:
+                    break
+                replayed_msg_ids.append(msg_id)
+            return replayed_msg_ids
 
     def force_fallback(
-        self, target: str
+        self, target: str, msg_ids: Optional[list[str]] = None
     ) -> Tuple[bool, EventType, Dict[str, JsonValue]]:
         """Forces all unacknowledged outgoing live messages to the drop queue.
 
         Args:
             target (str): The target alias or onion address.
+            msg_ids (Optional[list[str]]): Selected IDs, or all pending IDs.
 
         Returns:
             Tuple[bool, EventType, Dict[str, JsonValue]]: The operation result.
@@ -199,14 +204,29 @@ class FallbackRouter:
         if not resolved:
             return False, EventType.PEER_NOT_FOUND, {'target': target}
         alias, onion = resolved
-        unacked = self.convert_unacked_messages_to_drop(
-            alias,
-            onion,
-            request_id=get_current_request_id(),
-            history_actor=HistoryActor.LOCAL,
-            history_reason_code=HistoryReasonCode.MANUAL_FALLBACK_TO_DROP,
-        )
-        if not unacked:
+        with self._transition_lock:
+            records = self._mm.promote_pending_live_to_drop(onion, msg_ids)
+            if records is None:
+                selected_ids: list[JsonValue] = list(msg_ids or [])
+                return (
+                    False,
+                    EventType.FALLBACK_REJECTED,
+                    {
+                        'alias': alias,
+                        'onion': onion,
+                        'msg_ids': selected_ids,
+                        'reason': MessageOperationReason.INVALID_SELECTION.value,
+                    },
+                )
+            for record in records:
+                self._state.remove_unacked_message(onion, record.msg_id)
+                self._hm.log_event(
+                    HistoryEvent.QUEUED,
+                    onion,
+                    actor=HistoryActor.LOCAL,
+                    detail_code=HistoryReasonCode.MANUAL_FALLBACK_TO_DROP,
+                )
+        if not records:
             return (
                 False,
                 EventType.NO_PENDING_LIVE_MSGS,
@@ -218,12 +238,12 @@ class FallbackRouter:
             {
                 'alias': alias,
                 'onion': onion,
-                'count': len(unacked),
-                'msg_ids': list(unacked),
+                'count': len(records),
+                'msg_ids': [record.msg_id for record in records],
             },
         )
 
-    def finalize_pending_live_messages(self) -> None:
+    def finalize_pending_live_messages(self) -> list[str]:
         """Converts remaining durable pending live messages into drops on shutdown.
 
         Args:
@@ -233,12 +253,16 @@ class FallbackRouter:
             None
         """
         if not self._config.get_bool(SettingKey.FALLBACK_TO_DROP):
-            return
+            return []
 
         pending_onions: set[str] = set(self._state.get_unacked_onions())
-        for _, onion, _, _, _ in self._mm.get_pending_live_outbox():
-            pending_onions.add(onion)
+        for record in self._mm.get_pending_live_outbox():
+            pending_onions.add(record.peer_onion)
 
+        promoted: list[str] = []
         for onion in pending_onions:
             alias: str = self._cm.ensure_alias_for_onion(onion) or onion
-            self.convert_unacked_messages_to_drop(alias, onion, emit_event=False)
+            promoted.extend(
+                self.convert_unacked_messages_to_drop(alias, onion, emit_event=False)
+            )
+        return promoted

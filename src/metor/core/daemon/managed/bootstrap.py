@@ -69,7 +69,7 @@ def build_runtime(
             raise InvalidMasterPasswordError()
         verify_master_password(km)
 
-    if enable_session_auth:
+    if pm.uses_encrypted_storage() or enable_session_auth:
         auth_password: Optional[str] = (
             password if pm.uses_encrypted_storage() else session_auth_password
         )

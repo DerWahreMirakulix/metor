@@ -186,14 +186,15 @@ plaintext temporary file. The initial whole-object implementation caps
 plaintext objects at 64 MiB to bound corrupt-file reads; future streaming media
 work may introduce a different documented limit with a new format version.
 
-The current whole-object API establishes crypto and ownership semantics. A
-future bounded streaming transfer implementation may evolve the versioned file
-format without exposing paths or encryption details to message DTOs. A future
-`VoiceContent` or `FileContent` will carry `blob_id` and small metadata only;
-raw binary data must not enter NDJSON.
+The whole-object API establishes crypto and ownership semantics. Voice adds a
+bounded, resumable application protocol while keeping encrypted object paths and
+formats behind `BlobStore`. `VoiceContent` carries `blob_id`, codec, byte count,
+and optional duration metadata only; raw binary data does not become a permanent
+NDJSON message representation. A future `FileContent` can reuse these ownership
+and bounded-transfer principles without changing message semantics.
 
 Temporary and persistent objects use the same encryption model. Consequently a
-future `LIVE + VOICE` object can be promoted to `DROP + VOICE` during fallback
+`LIVE + VOICE` object can be promoted to `DROP + VOICE` during fallback
 without changing keys or embedding content in transport messages. Promotion
 changes ownership/lifecycle only; LIVE content does not become history merely
 because it required encrypted crash-safe spooling.
@@ -265,24 +266,24 @@ boundary, register/select the provider, inject it through `KeyManager` and the
 central destruction lifecycle, and destroy that hardware key during purge. No
 SQLCipher, key-hierarchy, blob, message, or lock semantic requires redesign.
 
-Future voice/file integration still requires a bounded authenticated SDK/IPC
-blob-transfer channel, authorization tying blob operations to the active
-profile/session, streaming/chunk limits and cancellation, database reference
-ownership and orphan cleanup, registered `VoiceContent`/`FileContent` DTOs, and
-fallback logic that promotes temporary ownership only after durable message
-metadata commits. None of those media/transport features is implemented by the
-at-rest blob foundation.
+Voice uses authenticated, exact-offset chunks with receiver-enforced frame and
+retention limits. Receipt metadata owns blob references, and fallback promotes
+temporary ownership only after the message transition commits. Platform audio
+capture/playback and frontend playback cursors stay outside Core. File transfer
+and a `FileContent` DTO remain future work.
 
 ## Messages: delivery and content
 
 Messages have two independent dimensions. `Delivery` is either `LIVE`
 (ephemeral interactive delivery, with a temporary reliability spool) or `DROP`
-(persistent asynchronous delivery). `ContentType` is currently only `TEXT`,
-represented by `TextContent`.
+(persistent asynchronous delivery). `ContentType` is `TEXT` or `VOICE`,
+represented by `TextContent` and `VoiceContent`.
 
 ```text
 LIVE + TEXT → ephemeral interactive text
 DROP + TEXT → persistent asynchronous text
+LIVE + VOICE → ephemeral, resumable interactive Voice
+DROP + VOICE → persistent asynchronous Voice
 ```
 
 The public boundary uses `SendMessageCommand(target, delivery, content,
@@ -290,10 +291,11 @@ msg_id)` and `MessageReceivedEvent(alias, delivery, content, msg_id)`. Fallback
 changes only `Delivery.LIVE` to `Delivery.DROP`; logical identity and content
 remain unchanged.
 
-Future `VOICE`, `FILE`, and `PAYMENT_REQUEST` content types are extension
-examples, not implemented features. Voice and files require a bounded,
-authenticated blob-transfer protocol and reference payloads; binary data must
-not become a permanent Base64-in-NDJSON representation.
+One Voice capture turn is one logical message and stable `msg_id`. Bounded
+Base64 chunks exist only in authenticated transfer frames; the stored/public
+content DTO is a blob reference. Voice uses the same ACK, dedupe, pending,
+reconnect/replay, selective fallback, consume, and DROP history semantics as
+text. `FILE` and `PAYMENT_REQUEST` remain extension examples.
 
 ## Purpose
 
@@ -457,7 +459,38 @@ The canonical wire sequence is:
    - If the daemon responds with `DaemonLockedEvent`, send `UnlockCommand(password=...)` and await `DaemonUnlockedEvent`.
    - If the daemon responds with `AuthRequiredEvent(challenge, salt)`, compute `proof = HMAC-SHA256(Argon2i(password, salt), challenge)` and send `AuthenticateSessionCommand(proof=...)`, awaiting `SessionAuthenticatedEvent`.
 4. **Register Live Consumer:** Send `RegisterLiveConsumerCommand()`. The daemon will now stream asynchronous push events (messages, status updates, contact requests) to this socket.
-5. **Initial State & Event Loop:** Fetch startup state via `GetChatStartupStateCommand` or `GetHistoryCommand`. Process continuous streaming events delimited by newlines.
+5. **Initial State & Event Loop:** Terminal may fetch its compatibility projection
+   with `GetChatStartupStateCommand`. Rich clients request
+   `GetRuntimeSnapshotCommand`, install its `revision` as the projection
+   baseline, then apply buffered/later events with greater revisions. Process
+   continuous streaming events delimited by newlines.
+
+### Aggregate Runtime Projection
+
+`RuntimeSnapshotEvent` is the authoritative content-free reattachment boundary.
+It aggregates profile/Onion identity, saved and discovered contacts, DROP
+conversation summaries, LIVE contexts, pending incoming requests, unread and
+pending counts, terminal disconnect reasons, and a settings revision. Every IPC
+event carries a monotonically assigned daemon `revision`, so registration before
+snapshot retrieval cannot create an undetectable state-change gap. Frontends do
+not reconstruct this truth from logs or human-readable strings, and the snapshot
+never contains message bodies, Voice bytes, drafts, playback position, or
+notification history.
+
+### Per-Client Restriction Versus Hard Lock
+
+`LockCommand` retains its security meaning: it releases the complete active
+profile runtime and its keys. Device-style screen locking uses
+`RestrictClientCommand`, which freezes an authorization/privacy policy for only
+the requesting IPC session while other authenticated clients and the profile
+runtime remain active. Core gates commands, locked Voice target ownership,
+incoming acceptance, and identity disclosure; it does not trust frontend
+presentation state as an authorization boundary.
+
+Optional quick unlock is a one-use challenge proof backed by a salted Argon2id
+PIN verifier. It is not a PMK/keyslot credential and cannot start a cold or
+hard-locked profile. Three failed PIN proofs disable PIN for that session's lock
+cycle and require the normal profile-password proof.
 
 ### Peer Wire Version (Daemon -> Daemon)
 

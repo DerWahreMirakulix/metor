@@ -4,7 +4,7 @@ import socket
 import threading
 from typing import Dict, List, Set, Tuple
 
-from metor.core.api import ConnectionOrigin
+from metor.core.api import ConnectionOrigin, ConnectionReasonCode
 from metor.core.daemon.managed.models import TunnelState
 from metor.core.daemon.managed.network.state.connections import (
     PendingConnectionSnapshot,
@@ -62,6 +62,7 @@ class StateTracker(
         self._retunnel_recovery_retry_pending: Set[str] = set()
         self._ui_focus_counts: Dict[str, int] = {}
         self._session_last_activity: Dict[str, float] = {}
+        self._last_disconnect_reasons: Dict[str, ConnectionReasonCode] = {}
 
 
 __all__ = ['PendingConnectionReason', 'PendingConnectionSnapshot', 'StateTracker']

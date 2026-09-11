@@ -1,7 +1,7 @@
 """Messaging command DTOs for live, inbox, and stored-message flows."""
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import List, Optional
 
 # Local Package Imports
 from metor.core.api.base import IpcCommand
@@ -36,6 +36,7 @@ class MarkReadCommand(IpcCommand):
     """Reads and clears unread messages for a peer."""
 
     target: str
+    delivery: Optional[Delivery] = None
     command_type: CommandType = field(default=CommandType.MARK_READ, init=False)
 
 
@@ -45,6 +46,7 @@ class FallbackCommand(IpcCommand):
     """Forces pending live messages into the drop queue."""
 
     target: str
+    msg_ids: Optional[List[str]] = None
     command_type: CommandType = field(default=CommandType.FALLBACK, init=False)
 
 
@@ -61,11 +63,72 @@ class GetMessagesCommand(IpcCommand):
 @register_command(CommandType.CLEAR_MESSAGES)
 @dataclass
 class ClearMessagesCommand(IpcCommand):
-    """Clears stored message history."""
+    """Clears only local DROP conversation payload/history state."""
 
     target: Optional[str] = None
     non_contacts_only: bool = False
     command_type: CommandType = field(
         default=CommandType.CLEAR_MESSAGES,
+        init=False,
+    )
+
+
+@register_command(CommandType.DELETE_MESSAGE)
+@dataclass
+class DeleteMessageCommand(IpcCommand):
+    """Deletes one eligible local DROP payload while retaining dedupe metadata."""
+
+    target: str
+    msg_id: str
+    command_type: CommandType = field(default=CommandType.DELETE_MESSAGE, init=False)
+
+
+@register_command(CommandType.DISMISS_LIVE_CONTEXT)
+@dataclass
+class DismissLiveContextCommand(IpcCommand):
+    """Destroys resolved inbound state for a disconnected LIVE context."""
+
+    target: str
+    command_type: CommandType = field(
+        default=CommandType.DISMISS_LIVE_CONTEXT,
+        init=False,
+    )
+
+
+@register_command(CommandType.BEGIN_VOICE)
+@dataclass
+class BeginVoiceCommand(IpcCommand):
+    """Begins one peer-bound logical Voice turn."""
+
+    target: str
+    delivery: Delivery
+    msg_id: str
+    codec: str
+    command_type: CommandType = field(default=CommandType.BEGIN_VOICE, init=False)
+
+
+@register_command(CommandType.APPEND_VOICE_CHUNK)
+@dataclass
+class AppendVoiceChunkCommand(IpcCommand):
+    """Appends one bounded Base64 Voice chunk at an exact byte offset."""
+
+    msg_id: str
+    offset: int
+    data: str
+    command_type: CommandType = field(
+        default=CommandType.APPEND_VOICE_CHUNK,
+        init=False,
+    )
+
+
+@register_command(CommandType.FINALIZE_VOICE)
+@dataclass
+class FinalizeVoiceCommand(IpcCommand):
+    """Finalizes the current logical Voice turn without changing its target."""
+
+    msg_id: str
+    duration_ms: Optional[int] = None
+    command_type: CommandType = field(
+        default=CommandType.FINALIZE_VOICE,
         init=False,
     )

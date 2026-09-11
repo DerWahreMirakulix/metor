@@ -12,12 +12,33 @@ used by the UI, the IPC contract, and the message store. They do NOT change.
 
 | Term   | Meaning                                                                                   |
 | ------ | ----------------------------------------------------------------------------------------- |
-| `live` | Ephemeral, interactive. Never appears in chat history; payload is shredded after consume. |
-| `drop` | Durable, mailbox-style. Persists until deletion or shred policy.                          |
+| `live` | Ephemeral, interactive. Never appears in chat history; Core payload may be shredded after consume. |
+| `drop` | Durable, mailbox-style. Persists until deletion or shred policy.                                |
 
 Examples that keep this vocabulary: `SendMessageCommand`, `Delivery.LIVE` /
 `Delivery.DROP`, `TextContent`, `ChatTransportState`, UI prompt tags
 (`[Drop]`, `[Switching]`, `[Reconnecting]`).
+
+## Message content and identity
+
+| Term | Meaning |
+| ---- | ------- |
+| `msg_id` | Stable logical message identity across retry, replay, ACK, and LIVE-to-DROP fallback. |
+| `TextContent` | UTF-8 typed message content. |
+| `VoiceContent` | Typed metadata referencing a bounded Core-owned Voice blob; never raw audio in normal message NDJSON. |
+| Voice turn | One physical PTT press, one logical message, and one stable `msg_id`, regardless of chunk count. |
+| consume | Explicit local read/unseen transition; distinct from a delivery ACK and optionally produces a remote read receipt. |
+
+## Client access and lifecycle
+
+| Term | Meaning |
+| ---- | ------- |
+| hard lock | `LockCommand`: releases the entire active profile runtime and its key/database/Tor state. |
+| restricted client | Per-IPC-session authorization state used for device-style lock behavior while the profile runtime remains active. |
+| quick unlock | Optional challenge proof derived from a salted memory-hard PIN verifier; never a profile decryption credential. |
+| graceful profile exit | Reliability-preserving local commit/connection shutdown/hard-lock flow that does not wait for remote DROP delivery. |
+| purge / self-destruct | Reliability-preempting destruction flow: abort communication work, destroy key access, then perform best-effort cleanup. |
+| revision | Daemon-authored monotonic sequence on IPC events used to reconcile an aggregate runtime snapshot with buffered events. |
 
 ## Dimension 2 — Connection Type (Backend, `transport` field)
 

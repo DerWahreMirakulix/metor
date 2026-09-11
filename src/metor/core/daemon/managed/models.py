@@ -21,6 +21,13 @@ class TorCommand(str, Enum):
     ACK = '/ack'
     DROP = '/drop'
     READ = '/read'
+    VOICE_BEGIN = '/voice_begin'
+    VOICE_CHUNK = '/voice_chunk'
+    VOICE_END = '/voice_end'
+    VOICE_ACK = '/voice_ack'
+    DROP_VOICE_BEGIN = '/drop_voice_begin'
+    DROP_VOICE_CHUNK = '/drop_voice_chunk'
+    DROP_VOICE_END = '/drop_voice_end'
 
 
 class DisconnectIntent(str, Enum):

@@ -114,6 +114,33 @@ class LocalAuthTracker:
         with self._lock:
             return self._context is not None
 
+    def proof_salt(self) -> Optional[str]:
+        """Returns the active profile-password proof salt.
+
+        Args:
+            None
+
+        Returns:
+            Optional[str]: Runtime salt when password proof is enabled.
+        """
+        with self._lock:
+            return self._context.salt_hex if self._context is not None else None
+
+    def verify_proof_key(self, challenge: str, proof: str) -> bool:
+        """Verifies a proof against the active profile-password proof key.
+
+        Args:
+            challenge (str): One-use challenge.
+            proof (str): HMAC proof digest.
+
+        Returns:
+            bool: True when the active password verifier matches.
+        """
+        with self._lock:
+            if self._context is None:
+                return False
+            return verify_session_auth_proof(self._context.proof_key, challenge, proof)
+
     def clear_connection(self, conn: socket.socket) -> None:
         """
         Removes one IPC connection from tracked local-auth state.

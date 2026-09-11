@@ -104,6 +104,36 @@
         "name"
       ]
     },
+    "AppendVoiceChunkCommand": {
+      "title": "AppendVoiceChunkCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer"
+        },
+        "data": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "msg_id",
+        "offset",
+        "data"
+      ]
+    },
     "AuthenticateSessionCommand": {
       "title": "AuthenticateSessionCommand",
       "type": "object",
@@ -124,6 +154,44 @@
       },
       "required": [
         "proof"
+      ]
+    },
+    "BeginVoiceCommand": {
+      "title": "BeginVoiceCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "type": "string"
+        },
+        "delivery": {
+          "enum": [
+            "live",
+            "drop"
+          ],
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "codec": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "delivery",
+        "msg_id",
+        "codec"
       ]
     },
     "ChangePasswordCommand": {
@@ -239,6 +307,52 @@
         }
       }
     },
+    "ConfigureQuickUnlockCommand": {
+      "title": "ConfigureQuickUnlockCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "enum": [
+            "set",
+            "remove"
+          ],
+          "type": "string"
+        },
+        "salt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verifier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "action"
+      ]
+    },
     "ConnectCommand": {
       "title": "ConnectCommand",
       "type": "object",
@@ -261,8 +375,56 @@
         "target"
       ]
     },
+    "DeleteMessageCommand": {
+      "title": "DeleteMessageCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "msg_id"
+      ]
+    },
     "DisconnectCommand": {
       "title": "DisconnectCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "target"
+      ]
+    },
+    "DismissLiveContextCommand": {
+      "title": "DismissLiveContextCommand",
       "type": "object",
       "properties": {
         "request_id": {
@@ -299,10 +461,55 @@
         },
         "target": {
           "type": "string"
+        },
+        "msg_ids": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
         "target"
+      ]
+    },
+    "FinalizeVoiceCommand": {
+      "title": "FinalizeVoiceCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "msg_id"
       ]
     },
     "GenerateAddressCommand": {
@@ -553,6 +760,22 @@
         }
       }
     },
+    "GetRuntimeSnapshotCommand": {
+      "title": "GetRuntimeSnapshotCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
     "GetSettingCommand": {
       "title": "GetSettingCommand",
       "type": "object",
@@ -675,6 +898,20 @@
         },
         "target": {
           "type": "string"
+        },
+        "delivery": {
+          "anyOf": [
+            {
+              "enum": [
+                "live",
+                "drop"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -725,6 +962,59 @@
       "required": [
         "name",
         "target_mode"
+      ]
+    },
+    "PrepareProfileExitCommand": {
+      "title": "PrepareProfileExitCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ReauthorizeClientCommand": {
+      "title": "ReauthorizeClientCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "method": {
+          "enum": [
+            "pin",
+            "profile_password",
+            "none"
+          ],
+          "type": "string"
+        },
+        "proof": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "method"
       ]
     },
     "RegisterLiveConsumerCommand": {
@@ -871,6 +1161,59 @@
         "new_name"
       ]
     },
+    "RestrictClientCommand": {
+      "title": "RestrictClientCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unlock_method": {
+          "enum": [
+            "pin",
+            "profile_password",
+            "none"
+          ],
+          "type": "string"
+        },
+        "continued_live_target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "live_while_locked": {
+          "type": "boolean"
+        },
+        "accept_while_locked": {
+          "enum": [
+            "all",
+            "saved_contacts",
+            "none"
+          ],
+          "type": "string"
+        },
+        "notification_privacy": {
+          "enum": [
+            "show_all",
+            "anonymize",
+            "off"
+          ],
+          "type": "string"
+        }
+      }
+    },
     "RetunnelCommand": {
       "title": "RetunnelCommand",
       "type": "object",
@@ -933,7 +1276,12 @@
           ],
           "type": "string"
         },
-        "content": {},
+        "content": {
+          "anyOf": [
+            {},
+            {}
+          ]
+        },
         "msg_id": {
           "type": "string"
         }
@@ -1123,6 +1471,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "msg_id": {
           "type": "string"
         },
@@ -1155,6 +1513,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "profile": {
           "type": "string"
         }
@@ -1171,6 +1539,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -1203,6 +1581,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "profile": {
           "type": "string"
         },
@@ -1229,6 +1617,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "profile": {
           "type": "string"
         }
@@ -1245,6 +1643,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -1283,6 +1691,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         }
@@ -1299,6 +1717,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -1340,6 +1768,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -1356,6 +1794,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -1367,6 +1815,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -1409,6 +1867,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -1439,6 +1907,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -1496,6 +1974,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -1507,6 +1995,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -1528,6 +2026,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -1539,6 +2047,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -1571,6 +2089,121 @@
         "contacts"
       ]
     },
+    "ClientAccessRestrictedEvent": {
+      "title": "ClientAccessRestrictedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "command": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "command"
+      ]
+    },
+    "ClientReauthorizedEvent": {
+      "title": "ClientReauthorizedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ClientRestrictedEvent": {
+      "title": "ClientRestrictedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unlock_method": {
+          "enum": [
+            "pin",
+            "profile_password",
+            "none"
+          ],
+          "type": "string"
+        },
+        "challenge": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "salt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "unlock_method"
+      ]
+    },
     "ClientScopeKeyRejectedEvent": {
       "title": "ClientScopeKeyRejectedEvent",
       "type": "object",
@@ -1579,6 +2212,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -1598,6 +2241,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -1624,6 +2277,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -1659,6 +2322,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -1670,6 +2343,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -1692,6 +2375,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "key": {
           "type": "string"
         }
@@ -1708,6 +2401,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -1754,6 +2457,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -1812,6 +2525,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -1858,6 +2581,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -1921,7 +2654,10 @@
                 "pending_acceptance_expired",
                 "mutual_tiebreaker_loser",
                 "duplicate_incoming_connected",
-                "duplicate_incoming_pending"
+                "duplicate_incoming_pending",
+                "live_backlog_limit_reached",
+                "live_voice_limit_reached",
+                "idle_timeout"
               ],
               "type": "string"
             },
@@ -1943,6 +2679,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -2001,6 +2747,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -2048,7 +2804,10 @@
                 "pending_acceptance_expired",
                 "mutual_tiebreaker_loser",
                 "duplicate_incoming_connected",
-                "duplicate_incoming_pending"
+                "duplicate_incoming_pending",
+                "live_backlog_limit_reached",
+                "live_voice_limit_reached",
+                "idle_timeout"
               ],
               "type": "string"
             },
@@ -2070,6 +2829,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -2136,6 +2905,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "active": {
           "type": "array",
           "items": {
@@ -2178,6 +2957,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -2208,6 +2997,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -2246,6 +3045,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -2272,6 +3081,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -2320,6 +3139,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -2355,6 +3184,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -2366,6 +3205,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -2391,6 +3240,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -2428,6 +3287,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -2439,6 +3308,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -2460,6 +3339,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -2476,6 +3365,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -2487,6 +3386,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -2517,6 +3426,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -2528,6 +3447,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -2581,7 +3510,10 @@
                 "pending_acceptance_expired",
                 "mutual_tiebreaker_loser",
                 "duplicate_incoming_connected",
-                "duplicate_incoming_pending"
+                "duplicate_incoming_pending",
+                "live_backlog_limit_reached",
+                "live_voice_limit_reached",
+                "idle_timeout"
               ],
               "type": "string"
             },
@@ -2609,6 +3541,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "target": {
           "type": "string"
         }
@@ -2625,6 +3567,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -2663,6 +3615,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -2694,8 +3656,84 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
+    },
+    "FallbackRejectedEvent": {
+      "title": "FallbackRejectedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alias": {
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "invalid_selection",
+            "wrong_peer",
+            "not_pending_live",
+            "not_drop",
+            "pending_delivery",
+            "not_found",
+            "no_recovery",
+            "count_limit",
+            "byte_limit",
+            "outbound_pending_live",
+            "active_live_context"
+          ],
+          "type": "string"
+        },
+        "msg_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "alias",
+        "reason",
+        "msg_ids"
+      ]
     },
     "FallbackSuccessEvent": {
       "title": "FallbackSuccessEvent",
@@ -2705,6 +3743,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -2753,6 +3801,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -2764,6 +3822,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -2802,6 +3870,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "profile": {
           "type": "string"
         }
@@ -2818,6 +3896,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -2868,6 +3956,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "entries": {},
         "profile": {
           "type": "string"
@@ -2912,6 +4010,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "inbox": {
           "type": "object"
         }
@@ -2928,6 +4036,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -2976,6 +4094,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -3005,6 +4133,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -3057,6 +4195,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -3118,6 +4266,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -3129,6 +4287,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -3150,6 +4318,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -3161,6 +4339,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -3202,6 +4390,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -3213,6 +4411,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -3241,12 +4449,257 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "max_clients": {
           "type": "integer"
         }
       },
       "required": [
         "max_clients"
+      ]
+    },
+    "LiveContextDismissRejectedEvent": {
+      "title": "LiveContextDismissRejectedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alias": {
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "invalid_selection",
+            "wrong_peer",
+            "not_pending_live",
+            "not_drop",
+            "pending_delivery",
+            "not_found",
+            "no_recovery",
+            "count_limit",
+            "byte_limit",
+            "outbound_pending_live",
+            "active_live_context"
+          ],
+          "type": "string"
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "alias",
+        "reason"
+      ]
+    },
+    "LiveContextDismissedEvent": {
+      "title": "LiveContextDismissedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alias": {
+          "type": "string"
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "removed_count": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "alias"
+      ]
+    },
+    "LiveMessageResourcePressureEvent": {
+      "title": "LiveMessageResourcePressureEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alias": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "invalid_selection",
+            "wrong_peer",
+            "not_pending_live",
+            "not_drop",
+            "pending_delivery",
+            "not_found",
+            "no_recovery",
+            "count_limit",
+            "byte_limit",
+            "outbound_pending_live",
+            "active_live_context"
+          ],
+          "type": "string"
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pending_count": {
+          "type": "integer"
+        },
+        "pending_bytes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "alias",
+        "msg_id",
+        "reason"
+      ]
+    },
+    "LiveMessageUnavailableEvent": {
+      "title": "LiveMessageUnavailableEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alias": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "enum": [
+            "invalid_selection",
+            "wrong_peer",
+            "not_pending_live",
+            "not_drop",
+            "pending_delivery",
+            "not_found",
+            "no_recovery",
+            "count_limit",
+            "byte_limit",
+            "outbound_pending_live",
+            "active_live_context"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "alias",
+        "msg_id"
       ]
     },
     "LocalAuthRateLimitedEvent": {
@@ -3257,6 +4710,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -3285,6 +4748,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "target": {
           "type": "string"
         },
@@ -3295,6 +4768,115 @@
       "required": [
         "target",
         "max_conn"
+      ]
+    },
+    "MessageDeleteRejectedEvent": {
+      "title": "MessageDeleteRejectedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "invalid_selection",
+            "wrong_peer",
+            "not_pending_live",
+            "not_drop",
+            "pending_delivery",
+            "not_found",
+            "no_recovery",
+            "count_limit",
+            "byte_limit",
+            "outbound_pending_live",
+            "active_live_context"
+          ],
+          "type": "string"
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "target",
+        "msg_id",
+        "reason"
+      ]
+    },
+    "MessageDeletedEvent": {
+      "title": "MessageDeletedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alias": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "alias",
+        "msg_id"
       ]
     },
     "MessageReceivedEvent": {
@@ -3311,6 +4893,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -3321,7 +4913,12 @@
           ],
           "type": "string"
         },
-        "content": {},
+        "content": {
+          "anyOf": [
+            {},
+            {}
+          ]
+        },
         "onion": {
           "anyOf": [
             {
@@ -3372,6 +4969,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -3383,6 +4990,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -3421,6 +5038,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "profile": {
           "type": "string"
         }
@@ -3437,6 +5064,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -3475,6 +5112,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "profile": {
           "type": "string"
         }
@@ -3491,6 +5138,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -3534,6 +5191,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -3560,6 +5227,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -3598,6 +5275,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -3624,6 +5311,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -3662,6 +5359,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -3693,6 +5400,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -3704,6 +5421,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -3725,6 +5452,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -3736,6 +5473,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -3778,6 +5525,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -3810,6 +5567,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "target": {
           "type": "string"
         }
@@ -3826,6 +5593,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -3864,6 +5641,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -3890,6 +5677,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -3941,13 +5738,48 @@
             "pending_acceptance_expired",
             "mutual_tiebreaker_loser",
             "duplicate_incoming_connected",
-            "duplicate_incoming_pending"
+            "duplicate_incoming_pending",
+            "live_backlog_limit_reached",
+            "live_voice_limit_reached",
+            "idle_timeout"
           ],
           "type": "string"
         }
       },
       "required": [
         "alias"
+      ]
+    },
+    "ProfileExitPreparedEvent": {
+      "title": "ProfileExitPreparedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "profile": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile"
       ]
     },
     "ProfileOperationResultEvent": {
@@ -3958,6 +5790,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -4020,6 +5862,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "profiles": {
           "type": "array",
           "items": {}
@@ -4037,6 +5889,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -4063,6 +5925,87 @@
         "client_min_supported"
       ]
     },
+    "QuickUnlockConfiguredEvent": {
+      "title": "QuickUnlockConfiguredEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ]
+    },
+    "QuickUnlockFailedEvent": {
+      "title": "QuickUnlockFailedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "password_required": {
+          "type": "boolean"
+        },
+        "challenge": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "salt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
     "ReadReceiptEvent": {
       "title": "ReadReceiptEvent",
       "type": "object",
@@ -4071,6 +6014,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -4113,6 +6066,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "old_alias": {
           "type": "string"
         },
@@ -4149,6 +6112,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -4228,6 +6201,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -4260,6 +6243,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "alias": {
           "type": "string"
         },
@@ -4278,6 +6271,87 @@
         "alias"
       ]
     },
+    "RuntimeSnapshotEvent": {
+      "title": "RuntimeSnapshotEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "profile": {
+          "type": "string"
+        },
+        "onion": {
+          "type": "string"
+        },
+        "contacts": {
+          "type": "array",
+          "items": {}
+        },
+        "conversations": {
+          "type": "array",
+          "items": {}
+        },
+        "live_contexts": {
+          "type": "array",
+          "items": {}
+        },
+        "pending": {
+          "type": "array",
+          "items": {}
+        },
+        "settings_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile",
+        "onion"
+      ]
+    },
+    "SelfDestructCompletedEvent": {
+      "title": "SelfDestructCompletedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
     "SelfDestructInitiatedEvent": {
       "title": "SelfDestructInitiatedEvent",
       "type": "object",
@@ -4286,6 +6360,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -4307,6 +6391,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -4318,6 +6412,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -4344,6 +6448,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -4385,6 +6499,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -4396,6 +6520,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -4424,6 +6558,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "scope": {
           "type": "string"
         },
@@ -4444,6 +6588,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -4485,6 +6639,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -4501,6 +6665,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -4512,6 +6686,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -4575,6 +6759,16 @@
             }
           ]
         },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "error": {
           "anyOf": [
             {
@@ -4626,6 +6820,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -4686,6 +6890,16 @@
               "type": "null"
             }
           ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -4697,6 +6911,16 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -4725,6 +6949,278 @@
         "messages",
         "alias"
       ]
+    },
+    "VoiceChunkAcceptedEvent": {
+      "title": "VoiceChunkAcceptedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "next_offset": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "msg_id",
+        "next_offset"
+      ]
+    },
+    "VoiceChunkReceivedEvent": {
+      "title": "VoiceChunkReceivedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alias": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer"
+        },
+        "data": {
+          "type": "string"
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "alias",
+        "msg_id",
+        "offset",
+        "data"
+      ]
+    },
+    "VoiceFinalizedEvent": {
+      "title": "VoiceFinalizedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "size_bytes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "msg_id",
+        "size_bytes"
+      ]
+    },
+    "VoiceResourceLimitEvent": {
+      "title": "VoiceResourceLimitEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "used_bytes": {
+          "type": "integer"
+        },
+        "limit_bytes": {
+          "type": "integer"
+        },
+        "msg_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "used_bytes",
+        "limit_bytes"
+      ]
+    },
+    "VoiceResourcePressureEvent": {
+      "title": "VoiceResourcePressureEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "used_bytes": {
+          "type": "integer"
+        },
+        "limit_bytes": {
+          "type": "integer"
+        },
+        "msg_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "used_bytes",
+        "limit_bytes"
+      ]
+    },
+    "VoiceStartedEvent": {
+      "title": "VoiceStartedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "alias": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "delivery": {
+          "enum": [
+            "live",
+            "drop"
+          ],
+          "type": "string"
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "alias",
+        "msg_id",
+        "delivery"
+      ]
     }
   },
   "commands": {
@@ -4737,8 +7233,14 @@
     "add_profile": {
       "$ref": "#/definitions/AddProfileCommand"
     },
+    "append_voice_chunk": {
+      "$ref": "#/definitions/AppendVoiceChunkCommand"
+    },
     "authenticate_session": {
       "$ref": "#/definitions/AuthenticateSessionCommand"
+    },
+    "begin_voice": {
+      "$ref": "#/definitions/BeginVoiceCommand"
     },
     "change_password": {
       "$ref": "#/definitions/ChangePasswordCommand"
@@ -4755,14 +7257,26 @@
     "clear_profile_db": {
       "$ref": "#/definitions/ClearProfileDbCommand"
     },
+    "configure_quick_unlock": {
+      "$ref": "#/definitions/ConfigureQuickUnlockCommand"
+    },
     "connect": {
       "$ref": "#/definitions/ConnectCommand"
+    },
+    "delete_message": {
+      "$ref": "#/definitions/DeleteMessageCommand"
     },
     "disconnect": {
       "$ref": "#/definitions/DisconnectCommand"
     },
+    "dismiss_live_context": {
+      "$ref": "#/definitions/DismissLiveContextCommand"
+    },
     "fallback": {
       "$ref": "#/definitions/FallbackCommand"
+    },
+    "finalize_voice": {
+      "$ref": "#/definitions/FinalizeVoiceCommand"
     },
     "generate_address": {
       "$ref": "#/definitions/GenerateAddressCommand"
@@ -4797,6 +7311,9 @@
     "get_raw_history": {
       "$ref": "#/definitions/GetRawHistoryCommand"
     },
+    "get_runtime_snapshot": {
+      "$ref": "#/definitions/GetRuntimeSnapshotCommand"
+    },
     "get_setting": {
       "$ref": "#/definitions/GetSettingCommand"
     },
@@ -4818,6 +7335,12 @@
     "migrate_profile_security": {
       "$ref": "#/definitions/MigrateProfileSecurityCommand"
     },
+    "prepare_profile_exit": {
+      "$ref": "#/definitions/PrepareProfileExitCommand"
+    },
+    "reauthorize_client": {
+      "$ref": "#/definitions/ReauthorizeClientCommand"
+    },
     "register_live_consumer": {
       "$ref": "#/definitions/RegisterLiveConsumerCommand"
     },
@@ -4835,6 +7358,9 @@
     },
     "rename_profile": {
       "$ref": "#/definitions/RenameProfileCommand"
+    },
+    "restrict_client": {
+      "$ref": "#/definitions/RestrictClientCommand"
     },
     "retunnel": {
       "$ref": "#/definitions/RetunnelCommand"
@@ -4915,6 +7441,15 @@
     },
     "chat_startup_state": {
       "$ref": "#/definitions/ChatStartupStateEvent"
+    },
+    "client_access_restricted": {
+      "$ref": "#/definitions/ClientAccessRestrictedEvent"
+    },
+    "client_reauthorized": {
+      "$ref": "#/definitions/ClientReauthorizedEvent"
+    },
+    "client_restricted": {
+      "$ref": "#/definitions/ClientRestrictedEvent"
     },
     "client_scope_key_rejected": {
       "$ref": "#/definitions/ClientScopeKeyRejectedEvent"
@@ -5015,6 +7550,9 @@
     "drops_disabled": {
       "$ref": "#/definitions/DropsDisabledEvent"
     },
+    "fallback_rejected": {
+      "$ref": "#/definitions/FallbackRejectedEvent"
+    },
     "fallback_success": {
       "$ref": "#/definitions/FallbackSuccessEvent"
     },
@@ -5069,11 +7607,29 @@
     "ipc_client_limit_reached": {
       "$ref": "#/definitions/IpcClientLimitReachedEvent"
     },
+    "live_context_dismiss_rejected": {
+      "$ref": "#/definitions/LiveContextDismissRejectedEvent"
+    },
+    "live_context_dismissed": {
+      "$ref": "#/definitions/LiveContextDismissedEvent"
+    },
+    "live_message_resource_pressure": {
+      "$ref": "#/definitions/LiveMessageResourcePressureEvent"
+    },
+    "live_message_unavailable": {
+      "$ref": "#/definitions/LiveMessageUnavailableEvent"
+    },
     "local_auth_rate_limited": {
       "$ref": "#/definitions/LocalAuthRateLimitedEvent"
     },
     "max_connections_reached": {
       "$ref": "#/definitions/MaxConnectionsReachedEvent"
+    },
+    "message_delete_rejected": {
+      "$ref": "#/definitions/MessageDeleteRejectedEvent"
+    },
+    "message_deleted": {
+      "$ref": "#/definitions/MessageDeletedEvent"
     },
     "message_received": {
       "$ref": "#/definitions/MessageReceivedEvent"
@@ -5138,6 +7694,9 @@
     "pending_connection_expired": {
       "$ref": "#/definitions/PendingConnectionExpiredEvent"
     },
+    "profile_exit_prepared": {
+      "$ref": "#/definitions/ProfileExitPreparedEvent"
+    },
     "profile_operation_result": {
       "$ref": "#/definitions/ProfileOperationResultEvent"
     },
@@ -5146,6 +7705,12 @@
     },
     "protocol_mismatch": {
       "$ref": "#/definitions/ProtocolMismatchEvent"
+    },
+    "quick_unlock_configured": {
+      "$ref": "#/definitions/QuickUnlockConfiguredEvent"
+    },
+    "quick_unlock_failed": {
+      "$ref": "#/definitions/QuickUnlockFailedEvent"
     },
     "read_receipt": {
       "$ref": "#/definitions/ReadReceiptEvent"
@@ -5161,6 +7726,12 @@
     },
     "retunnel_success": {
       "$ref": "#/definitions/RetunnelSuccessEvent"
+    },
+    "runtime_snapshot": {
+      "$ref": "#/definitions/RuntimeSnapshotEvent"
+    },
+    "self_destruct_completed": {
+      "$ref": "#/definitions/SelfDestructCompletedEvent"
     },
     "self_destruct_initiated": {
       "$ref": "#/definitions/SelfDestructInitiatedEvent"
@@ -5206,6 +7777,24 @@
     },
     "unread_messages": {
       "$ref": "#/definitions/UnreadMessagesEvent"
+    },
+    "voice_chunk_accepted": {
+      "$ref": "#/definitions/VoiceChunkAcceptedEvent"
+    },
+    "voice_chunk_received": {
+      "$ref": "#/definitions/VoiceChunkReceivedEvent"
+    },
+    "voice_finalized": {
+      "$ref": "#/definitions/VoiceFinalizedEvent"
+    },
+    "voice_resource_limit": {
+      "$ref": "#/definitions/VoiceResourceLimitEvent"
+    },
+    "voice_resource_pressure": {
+      "$ref": "#/definitions/VoiceResourcePressureEvent"
+    },
+    "voice_started": {
+      "$ref": "#/definitions/VoiceStartedEvent"
     }
   }
 }

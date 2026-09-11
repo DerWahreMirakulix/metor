@@ -5,7 +5,7 @@ from typing import Optional
 
 # Local Package Imports
 from metor.core.api.base import IpcEvent
-from metor.core.api.codes import EventType
+from metor.core.api.codes import ClientUnlockMethod, EventType
 from metor.core.api.registry import register_event
 
 
@@ -68,6 +68,60 @@ class SessionAuthenticatedEvent(IpcEvent):
     )
 
 
+@register_event(EventType.CLIENT_RESTRICTED)
+@dataclass
+class ClientRestrictedEvent(IpcEvent):
+    """Confirms per-session restriction and supplies a one-use unlock challenge."""
+
+    unlock_method: ClientUnlockMethod
+    challenge: Optional[str] = None
+    salt: Optional[str] = None
+    event_type: EventType = field(default=EventType.CLIENT_RESTRICTED, init=False)
+
+
+@register_event(EventType.CLIENT_REAUTHORIZED)
+@dataclass
+class ClientReauthorizedEvent(IpcEvent):
+    """Confirms that only the requesting restricted client was reauthorized."""
+
+    event_type: EventType = field(default=EventType.CLIENT_REAUTHORIZED, init=False)
+
+
+@register_event(EventType.CLIENT_ACCESS_RESTRICTED)
+@dataclass
+class ClientAccessRestrictedEvent(IpcEvent):
+    """Rejects an operation outside the locked-session policy."""
+
+    command: str
+    event_type: EventType = field(
+        default=EventType.CLIENT_ACCESS_RESTRICTED,
+        init=False,
+    )
+
+
+@register_event(EventType.QUICK_UNLOCK_CONFIGURED)
+@dataclass
+class QuickUnlockConfiguredEvent(IpcEvent):
+    """Confirms installation or removal of the PIN verifier."""
+
+    enabled: bool
+    event_type: EventType = field(
+        default=EventType.QUICK_UNLOCK_CONFIGURED,
+        init=False,
+    )
+
+
+@register_event(EventType.QUICK_UNLOCK_FAILED)
+@dataclass
+class QuickUnlockFailedEvent(IpcEvent):
+    """Rejects invalid quick-unlock verifier configuration or proof."""
+
+    password_required: bool = False
+    challenge: Optional[str] = None
+    salt: Optional[str] = None
+    event_type: EventType = field(default=EventType.QUICK_UNLOCK_FAILED, init=False)
+
+
 @register_event(EventType.SELF_DESTRUCT_INITIATED)
 @dataclass
 class SelfDestructInitiatedEvent(IpcEvent):
@@ -75,6 +129,29 @@ class SelfDestructInitiatedEvent(IpcEvent):
 
     event_type: EventType = field(
         default=EventType.SELF_DESTRUCT_INITIATED,
+        init=False,
+    )
+
+
+@register_event(EventType.SELF_DESTRUCT_COMPLETED)
+@dataclass
+class SelfDestructCompletedEvent(IpcEvent):
+    """Signals that protected key access was destroyed before cleanup completion."""
+
+    event_type: EventType = field(
+        default=EventType.SELF_DESTRUCT_COMPLETED,
+        init=False,
+    )
+
+
+@register_event(EventType.PROFILE_EXIT_PREPARED)
+@dataclass
+class ProfileExitPreparedEvent(IpcEvent):
+    """Confirms durable local transition and hard lock for normal profile exit."""
+
+    profile: str
+    event_type: EventType = field(
+        default=EventType.PROFILE_EXIT_PREPARED,
         init=False,
     )
 

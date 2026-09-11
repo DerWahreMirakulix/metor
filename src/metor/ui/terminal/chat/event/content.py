@@ -28,6 +28,7 @@ from metor.core.api import (
     UnreadMessageEntry,
     UnreadMessagesEvent,
 )
+from metor.ui.terminal.content import render_content
 from metor.ui.terminal import AliasPolicy, StatusTone, UIPresenter
 
 # Local Package Imports
@@ -111,7 +112,7 @@ def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool
                 messages_data: List[Dict[str, JsonValue]] = [
                     {
                         'id': '',
-                        'payload': message.content.text,
+                        'payload': render_content(message.content),
                         'timestamp': message.timestamp,
                         'is_drop': message.delivery is Delivery.DROP,
                     }
@@ -153,7 +154,7 @@ def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool
             if event.msg_id:
                 handler._remember_pushed_live_msg_id(event.msg_id)
             handler._renderer.print_message(
-                event.content.text,
+                render_content(event.content),
                 msg_type=ChatMessageType.REMOTE,
                 alias=event.alias,
                 peer_onion=event.onion,
@@ -221,7 +222,7 @@ def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool
                 {
                     'id': '',
                     'timestamp': message.timestamp,
-                    'payload': message.content.text,
+                    'payload': render_content(message.content),
                     'is_drop': message.delivery is Delivery.DROP,
                 }
                 for message in event.messages

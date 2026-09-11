@@ -115,6 +115,35 @@ def _coerce_and_validate(
                         coerced[key] = arg(value)
                         valid = True
                         break
+                    elif (
+                        isinstance(arg, type)
+                        and dataclasses.is_dataclass(arg)
+                        and isinstance(value, dict)
+                    ):
+                        discriminator = value.get('type')
+                        type_fields = [
+                            field
+                            for field in dataclasses.fields(arg)
+                            if field.name == 'type'
+                        ]
+                        if (
+                            type_fields
+                            and discriminator != type_fields[0].default.value
+                        ):
+                            continue
+                        nested_keys = {field.name for field in dataclasses.fields(arg)}
+                        _reject_unknown_fields(arg, value, nested_keys, '')
+                        nested_kwargs = {
+                            nested_key: nested_value
+                            for nested_key, nested_value in value.items()
+                            if nested_key in nested_keys and nested_key != 'type'
+                        }
+                        coerced[key] = _instantiate_validated_message(
+                            arg,
+                            _coerce_and_validate(arg, nested_kwargs),
+                        )
+                        valid = True
+                        break
                     elif isinstance(arg, type) and isinstance(value, arg):
                         coerced[key] = value
                         valid = True
@@ -260,6 +289,7 @@ class IpcCommand(IpcMessage):
 class IpcEvent(IpcMessage):
     """Base class for all events emitted by the daemon."""
 
+    revision: Optional[int] = dataclasses.field(default=None, kw_only=True)
     event_type: EventType = dataclasses.field(init=False)
 
     @classmethod

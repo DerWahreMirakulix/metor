@@ -13,6 +13,7 @@ from metor.core.api.codes import (
     ConnectionReasonCode,
     EventType,
     RuntimeErrorCode,
+    MessageOperationReason,
 )
 from metor.core.api.registry import register_event
 
@@ -393,6 +394,38 @@ class AutoFallbackQueuedEvent(IpcEvent):
     event_type: EventType = field(default=EventType.AUTO_FALLBACK_QUEUED, init=False)
 
 
+@register_event(EventType.LIVE_MESSAGE_UNAVAILABLE)
+@dataclass
+class LiveMessageUnavailableEvent(IpcEvent):
+    """Rejects a LIVE send when no active or recoverable session exists."""
+
+    alias: str
+    msg_id: str
+    onion: Optional[str] = None
+    reason: MessageOperationReason = MessageOperationReason.NO_RECOVERY
+    event_type: EventType = field(
+        default=EventType.LIVE_MESSAGE_UNAVAILABLE,
+        init=False,
+    )
+
+
+@register_event(EventType.LIVE_MESSAGE_RESOURCE_PRESSURE)
+@dataclass
+class LiveMessageResourcePressureEvent(IpcEvent):
+    """Rejects a LIVE send that would exceed the retained pending budget."""
+
+    alias: str
+    msg_id: str
+    reason: MessageOperationReason
+    onion: Optional[str] = None
+    pending_count: int = 0
+    pending_bytes: int = 0
+    event_type: EventType = field(
+        default=EventType.LIVE_MESSAGE_RESOURCE_PRESSURE,
+        init=False,
+    )
+
+
 @register_event(EventType.NO_PENDING_LIVE_MSGS)
 @dataclass
 class NoPendingLiveMessagesEvent(IpcEvent):
@@ -413,6 +446,151 @@ class FallbackSuccessEvent(IpcEvent):
     msg_ids: List[str]
     onion: Optional[str] = None
     event_type: EventType = field(default=EventType.FALLBACK_SUCCESS, init=False)
+
+
+@register_event(EventType.FALLBACK_REJECTED)
+@dataclass
+class FallbackRejectedEvent(IpcEvent):
+    """Rejects an atomic selective fallback whose selection is ineligible."""
+
+    alias: str
+    reason: MessageOperationReason
+    msg_ids: List[str]
+    onion: Optional[str] = None
+    event_type: EventType = field(default=EventType.FALLBACK_REJECTED, init=False)
+
+
+@register_event(EventType.MESSAGE_DELETED)
+@dataclass
+class MessageDeletedEvent(IpcEvent):
+    """Confirms local payload deletion for one DROP message."""
+
+    alias: str
+    msg_id: str
+    onion: Optional[str] = None
+    event_type: EventType = field(default=EventType.MESSAGE_DELETED, init=False)
+
+
+@register_event(EventType.MESSAGE_DELETE_REJECTED)
+@dataclass
+class MessageDeleteRejectedEvent(IpcEvent):
+    """Rejects local deletion without changing delivery semantics."""
+
+    target: str
+    msg_id: str
+    reason: MessageOperationReason
+    onion: Optional[str] = None
+    event_type: EventType = field(
+        default=EventType.MESSAGE_DELETE_REJECTED,
+        init=False,
+    )
+
+
+@register_event(EventType.LIVE_CONTEXT_DISMISSED)
+@dataclass
+class LiveContextDismissedEvent(IpcEvent):
+    """Confirms destruction of resolved inbound disconnected LIVE state."""
+
+    alias: str
+    onion: Optional[str] = None
+    removed_count: int = 0
+    event_type: EventType = field(
+        default=EventType.LIVE_CONTEXT_DISMISSED,
+        init=False,
+    )
+
+
+@register_event(EventType.LIVE_CONTEXT_DISMISS_REJECTED)
+@dataclass
+class LiveContextDismissRejectedEvent(IpcEvent):
+    """Rejects LIVE-context dismissal while canonical state is unresolved."""
+
+    alias: str
+    reason: MessageOperationReason
+    onion: Optional[str] = None
+    event_type: EventType = field(
+        default=EventType.LIVE_CONTEXT_DISMISS_REJECTED,
+        init=False,
+    )
+
+
+@register_event(EventType.VOICE_STARTED)
+@dataclass
+class VoiceStartedEvent(IpcEvent):
+    """Confirms allocation of one logical Voice turn."""
+
+    alias: str
+    msg_id: str
+    delivery: Delivery
+    onion: Optional[str] = None
+    event_type: EventType = field(default=EventType.VOICE_STARTED, init=False)
+
+
+@register_event(EventType.VOICE_CHUNK_ACCEPTED)
+@dataclass
+class VoiceChunkAcceptedEvent(IpcEvent):
+    """Confirms durable acceptance through the returned next offset."""
+
+    msg_id: str
+    next_offset: int
+    event_type: EventType = field(
+        default=EventType.VOICE_CHUNK_ACCEPTED,
+        init=False,
+    )
+
+
+@register_event(EventType.VOICE_CHUNK_RECEIVED)
+@dataclass
+class VoiceChunkReceivedEvent(IpcEvent):
+    """Streams one bounded inbound Voice chunk to an attached consumer."""
+
+    alias: str
+    msg_id: str
+    offset: int
+    data: str
+    onion: Optional[str] = None
+    event_type: EventType = field(
+        default=EventType.VOICE_CHUNK_RECEIVED,
+        init=False,
+    )
+
+
+@register_event(EventType.VOICE_FINALIZED)
+@dataclass
+class VoiceFinalizedEvent(IpcEvent):
+    """Confirms clean finalization of one logical Voice turn."""
+
+    msg_id: str
+    size_bytes: int
+    event_type: EventType = field(default=EventType.VOICE_FINALIZED, init=False)
+
+
+@register_event(EventType.VOICE_RESOURCE_PRESSURE)
+@dataclass
+class VoiceResourcePressureEvent(IpcEvent):
+    """Reports Voice retention reaching the warning threshold."""
+
+    used_bytes: int
+    limit_bytes: int
+    msg_id: Optional[str] = None
+    event_type: EventType = field(
+        default=EventType.VOICE_RESOURCE_PRESSURE,
+        init=False,
+    )
+
+
+@register_event(EventType.VOICE_RESOURCE_LIMIT)
+@dataclass
+class VoiceResourceLimitEvent(IpcEvent):
+    """Reports Voice retention refusal or resource-limit finalization."""
+
+    used_bytes: int
+    limit_bytes: int
+    msg_id: Optional[str] = None
+    event_type: EventType = field(
+        default=EventType.VOICE_RESOURCE_LIMIT,
+        init=False,
+    )
 
 
 @register_event(EventType.RETUNNEL_INITIATED)

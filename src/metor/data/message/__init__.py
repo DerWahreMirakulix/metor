@@ -6,9 +6,12 @@ from metor.data.message.models import (
     MessageClearOperationType,
     MessageClearResult,
     MessageDirection,
+    MessageDeleteOutcome,
     MessageStatus,
     QueuedMessageResult,
     StoredMessageRecord,
+    PendingLiveRecord,
+    InboundVoiceRecord,
     UnreadInboxSummaryRecord,
 )
 
@@ -20,10 +23,13 @@ __all__ = [
     'MessageClearOperationType',
     'MessageClearResult',
     'MessageDirection',
+    'MessageDeleteOutcome',
     'MessageManager',
     'MessageStatus',
     'QueuedMessageResult',
     'StoredMessageRecord',
+    'PendingLiveRecord',
+    'InboundVoiceRecord',
     'UnreadInboxSummaryRecord',
 ]
 

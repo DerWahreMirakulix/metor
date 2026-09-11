@@ -4,6 +4,7 @@ import socket
 import time
 from typing import TYPE_CHECKING, List, Optional
 
+from metor.core.api import ConnectionReasonCode
 from metor.core.daemon.managed.models import SessionState, TorCommand
 from metor.data import MessageManager, SettingKey
 
@@ -97,4 +98,8 @@ class SessionMaintenance:
             )
             if last_activity is None or now - last_activity <= idle_timeout:
                 continue
-            self._network.disconnect(onion, initiated_by_self=True)
+            self._network.disconnect(
+                onion,
+                initiated_by_self=True,
+                system_reason=ConnectionReasonCode.IDLE_TIMEOUT,
+            )

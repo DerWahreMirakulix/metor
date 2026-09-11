@@ -8,6 +8,8 @@ from metor.core.api.base import IpcEvent
 from metor.core.api.codes import EventType
 from metor.core.api.events.entries import (
     ContactEntry,
+    DropConversationSummaryEntry,
+    LiveContextEntry,
     MessageEntry,
     PendingConnectionEntry,
     ProfileEntry,
@@ -98,6 +100,27 @@ class ChatStartupStateEvent(NestedEntryCastingMixin, IpcEvent):
         'unread': UnreadInboxSummaryEntry,
     }
     event_type: EventType = field(default=EventType.CHAT_STARTUP_STATE, init=False)
+
+
+@register_event(EventType.RUNTIME_SNAPSHOT)
+@dataclass
+class RuntimeSnapshotEvent(NestedEntryCastingMixin, IpcEvent):
+    """Returns one aggregate, content-free runtime projection for rich clients."""
+
+    profile: str
+    onion: str
+    contacts: List[ContactEntry] = field(default_factory=list)
+    conversations: List[DropConversationSummaryEntry] = field(default_factory=list)
+    live_contexts: List[LiveContextEntry] = field(default_factory=list)
+    pending: List[PendingConnectionEntry] = field(default_factory=list)
+    settings_version: str = '1'
+    _nested_entry_types: ClassVar[Dict[str, type[object]]] = {
+        'contacts': ContactEntry,
+        'conversations': DropConversationSummaryEntry,
+        'live_contexts': LiveContextEntry,
+        'pending': PendingConnectionEntry,
+    }
+    event_type: EventType = field(default=EventType.RUNTIME_SNAPSHOT, init=False)
 
 
 @register_event(EventType.UNREAD_MESSAGES)

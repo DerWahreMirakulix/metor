@@ -1,6 +1,7 @@
 """Live-message routing, durable acceptance, and acknowledgement handling."""
 
 import socket
+import threading
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable, Optional, Tuple, cast
 
@@ -11,6 +12,9 @@ from metor.core.api import (
     Delivery,
     InboxNotificationEvent,
     IpcEvent,
+    LiveMessageResourcePressureEvent,
+    LiveMessageUnavailableEvent,
+    MessageOperationReason,
     MessageReceivedEvent,
     ReadReceiptEvent,
     TextContent,
@@ -78,6 +82,7 @@ class LiveMessageRouter:
         )
         self._notify_callback: Callable[[NotificationPayload], None] = notify_callback
         self._config: 'Config' = config
+        self._pending_lock: threading.Lock = threading.Lock()
 
     def _should_defer_live_message(self, onion: str) -> bool:
         """Checks whether one outbound live message should stay recoverable.
@@ -98,7 +103,7 @@ class LiveMessageRouter:
 
     def _queue_pending_live_message(
         self, onion: str, msg: str, msg_id: str, timestamp: str
-    ) -> None:
+    ) -> Optional[MessageOperationReason]:
         """Persists one outbound live message until ACK or terminal fallback.
 
         Args:
@@ -108,19 +113,29 @@ class LiveMessageRouter:
             timestamp (str): The authored timestamp.
 
         Returns:
-            None
+            Optional[MessageOperationReason]: Limit reason, or None after queueing.
         """
-        self._mm.queue_message(
-            contact_onion=onion,
-            direction=MessageDirection.OUT,
-            delivery=Delivery.LIVE,
-            content_type=ContentType.TEXT,
-            payload=msg,
-            status=MessageStatus.PENDING,
-            msg_id=msg_id,
-            timestamp=timestamp,
-        )
-        self._state.add_unacked_message(onion, msg_id, msg, timestamp)
+        with self._pending_lock:
+            pending_count, pending_bytes = self._mm.get_pending_live_usage()
+            count_limit = self._config.get_int(SettingKey.MAX_PENDING_LIVE_MSGS)
+            byte_limit = self._config.get_int(SettingKey.MAX_PENDING_LIVE_BYTES)
+            if count_limit >= 0 and pending_count >= count_limit:
+                return MessageOperationReason.COUNT_LIMIT
+            payload_bytes = len(msg.encode('utf-8'))
+            if byte_limit >= 0 and pending_bytes + payload_bytes > byte_limit:
+                return MessageOperationReason.BYTE_LIMIT
+            self._mm.queue_message(
+                contact_onion=onion,
+                direction=MessageDirection.OUT,
+                delivery=Delivery.LIVE,
+                content_type=ContentType.TEXT,
+                payload=msg,
+                status=MessageStatus.PENDING,
+                msg_id=msg_id,
+                timestamp=timestamp,
+            )
+            self._state.add_unacked_message(onion, msg_id, msg, timestamp)
+            return None
 
     def send_message(self, target: str, msg: str, msg_id: str) -> None:
         """Sends one live message or durably defers it for recovery.
@@ -143,10 +158,33 @@ class LiveMessageRouter:
         timestamp: str = datetime.now(timezone.utc).isoformat()
 
         if conn is None:
-            if self._should_defer_live_message(onion) or not self._config.get_bool(
-                SettingKey.FALLBACK_TO_DROP
-            ):
-                self._queue_pending_live_message(onion, msg, msg_id, timestamp)
+            if self._should_defer_live_message(onion):
+                limit_reason = self._queue_pending_live_message(
+                    onion, msg, msg_id, timestamp
+                )
+                if limit_reason is not None:
+                    pending_count, pending_bytes = self._mm.get_pending_live_usage()
+                    self._broadcast(
+                        LiveMessageResourcePressureEvent(
+                            alias=alias,
+                            onion=onion,
+                            msg_id=msg_id,
+                            reason=limit_reason,
+                            pending_count=pending_count,
+                            pending_bytes=pending_bytes,
+                            request_id=request_id,
+                        )
+                    )
+                return
+            if not self._config.get_bool(SettingKey.FALLBACK_TO_DROP):
+                self._broadcast(
+                    LiveMessageUnavailableEvent(
+                        alias=alias,
+                        onion=onion,
+                        msg_id=msg_id,
+                        request_id=request_id,
+                    )
+                )
                 return
             self._mm.queue_message(
                 contact_onion=onion,
@@ -174,7 +212,23 @@ class LiveMessageRouter:
             return
 
         try:
-            self._queue_pending_live_message(onion, msg, msg_id, timestamp)
+            limit_reason = self._queue_pending_live_message(
+                onion, msg, msg_id, timestamp
+            )
+            if limit_reason is not None:
+                pending_count, pending_bytes = self._mm.get_pending_live_usage()
+                self._broadcast(
+                    LiveMessageResourcePressureEvent(
+                        alias=alias,
+                        onion=onion,
+                        msg_id=msg_id,
+                        reason=limit_reason,
+                        pending_count=pending_count,
+                        pending_bytes=pending_bytes,
+                        request_id=request_id,
+                    )
+                )
+                return
             conn.sendall(
                 build_message_frame(TorCommand.MSG, msg_id, msg, timestamp).encode(
                     'utf-8'
@@ -220,7 +274,10 @@ class LiveMessageRouter:
         if unread_live_limit == 0:
             if not has_live_consumers:
                 return True
-        elif self._mm.get_unread_live_count(onion) >= unread_live_limit:
+        elif (
+            unread_live_limit > 0
+            and self._mm.get_unread_live_count(onion) >= unread_live_limit
+        ):
             return True
 
         queue_result = self._mm.queue_message(

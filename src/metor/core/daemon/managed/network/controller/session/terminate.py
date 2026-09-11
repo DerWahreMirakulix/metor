@@ -410,6 +410,7 @@ def disconnect(
     socket_to_close: Optional[socket.socket] = None,
     suppress_events: bool = False,
     origin: Optional[ConnectionOrigin] = None,
+    system_reason: Optional[ConnectionReasonCode] = None,
 ) -> None:
     """
     Disconnects one active or pending live flow and processes fallback promotion.
@@ -422,6 +423,7 @@ def disconnect(
         socket_to_close (Optional[socket.socket]): Specific duplicate socket to safely terminate.
         suppress_events (bool): Whether lifecycle events should be suppressed.
         origin (Optional[ConnectionOrigin]): The machine-readable source of the disconnected flow.
+        system_reason (Optional[ConnectionReasonCode]): Local system-policy reason.
 
         Returns:
             None
@@ -432,7 +434,11 @@ def disconnect(
             controller._broadcast(PeerNotFoundEvent(target=target))
         return
     alias, onion = resolved
-    if initiated_by_self and origin is ConnectionOrigin.MANUAL:
+    if (
+        initiated_by_self
+        and origin is ConnectionOrigin.MANUAL
+        and system_reason is None
+    ):
         _mark_local_recovery_opt_out(controller, onion)
 
     defer_remote_fallback: bool = (
@@ -645,7 +651,9 @@ def disconnect(
     else:
         status = HistoryEvent.DISCONNECTED
         disconnect_actor = (
-            HistoryActor.LOCAL if initiated_by_self else HistoryActor.REMOTE
+            HistoryActor.SYSTEM
+            if system_reason is not None
+            else (HistoryActor.LOCAL if initiated_by_self else HistoryActor.REMOTE)
         )
     controller._hm.log_event(
         status,
@@ -653,6 +661,10 @@ def disconnect(
         actor=disconnect_actor,
         trigger=origin,
     )
+    effective_reason = system_reason
+    if effective_reason is None and not initiated_by_self and not is_fallback:
+        effective_reason = ConnectionReasonCode.PEER_ENDED_SESSION
+    controller._state.set_last_disconnect_reason(onion, effective_reason)
 
     if not suppress_events:
         controller._broadcast(
@@ -661,7 +673,7 @@ def disconnect(
                 onion=onion,
                 actor=(
                     ConnectionActor.SYSTEM
-                    if is_fallback
+                    if is_fallback or system_reason is not None
                     else (
                         ConnectionActor.LOCAL
                         if initiated_by_self
@@ -669,6 +681,7 @@ def disconnect(
                     )
                 ),
                 origin=origin or ConnectionOrigin.MANUAL,
+                reason_code=effective_reason,
             )
         )
 

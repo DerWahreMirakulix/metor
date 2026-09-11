@@ -5,7 +5,7 @@ import binascii
 import json
 from typing import Dict, Optional, Tuple
 
-from metor.core.api import JsonValue
+from metor.core.api import JsonValue, is_valid_message_id
 from metor.core.daemon.managed.models import TorCommand
 
 
@@ -23,6 +23,8 @@ def build_message_frame(
     Returns:
         str: The complete protocol frame.
     """
+    if not is_valid_message_id(msg_id):
+        raise ValueError('Invalid message ID.')
     envelope: Dict[str, JsonValue] = {
         'id': msg_id,
         'timestamp': timestamp,
@@ -50,6 +52,8 @@ def decode_live_payload(
     Returns:
         Tuple[str, str, Optional[str]]: The message ID, text, and timestamp.
     """
+    if not is_valid_message_id(payload_id):
+        raise ValueError('Invalid live message ID.')
     try:
         raw_text: str = base64.b64decode(b64_payload, validate=True).decode('utf-8')
     except (binascii.Error, UnicodeDecodeError) as exc:
@@ -72,7 +76,14 @@ def decode_live_payload(
     timestamp: Optional[str] = (
         str(timestamp_value) if timestamp_value is not None else None
     )
-    return str(envelope.get('id', payload_id)), text_value, timestamp
+    envelope_id = envelope.get('id', payload_id)
+    if (
+        not isinstance(envelope_id, str)
+        or envelope_id != payload_id
+        or not is_valid_message_id(envelope_id)
+    ):
+        raise ValueError('Invalid live message ID.')
+    return envelope_id, text_value, timestamp
 
 
 def decode_drop_payload(
@@ -89,6 +100,8 @@ def decode_drop_payload(
         Optional[Tuple[str, str, Optional[str]]]: The decoded message fields, or
             None when the encoding itself is invalid.
     """
+    if not is_valid_message_id(payload_id):
+        return None
     try:
         raw_text: str = base64.b64decode(b64_payload, validate=True).decode('utf-8')
     except (binascii.Error, UnicodeDecodeError):
@@ -103,8 +116,11 @@ def decode_drop_payload(
     timestamp: Optional[str] = (
         str(timestamp_value) if timestamp_value is not None else None
     )
+    envelope_id = envelope.get('id', payload_id)
+    if not isinstance(envelope_id, str) or not is_valid_message_id(envelope_id):
+        return None
     return (
-        str(envelope.get('id', payload_id)),
+        envelope_id,
         str(envelope.get('text', raw_text)),
         timestamp,
     )

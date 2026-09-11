@@ -606,6 +606,98 @@ Falls back unacknowledged live messages into the offline drop queue when possibl
 
 ---
 
+#### `daemon.send_read_receipts`
+
+Sends optional remote read receipts after local consume. Disabled by default.
+
+| Property         | Value                                                          |
+| ---------------- | -------------------------------------------------------------- |
+| Type             | `bool`                                                         |
+| Default          | `False`                                                        |
+| Category         | `Core Daemon`                                                  |
+| Scope            | `Daemon runtime`                                               |
+| Profile Override | `Yes`                                                          |
+| Constraints      | Boolean.                                                       |
+| Security Note    | Enabling reveals message-consumption metadata to remote peers. |
+
+**CLI Examples**
+
+- `metor settings get daemon.send_read_receipts`
+- `metor settings set daemon.send_read_receipts false`
+- `metor -p <profile> config get daemon.send_read_receipts`
+- `metor -p <profile> config set daemon.send_read_receipts false`
+
+---
+
+#### `daemon.max_pending_live_msgs`
+
+Caps retained outbound pending LIVE logical messages per profile. `0` refuses retention and `-1` removes this guard.
+
+| Property         | Value                                                                           |
+| ---------------- | ------------------------------------------------------------------------------- |
+| Type             | `int`                                                                           |
+| Default          | `100`                                                                           |
+| Category         | `Core Daemon`                                                                   |
+| Scope            | `Daemon runtime`                                                                |
+| Profile Override | `Yes`                                                                           |
+| Constraints      | Integer >= -1.                                                                  |
+| Security Note    | Bounds durable recovery state; existing pending messages are never overwritten. |
+
+**CLI Examples**
+
+- `metor settings get daemon.max_pending_live_msgs`
+- `metor settings set daemon.max_pending_live_msgs 100`
+- `metor -p <profile> config get daemon.max_pending_live_msgs`
+- `metor -p <profile> config set daemon.max_pending_live_msgs 100`
+
+---
+
+#### `daemon.max_pending_live_bytes`
+
+Caps retained outbound pending LIVE payload bytes per profile. `0` refuses retention and `-1` removes this guard.
+
+| Property         | Value                                                               |
+| ---------------- | ------------------------------------------------------------------- |
+| Type             | `int`                                                               |
+| Default          | `16777216`                                                          |
+| Category         | `Core Daemon`                                                       |
+| Scope            | `Daemon runtime`                                                    |
+| Profile Override | `Yes`                                                               |
+| Constraints      | Integer >= -1 bytes.                                                |
+| Security Note    | Bounds durable recovery storage, including retained media payloads. |
+
+**CLI Examples**
+
+- `metor settings get daemon.max_pending_live_bytes`
+- `metor settings set daemon.max_pending_live_bytes 16777216`
+- `metor -p <profile> config get daemon.max_pending_live_bytes`
+- `metor -p <profile> config set daemon.max_pending_live_bytes 16777216`
+
+---
+
+#### `daemon.max_live_voice_buffer_bytes`
+
+Caps retained local LIVE Voice bytes per profile at 64 MiB. `0` disables Voice retention and `-1` removes this guard.
+
+| Property         | Value                                                                                                        |
+| ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| Type             | `int`                                                                                                        |
+| Default          | `67108864`                                                                                                   |
+| Category         | `Core Daemon`                                                                                                |
+| Scope            | `Daemon runtime`                                                                                             |
+| Profile Override | `Yes`                                                                                                        |
+| Constraints      | Integer >= -1 bytes.                                                                                         |
+| Security Note    | Finite by default to bound authenticated peer and local capture storage pressure; data is never overwritten. |
+
+**CLI Examples**
+
+- `metor settings get daemon.max_live_voice_buffer_bytes`
+- `metor settings set daemon.max_live_voice_buffer_bytes 67108864`
+- `metor -p <profile> config get daemon.max_live_voice_buffer_bytes`
+- `metor -p <profile> config set daemon.max_live_voice_buffer_bytes 67108864`
+
+---
+
 #### `daemon.max_unseen_drop_msgs`
 
 Caps unread crash-safe drop backlog per peer. `0` rejects new unread drops, while `-1` removes the limit entirely.

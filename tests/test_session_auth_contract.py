@@ -6,6 +6,7 @@ import socket
 import sys
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import cast
 from unittest.mock import patch
 
@@ -15,14 +16,33 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.core.api import (
     AuthenticateSessionCommand,
+    AppendVoiceChunkCommand,
     AuthRequiredEvent,
     InvalidPasswordEvent,
     IpcCommand,
     IpcEvent,
+    BeginVoiceCommand,
+    ClientReauthorizedEvent,
+    ClientUnlockMethod,
+    ConfigureQuickUnlockCommand,
+    Delivery,
+    GetContactsListCommand,
+    LockedAcceptPolicy,
+    NotificationPrivacy,
+    QuickUnlockFailedEvent,
+    QuickUnlockAction,
+    ReauthorizeClientCommand,
+    RestrictClientCommand,
+    SessionAuthenticatedEvent,
 )
+from metor.core.daemon.managed.engine.session_access import SessionAccessController
 from metor.core.daemon.managed.local_auth import (
     LocalAuthTracker,
     create_session_auth_context,
+)
+from metor.core.daemon.managed.quick_unlock import (
+    QuickUnlockStore,
+    create_pin_verifier,
 )
 from metor.utils import Constants, build_session_auth_proof
 
@@ -31,6 +51,136 @@ class SessionAuthContractTests(unittest.TestCase):
     """
     Covers session auth contract regression scenarios.
     """
+
+    def test_quick_unlock_configuration_requires_full_password_proof(self) -> None:
+        """Keeps PIN mutation gated when ordinary session auth is optional."""
+        with TemporaryDirectory() as temp_dir:
+            store = QuickUnlockStore(Path(temp_dir) / 'quick-unlock.json')
+            sent: list[IpcEvent] = []
+            conn = cast(socket.socket, object())
+            controller = SessionAccessController(
+                require_auth=False,
+                send_callback=lambda _conn, event: sent.append(event),
+                lockout_timeout_callback=lambda: 30.0,
+                failure_limit_callback=lambda: 3,
+                live_consumer_available_callback=lambda: None,
+                quick_unlock_store=store,
+            )
+            controller.install_context(create_session_auth_context('profile-password'))
+            salt, verifier = create_pin_verifier('1234')
+            command = ConfigureQuickUnlockCommand(
+                action=QuickUnlockAction.SET,
+                salt=salt,
+                verifier=verifier,
+            )
+
+            self.assertFalse(controller.authorize(command, conn, True))
+            prompt = cast(AuthRequiredEvent, sent[-1])
+            self.assertIsInstance(prompt, AuthRequiredEvent)
+            assert prompt.challenge is not None
+            assert prompt.salt is not None
+            proof = build_session_auth_proof(
+                'profile-password', prompt.challenge, prompt.salt
+            )
+            self.assertFalse(
+                controller.authorize(AuthenticateSessionCommand(proof), conn, True)
+            )
+            self.assertIsInstance(sent[-1], SessionAuthenticatedEvent)
+            self.assertTrue(controller.authorize(command, conn, True))
+
+    def test_restricted_client_enforces_scope_and_pin_password_escalation(self) -> None:
+        """Blocks normal access and requires password after three failed PIN proofs."""
+        with TemporaryDirectory() as temp_dir:
+            store = QuickUnlockStore(Path(temp_dir) / 'quick-unlock.json')
+            salt, verifier = create_pin_verifier('1234')
+            store.configure(salt, verifier)
+            sent: list[IpcEvent] = []
+            conn = cast(socket.socket, object())
+            controller = SessionAccessController(
+                require_auth=False,
+                send_callback=lambda _conn, event: sent.append(event),
+                lockout_timeout_callback=lambda: 30.0,
+                failure_limit_callback=lambda: 3,
+                live_consumer_available_callback=lambda: None,
+                quick_unlock_store=store,
+                resolve_target_callback=lambda target: {
+                    'alice': 'alice-onion',
+                    'bob': 'bob-onion',
+                }.get(target, target),
+                voice_target_callback=lambda msg_id: (
+                    'alice-onion' if msg_id == 'alice-voice' else 'bob-onion'
+                ),
+                voice_delivery_callback=lambda msg_id: (
+                    Delivery.LIVE if msg_id == 'alice-voice' else Delivery.DROP
+                ),
+            )
+            controller.install_context(create_session_auth_context('profile-password'))
+            restricted = controller.restrict(
+                conn,
+                RestrictClientCommand(
+                    unlock_method=ClientUnlockMethod.PIN,
+                    continued_live_target='alice',
+                    live_while_locked=True,
+                    accept_while_locked=LockedAcceptPolicy.NONE,
+                    notification_privacy=NotificationPrivacy.ANONYMIZE,
+                ),
+            )
+            self.assertEqual(getattr(restricted, 'salt'), salt)
+            self.assertFalse(controller.authorize(GetContactsListCommand(), conn, True))
+            self.assertFalse(
+                controller.authorize(
+                    BeginVoiceCommand('bob', Delivery.LIVE, 'voice-1', 'opus'),
+                    conn,
+                    True,
+                )
+            )
+            self.assertTrue(
+                controller.authorize(
+                    BeginVoiceCommand('alice', Delivery.LIVE, 'voice-2', 'opus'),
+                    conn,
+                    True,
+                )
+            )
+            self.assertFalse(
+                controller.authorize(
+                    BeginVoiceCommand('alice', Delivery.DROP, 'voice-3', 'opus'),
+                    conn,
+                    True,
+                )
+            )
+            self.assertTrue(
+                controller.authorize(
+                    AppendVoiceChunkCommand('alice-voice', 0, 'YQ=='), conn, True
+                )
+            )
+
+            for _ in range(3):
+                controller.authorize(
+                    ReauthorizeClientCommand(
+                        method=ClientUnlockMethod.PIN,
+                        proof='00' * 32,
+                    ),
+                    conn,
+                    True,
+                )
+            failure = cast(QuickUnlockFailedEvent, sent[-1])
+            self.assertIsInstance(failure, QuickUnlockFailedEvent)
+            self.assertTrue(failure.password_required)
+            assert failure.challenge is not None
+            assert failure.salt is not None
+            password_proof = build_session_auth_proof(
+                'profile-password', failure.challenge, failure.salt
+            )
+            controller.authorize(
+                ReauthorizeClientCommand(
+                    method=ClientUnlockMethod.PROFILE_PASSWORD,
+                    proof=password_proof,
+                ),
+                conn,
+                True,
+            )
+            self.assertIsInstance(sent[-1], ClientReauthorizedEvent)
+            self.assertTrue(controller.authorize(GetContactsListCommand(), conn, True))
 
     def test_authenticate_session_command_uses_proof_field(self) -> None:
         """

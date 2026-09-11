@@ -8,6 +8,7 @@ from metor.core.api import (
     ClearHistoryCommand,
     ClearMessagesCommand,
     ClearProfileDbCommand,
+    DeleteMessageCommand,
     EventType,
     GetContactsListCommand,
     GetHistoryCommand,
@@ -50,6 +51,8 @@ class DatabaseCommandHandler(
         get_active_onions: Callable[[], List[str]],
         broadcast: Callable[[IpcEvent], None],
         send_read_receipt_cb: Optional[Callable[[str, List[str]], None]] = None,
+        release_consumed_voice_cb: Optional[Callable[[str, List[str]], None]] = None,
+        delete_persistent_blob_cb: Optional[Callable[[str], None]] = None,
     ) -> None:
         """
         Initializes the DatabaseCommandHandler.
@@ -63,6 +66,10 @@ class DatabaseCommandHandler(
             broadcast (Callable[[IpcEvent], None]): Hook to broadcast side-effect events to all clients.
             send_read_receipt_cb (Optional[Callable[[str, List[str]], None]]): Hook to send transient
                 read receipts to a peer over its live session.
+            release_consumed_voice_cb (Optional[Callable]): Hook to release
+                consumed inbound LIVE Voice payloads.
+            delete_persistent_blob_cb (Optional[Callable]): Hook to delete one
+                Core-owned persistent Voice blob after explicit local removal.
 
         Returns:
             None
@@ -76,6 +83,8 @@ class DatabaseCommandHandler(
         self._send_read_receipt_cb: Optional[Callable[[str, List[str]], None]] = (
             send_read_receipt_cb
         )
+        self._release_consumed_voice_cb = release_consumed_voice_cb
+        self._delete_persistent_blob_cb = delete_persistent_blob_cb
 
     def handle(self, cmd: IpcCommand) -> IpcEvent:
         """
@@ -116,6 +125,9 @@ class DatabaseCommandHandler(
 
         if isinstance(cmd, ClearMessagesCommand):
             return self._handle_clear_messages(cmd)
+
+        if isinstance(cmd, DeleteMessageCommand):
+            return self._handle_delete_message(cmd)
 
         if isinstance(cmd, GetInboxCommand):
             return self._handle_get_inbox(cmd)

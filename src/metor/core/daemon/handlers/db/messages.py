@@ -4,6 +4,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from metor.core.api import (
     ClearMessagesCommand,
+    DeleteMessageCommand,
     EventType,
     GetInboxCommand,
     GetMessagesCommand,
@@ -11,15 +12,24 @@ from metor.core.api import (
     IpcEvent,
     MarkReadCommand,
     MessageDirectionCode,
+    MessageOperationReason,
     MessageEntry,
     MessageStatusCode,
     MessagesDataEvent,
     UnreadMessageEntry,
     UnreadMessagesEvent,
     create_event,
+    ContentType,
+    deserialize_content,
+    VoiceContent,
 )
-from metor.core.api import Delivery, TextContent
-from metor.data.message import MessageClearOperationType, MessageClearResult
+from metor.core.api import Delivery
+from metor.data import SettingKey
+from metor.data.message import (
+    MessageClearOperationType,
+    MessageClearResult,
+    MessageDeleteOutcome,
+)
 
 # Local Package Imports
 from metor.core.daemon.handlers.db.support import DatabaseCommandHandlerSupportMixin
@@ -42,6 +52,20 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
     """Handles chat-history, inbox, and clear-message database commands."""
 
     _send_read_receipt_cb: Optional[Callable[[str, List[str]], None]]
+    _release_consumed_voice_cb: Optional[Callable[[str, List[str]], None]]
+    _delete_persistent_blob_cb: Optional[Callable[[str], None]]
+
+    def _delete_voice_payloads(self, payloads: List[str]) -> None:
+        """Best-effort deletes persistent Voice objects after metadata commits."""
+        if self._delete_persistent_blob_cb is None:
+            return
+        for payload in payloads:
+            try:
+                content = deserialize_content(ContentType.VOICE, payload)
+                if isinstance(content, VoiceContent):
+                    self._delete_persistent_blob_cb(content.blob_id)
+            except (KeyError, OSError, TypeError, ValueError):
+                continue
 
     def _handle_get_messages(self, cmd: GetMessagesCommand) -> IpcEvent:
         """
@@ -67,8 +91,11 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
                 direction=MessageDirectionCode(message.direction),
                 status=MessageStatusCode(message.status),
                 delivery=Delivery.DROP,
-                content=TextContent(message.payload),
+                content=deserialize_content(
+                    ContentType(message.content_type), message.payload
+                ),
                 timestamp=message.timestamp,
+                msg_id=message.msg_id,
             )
             for message in messages_raw
         ]
@@ -94,10 +121,16 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
                 return create_event(EventType.PEER_NOT_FOUND, {'target': cmd.target})
             alias, onion = resolved
 
+        voice_payloads = self._mm.get_drop_voice_payloads(
+            onion=onion,
+            non_contacts_only=cmd.non_contacts_only,
+        )
         result: MessageClearResult = self._mm.clear_messages(
             onion,
             cmd.non_contacts_only,
         )
+        if result.success:
+            self._delete_voice_payloads(voice_payloads)
         params: Dict[str, str] = {}
         if (
             result.operation_type
@@ -151,12 +184,14 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
             return create_event(EventType.PEER_NOT_FOUND, {'target': cmd.target})
 
         alias, onion = resolved
-        raw_messages = self._mm.get_and_read_inbox(onion)
+        raw_messages = self._mm.get_and_read_inbox(onion, cmd.delivery)
         messages_list: List[UnreadMessageEntry] = [
             UnreadMessageEntry(
                 timestamp=str(message[3]),
                 delivery=Delivery(str(message[1])),
-                content=TextContent(str(message[2])),
+                content=deserialize_content(
+                    ContentType(str(message[5])), str(message[2])
+                ),
                 msg_id=str(message[4]) if message[4] is not None else None,
             )
             for message in raw_messages
@@ -164,6 +199,67 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
         msg_ids: List[str] = [
             str(message[4]) for message in raw_messages if message[4] is not None
         ]
-        if self._send_read_receipt_cb is not None and msg_ids:
+        voice_msg_ids = [
+            str(message[4])
+            for message in raw_messages
+            if message[4] is not None and str(message[5]) == ContentType.VOICE.value
+        ]
+        if self._release_consumed_voice_cb is not None and voice_msg_ids:
+            self._release_consumed_voice_cb(onion, voice_msg_ids)
+        if self._pm.config.get_bool(SettingKey.EPHEMERAL_MESSAGES):
+            self._delete_voice_payloads(
+                [
+                    str(message[2])
+                    for message in raw_messages
+                    if message[1] == Delivery.DROP.value
+                    and message[5] == ContentType.VOICE.value
+                ]
+            )
+        if (
+            self._send_read_receipt_cb is not None
+            and msg_ids
+            and self._pm.config.get_bool(SettingKey.SEND_READ_RECEIPTS)
+        ):
             self._send_read_receipt_cb(onion, msg_ids)
         return UnreadMessagesEvent(messages=messages_list, alias=alias, onion=onion)
+
+    def _handle_delete_message(self, cmd: DeleteMessageCommand) -> IpcEvent:
+        """Deletes one eligible local DROP payload by stable identity.
+
+        Args:
+            cmd (DeleteMessageCommand): Target and stable message identity.
+
+        Returns:
+            IpcEvent: Typed success or rejection event.
+        """
+        resolved = self._cm.resolve_target(cmd.target)
+        if not resolved:
+            return create_event(EventType.PEER_NOT_FOUND, {'target': cmd.target})
+        alias, onion = resolved
+        voice_payloads = self._mm.get_drop_voice_payloads(
+            onion=onion,
+            msg_id=cmd.msg_id,
+        )
+        outcome = self._mm.delete_drop_message(onion, cmd.msg_id)
+        if outcome is MessageDeleteOutcome.DELETED:
+            self._delete_voice_payloads(voice_payloads)
+            return create_event(
+                EventType.MESSAGE_DELETED,
+                {'alias': alias, 'onion': onion, 'msg_id': cmd.msg_id},
+            )
+        reason_map = {
+            MessageDeleteOutcome.NOT_FOUND: MessageOperationReason.NOT_FOUND,
+            MessageDeleteOutcome.NOT_DROP: MessageOperationReason.NOT_DROP,
+            MessageDeleteOutcome.PENDING_DELIVERY: (
+                MessageOperationReason.PENDING_DELIVERY
+            ),
+        }
+        return create_event(
+            EventType.MESSAGE_DELETE_REJECTED,
+            {
+                'target': cmd.target,
+                'onion': onion,
+                'msg_id': cmd.msg_id,
+                'reason': reason_map[outcome].value,
+            },
+        )

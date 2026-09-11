@@ -19,6 +19,10 @@ class StateTrackerMessagesMixin:
     _recent_live_msg_ids: Dict[str, List[str]]
     _unauthenticated_connections: Set[socket.socket]
     _locally_terminated_sockets: Set[socket.socket]
+    _outbound_attempts: Set[str]
+    _scheduled_auto_reconnects: Set[str]
+    _live_reconnect_grace: Dict[str, float]
+    _retunnel_in_progress: Set[str]
 
     def remember_message_request_id(
         self,
@@ -281,3 +285,33 @@ class StateTrackerMessagesMixin:
                 + len(self._outbound_sockets)
                 + len(self._unauthenticated_connections)
             )
+
+    def abort_all_sockets(self) -> None:
+        """Closes every tracked peer socket without protocol or reliability work.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with self._lock:
+            sockets = (
+                set(self._connections.values())
+                | set(self._pending_connections.values())
+                | set(self._outbound_sockets.values())
+                | set(self._unauthenticated_connections)
+            )
+            self._connections.clear()
+            self._pending_connections.clear()
+            self._outbound_sockets.clear()
+            self._unauthenticated_connections.clear()
+            self._outbound_attempts.clear()
+            self._scheduled_auto_reconnects.clear()
+            self._live_reconnect_grace.clear()
+            self._retunnel_in_progress.clear()
+        for sock in sockets:
+            try:
+                sock.close()
+            except OSError:
+                pass

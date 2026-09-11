@@ -13,7 +13,9 @@ from metor.core.api import (
     IpcEvent,
     ConnectedEvent,
     ConnectionPendingEvent,
+    ConnectionReasonCode,
     RetunnelSuccessEvent,
+    is_valid_message_id,
 )
 from metor.core.daemon.managed.models import (
     DisconnectIntent,
@@ -148,6 +150,7 @@ class StreamReceiver:
                 Optional[socket.socket],
                 bool,
                 Optional[ConnectionOrigin],
+                Optional[ConnectionReasonCode],
             ],
             None,
         ],
@@ -194,6 +197,7 @@ class StreamReceiver:
                 Optional[socket.socket],
                 bool,
                 Optional[ConnectionOrigin],
+                Optional[ConnectionReasonCode],
             ],
             None,
         ] = disconnect_cb
@@ -223,7 +227,7 @@ class StreamReceiver:
         if len(parts) != 2 or parts[0] != TorCommand.ACK.value:
             return None
 
-        return parts[1]
+        return parts[1] if is_valid_message_id(parts[1]) else None
 
     def start_receiving(
         self,
@@ -407,8 +411,67 @@ class StreamReceiver:
                                     None,
                                     False,
                                     connection_origin,
+                                    ConnectionReasonCode.LIVE_BACKLOG_LIMIT_REACHED,
                                 )
                                 break
+
+                    elif any(
+                        msg.startswith(f'{command.value} ')
+                        for command in (
+                            TorCommand.VOICE_BEGIN,
+                            TorCommand.VOICE_CHUNK,
+                            TorCommand.VOICE_END,
+                        )
+                    ):
+                        parts = msg.split(' ', 1)
+                        if len(parts) != 2 or self._router.process_voice_frame(
+                            conn, onion, parts[0], parts[1]
+                        ):
+                            self._disconnect_cb(
+                                onion,
+                                True,
+                                False,
+                                None,
+                                False,
+                                connection_origin,
+                                ConnectionReasonCode.LIVE_VOICE_LIMIT_REACHED,
+                            )
+                            break
+
+                    elif msg.startswith(f'{TorCommand.VOICE_ACK.value} '):
+                        parts = msg.split(' ')
+                        if len(parts) == 3:
+                            try:
+                                next_offset = int(parts[2])
+                            except ValueError:
+                                next_offset = -1
+                            if next_offset >= 0:
+                                self._router.process_voice_ack(
+                                    onion, parts[1], next_offset
+                                )
+
+                    elif any(
+                        msg.startswith(f'{command.value} ')
+                        for command in (
+                            TorCommand.DROP_VOICE_BEGIN,
+                            TorCommand.DROP_VOICE_CHUNK,
+                            TorCommand.DROP_VOICE_END,
+                        )
+                    ):
+                        parts = msg.split(' ', 1)
+                        if len(parts) != 2 or self._router.process_drop_voice_frame(
+                            conn, onion, parts[0], parts[1]
+                        ):
+                            self._disconnect_cb(
+                                onion,
+                                True,
+                                False,
+                                None,
+                                False,
+                                connection_origin,
+                                ConnectionReasonCode.LIVE_VOICE_LIMIT_REACHED,
+                            )
+                            break
 
                     elif msg.startswith(f'{TorCommand.DROP.value} '):
                         parts = msg.split(' ', 2)
@@ -449,6 +512,7 @@ class StreamReceiver:
                     conn,
                     False,
                     connection_origin,
+                    None,
                 )
             else:
                 self._disconnect_cb(
@@ -458,4 +522,5 @@ class StreamReceiver:
                     conn,
                     False,
                     connection_origin,
+                    None,
                 )

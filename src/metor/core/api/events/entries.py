@@ -10,7 +10,13 @@ from metor.core.api.codes import (
     MessageStatusCode,
     PendingConnectionReasonCode,
 )
-from metor.core.api.content import Delivery, MessageContent, TextContent
+from metor.core.api.content import (
+    ContentType,
+    Delivery,
+    MessageContent,
+    TextContent,
+    VoiceContent,
+)
 
 
 EnumT = TypeVar('EnumT', bound=Enum)
@@ -24,12 +30,35 @@ def _coerce_enum(enum_type: type[EnumT], value: object) -> EnumT:
     return enum_type(value)
 
 
+def _coerce_content(value: MessageContent | dict[str, object]) -> MessageContent:
+    """Casts one JSON-shaped content payload by its discriminator.
+
+    Args:
+        value (MessageContent | dict[str, object]): Content DTO or decoded object.
+
+    Returns:
+        MessageContent: Typed content DTO.
+    """
+    if not isinstance(value, dict):
+        return value
+    if value.get('type') == ContentType.VOICE.value:
+        duration = value.get('duration_ms')
+        return VoiceContent(
+            blob_id=str(value['blob_id']),
+            codec=str(value['codec']),
+            size_bytes=int(str(value['size_bytes'])),
+            duration_ms=int(str(duration)) if duration is not None else None,
+        )
+    return TextContent(text=str(value['text']))
+
+
 @dataclass
 class ContactEntry:
     """Represents a structured contact entry."""
 
     alias: str
     onion: str
+    saved: bool = True
 
 
 @dataclass
@@ -41,6 +70,7 @@ class MessageEntry:
     delivery: Delivery
     content: MessageContent
     timestamp: str
+    msg_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         """Coerces string-backed direction and status fields to their typed enum equivalents."""
@@ -48,7 +78,7 @@ class MessageEntry:
         self.status = _coerce_enum(MessageStatusCode, self.status)
         self.delivery = _coerce_enum(Delivery, self.delivery)
         if isinstance(self.content, dict):
-            self.content = TextContent(text=str(self.content['text']))
+            self.content = _coerce_content(self.content)
 
 
 @dataclass
@@ -71,7 +101,7 @@ class UnreadMessageEntry:
         """
         self.delivery = _coerce_enum(Delivery, self.delivery)
         if isinstance(self.content, dict):
-            self.content = TextContent(text=str(self.content['text']))
+            self.content = _coerce_content(self.content)
 
 
 @dataclass
@@ -99,6 +129,28 @@ class UnreadInboxSummaryEntry:
     total_unread: int
     drop_unread: int
     live_unread: int
+
+
+@dataclass
+class LiveContextEntry:
+    """Represents canonical per-peer LIVE state in an aggregate snapshot."""
+
+    alias: str
+    onion: str
+    saved: bool
+    session_state: str
+    unseen_count: int = 0
+    pending_outbound_count: int = 0
+    disconnect_reason: Optional[str] = None
+
+
+@dataclass
+class DropConversationSummaryEntry:
+    """Represents a content-free DROP conversation summary."""
+
+    alias: str
+    onion: str
+    unread_count: int = 0
 
 
 @dataclass

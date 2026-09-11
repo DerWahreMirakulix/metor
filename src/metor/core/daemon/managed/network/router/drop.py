@@ -36,6 +36,9 @@ class DropMessageRouter:
         has_clients_callback: Callable[[], bool],
         notify_callback: Callable[[NotificationPayload], None],
         config: 'Config',
+        voice_frame_callback: Optional[
+            Callable[[socket.socket, str, str, str], bool]
+        ] = None,
     ) -> None:
         """Initializes drop routing with its explicit collaborators.
 
@@ -47,6 +50,7 @@ class DropMessageRouter:
             has_clients_callback (Callable[[], bool]): Connected-client check.
             notify_callback (Callable[[NotificationPayload], None]): Detached notifier.
             config (Config): Profile configuration.
+            voice_frame_callback (Optional[Callable]): Bounded DROP Voice frame handler.
 
         Returns:
             None
@@ -58,6 +62,7 @@ class DropMessageRouter:
         self._has_clients_callback: Callable[[], bool] = has_clients_callback
         self._notify_callback: Callable[[NotificationPayload], None] = notify_callback
         self._config: 'Config' = config
+        self._voice_frame_callback = voice_frame_callback
 
     def _process_inbound_drop_frame(
         self,
@@ -208,6 +213,21 @@ class DropMessageRouter:
                     parts: list[str] = message.split(' ', 2)
                     if len(parts) == 3 and self._process_inbound_drop_frame(
                         conn, onion, parts[1], parts[2], 'tunnel'
+                    ):
+                        break
+                elif any(
+                    message.startswith(f'{command.value} ')
+                    for command in (
+                        TorCommand.DROP_VOICE_BEGIN,
+                        TorCommand.DROP_VOICE_CHUNK,
+                        TorCommand.DROP_VOICE_END,
+                    )
+                ):
+                    parts = message.split(' ', 1)
+                    if (
+                        len(parts) != 2
+                        or self._voice_frame_callback is None
+                        or self._voice_frame_callback(conn, onion, parts[0], parts[1])
                     ):
                         break
         except Exception:

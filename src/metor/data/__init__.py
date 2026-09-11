@@ -37,6 +37,8 @@ from metor.data.message import (
     MessageManager,
     MessageStatus,
     MessageDirection,
+    PendingLiveRecord,
+    InboundVoiceRecord,
 )
 from metor.data.profile import (
     Config,
@@ -62,6 +64,8 @@ __all__ = [
     'MessageManager',
     'MessageStatus',
     'MessageDirection',
+    'PendingLiveRecord',
+    'InboundVoiceRecord',
     'ChatDaemonAutostartPolicy',
     'DAEMON_SETTING_KEYS',
     'Settings',

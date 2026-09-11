@@ -6,7 +6,14 @@ import socket
 import threading
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 
-from metor.core.api import AckEvent, DropFailedEvent, IpcEvent, JsonValue
+from metor.core.api import (
+    AckEvent,
+    ContentType,
+    DropFailedEvent,
+    IpcEvent,
+    JsonValue,
+    is_valid_message_id,
+)
 from metor.core.daemon.managed.models import PrimaryTransport, TorCommand
 from metor.data import (
     HistoryActor,
@@ -16,9 +23,11 @@ from metor.data import (
     MessageStatus,
     SettingKey,
 )
+from metor.data.blob import BlobLifecycle, BlobStore
+from metor.utils import Constants
 
 # Local Package Imports
-from ..network import StateTracker
+from ..network import StateTracker, TcpStreamReader
 from .tunnel import DropTunnelManager
 
 if TYPE_CHECKING:
@@ -69,6 +78,8 @@ def build_drop_message(payload: str, msg_id: str, timestamp: str) -> str:
     Returns:
         str: The encoded Tor DROP command line.
     """
+    if not is_valid_message_id(msg_id):
+        raise ValueError('Invalid message ID.')
     envelope: Dict[str, JsonValue] = {
         'id': msg_id,
         'timestamp': timestamp,
@@ -92,6 +103,7 @@ class DropDelivery:
         broadcast_callback: Callable[[IpcEvent], None],
         stop_flag: threading.Event,
         config: 'Config',
+        blob_store: Optional[BlobStore] = None,
     ) -> None:
         """Initializes drop delivery with its explicit collaborators.
 
@@ -103,6 +115,7 @@ class DropDelivery:
             broadcast_callback (Callable[[IpcEvent], None]): IPC event broadcaster.
             stop_flag (threading.Event): Worker shutdown signal.
             config (Config): Profile configuration.
+            blob_store (Optional[BlobStore]): Profile object store for Voice drops.
 
         Returns:
             None
@@ -114,6 +127,7 @@ class DropDelivery:
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
         self._stop_flag: threading.Event = stop_flag
         self._config: 'Config' = config
+        self._blobs = blob_store
 
     def process_pending(self) -> None:
         """Groups and attempts all currently pending drop rows.
@@ -140,7 +154,9 @@ class DropDelivery:
         Returns:
             None
         """
-        if self._reuse_session(onion):
+        if self._reuse_session(onion) and all(
+            row[2] == ContentType.TEXT.value for row in messages
+        ):
             self.send_over_session(onion, messages)
             return
 
@@ -164,20 +180,24 @@ class DropDelivery:
         try:
             conn.settimeout(self._config.get_float(SettingKey.STREAM_IDLE_TIMEOUT))
             for row in messages:
-                db_id, _, _, payload, msg_id, timestamp = row
+                db_id, _, content_type, payload, msg_id, timestamp = row
                 try:
-                    conn.sendall(
-                        build_drop_message(payload, msg_id, timestamp).encode('utf-8')
-                    )
+                    early_ack = self._send_drop_row(conn, stream, row)
                     self._tunnels.touch(onion, conn, stream)
-                    ack_line: Optional[str] = stream.read_line()
+                    ack_line: Optional[str] = early_ack or stream.read_line()
                     if self._handle_rejection(onion, msg_id, ack_line):
                         self._tunnels.close(onion)
                         break
                     if not is_expected_ack_line(msg_id, ack_line):
                         raise ConnectionError('Tunnel dropped or invalid ACK received.')
                     self._finalize_delivery(
-                        db_id, onion, msg_id, timestamp, transport='tunnel'
+                        db_id,
+                        onion,
+                        content_type,
+                        payload,
+                        msg_id,
+                        timestamp,
+                        transport='tunnel',
                     )
                 except Exception as exc:
                     self._log_delivery_failure(onion, str(exc))
@@ -207,7 +227,7 @@ class DropDelivery:
         Returns:
             None
         """
-        if self._reuse_session(onion):
+        if self._reuse_session(onion) and row[2] == ContentType.TEXT.value:
             self.send_over_session(onion, [row])
             return
 
@@ -216,17 +236,25 @@ class DropDelivery:
             self._log_tunnel_failure(onion)
             return
         conn, stream = tunnel
-        db_id, _, _, payload, msg_id, timestamp = row
+        db_id, _, content_type, payload, msg_id, timestamp = row
 
         try:
             conn.settimeout(self._config.get_float(SettingKey.STREAM_IDLE_TIMEOUT))
-            conn.sendall(build_drop_message(payload, msg_id, timestamp).encode('utf-8'))
-            ack_line: Optional[str] = stream.read_line()
+            early_ack = self._send_drop_row(conn, stream, row)
+            ack_line: Optional[str] = early_ack or stream.read_line()
             if self._handle_rejection(onion, msg_id, ack_line):
                 return
             if not is_expected_ack_line(msg_id, ack_line):
                 raise ConnectionError('Tunnel dropped or invalid ACK received.')
-            self._finalize_delivery(db_id, onion, msg_id, timestamp, transport='direct')
+            self._finalize_delivery(
+                db_id,
+                onion,
+                content_type,
+                payload,
+                msg_id,
+                timestamp,
+                transport='direct',
+            )
         except Exception as exc:
             self._log_delivery_failure(onion, str(exc))
         finally:
@@ -258,6 +286,84 @@ class DropDelivery:
                 )
             except Exception:
                 return
+
+    def _send_drop_row(
+        self,
+        conn: socket.socket,
+        stream: TcpStreamReader,
+        row: OutboxRow,
+    ) -> Optional[str]:
+        """Sends one text or bounded resumable Voice DROP, leaving final ACK unread."""
+        _, _, content_type, payload, msg_id, timestamp = row
+        if content_type == ContentType.TEXT.value:
+            conn.sendall(build_drop_message(payload, msg_id, timestamp).encode('utf-8'))
+            return None
+        if content_type != ContentType.VOICE.value or self._blobs is None:
+            raise ValueError('Unsupported DROP content type.')
+        metadata = json.loads(payload)
+        if not isinstance(metadata, dict):
+            raise ValueError('Invalid Voice DROP metadata.')
+        blob_id = str(metadata['blob_id'])
+        codec = str(metadata['codec'])
+        data = self._blobs.read(blob_id, BlobLifecycle.PERSISTENT)
+        begin: Dict[str, JsonValue] = {
+            'id': msg_id,
+            'codec': codec,
+            'timestamp': timestamp,
+        }
+        conn.sendall(self._voice_frame(TorCommand.DROP_VOICE_BEGIN, begin))
+        resume_line = stream.read_line()
+        if resume_line is not None and is_expected_ack_line(msg_id, resume_line):
+            return resume_line
+        offset = self._parse_voice_offset(msg_id, resume_line, len(data))
+        while offset < len(data):
+            previous_offset = offset
+            chunk = data[offset : offset + Constants.VOICE_CHUNK_MAX_BYTES]
+            conn.sendall(
+                self._voice_frame(
+                    TorCommand.DROP_VOICE_CHUNK,
+                    {
+                        'id': msg_id,
+                        'offset': offset,
+                        'data': base64.b64encode(chunk).decode('ascii'),
+                    },
+                )
+            )
+            offset = self._parse_voice_offset(msg_id, stream.read_line(), len(data))
+            if offset <= previous_offset:
+                raise ConnectionError('Voice DROP acknowledgement did not advance.')
+        conn.sendall(
+            self._voice_frame(
+                TorCommand.DROP_VOICE_END,
+                {'id': msg_id, 'size': len(data)},
+            )
+        )
+        return None
+
+    @staticmethod
+    def _voice_frame(command: TorCommand, payload: Dict[str, JsonValue]) -> bytes:
+        """Encodes one bounded Voice DROP protocol frame."""
+        encoded = base64.b64encode(
+            json.dumps(payload, separators=(',', ':')).encode('utf-8')
+        ).decode('ascii')
+        return f'{command.value} {encoded}\n'.encode('ascii')
+
+    @staticmethod
+    def _parse_voice_offset(msg_id: str, line: Optional[str], maximum: int) -> int:
+        """Validates one exact monotonic Voice resume acknowledgement."""
+        if line is None:
+            raise ConnectionError('Voice DROP acknowledgement missing.')
+        parts = line.split()
+        if (
+            len(parts) != 3
+            or parts[0] != TorCommand.VOICE_ACK.value
+            or parts[1] != msg_id
+        ):
+            raise ConnectionError('Voice DROP acknowledgement invalid.')
+        offset = int(parts[2])
+        if offset < 0 or offset > maximum:
+            raise ConnectionError('Voice DROP acknowledgement offset invalid.')
+        return offset
 
     def is_drop_standby_allowed(self) -> bool:
         """Checks whether cached drop standby may coexist with live state.
@@ -312,6 +418,8 @@ class DropDelivery:
         self,
         db_id: int,
         onion: str,
+        content_type: str,
+        payload: str,
         msg_id: str,
         timestamp: str,
         transport: str,
@@ -321,6 +429,8 @@ class DropDelivery:
         Args:
             db_id (int): The durable message row identifier.
             onion (str): The target onion identity.
+            content_type (str): Stored typed content discriminator.
+            payload (str): Stored text or Voice metadata.
             msg_id (str): The acknowledged message identifier.
             timestamp (str): The original message timestamp.
             transport (str): The transport ledger value.
@@ -329,6 +439,19 @@ class DropDelivery:
             None
         """
         self._mm.update_message_status(db_id, MessageStatus.DELIVERED)
+        if (
+            content_type == ContentType.VOICE.value
+            and self._blobs is not None
+            and not self._mm.has_drop_payload(onion, msg_id)
+        ):
+            try:
+                metadata = json.loads(payload)
+                if isinstance(metadata, dict):
+                    self._blobs.delete(
+                        str(metadata['blob_id']), BlobLifecycle.PERSISTENT
+                    )
+            except (KeyError, OSError, TypeError, ValueError):
+                pass
         self._hm.log_event(
             HistoryEvent.SENT,
             onion,

@@ -11,10 +11,16 @@ from typing import Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from metor.core.api import (
     ChatStartupStateEvent,
+    BeginVoiceCommand,
+    AppendVoiceChunkCommand,
+    ContactEntry,
+    DropConversationSummaryEntry,
+    LiveContextEntry,
     ContentType,
     ConnectionOrigin,
     EventType,
     GetChatStartupStateCommand,
+    GetRuntimeSnapshotCommand,
     PendingConnectionEntry,
     PendingConnectionReasonCode,
     IpcCommand,
@@ -24,25 +30,30 @@ from metor.core.api import (
     InitCommand,
     InitEvent,
     ProtocolMismatchEvent,
+    RuntimeSnapshotEvent,
     GetConnectionsCommand,
     ConnectionsStateEvent,
     ConnectCommand,
     DisconnectCommand,
+    DismissLiveContextCommand,
     AcceptCommand,
     RejectCommand,
     Delivery,
     FallbackCommand,
+    FinalizeVoiceCommand,
     RegisterLiveConsumerCommand,
     SendMessageCommand,
     SwitchCommand,
     SwitchSuccessEvent,
     RetunnelCommand,
     RuntimeErrorCode,
+    MessageOperationReason,
     request_context,
     stamp_request_id,
     UnreadInboxSummaryEntry,
     GetTransportStateCommand,
     TransportStateEvent,
+    TextContent,
 )
 from metor.core.tor import TorManager
 from metor.core.daemon.managed.models import (
@@ -61,7 +72,7 @@ from metor.data import (
     MessageStatus,
     SettingKey,
 )
-from metor.utils import clean_onion
+from metor.utils import Constants, clean_onion
 from metor.versioning import (
     IPC_PROTOCOL_MIN_SUPPORTED,
     IPC_PROTOCOL_VERSION,
@@ -110,6 +121,7 @@ class NetworkCommandHandler:
         send_to_cb: Callable[[socket.socket, IpcEvent], None],
         register_session_consumer_cb: Callable[[socket.socket], None],
         config: 'Config',
+        current_revision_cb: Optional[Callable[[], int]] = None,
     ) -> None:
         """
         Initializes the NetworkCommandHandler.
@@ -125,6 +137,8 @@ class NetworkCommandHandler:
             send_to_cb (Callable[[socket.socket, IpcEvent], None]): Hook to send an IPC event to a specific client.
             register_session_consumer_cb (Callable[[socket.socket], None]): Hook to mark one IPC session as an interactive live consumer.
             config (Config): The profile configuration instance.
+            current_revision_cb (Optional[Callable[[], int]]): Current daemon
+                event sequence used to build a race-safe aggregate snapshot.
 
         Returns:
             None
@@ -141,6 +155,7 @@ class NetworkCommandHandler:
             register_session_consumer_cb
         )
         self._config: 'Config' = config
+        self._current_revision: Callable[[], int] = current_revision_cb or (lambda: 0)
         self._client_focuses: Dict[socket.socket, str] = {}
         self._focus_lock: threading.Lock = threading.Lock()
 
@@ -393,6 +408,87 @@ class NetworkCommandHandler:
             unread=self._build_unread_startup_entries(),
         )
 
+    def _build_runtime_snapshot(self) -> RuntimeSnapshotEvent:
+        """Builds one authoritative content-free aggregate runtime projection.
+
+        Args:
+            None
+
+        Returns:
+            RuntimeSnapshotEvent: Frontend-neutral runtime snapshot.
+        """
+        for _ in range(Constants.RUNTIME_SNAPSHOT_MAX_RETRIES):
+            revision = self._current_revision()
+            snapshot = self._compose_runtime_snapshot()
+            if self._current_revision() == revision:
+                snapshot.revision = revision
+                return snapshot
+        revision = self._current_revision()
+        snapshot = self._compose_runtime_snapshot()
+        snapshot.revision = revision
+        return snapshot
+
+    def _compose_runtime_snapshot(self) -> RuntimeSnapshotEvent:
+        """Reads one candidate aggregate projection for revision validation."""
+        contact_snapshot = self._cm.get_contacts_data()
+        saved_onions = {contact.onion for contact in contact_snapshot.saved}
+        contacts = [
+            ContactEntry(contact.alias, contact.onion, True)
+            for contact in contact_snapshot.saved
+        ] + [
+            ContactEntry(contact.alias, contact.onion, False)
+            for contact in contact_snapshot.discovered
+        ]
+        conversations = [
+            DropConversationSummaryEntry(
+                alias=self._cm.ensure_alias_for_onion(onion) or onion,
+                onion=onion,
+                unread_count=unread_count,
+            )
+            for onion, unread_count in self._mm.get_drop_conversation_summaries()
+        ]
+        unread_by_onion = {
+            summary.contact_onion: summary
+            for summary in self._mm.get_unread_inbox_summaries()
+        }
+        relevant_onions = set(self._network.get_relevant_live_onions())
+        relevant_onions.update(
+            summary.contact_onion
+            for summary in unread_by_onion.values()
+            if summary.live_unread > 0
+        )
+        relevant_onions.update(
+            record.peer_onion for record in self._mm.get_pending_live_outbox()
+        )
+        live_contexts = []
+        for onion in sorted(relevant_onions):
+            summary = unread_by_onion.get(onion)
+            disconnect_reason = self._network.get_last_disconnect_reason(onion)
+            live_contexts.append(
+                LiveContextEntry(
+                    alias=self._cm.ensure_alias_for_onion(onion) or onion,
+                    onion=onion,
+                    saved=onion in saved_onions,
+                    session_state=self._network.get_live_state(onion).value,
+                    unseen_count=summary.live_unread if summary else 0,
+                    pending_outbound_count=len(self._mm.get_pending_live_outbox(onion)),
+                    disconnect_reason=(
+                        disconnect_reason.value
+                        if disconnect_reason is not None
+                        else None
+                    ),
+                )
+            )
+        return RuntimeSnapshotEvent(
+            profile=self._config._paths.profile_name,
+            onion=self._tm.onion or '',
+            contacts=contacts,
+            conversations=conversations,
+            live_contexts=live_contexts,
+            pending=self._build_pending_startup_entries(),
+            settings_version=str(IPC_PROTOCOL_VERSION),
+        )
+
     def _build_transport_state_events(
         self,
         peer: Optional[str],
@@ -536,8 +632,20 @@ class NetworkCommandHandler:
         elif isinstance(cmd, GetChatStartupStateCommand):
             self._send_event(conn, self._build_chat_startup_state())
 
+        elif isinstance(cmd, GetRuntimeSnapshotCommand):
+            self._send_event(conn, self._build_runtime_snapshot())
+
         elif isinstance(cmd, RegisterLiveConsumerCommand):
             self._register_session_consumer(conn)
+
+        elif isinstance(cmd, BeginVoiceCommand):
+            self._network.begin_voice(cmd.target, cmd.delivery, cmd.msg_id, cmd.codec)
+
+        elif isinstance(cmd, AppendVoiceChunkCommand):
+            self._network.append_voice(cmd.msg_id, cmd.offset, cmd.data)
+
+        elif isinstance(cmd, FinalizeVoiceCommand):
+            self._network.finalize_voice(cmd.msg_id, cmd.duration_ms)
 
         elif isinstance(cmd, GetTransportStateCommand):
             for event in self._build_transport_state_events(cmd.peer):
@@ -585,12 +693,66 @@ class NetworkCommandHandler:
         elif isinstance(cmd, RejectCommand):
             self._network.reject(cmd.target, initiated_by_self=True)
 
-        elif isinstance(cmd, SendMessageCommand) and cmd.delivery is Delivery.LIVE:
+        elif (
+            isinstance(cmd, SendMessageCommand)
+            and cmd.delivery is Delivery.LIVE
+            and isinstance(cmd.content, TextContent)
+        ):
             self._network.send_message(cmd.target, cmd.content.text, cmd.msg_id)
 
         elif isinstance(cmd, FallbackCommand):
-            _, event_type, params = self._network.force_fallback(cmd.target)
+            _, event_type, params = self._network.force_fallback(
+                cmd.target, cmd.msg_ids
+            )
             self._send_event(conn, create_event(event_type, params))
+
+        elif isinstance(cmd, DismissLiveContextCommand):
+            resolved = self._cm.resolve_target(cmd.target)
+            if not resolved:
+                self._send_event(
+                    conn, create_event(EventType.PEER_NOT_FOUND, {'target': cmd.target})
+                )
+                return
+            alias, onion = resolved
+            if self._network.is_connected_or_recovering(onion):
+                self._send_event(
+                    conn,
+                    create_event(
+                        EventType.LIVE_CONTEXT_DISMISS_REJECTED,
+                        {
+                            'alias': alias,
+                            'onion': onion,
+                            'reason': MessageOperationReason.ACTIVE_LIVE_CONTEXT.value,
+                        },
+                    ),
+                )
+                return
+            if self._mm.get_pending_live_outbox(onion):
+                self._send_event(
+                    conn,
+                    create_event(
+                        EventType.LIVE_CONTEXT_DISMISS_REJECTED,
+                        {
+                            'alias': alias,
+                            'onion': onion,
+                            'reason': MessageOperationReason.OUTBOUND_PENDING_LIVE.value,
+                        },
+                    ),
+                )
+                return
+            removed_count = self._mm.dismiss_inbound_live(onion)
+            self._network.dismiss_inbound_voice(onion)
+            self._send_event(
+                conn,
+                create_event(
+                    EventType.LIVE_CONTEXT_DISMISSED,
+                    {
+                        'alias': alias,
+                        'onion': onion,
+                        'removed_count': removed_count,
+                    },
+                ),
+            )
 
         elif isinstance(cmd, RetunnelCommand):
             resolved = self._cm.resolve_target_for_interaction(cmd.target)
@@ -612,7 +774,9 @@ class NetworkCommandHandler:
                 onion,
             )
 
-        elif isinstance(cmd, SendMessageCommand):
+        elif isinstance(cmd, SendMessageCommand) and isinstance(
+            cmd.content, TextContent
+        ):
             if not self._config.get_bool(SettingKey.ALLOW_DROPS):
                 self._send_event(conn, create_event(EventType.DROPS_DISABLED))
                 return

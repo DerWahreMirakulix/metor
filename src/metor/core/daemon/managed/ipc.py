@@ -91,6 +91,8 @@ class IpcServer:
 
         self._clients: List[socket.socket] = []
         self._lock: threading.Lock = threading.Lock()
+        self._revision_lock: threading.Lock = threading.Lock()
+        self._state_revision: int = 0
         self._stop_flag: threading.Event = threading.Event()
         self.port: Optional[int] = None
         self._server: Optional[socket.socket] = None
@@ -125,6 +127,11 @@ class IpcServer:
         """
         with self._lock:
             return len(self._clients) > 0
+
+    def active_clients(self) -> set[socket.socket]:
+        """Returns a lock-safe snapshot of attached IPC sockets."""
+        with self._lock:
+            return set(self._clients)
 
     def start(self) -> None:
         """
@@ -206,6 +213,7 @@ class IpcServer:
             None
         """
         stamp_request_id(event)
+        self._stamp_revision(event)
         msg: bytes = (event.to_json() + '\n').encode('utf-8')
         dead_clients: List[socket.socket] = []
 
@@ -247,10 +255,37 @@ class IpcServer:
         """
         try:
             stamp_request_id(event)
+            self._stamp_revision(event)
             msg: bytes = (event.to_json() + '\n').encode('utf-8')
             conn.sendall(msg)
         except Exception:
             pass
+
+    def _stamp_revision(self, event: IpcEvent) -> None:
+        """Assigns one monotonic daemon event revision exactly once.
+
+        Args:
+            event (IpcEvent): Event entering the IPC stream.
+
+        Returns:
+            None
+        """
+        with self._revision_lock:
+            if getattr(event, 'revision', None) is None:
+                self._state_revision += 1
+                event.revision = self._state_revision
+
+    def current_revision(self) -> int:
+        """Returns the latest assigned daemon event revision.
+
+        Args:
+            None
+
+        Returns:
+            int: Monotonic event revision.
+        """
+        with self._revision_lock:
+            return self._state_revision
 
     def _reject_client_limit(self, conn: socket.socket, max_clients: int) -> None:
         """

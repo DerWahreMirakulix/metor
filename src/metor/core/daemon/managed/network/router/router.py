@@ -3,7 +3,9 @@
 import socket
 from typing import TYPE_CHECKING, Callable, Dict, Optional, Tuple
 
-from metor.core.api import EventType, IpcEvent, JsonValue
+from metor.core.api import Delivery, EventType, IpcEvent, JsonValue
+from metor.core.daemon.managed.models import TorCommand
+from metor.data.blob import BlobStore
 from metor.data import (
     ContactManager,
     HistoryActor,
@@ -19,6 +21,7 @@ from ..stream import TcpStreamReader
 from .drop import DropMessageRouter
 from .fallback import FallbackRouter
 from .live import LiveMessageRouter
+from ..voice import VoiceTransferManager
 
 if TYPE_CHECKING:
     from metor.data.profile import Config
@@ -38,6 +41,7 @@ class MessageRouter:
         has_live_consumers_callback: Callable[[], bool],
         notify_callback: Callable[[NotificationPayload], None],
         config: 'Config',
+        blob_store: Optional[BlobStore] = None,
     ) -> None:
         """Composes the live, drop, and fallback routing components.
 
@@ -51,6 +55,7 @@ class MessageRouter:
             has_live_consumers_callback (Callable[[], bool]): Live-consumer check.
             notify_callback (Callable[[NotificationPayload], None]): Detached notifier.
             config (Config): Profile configuration.
+            blob_store (Optional[BlobStore]): Active profile external object store.
 
         Returns:
             None
@@ -66,6 +71,29 @@ class MessageRouter:
             notify_callback=notify_callback,
             config=config,
         )
+        self._fallback: FallbackRouter = FallbackRouter(
+            cm=cm,
+            hm=hm,
+            mm=mm,
+            state=state,
+            broadcast_callback=broadcast_callback,
+            config=config,
+        )
+        self._voice: Optional[VoiceTransferManager] = (
+            VoiceTransferManager(
+                contacts=cm,
+                messages=mm,
+                blobs=blob_store,
+                state=state,
+                broadcast=broadcast_callback,
+                config=config,
+                has_clients_callback=has_clients_callback,
+                has_live_consumers_callback=has_live_consumers_callback,
+                notify_callback=notify_callback,
+            )
+            if blob_store is not None
+            else None
+        )
         self._drop: DropMessageRouter = DropMessageRouter(
             cm=cm,
             hm=hm,
@@ -74,14 +102,7 @@ class MessageRouter:
             has_clients_callback=has_clients_callback,
             notify_callback=notify_callback,
             config=config,
-        )
-        self._fallback: FallbackRouter = FallbackRouter(
-            cm=cm,
-            hm=hm,
-            mm=mm,
-            state=state,
-            broadcast_callback=broadcast_callback,
-            config=config,
+            voice_frame_callback=self.process_drop_voice_frame,
         )
 
     def send_message(self, target: str, msg: str, msg_id: str) -> None:
@@ -123,7 +144,133 @@ class MessageRouter:
         Returns:
             None
         """
+        if self._voice is not None:
+            self._voice.acknowledge_complete(onion, msg_id)
         self._live.process_incoming_ack(onion, msg_id)
+
+    def begin_voice(
+        self, target: str, delivery: Delivery, msg_id: str, codec: str
+    ) -> None:
+        """Begins one logical Voice turn when blob storage is available.
+
+        Args:
+            target (str): Peer alias or onion.
+            delivery (Delivery): Requested semantics.
+            msg_id (str): Stable identity.
+            codec (str): Codec identifier.
+
+        Returns:
+            None
+        """
+        if self._voice is not None:
+            self._voice.begin(target, delivery, msg_id, codec)
+
+    def append_voice(self, msg_id: str, offset: int, data: str) -> None:
+        """Appends one bounded local Voice chunk.
+
+        Args:
+            msg_id (str): Stable identity.
+            offset (int): Exact byte offset.
+            data (str): Base64 chunk.
+
+        Returns:
+            None
+        """
+        if self._voice is not None:
+            self._voice.append(msg_id, offset, data)
+
+    def finalize_voice(self, msg_id: str, duration_ms: Optional[int]) -> None:
+        """Finalizes one logical local Voice turn.
+
+        Args:
+            msg_id (str): Stable identity.
+            duration_ms (Optional[int]): Optional duration metadata.
+
+        Returns:
+            None
+        """
+        if self._voice is not None:
+            self._voice.finalize(msg_id, duration_ms)
+
+    def release_consumed_voice(self, onion: str, msg_ids: list[str]) -> None:
+        """Releases consumed inbound LIVE Voice retention."""
+        if self._voice is not None:
+            self._voice.release_consumed(onion, msg_ids)
+
+    def voice_target(self, msg_id: str) -> Optional[str]:
+        """Returns the peer identity permanently bound to one outbound turn."""
+        return self._voice.outbound_target(msg_id) if self._voice is not None else None
+
+    def voice_delivery(self, msg_id: str) -> Optional[Delivery]:
+        """Returns delivery semantics permanently bound to one outbound turn."""
+        return (
+            self._voice.outbound_delivery(msg_id) if self._voice is not None else None
+        )
+
+    def dismiss_inbound_voice(self, onion: str) -> None:
+        """Releases all inbound Voice retention for a dismissed LIVE context."""
+        if self._voice is not None:
+            self._voice.dismiss_inbound(onion)
+
+    def process_voice_frame(
+        self, conn: socket.socket, onion: str, command: str, encoded: str
+    ) -> bool:
+        """Processes one authenticated Voice application frame.
+
+        Args:
+            conn (socket.socket): Active peer socket.
+            onion (str): Authenticated peer identity.
+            command (str): Voice wire command.
+            encoded (str): Base64 JSON envelope.
+
+        Returns:
+            bool: True when malformed/resource state requires disconnect.
+        """
+        if self._voice is None:
+            return True
+        payload = self._voice.decode_wire_payload(encoded)
+        if payload is None:
+            return True
+        if command == TorCommand.VOICE_BEGIN.value:
+            return self._voice.receive_begin(conn, onion, payload)
+        if command == TorCommand.VOICE_CHUNK.value:
+            return self._voice.receive_chunk(conn, onion, payload)
+        if command == TorCommand.VOICE_END.value:
+            return self._voice.receive_end(conn, onion, payload)
+        return True
+
+    def process_drop_voice_frame(
+        self, conn: socket.socket, onion: str, command: str, encoded: str
+    ) -> bool:
+        """Processes one typed Voice frame carrying DROP semantics."""
+        if self._voice is None:
+            return True
+        payload = self._voice.decode_wire_payload(encoded)
+        if payload is None:
+            return True
+        if command == TorCommand.DROP_VOICE_BEGIN.value:
+            return self._voice.receive_begin(
+                conn, onion, payload, delivery=Delivery.DROP
+            )
+        if command == TorCommand.DROP_VOICE_CHUNK.value:
+            return self._voice.receive_chunk(conn, onion, payload)
+        if command == TorCommand.DROP_VOICE_END.value:
+            return self._voice.receive_end(conn, onion, payload)
+        return True
+
+    def process_voice_ack(self, onion: str, msg_id: str, next_offset: int) -> None:
+        """Delegates one monotonic Voice resume acknowledgement.
+
+        Args:
+            onion (str): Peer identity.
+            msg_id (str): Stable Voice identity.
+            next_offset (int): Confirmed contiguous byte offset.
+
+        Returns:
+            None
+        """
+        if self._voice is not None:
+            self._voice.acknowledge(onion, msg_id, next_offset)
 
     def process_incoming_read_receipt(self, onion: str, msg_id: str) -> None:
         """Delegates incoming read-receipt handling to the live router.
@@ -194,7 +341,7 @@ class MessageRouter:
         Returns:
             Dict[str, Tuple[str, str]]: The converted unacknowledged messages.
         """
-        return self._fallback.convert_unacked_messages_to_drop(
+        converted = self._fallback.convert_unacked_messages_to_drop(
             alias,
             onion,
             request_id=request_id,
@@ -202,6 +349,9 @@ class MessageRouter:
             history_actor=history_actor,
             history_reason_code=history_reason_code,
         )
+        if self._voice is not None:
+            self._voice.promote_fallback(list(converted))
+        return converted
 
     def replay_unacked_messages(self, onion: str) -> list[str]:
         """Delegates pending live replay to the fallback router.
@@ -212,20 +362,31 @@ class MessageRouter:
         Returns:
             list[str]: The message IDs replayed successfully.
         """
-        return self._fallback.replay_unacked_messages(onion)
+        replayed = self._fallback.replay_unacked_messages(onion)
+        if self._voice is not None:
+            replayed.extend(self._voice.replay(onion))
+        return replayed
 
     def force_fallback(
-        self, target: str
+        self, target: str, msg_ids: Optional[list[str]] = None
     ) -> Tuple[bool, EventType, Dict[str, JsonValue]]:
         """Delegates explicit live-to-drop fallback to the fallback router.
 
         Args:
             target (str): The target alias or onion address.
+            msg_ids (Optional[list[str]]): Selected logical IDs, or all.
 
         Returns:
             Tuple[bool, EventType, Dict[str, JsonValue]]: The operation result.
         """
-        return self._fallback.force_fallback(target)
+        result = self._fallback.force_fallback(target, msg_ids)
+        if result[0] and self._voice is not None:
+            raw_ids = result[2].get('msg_ids', [])
+            if isinstance(raw_ids, list):
+                self._voice.promote_fallback(
+                    [msg_id for msg_id in raw_ids if isinstance(msg_id, str)]
+                )
+        return result
 
     def finalize_pending_live_messages(self) -> None:
         """Delegates shutdown fallback finalization to the fallback router.
@@ -236,4 +397,6 @@ class MessageRouter:
         Returns:
             None
         """
-        self._fallback.finalize_pending_live_messages()
+        promoted = self._fallback.finalize_pending_live_messages()
+        if self._voice is not None:
+            self._voice.promote_fallback(promoted)

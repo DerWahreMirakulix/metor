@@ -15,6 +15,7 @@ from metor.core.api import (
 )
 from metor.core.tor import TorManager
 from metor.data import HistoryManager, MessageManager
+from metor.data.blob import BlobStore
 from metor.utils import Constants
 
 # Local Package Imports
@@ -41,6 +42,7 @@ class OutboxWorker:
         config: 'Config',
         state: StateTracker,
         error_callback: Optional[Callable[[str], None]] = None,
+        blob_store: Optional[BlobStore] = None,
     ) -> None:
         """Composes the outbox worker, delivery, and tunnel components.
 
@@ -55,6 +57,7 @@ class OutboxWorker:
             state (StateTracker): Shared transport and request-correlation state.
             error_callback (Optional[Callable[[str], None]]): Optional callback for
                 unexpected worker-loop failures.
+            blob_store (Optional[BlobStore]): Profile object store for Voice drops.
 
         Returns:
             None
@@ -79,6 +82,7 @@ class OutboxWorker:
             broadcast_callback=broadcast_callback,
             stop_flag=stop_flag,
             config=config,
+            blob_store=blob_store,
         )
         self._worker_thread: Optional[threading.Thread] = None
 

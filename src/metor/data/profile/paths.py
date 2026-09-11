@@ -172,6 +172,17 @@ class Paths:
         """
         return self.get_protected_key_dir() / Constants.PROFILE_KEYSLOT_FILE
 
+    def get_quick_unlock_file(self) -> Path:
+        """Returns the PIN quick-unlock verifier metadata path.
+
+        Args:
+            None
+
+        Returns:
+            Path: Protected quick-unlock metadata file.
+        """
+        return self.get_protected_key_dir() / Constants.QUICK_UNLOCK_FILE
+
     def get_blob_dir(self) -> Path:
         """Returns the mode-appropriate external-object root directory.
 

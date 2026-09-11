@@ -6,6 +6,12 @@ from typing import Optional
 # Local Package Imports
 from metor.core.api.base import IpcCommand
 from metor.core.api.codes import CommandType
+from metor.core.api.codes import (
+    ClientUnlockMethod,
+    LockedAcceptPolicy,
+    NotificationPrivacy,
+    QuickUnlockAction,
+)
 from metor.core.api.registry import register_command
 
 
@@ -26,6 +32,17 @@ class GetChatStartupStateCommand(IpcCommand):
 
     command_type: CommandType = field(
         default=CommandType.GET_CHAT_STARTUP_STATE,
+        init=False,
+    )
+
+
+@register_command(CommandType.GET_RUNTIME_SNAPSHOT)
+@dataclass
+class GetRuntimeSnapshotCommand(IpcCommand):
+    """Requests one frontend-neutral aggregate runtime projection."""
+
+    command_type: CommandType = field(
+        default=CommandType.GET_RUNTIME_SNAPSHOT,
         init=False,
     )
 
@@ -147,3 +164,46 @@ class RetunnelCommand(IpcCommand):
 
     target: str
     command_type: CommandType = field(default=CommandType.RETUNNEL, init=False)
+
+
+@register_command(CommandType.RESTRICT_CLIENT)
+@dataclass
+class RestrictClientCommand(IpcCommand):
+    """Places only the requesting authenticated IPC session in restricted state."""
+
+    unlock_method: ClientUnlockMethod = ClientUnlockMethod.PROFILE_PASSWORD
+    continued_live_target: Optional[str] = None
+    live_while_locked: bool = False
+    accept_while_locked: LockedAcceptPolicy = LockedAcceptPolicy.NONE
+    notification_privacy: NotificationPrivacy = NotificationPrivacy.OFF
+    command_type: CommandType = field(
+        default=CommandType.RESTRICT_CLIENT,
+        init=False,
+    )
+
+
+@register_command(CommandType.REAUTHORIZE_CLIENT)
+@dataclass(repr=False)
+class ReauthorizeClientCommand(IpcCommand):
+    """Reauthorizes one restricted session using its configured proof method."""
+
+    method: ClientUnlockMethod
+    proof: Optional[str] = None
+    command_type: CommandType = field(
+        default=CommandType.REAUTHORIZE_CLIENT,
+        init=False,
+    )
+
+
+@register_command(CommandType.CONFIGURE_QUICK_UNLOCK)
+@dataclass(repr=False)
+class ConfigureQuickUnlockCommand(IpcCommand):
+    """Installs or removes memory-hard PIN verifier material."""
+
+    action: QuickUnlockAction
+    salt: Optional[str] = None
+    verifier: Optional[str] = None
+    command_type: CommandType = field(
+        default=CommandType.CONFIGURE_QUICK_UNLOCK,
+        init=False,
+    )

@@ -15,6 +15,7 @@ from metor.core.api import (
     SettingSnapshotEntry,
     UnreadMessagesEvent,
 )
+from metor.ui.terminal.content import render_content
 
 # Local Package Imports
 from metor.data import UiSettingSpec, get_registered_ui_settings
@@ -236,7 +237,7 @@ def format_messages(event: MessagesDataEvent) -> str:
             format_prefixed_message(
                 f'{timestamp_prefix}{rendered_prefix_text}',
                 f'{timestamp_visible}{prefix_text}',
-                msg.content.text,
+                render_content(msg.content),
             )
             + '\n'
         )
@@ -293,7 +294,7 @@ def format_read_messages(event: UnreadMessagesEvent) -> str:
             format_prefixed_message(
                 f'{timestamp_prefix}{rendered_prefix_text}',
                 f'{timestamp_visible}{prefix_text}',
-                msg.content.text,
+                render_content(msg.content),
             )
             + '\n'
         )

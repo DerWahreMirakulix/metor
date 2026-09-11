@@ -15,6 +15,11 @@ from metor.core.api.commands.history import (
 )
 from metor.core.api.commands.messages import (
     ClearMessagesCommand,
+    AppendVoiceChunkCommand,
+    BeginVoiceCommand,
+    DeleteMessageCommand,
+    DismissLiveContextCommand,
+    FinalizeVoiceCommand,
     FallbackCommand,
     GetInboxCommand,
     GetMessagesCommand,
@@ -31,13 +36,17 @@ from metor.core.api.commands.profile import (
 from metor.core.api.commands.session import (
     AcceptCommand,
     AuthenticateSessionCommand,
+    ConfigureQuickUnlockCommand,
     ConnectCommand,
     ChangePasswordCommand,
     DisconnectCommand,
     GetChatStartupStateCommand,
+    GetRuntimeSnapshotCommand,
     GetConnectionsCommand,
     InitCommand,
     RegisterLiveConsumerCommand,
+    ReauthorizeClientCommand,
+    RestrictClientCommand,
     RejectCommand,
     RetunnelCommand,
     SwitchCommand,
@@ -53,13 +62,18 @@ from metor.core.api.commands.settings import (
     SetSettingCommand,
     SyncConfigCommand,
 )
-from metor.core.api.commands.system import ClearProfileDbCommand, SelfDestructCommand
+from metor.core.api.commands.system import (
+    ClearProfileDbCommand,
+    PrepareProfileExitCommand,
+    SelfDestructCommand,
+)
 from metor.core.api.commands.transport import GetTransportStateCommand
 
 
 __all__ = [
     'InitCommand',
     'GetChatStartupStateCommand',
+    'GetRuntimeSnapshotCommand',
     'RegisterLiveConsumerCommand',
     'GetConnectionsCommand',
     'ConnectCommand',
@@ -71,6 +85,9 @@ __all__ = [
     'UnlockCommand',
     'LockCommand',
     'AuthenticateSessionCommand',
+    'ConfigureQuickUnlockCommand',
+    'ReauthorizeClientCommand',
+    'RestrictClientCommand',
     'RetunnelCommand',
     'GetContactsListCommand',
     'AddContactCommand',
@@ -91,6 +108,11 @@ __all__ = [
     'ClearHistoryCommand',
     'GetMessagesCommand',
     'ClearMessagesCommand',
+    'DeleteMessageCommand',
+    'DismissLiveContextCommand',
+    'AppendVoiceChunkCommand',
+    'BeginVoiceCommand',
+    'FinalizeVoiceCommand',
     'GetAddressCommand',
     'GenerateAddressCommand',
     'SetSettingCommand',
@@ -102,5 +124,6 @@ __all__ = [
     'SyncConfigCommand',
     'ClearProfileDbCommand',
     'SelfDestructCommand',
+    'PrepareProfileExitCommand',
     'GetTransportStateCommand',
 ]

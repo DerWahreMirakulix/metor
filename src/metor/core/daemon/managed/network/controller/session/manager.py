@@ -3,7 +3,7 @@
 import socket
 from typing import TYPE_CHECKING, Optional
 
-from metor.core.api import ConnectionOrigin
+from metor.core.api import ConnectionOrigin, ConnectionReasonCode
 from metor.core.daemon.managed.models import RejectIntent
 
 # Local Package Imports
@@ -129,6 +129,7 @@ class ConnectionControllerSessionMixin(ConnectionControllerSupportMixin):
         socket_to_close: Optional[socket.socket] = None,
         suppress_events: bool = False,
         origin: Optional[ConnectionOrigin] = None,
+        system_reason: Optional[ConnectionReasonCode] = None,
     ) -> None:
         """
         Delegates disconnect handling to the focused termination helper.
@@ -140,6 +141,7 @@ class ConnectionControllerSessionMixin(ConnectionControllerSupportMixin):
             socket_to_close (Optional[socket.socket]): Specific duplicate socket to safely terminate.
             suppress_events (bool): Whether transport lifecycle status events should be suppressed.
             origin (Optional[ConnectionOrigin]): The machine-readable source of the disconnected live flow.
+            system_reason (Optional[ConnectionReasonCode]): Local system-policy reason.
 
         Returns:
             None
@@ -152,4 +154,5 @@ class ConnectionControllerSessionMixin(ConnectionControllerSupportMixin):
             socket_to_close=socket_to_close,
             suppress_events=suppress_events,
             origin=origin,
+            system_reason=system_reason,
         )

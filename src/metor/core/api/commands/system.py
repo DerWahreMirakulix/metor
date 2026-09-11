@@ -28,3 +28,14 @@ class SelfDestructCommand(IpcCommand):
         default=CommandType.SELF_DESTRUCT,
         init=False,
     )
+
+
+@register_command(CommandType.PREPARE_PROFILE_EXIT)
+@dataclass
+class PrepareProfileExitCommand(IpcCommand):
+    """Durably prepares normal profile exit without awaiting remote delivery."""
+
+    command_type: CommandType = field(
+        default=CommandType.PREPARE_PROFILE_EXIT,
+        init=False,
+    )

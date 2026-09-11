@@ -20,6 +20,7 @@ from metor.client.contact_qr import (
     validate_contact_qr,
 )
 from metor.client.session import MetorClient, parse_endpoint
+from metor.client.lifecycle import ProfileRuntimeCoordinator, ProfileSwitchResult
 from metor.client.stream import BufferedIpcEventReader
 
 __all__ = [
@@ -32,6 +33,8 @@ __all__ = [
     'ContactQrPayload',
     'ContactQrValidationResult',
     'MetorClient',
+    'ProfileRuntimeCoordinator',
+    'ProfileSwitchResult',
     'build_session_auth_proof',
     'build_session_auth_proof_from_key',
     'derive_session_auth_proof_key',

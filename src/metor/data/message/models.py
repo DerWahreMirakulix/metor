@@ -37,6 +37,43 @@ class StoredMessageRecord:
     status: str
     payload: str
     timestamp: str
+    msg_id: str
+    content_type: str
+
+
+@dataclass(frozen=True)
+class PendingLiveRecord:
+    """Represents one durable outbound LIVE item eligible for replay/fallback."""
+
+    receipt_id: int
+    peer_onion: str
+    content_type: str
+    payload: str
+    msg_id: str
+    timestamp: str
+
+
+@dataclass(frozen=True)
+class InboundVoiceRecord:
+    """Represents one crash-safe inbound Voice spool item."""
+
+    receipt_id: int
+    peer_onion: str
+    delivery: str
+    payload: str
+    msg_id: str
+    timestamp: str
+    retained_bytes: int
+    status: str
+
+
+class MessageDeleteOutcome(str, Enum):
+    """Domain outcomes for local single-message deletion."""
+
+    DELETED = 'deleted'
+    NOT_FOUND = 'not_found'
+    NOT_DROP = 'not_drop'
+    PENDING_DELIVERY = 'pending_delivery'
 
 
 @dataclass(frozen=True)

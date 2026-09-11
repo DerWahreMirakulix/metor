@@ -7,11 +7,19 @@ the complex interactions between the Listener, Receiver, Controller, and Router.
 import threading
 from typing import Dict, List, Callable, Optional, Tuple, TYPE_CHECKING
 
-from metor.core.api import ConnectionOrigin, EventType, IpcEvent, JsonValue
+from metor.core.api import (
+    ConnectionOrigin,
+    ConnectionReasonCode,
+    Delivery,
+    EventType,
+    IpcEvent,
+    JsonValue,
+)
 from metor.core.daemon.managed.crypto import Crypto
 from metor.core.daemon.managed.models import TunnelState, SessionState
 from metor.core.tor import TorManager
 from metor.data import HistoryManager, ContactManager, MessageManager
+from metor.data.blob import BlobStore
 
 # Local Package Imports
 from metor.core.daemon.managed.network.state import (
@@ -45,6 +53,7 @@ class NetworkManager:
         stop_flag: threading.Event,
         config: 'Config',
         state: Optional[StateTracker] = None,
+        blob_store: Optional[BlobStore] = None,
     ) -> None:
         """
         Initializes the NetworkManager and its isolated sub-components.
@@ -62,6 +71,7 @@ class NetworkManager:
             stop_flag (threading.Event): Global daemon termination flag.
             config (Config): The profile configuration instance.
             state (Optional[StateTracker]): Optional shared transport state.
+            blob_store (Optional[BlobStore]): Active profile external object store.
 
         Returns:
             None
@@ -79,6 +89,7 @@ class NetworkManager:
             has_live_consumers_callback=has_live_consumers_callback,
             notify_callback=notify_callback,
             config=config,
+            blob_store=blob_store,
         )
 
         self._controller: ConnectionController = ConnectionController(
@@ -174,13 +185,19 @@ class NetworkManager:
         """
         self._controller.reject(target, initiated_by_self)
 
-    def disconnect(self, target: str, initiated_by_self: bool = True) -> None:
+    def disconnect(
+        self,
+        target: str,
+        initiated_by_self: bool = True,
+        system_reason: Optional[ConnectionReasonCode] = None,
+    ) -> None:
         """
         Terminates an active connection safely.
 
         Args:
             target (str): The target alias or onion.
             initiated_by_self (bool): Whether the local user initiated the disconnect.
+            system_reason (Optional[ConnectionReasonCode]): Local system-policy reason.
 
         Returns:
             None
@@ -189,6 +206,7 @@ class NetworkManager:
             target,
             initiated_by_self,
             origin=(ConnectionOrigin.MANUAL if initiated_by_self else None),
+            system_reason=system_reason,
         )
 
     def disconnect_all(self) -> None:
@@ -203,6 +221,17 @@ class NetworkManager:
         """
         self._controller.disconnect_all()
         self._router.finalize_pending_live_messages()
+
+    def abort_all(self) -> None:
+        """Preempts sockets without reconnect, fallback, or delivery finalization.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self._state.abort_all_sockets()
 
     def retunnel(self, target: str) -> None:
         """
@@ -227,6 +256,23 @@ class NetworkManager:
             bool: True if the peer is currently active or pending.
         """
         return self._state.is_connected_or_pending(onion)
+
+    def is_connected_or_recovering(self, onion: str) -> bool:
+        """Checks whether a peer has active, pending, or genuine recovery state.
+
+        Args:
+            onion (str): The strict onion identity.
+
+        Returns:
+            bool: True while dismissing LIVE state would race session recovery.
+        """
+        return (
+            self._state.is_connected_or_pending(onion)
+            or self._state.has_live_reconnect_grace(onion)
+            or self._state.is_retunneling(onion)
+            or self._state.has_outbound_attempt(onion)
+            or self._state.has_scheduled_auto_reconnect(onion)
+        )
 
     def has_drop_tunnel(self, onion: str) -> bool:
         """
@@ -277,18 +323,19 @@ class NetworkManager:
         self._controller.on_live_consumer_available()
 
     def force_fallback(
-        self, target: str
+        self, target: str, msg_ids: Optional[list[str]] = None
     ) -> Tuple[bool, EventType, Dict[str, JsonValue]]:
         """
         Forces all unacknowledged outgoing live messages to the drop queue.
 
         Args:
             target (str): The target alias or onion address.
+            msg_ids (Optional[list[str]]): Selected logical IDs, or all.
 
         Returns:
             Tuple[bool, EventType, Dict[str, JsonValue]]: A success flag, strict event type, and payload.
         """
-        return self._router.force_fallback(target)
+        return self._router.force_fallback(target, msg_ids)
 
     def send_message(self, target: str, msg: str, msg_id: str) -> None:
         """
@@ -304,6 +351,63 @@ class NetworkManager:
         """
         self._router.send_message(target, msg, msg_id)
 
+    def begin_voice(
+        self, target: str, delivery: Delivery, msg_id: str, codec: str
+    ) -> None:
+        """Begins one logical Voice transfer.
+
+        Args:
+            target (str): Peer alias or onion.
+            delivery (Delivery): Requested delivery semantics.
+            msg_id (str): Stable logical identity.
+            codec (str): Codec identifier.
+
+        Returns:
+            None
+        """
+        self._router.begin_voice(target, delivery, msg_id, codec)
+
+    def append_voice(self, msg_id: str, offset: int, data: str) -> None:
+        """Appends one local Voice chunk.
+
+        Args:
+            msg_id (str): Stable identity.
+            offset (int): Exact byte offset.
+            data (str): Base64 chunk.
+
+        Returns:
+            None
+        """
+        self._router.append_voice(msg_id, offset, data)
+
+    def finalize_voice(self, msg_id: str, duration_ms: Optional[int]) -> None:
+        """Finalizes one local Voice turn.
+
+        Args:
+            msg_id (str): Stable identity.
+            duration_ms (Optional[int]): Optional duration metadata.
+
+        Returns:
+            None
+        """
+        self._router.finalize_voice(msg_id, duration_ms)
+
+    def release_consumed_voice(self, onion: str, msg_ids: List[str]) -> None:
+        """Releases consumed inbound LIVE Voice payloads."""
+        self._router.release_consumed_voice(onion, msg_ids)
+
+    def voice_target(self, msg_id: str) -> Optional[str]:
+        """Returns the onion identity bound to one active outbound Voice turn."""
+        return self._router.voice_target(msg_id)
+
+    def voice_delivery(self, msg_id: str) -> Optional[Delivery]:
+        """Returns the delivery semantics fixed at Voice begin."""
+        return self._router.voice_delivery(msg_id)
+
+    def dismiss_inbound_voice(self, onion: str) -> None:
+        """Releases inbound Voice payloads for a dismissed LIVE context."""
+        self._router.dismiss_inbound_voice(onion)
+
     def get_active_onions(self) -> List[str]:
         """
         Returns a snapshot of all currently connected and pending onions.
@@ -315,6 +419,17 @@ class NetworkManager:
             List[str]: Active Tor connection onions.
         """
         return self._state.get_active_onions()
+
+    def get_relevant_live_onions(self) -> List[str]:
+        """Returns every peer with canonical LIVE runtime state.
+
+        Args:
+            None
+
+        Returns:
+            List[str]: LIVE-relevant onion identities.
+        """
+        return self._state.get_relevant_live_onions()
 
     def get_active_aliases(self) -> List[str]:
         """
@@ -369,6 +484,10 @@ class NetworkManager:
             SessionState: The derived live transport lifecycle state.
         """
         return self._state.get_live_state(onion)
+
+    def get_last_disconnect_reason(self, onion: str) -> Optional[ConnectionReasonCode]:
+        """Returns the last machine-readable disconnect reason for snapshots."""
+        return self._state.get_last_disconnect_reason(onion)
 
     def get_drop_tunnel_state(self, onion: str) -> Optional[TunnelState]:
         """

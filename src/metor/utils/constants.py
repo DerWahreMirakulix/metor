@@ -35,6 +35,10 @@ class Constants:
     # Network Constraints
     MAX_STREAM_BYTES: int = 1048576  # 1 MB Limit for Tor TCP streams (OOM Protection)
     MAX_IPC_BYTES: int = 5242880  # 5 MB Limit for local IPC streams (OOM Protection)
+    VOICE_CHUNK_MAX_BYTES: int = 65536
+    VOICE_CODEC_MAX_CHARS: int = 64
+    VOICE_PRESSURE_PERCENT: int = 90
+    MESSAGE_ID_MAX_CHARS: int = 128
     TCP_BUFFER_SIZE: int = 4096  # Standard TCP chunk size for socket.recv
     SERVER_BACKLOG: int = 5  # Standard socket backlog for daemon IPC and listeners
     SERVER_BACKLOG_HEADLESS: int = 1  # Minimal socket backlog for ephemeral daemons
@@ -87,6 +91,7 @@ class Constants:
     DEFAULT_MESSAGES_LIMIT: int = (
         50  # Stored messages per request when no explicit limit is sent
     )
+    RUNTIME_SNAPSHOT_MAX_RETRIES: int = 8
 
     # Thread Constraints & Timing
     THREAD_POLL_TIMEOUT: float = 1.0  # Timeout for non-blocking accept/recv loops
@@ -126,6 +131,7 @@ class Constants:
     TOR_DATA_DIR: str = 'tor_data'
     PROTECTED_KEY_DIR: str = 'protected-key-material'
     PROFILE_KEYSLOT_FILE: str = 'keyslot.json'
+    QUICK_UNLOCK_FILE: str = 'quick-unlock.json'
     BLOBS_DIR: str = 'blobs'
     PERSISTENT_BLOBS_DIR: str = 'persistent'
     TEMPORARY_BLOBS_DIR: str = 'temporary'

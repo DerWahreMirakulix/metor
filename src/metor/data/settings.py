@@ -72,6 +72,10 @@ class SettingKey(str, Enum):
     RECORD_LIVE_HISTORY = 'daemon.record_live_history'
     RECORD_DROP_HISTORY = 'daemon.record_drop_history'
     FALLBACK_TO_DROP = 'daemon.fallback_to_drop'
+    SEND_READ_RECEIPTS = 'daemon.send_read_receipts'
+    MAX_PENDING_LIVE_MSGS = 'daemon.max_pending_live_msgs'
+    MAX_PENDING_LIVE_BYTES = 'daemon.max_pending_live_bytes'
+    MAX_LIVE_VOICE_BUFFER_BYTES = 'daemon.max_live_voice_buffer_bytes'
     MAX_UNSEEN_DROP_MSGS = 'daemon.max_unseen_drop_msgs'
     MAX_UNSEEN_LIVE_MSGS = 'daemon.max_unseen_live_msgs'
     EXPOSE_DROP_REJECTION = 'daemon.expose_drop_rejection'
@@ -439,6 +443,41 @@ class Settings:
             category='Core Daemon',
             description='Falls back unacknowledged live messages into the offline drop queue when possible.',
             constraints='Boolean.',
+        ),
+        SettingKey.SEND_READ_RECEIPTS: SettingSpec(
+            key=SettingKey.SEND_READ_RECEIPTS,
+            default=False,
+            category='Core Daemon',
+            description='Sends optional remote read receipts after local consume. Disabled by default.',
+            constraints='Boolean.',
+            security_note='Enabling reveals message-consumption metadata to remote peers.',
+        ),
+        SettingKey.MAX_PENDING_LIVE_MSGS: SettingSpec(
+            key=SettingKey.MAX_PENDING_LIVE_MSGS,
+            default=100,
+            category='Core Daemon',
+            description='Caps retained outbound pending LIVE logical messages per profile. `0` refuses retention and `-1` removes this guard.',
+            constraints='Integer >= -1.',
+            security_note='Bounds durable recovery state; existing pending messages are never overwritten.',
+            min_value=-1,
+        ),
+        SettingKey.MAX_PENDING_LIVE_BYTES: SettingSpec(
+            key=SettingKey.MAX_PENDING_LIVE_BYTES,
+            default=16777216,
+            category='Core Daemon',
+            description='Caps retained outbound pending LIVE payload bytes per profile. `0` refuses retention and `-1` removes this guard.',
+            constraints='Integer >= -1 bytes.',
+            security_note='Bounds durable recovery storage, including retained media payloads.',
+            min_value=-1,
+        ),
+        SettingKey.MAX_LIVE_VOICE_BUFFER_BYTES: SettingSpec(
+            key=SettingKey.MAX_LIVE_VOICE_BUFFER_BYTES,
+            default=67108864,
+            category='Core Daemon',
+            description='Caps retained local LIVE Voice bytes per profile at 64 MiB. `0` disables Voice retention and `-1` removes this guard.',
+            constraints='Integer >= -1 bytes.',
+            security_note='Finite by default to bound authenticated peer and local capture storage pressure; data is never overwritten.',
+            min_value=-1,
         ),
         SettingKey.MAX_UNSEEN_DROP_MSGS: SettingSpec(
             key=SettingKey.MAX_UNSEEN_DROP_MSGS,
