@@ -5,9 +5,10 @@ from __future__ import annotations
 from enum import Enum
 from pathlib import Path
 import threading
+import socket
 from typing import TYPE_CHECKING
 
-from metor.core.api import EventType, create_event
+from metor.core.api import EventType, JsonValue, create_event
 from metor.core.daemon.managed.network import StateTracker
 from metor.core.profile_destruction import destroy_profile_storage
 from metor.data.sql import SqlManager
@@ -67,6 +68,7 @@ class DaemonLifecycleMixin:
     _session_maintenance: 'SessionMaintenance | None'
     _tm: 'TorManager | None'
     _transport_state: StateTracker
+    _destruction_recipients: set[socket.socket]
 
     def _on_runtime_internal_error(self, message: str) -> None:
         """Reports one lifecycle failure through the concrete daemon."""
@@ -167,22 +169,31 @@ class DaemonLifecycleMixin:
         """
         failure_phase = 'unknown'
         key_destroyed = False
+        profile_name = getattr(self._pm, 'profile_name', 'unknown')
+
+        def publish(
+            event_type: EventType, payload: dict[str, JsonValue] | None = None
+        ) -> None:
+            """Publishes purge status only to the initiating control session."""
+            ipc = getattr(self, '_ipc', None)
+            if ipc is None:
+                return
+            recipients: set[socket.socket] = getattr(
+                self, '_destruction_recipients', set()
+            )
+            try:
+                ipc.broadcast_to(create_event(event_type, payload), recipients)
+            except Exception:
+                pass
 
         def report_key_destroyed() -> None:
             """Publishes the irreversible key-destruction milestone."""
             nonlocal key_destroyed
             key_destroyed = True
-            ipc = getattr(self, '_ipc', None)
-            if ipc is not None:
-                try:
-                    ipc.broadcast(
-                        create_event(
-                            EventType.SELF_DESTRUCT_KEY_DESTROYED,
-                            {'profile': self._pm.profile_name},
-                        )
-                    )
-                except Exception:
-                    pass
+            publish(
+                EventType.SELF_DESTRUCT_KEY_DESTROYED,
+                {'profile': profile_name},
+            )
 
         def record_failure(phase: str, destroyed: bool) -> None:
             """Captures the destruction phase before the original error propagates."""
@@ -197,31 +208,28 @@ class DaemonLifecycleMixin:
                 key_destroyed_callback=report_key_destroyed,
                 failure_callback=record_failure,
             )
-            ipc = getattr(self, '_ipc', None)
-            if ipc is not None:
-                try:
-                    ipc.broadcast(create_event(EventType.SELF_DESTRUCT_COMPLETED))
-                except Exception:
-                    pass
+            publish(EventType.SELF_DESTRUCT_COMPLETED)
         except Exception:
-            ipc = getattr(self, '_ipc', None)
-            if ipc is not None:
-                try:
-                    ipc.broadcast(
-                        create_event(
-                            EventType.SELF_DESTRUCT_CLEANUP_FAILED,
-                            {
-                                'profile': self._pm.profile_name,
-                                'phase': failure_phase,
-                                'key_destroyed': key_destroyed,
-                            },
-                        )
-                    )
-                except Exception:
-                    pass
+            publish(
+                EventType.SELF_DESTRUCT_CLEANUP_FAILED,
+                {
+                    'profile': profile_name,
+                    'phase': failure_phase,
+                    'key_destroyed': key_destroyed,
+                },
+            )
             self._on_runtime_internal_error(
                 'Profile destruction failed during '
                 f'{failure_phase}; key_destroyed={key_destroyed}.'
             )
         finally:
+            ipc = getattr(self, '_ipc', None)
+            if ipc is not None:
+                try:
+                    ipc.flush(
+                        Constants.SOCKET_WRITER_FLUSH_TIMEOUT_SEC,
+                        getattr(self, '_destruction_recipients', set()),
+                    )
+                except Exception:
+                    pass
             self.stop()

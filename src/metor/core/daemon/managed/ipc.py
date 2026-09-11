@@ -9,6 +9,7 @@ import socket
 import threading
 import json
 import secrets
+import time
 from typing import List, Callable, Dict, Optional, Iterable
 
 from metor.core.api import (
@@ -96,6 +97,7 @@ class IpcServer:
         self._client_write_locks: Dict[socket.socket, threading.Lock] = {}
         self._client_writers: Dict[socket.socket, BoundedSocketWriter] = {}
         self._revision_lock: threading.Lock = threading.Lock()
+        self._publication_lock: threading.Lock = threading.Lock()
         self._state_revision: int = 0
         self._epoch: str = secrets.token_hex(Constants.UUID_MSG_BYTES)
         self._stop_flag: threading.Event = threading.Event()
@@ -222,21 +224,26 @@ class IpcServer:
         Returns:
             None
         """
-        stamp_request_id(event)
-        self._stamp_revision(event)
-        msg: bytes = (event.to_json() + '\n').encode('utf-8')
-        with self._lock:
-            clients: List[socket.socket] = list(self._clients)
+        with self._publication_lock:
+            if (
+                getattr(event, 'event_type', None)
+                is not EventType.RUNTIME_STATE_CHANGED
+            ):
+                stamp_request_id(event)
+            self._stamp_revision(event)
+            msg: bytes = (event.to_json() + '\n').encode('utf-8')
+            with self._lock:
+                clients: List[socket.socket] = list(self._clients)
 
-        if recipients is not None:
-            allowed_clients: set[socket.socket] = set(recipients)
-            clients = [client for client in clients if client in allowed_clients]
+            if recipients is not None:
+                allowed_clients: set[socket.socket] = set(recipients)
+                clients = [client for client in clients if client in allowed_clients]
 
-        for client in clients:
-            try:
-                self._enqueue_client_frame(client, msg)
-            except (ConnectionError, FrameQueueFull):
-                self._drop_client(client)
+            for client in clients:
+                try:
+                    self._enqueue_client_frame(client, msg)
+                except (ConnectionError, FrameQueueFull):
+                    self._drop_client(client)
 
     def send_to(self, conn: socket.socket, event: IpcEvent) -> None:
         """
@@ -249,13 +256,45 @@ class IpcServer:
         Returns:
             None
         """
-        stamp_request_id(event)
-        self._stamp_revision(event)
-        msg: bytes = (event.to_json() + '\n').encode('utf-8')
-        try:
-            self._enqueue_client_frame(conn, msg)
-        except (ConnectionError, FrameQueueFull):
-            self._drop_client(conn)
+        with self._publication_lock:
+            if (
+                getattr(event, 'event_type', None)
+                is not EventType.RUNTIME_STATE_CHANGED
+            ):
+                stamp_request_id(event)
+            self._stamp_revision(event)
+            msg: bytes = (event.to_json() + '\n').encode('utf-8')
+            try:
+                self._enqueue_client_frame(conn, msg)
+            except (ConnectionError, FrameQueueFull):
+                self._drop_client(conn)
+
+    def flush(
+        self,
+        timeout: float,
+        recipients: Optional[Iterable[socket.socket]] = None,
+    ) -> bool:
+        """Waits a bounded time for published client control frames.
+
+        Args:
+            timeout (float): Total maximum wait in seconds.
+            recipients (Optional[Iterable[socket.socket]]): Optional client scope.
+
+        Returns:
+            bool: True when each scoped writer drained.
+        """
+        deadline = time.monotonic() + max(0.0, timeout)
+        allowed = set(recipients) if recipients is not None else None
+        with self._lock:
+            writers = [
+                writer
+                for conn, writer in self._client_writers.items()
+                if allowed is None or conn in allowed
+            ]
+        for writer in writers:
+            if not writer.flush(max(0.0, deadline - time.monotonic())):
+                return False
+        return True
 
     def _enqueue_client_frame(self, conn: socket.socket, msg: bytes) -> None:
         """Queues one client frame without holding daemon state across I/O."""
@@ -271,6 +310,8 @@ class IpcServer:
                 writer = BoundedSocketWriter(
                     conn,
                     capacity=Constants.IPC_WRITER_QUEUE_FRAMES,
+                    byte_capacity=Constants.IPC_WRITER_QUEUE_BYTES,
+                    max_frame_bytes=Constants.MAX_IPC_BYTES,
                     on_failure=lambda failed, _exc: self._drop_client(failed),
                     on_exit=lambda exited: self._writer_exited(conn, exited),
                 )

@@ -1,6 +1,7 @@
 """Contract tests for independent message delivery and typed content."""
 
 import json
+from contextlib import nullcontext
 import sys
 import unittest
 from pathlib import Path
@@ -122,6 +123,7 @@ class MessageArchitectureContractTests(unittest.TestCase):
         handler._current_revision = lambda: next(revisions)
         handler._compose_runtime_snapshot = compose
         handler._network = Mock()
+        handler._network.snapshot_barrier.return_value = nullcontext()
         handler._network.get_snapshot_token.return_value = ('stable',)
 
         snapshot = handler._build_runtime_snapshot()
@@ -135,6 +137,7 @@ class MessageArchitectureContractTests(unittest.TestCase):
         revisions = iter(range(Constants.RUNTIME_SNAPSHOT_MAX_RETRIES * 2))
         handler._current_revision = lambda: next(revisions)
         handler._network = Mock()
+        handler._network.snapshot_barrier.return_value = nullcontext()
         handler._network.get_snapshot_token.return_value = ('stable',)
         handler._compose_runtime_snapshot = lambda: RuntimeSnapshotEvent(
             profile='default', onion='peer-onion'
@@ -153,6 +156,7 @@ class MessageArchitectureContractTests(unittest.TestCase):
         handler._current_revision = lambda: 9
         tokens = iter((('before',), ('after',), ('stable',), ('stable',)))
         handler._network = Mock()
+        handler._network.snapshot_barrier.return_value = nullcontext()
         handler._network.get_snapshot_token.side_effect = lambda: next(tokens)
         compose_count = 0
 

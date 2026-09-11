@@ -2,17 +2,216 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from enum import Enum
 from importlib import metadata
-from typing import Protocol, cast
+import threading
+from typing import Optional, Protocol, cast
 
 
 FRONTEND_ENTRY_POINT_GROUP: str = 'metor.ui_frontends'
-FRONTEND_LAUNCH_CONTRACT_VERSION: int = 1
+FRONTEND_LAUNCH_CONTRACT_VERSION: int = 2
 
 
 class FrontendLaunchError(RuntimeError):
     """Reports an unavailable, conflicting, or broken frontend installation."""
+
+
+class FrontendBootstrapError(RuntimeError):
+    """Reports a user-visible host bootstrap outcome with its process status."""
+
+    def __init__(self, message: str, exit_code: int = 1) -> None:
+        """Initializes one typed frontend bootstrap failure.
+
+        Args:
+            message (str): Safe user-facing failure text.
+            exit_code (int): Process status returned by the selected frontend.
+
+        Returns:
+            None
+        """
+        super().__init__(message)
+        self.exit_code = exit_code
+
+
+class FrontendInteractions(Protocol):
+    """Frontend-owned prompts and status output requested by the base host."""
+
+    def confirm_daemon_start(self) -> Optional[bool]:
+        """Returns the frontend-owned daemon-start decision.
+
+        Args:
+            None
+
+        Returns:
+            Optional[bool]: Yes/no, or None when the user cancelled.
+        """
+        ...
+
+    def request_session_auth_secret(self) -> Optional[str]:
+        """Returns startup authentication input.
+
+        Args:
+            None
+
+        Returns:
+            Optional[str]: Secret text, or None when the user cancelled.
+        """
+        ...
+
+    def show_status(self, message: str) -> None:
+        """Displays one non-secret bootstrap status message.
+
+        Args:
+            message (str): Safe status text from the base host.
+
+        Returns:
+            None
+        """
+        ...
+
+
+class OneUseSecretProvider:
+    """Owns one in-memory startup secret and irreversibly consumes it once."""
+
+    def __init__(self, secret: Optional[str]) -> None:
+        """Initializes one consumable in-memory secret reference.
+
+        Args:
+            secret (Optional[str]): Startup secret or no secret.
+
+        Returns:
+            None
+        """
+        self._secret = secret
+        self._lock = threading.Lock()
+
+    def take(self) -> Optional[str]:
+        """Returns and clears the startup secret exactly once.
+
+        Args:
+            None
+
+        Returns:
+            Optional[str]: Previously held secret, if still available.
+        """
+        with self._lock:
+            secret = self._secret
+            self._secret = None
+            return secret
+
+
+class FrontendProfileSecurity(str, Enum):
+    """Frontend-neutral local profile storage choices."""
+
+    ENCRYPTED = 'encrypted'
+    PLAINTEXT = 'plaintext'
+
+
+@dataclass(frozen=True)
+class FrontendProfileCreateRequest:
+    """Non-secret profile-creation inputs accepted by the local base host."""
+
+    profile: str
+    remote: bool = False
+    port: int | None = None
+    security: FrontendProfileSecurity = FrontendProfileSecurity.ENCRYPTED
+
+
+@dataclass(frozen=True)
+class FrontendProfileOperationResult:
+    """Stable frontend-facing result for a local profile operation."""
+
+    success: bool
+    code: str
+    profile: str
+
+
+@dataclass(frozen=True)
+class FrontendBootstrapResult:
+    """Non-visual host state established after frontend-controlled bootstrap."""
+
+    profile: str
+    remote: bool
+    port: int | None
+    daemon_started_by_launcher: bool
+    session_auth: OneUseSecretProvider
+
+
+@dataclass(frozen=True)
+class FrontendProfileState:
+    """Read-only pre-bootstrap profile state for first-run frontend routing."""
+
+    profile: str
+    exists: bool
+    remote: bool
+    daemon_running: bool
+
+
+class FrontendHost(Protocol):
+    """Base-distribution service boundary exposed to installed frontends."""
+
+    contract_version: int
+
+    def profile_state(self) -> FrontendProfileState:
+        """Returns non-secret first-run state without starting work.
+
+        Args:
+            None
+
+        Returns:
+            FrontendProfileState: Current selected-profile metadata.
+        """
+        ...
+
+    def list_profiles(self) -> tuple[FrontendProfileState, ...]:
+        """Enumerates local profile metadata without starting it.
+
+        Args:
+            None
+
+        Returns:
+            tuple[FrontendProfileState, ...]: Available profile states.
+        """
+        ...
+
+    def select_profile(self, profile: str) -> FrontendProfileState:
+        """Selects one existing or first-run profile before bootstrap.
+
+        Args:
+            profile (str): Profile name routed through base validation.
+
+        Returns:
+            FrontendProfileState: Newly selected profile state.
+        """
+        ...
+
+    def create_profile(
+        self,
+        request: FrontendProfileCreateRequest,
+        secret: OneUseSecretProvider | None = None,
+    ) -> FrontendProfileOperationResult:
+        """Creates a profile through base services without retaining its secret.
+
+        Args:
+            request (FrontendProfileCreateRequest): Non-secret creation options.
+            secret (OneUseSecretProvider | None): Consumable creation secret.
+
+        Returns:
+            FrontendProfileOperationResult: Stable creation outcome.
+        """
+        ...
+
+    def bootstrap(self, interactions: FrontendInteractions) -> FrontendBootstrapResult:
+        """Performs profile checks and optional daemon startup on demand.
+
+        Args:
+            interactions (FrontendInteractions): Frontend-owned interaction adapter.
+
+        Returns:
+            FrontendBootstrapResult: Established local or remote endpoint state.
+        """
+        ...
 
 
 @dataclass(frozen=True)
@@ -21,12 +220,8 @@ class FrontendLaunchContext:
 
     Args:
         profile (str): Active profile name.
-        remote (bool): Whether the profile connects to a remote daemon.
-        port (int | None): Resolved daemon IPC port override, when supplied.
+        host (FrontendHost): Deferred base-distribution bootstrap service.
         start_daemon (bool | None): Invocation-specific daemon autostart override.
-        daemon_started_by_launcher (bool): Whether the base CLI started the daemon.
-        session_auth_secret (str | None): One-use startup credential retained only
-            in process memory for the selected frontend.
         contract_version (int): Public frontend launch-contract generation.
 
     Returns:
@@ -34,11 +229,8 @@ class FrontendLaunchContext:
     """
 
     profile: str
-    remote: bool = False
-    port: int | None = None
+    host: FrontendHost
     start_daemon: bool | None = None
-    daemon_started_by_launcher: bool = False
-    session_auth_secret: str | None = field(default=None, repr=False)
     contract_version: int = FRONTEND_LAUNCH_CONTRACT_VERSION
 
 

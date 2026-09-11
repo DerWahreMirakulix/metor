@@ -49,6 +49,9 @@ class Constants:
     SERVER_BACKLOG_HEADLESS: int = 1  # Minimal socket backlog for ephemeral daemons
     PEER_WRITER_QUEUE_FRAMES: int = 256
     IPC_WRITER_QUEUE_FRAMES: int = 256
+    PEER_WRITER_QUEUE_BYTES: int = 8 * MAX_STREAM_BYTES
+    IPC_WRITER_QUEUE_BYTES: int = 8 * MAX_IPC_BYTES
+    SOCKET_WRITER_FLUSH_TIMEOUT_SEC: float = 2.0
 
     # Tor Bootstrapping
     UNIX_TOR_TIMEOUT: int = 45  # Process launch timeout for Unix Tor binaries
@@ -81,6 +84,8 @@ class Constants:
     SESSION_AUTH_CHALLENGE_BYTES: int = (
         32  # Random challenge length for one IPC session-auth proof round
     )
+    SENSITIVE_AUTH_GRANT_TIMEOUT_SEC: float = 60.0
+    QUICK_UNLOCK_HELPER_TIMEOUT_SEC: float = 10.0
     TOR_HANDSHAKE_CHALLENGE_BYTES: int = (
         32  # Random challenge length for one Tor peer-auth proof round
     )

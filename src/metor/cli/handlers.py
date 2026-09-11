@@ -23,11 +23,10 @@ from metor.application import (
     InvalidDaemonPasswordError,
     PlaintextLockedDaemonError,
     configure_daemon_runtime_logging,
+    create_local_frontend_host,
     run_managed_daemon,
-    start_managed_daemon_process,
 )
 from metor.data import (
-    ChatDaemonAutostartPolicy,
     ProfileManager,
     ProfileSecurityMode,
     SettingKey,
@@ -41,7 +40,7 @@ from metor.cli import (
     prompt_text,
 )
 from metor.cli.errors import format_safe_local_runtime_error
-from metor.utils import Constants, ProcessManager, TypeCaster
+from metor.utils import Constants, ProcessManager
 from metor.cli.proxy import CliProxy
 
 
@@ -75,48 +74,6 @@ def _read_startup_session_auth_password_from_stdin() -> Optional[str]:
     if not password:
         return None
     return password
-
-
-def _resolve_chat_daemon_autostart_policy(
-    pm: ProfileManager,
-    start_daemon_override: Optional[bool],
-) -> ChatDaemonAutostartPolicy:
-    """
-    Resolves the effective local chat daemon-start policy for one invocation.
-
-    Args:
-        pm (ProfileManager): The active profile configuration.
-        start_daemon_override (Optional[bool]): Optional one-shot CLI override.
-
-    Returns:
-        ChatDaemonAutostartPolicy: The effective policy.
-    """
-    if start_daemon_override is True:
-        return ChatDaemonAutostartPolicy.ALWAYS
-    if start_daemon_override is False:
-        return ChatDaemonAutostartPolicy.NEVER
-
-    return TypeCaster.to_enum(
-        ChatDaemonAutostartPolicy,
-        pm.config.get_str(SettingKey.CHAT_DAEMON_AUTOSTART),
-        ChatDaemonAutostartPolicy.ASK,
-    )
-
-
-def _format_chat_daemon_offline_hint() -> str:
-    """
-    Builds the local chat guidance shown when no daemon startup should occur.
-
-    Args:
-        None
-
-    Returns:
-        str: The user-facing guidance text.
-    """
-    return (
-        "Daemon is not running! Use 'metor daemon' to start it or rerun with "
-        "'metor chat --start-daemon'."
-    )
 
 
 class CommandHandlers:
@@ -434,89 +391,10 @@ class CommandHandlers:
                 sys.stderr.write(f'{exc}\n')
                 return 2
 
-        if not pm.exists():
-            print(f"Profile '{pm.profile_name}' does not exist.")
-            return 1
-
-        startup_session_auth_password: Optional[str] = None
-        daemon_started_by_launcher: bool = False
-        output_spacer = PromptOutputSpacer()
-        if not pm.is_daemon_running():
-            if pm.is_remote():
-                msg, _ = Translator.get(EventType.DAEMON_OFFLINE)
-                print(msg)
-                return 1
-
-            autostart_policy: ChatDaemonAutostartPolicy = (
-                _resolve_chat_daemon_autostart_policy(
-                    pm,
-                    start_daemon_override,
-                )
-            )
-
-            if autostart_policy is ChatDaemonAutostartPolicy.NEVER:
-                print(output_spacer.format(_format_chat_daemon_offline_hint()))
-                return 1
-
-            if autostart_policy is ChatDaemonAutostartPolicy.ASK:
-                try:
-                    confirmation: str = prompt_text(
-                        "Type 'yes' to start the local daemon: "
-                    )
-                    output_spacer.mark_prompt()
-                except PromptAbortedError:
-                    return 130
-
-                if confirmation.strip().lower() != 'yes':
-                    print(output_spacer.format(_format_chat_daemon_offline_hint()))
-                    return 1
-
-            if pm.uses_plaintext_storage() and pm.config.get_bool(
-                SettingKey.REQUIRE_LOCAL_AUTH
-            ):
-                try:
-                    startup_session_auth_password = _prompt_hidden_optional(
-                        f'{Theme.GREEN}Enter Session Auth Password: {Theme.RESET}'
-                    )
-                    output_spacer.mark_prompt()
-                except PromptAbortedError:
-                    return 130
-
-                if startup_session_auth_password is None:
-                    print(output_spacer.format('Aborted.'))
-                    return 130
-
-            print(output_spacer.format('Starting local daemon...'))
-
-            try:
-                daemon_started: bool = start_managed_daemon_process(
-                    pm,
-                    start_locked=pm.uses_encrypted_storage(),
-                    session_auth_password=startup_session_auth_password,
-                )
-            except PlaintextLockedDaemonError:
-                print('Plaintext profiles cannot be started in locked mode.')
-                return 1
-            except ValueError as exc:
-                print(output_spacer.format(format_safe_local_runtime_error(exc)))
-                return 1
-
-            if not daemon_started:
-                print(
-                    output_spacer.format(
-                        "Could not start the local daemon. Run 'metor daemon' to inspect foreground startup errors."
-                    )
-                )
-                return 1
-            daemon_started_by_launcher = True
-
         context = FrontendLaunchContext(
             profile=pm.profile_name,
-            remote=pm.is_remote(),
-            port=pm.get_static_port(),
+            host=create_local_frontend_host(pm, start_daemon_override),
             start_daemon=start_daemon_override,
-            daemon_started_by_launcher=daemon_started_by_launcher,
-            session_auth_secret=startup_session_auth_password,
         )
         try:
             return invoke_frontend(loaded_frontend, context)

@@ -66,3 +66,7 @@ Every Pull Request, AI code generation, or architectural change MUST be audited 
 - [ ] **Minimum Support:** Did `MIN_SUPPORTED` change only with actual reader/negotiation support, and does implementation coverage prove every claimed generation?
 - [ ] **Release SemVer:** Did `APP_VERSION` change only through the explicit release process, independently of compatibility generations?
 - [ ] **Generated Baseline:** Are `docs/generated/api.schema.json` and `docs/generated/compatibility.json` regenerated and consistent with authoritative code?
+
+## Related acceptance evidence
+
+- [Refactor 2 final remediation evidence](./REFACTOR_2_FINAL_REMEDIATION.md)

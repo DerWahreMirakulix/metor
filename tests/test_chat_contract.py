@@ -323,7 +323,7 @@ class ChatContractTests(unittest.TestCase):
         self.assertEqual(chat._session.get_peer_onion('carol'), 'c' * 56)
         renderer.print_message.assert_not_called()
 
-    def test_prefilled_startup_session_auth_reuses_password_once(self) -> None:
+    def test_startup_session_auth_provider_reuses_password_once(self) -> None:
         """
         Verifies that chat bootstrap reuses one autostart session-auth password.
 
@@ -343,7 +343,7 @@ class ChatContractTests(unittest.TestCase):
         ):
             chat = Chat(
                 cast(ProfileManager, _DummyProfileManager()),
-                prefilled_session_auth_password='session-secret',
+                startup_session_auth_provider=lambda: 'session-secret',
             )
 
         chat._ipc = Mock()

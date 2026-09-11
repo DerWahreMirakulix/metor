@@ -176,6 +176,7 @@ class SessionAuthContractTests(unittest.TestCase):
                 voice_delivery_callback=lambda msg_id: (
                     Delivery.LIVE if msg_id == 'alice-voice' else Delivery.DROP
                 ),
+                live_context_callback=lambda onion: onion,
             )
             controller.install_context(create_session_auth_context('profile-password'))
             restricted = controller.restrict(

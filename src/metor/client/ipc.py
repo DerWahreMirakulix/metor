@@ -5,7 +5,8 @@ import threading
 import time
 import queue
 from collections import deque
-from typing import Callable, Optional
+from dataclasses import dataclass
+from typing import Callable, Optional, TypeAlias
 
 from metor.client.stream import BufferedIpcEventReader
 from metor.core.api import ensure_request_id, IpcCommand, IpcEvent
@@ -30,6 +31,16 @@ class IpcTimeoutError(IpcClientError):
 
 class IpcRequestLimitError(IpcClientError):
     """Raised when the bounded concurrent request inventory is saturated."""
+
+
+@dataclass(frozen=True)
+class _DisconnectSignal:
+    """Internal callback-queue marker for one lost connection generation."""
+
+    generation: int
+
+
+_AsyncItem: TypeAlias = IpcEvent | _DisconnectSignal
 
 
 class IpcClient:
@@ -64,10 +75,13 @@ class IpcClient:
 
         self._socket: Optional[socket.socket] = None
         self._stop_flag: threading.Event = threading.Event()
+        self._generation = 0
         self._listener_thread: Optional[threading.Thread] = None
+        self._listener_generation = -1
         self._listener_lock = threading.Lock()
         self._event_thread: Optional[threading.Thread] = None
-        self._event_queue: queue.Queue[IpcEvent] = queue.Queue(
+        self._event_generation = -1
+        self._event_queue: queue.Queue[_AsyncItem] = queue.Queue(
             maxsize=Constants.MAX_CLIENT_EVENT_QUEUE
         )
         self._disconnect_lock: threading.Lock = threading.Lock()
@@ -116,14 +130,17 @@ class IpcClient:
             bool: True if connection is successful, False otherwise.
         """
         try:
-            self._stop_flag.clear()
+            if self._socket is not None:
+                self.stop()
+            self._generation += 1
+            self._stop_flag = threading.Event()
             with self._disconnect_lock:
                 self._disconnect_notified = False
 
             self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self._socket.settimeout(self._timeout)
             self._socket.connect((self._host, self._port))
-            self._reader.reset()
+            self._reader = BufferedIpcEventReader()
             with self._response_condition:
                 self._response_waiters.clear()
                 self._responses.clear()
@@ -147,20 +164,41 @@ class IpcClient:
             None
         """
         with self._listener_lock:
+            generation = self._generation
+            stop_flag = self._stop_flag
+            event_queue = self._event_queue
+            if (
+                self._event_thread is None
+                or not self._event_thread.is_alive()
+                or self._event_generation != generation
+            ):
+                self._event_thread = threading.Thread(
+                    target=self._event_thread_main,
+                    args=(generation, stop_flag, event_queue),
+                    daemon=True,
+                )
+                self._event_generation = generation
+                self._event_thread.start()
             if self._socket is None:
                 return
-            if self._listener_thread is not None and self._listener_thread.is_alive():
-                return
-            self._listener_thread = threading.Thread(
-                target=self._listener_thread_main,
-                daemon=True,
-            )
-            self._event_thread = threading.Thread(
-                target=self._event_thread_main,
-                daemon=True,
-            )
-            self._listener_thread.start()
-            self._event_thread.start()
+            if (
+                self._listener_thread is None
+                or not self._listener_thread.is_alive()
+                or self._listener_generation != generation
+            ):
+                self._listener_thread = threading.Thread(
+                    target=self._listener_thread_main,
+                    args=(
+                        generation,
+                        stop_flag,
+                        self._socket,
+                        self._reader,
+                        event_queue,
+                    ),
+                    daemon=True,
+                )
+                self._listener_generation = generation
+                self._listener_thread.start()
 
     def stop(self) -> None:
         """
@@ -296,12 +334,25 @@ class IpcClient:
             self._response_waiters.discard(request_id)
             remaining = tuple(self._responses.pop(request_id, ()))
         for event in remaining:
-            try:
-                self._on_event(event)
-            except Exception:
-                pass
+            self._queue_async_event(event)
 
-    def _dispatch_event(self, event: IpcEvent) -> None:
+    def dispatch_async_event(self, event: IpcEvent) -> None:
+        """Publishes a mismatched outcome through callback ownership.
+
+        Args:
+            event (IpcEvent): Typed event not consumed by the request caller.
+
+        Returns:
+            None
+        """
+        self._queue_async_event(event)
+
+    def _dispatch_event(
+        self,
+        event: IpcEvent,
+        generation: Optional[int] = None,
+        event_queue: Optional[queue.Queue[_AsyncItem]] = None,
+    ) -> None:
         """Routes responses to waiters and preserves every asynchronous event.
 
         Args:
@@ -310,6 +361,8 @@ class IpcClient:
         Returns:
             None
         """
+        if generation is not None and generation != self._generation:
+            return
         request_id = event.request_id
         if request_id is not None:
             overflow = False
@@ -327,20 +380,37 @@ class IpcClient:
                     if not overflow:
                         return
             if overflow:
-                self._notify_disconnect()
+                self._notify_disconnect(generation, event_queue=event_queue)
                 return
-        if self._event_thread is None or not self._event_thread.is_alive():
-            try:
-                self._on_event(event)
-            except Exception:
-                pass
-            return
+        self._queue_async_event(event, event_queue)
+
+    def _queue_async_event(
+        self,
+        event: IpcEvent,
+        event_queue: Optional[queue.Queue[_AsyncItem]] = None,
+    ) -> None:
+        """Queues user callbacks outside protocol and caller threads.
+
+        Args:
+            event (IpcEvent): Event to deliver asynchronously.
+            event_queue (Optional[queue.Queue[_AsyncItem]]): Generation queue.
+
+        Returns:
+            None
+        """
+        target_queue = event_queue or self._event_queue
         try:
-            self._event_queue.put_nowait(event)
+            target_queue.put_nowait(event)
         except queue.Full:
             self._notify_disconnect()
 
-    def _notify_disconnect(self) -> None:
+    def _notify_disconnect(
+        self,
+        generation: Optional[int] = None,
+        *,
+        event_queue: Optional[queue.Queue[_AsyncItem]] = None,
+        sock: Optional[socket.socket] = None,
+    ) -> None:
         """
         Fires the disconnect callback once for unexpected IPC loss.
 
@@ -350,7 +420,8 @@ class IpcClient:
         Returns:
             None
         """
-        if self._stop_flag.is_set():
+        effective_generation = self._generation if generation is None else generation
+        if effective_generation != self._generation or self._stop_flag.is_set():
             return
 
         with self._disconnect_lock:
@@ -362,37 +433,65 @@ class IpcClient:
             self._connection_lost = True
             self._response_condition.notify_all()
 
-        sock = self._socket
-        self._socket = None
-        if sock is not None:
+        failed_socket = sock or self._socket
+        if failed_socket is self._socket:
+            self._socket = None
+        if failed_socket is not None:
             try:
-                sock.shutdown(socket.SHUT_RDWR)
+                failed_socket.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
             try:
-                sock.close()
+                failed_socket.close()
             except OSError:
                 pass
 
-        self._on_disconnect()
+        target_queue = event_queue or self._event_queue
+        try:
+            target_queue.put(
+                _DisconnectSignal(effective_generation),
+                timeout=Constants.THREAD_POLL_TIMEOUT,
+            )
+        except queue.Full:
+            pass
 
-    def _event_thread_main(self) -> None:
+    def _event_thread_main(
+        self,
+        generation: Optional[int] = None,
+        stop_flag: Optional[threading.Event] = None,
+        event_queue: Optional[queue.Queue[_AsyncItem]] = None,
+    ) -> None:
         """Dispatches asynchronous events without blocking the sole reader."""
-        while not self._stop_flag.is_set():
+        effective_generation = self._generation if generation is None else generation
+        effective_stop = stop_flag or self._stop_flag
+        effective_queue = event_queue or self._event_queue
+        while not effective_stop.is_set():
             try:
-                event = self._event_queue.get(timeout=Constants.THREAD_POLL_TIMEOUT)
+                item = effective_queue.get(timeout=Constants.THREAD_POLL_TIMEOUT)
             except queue.Empty:
-                if self._connection_lost:
+                if effective_generation != self._generation:
                     return
                 continue
             try:
-                self._on_event(event)
+                if isinstance(item, _DisconnectSignal):
+                    if item.generation == self._generation:
+                        self._on_disconnect()
+                    return
+                if effective_generation == self._generation:
+                    self._on_event(item)
             except Exception:
                 pass
             finally:
-                self._event_queue.task_done()
+                effective_queue.task_done()
 
-    def _listener_thread_main(self) -> None:
+    def _listener_thread_main(
+        self,
+        generation: Optional[int] = None,
+        stop_flag: Optional[threading.Event] = None,
+        sock: Optional[socket.socket] = None,
+        reader: Optional[BufferedIpcEventReader] = None,
+        event_queue: Optional[queue.Queue[_AsyncItem]] = None,
+    ) -> None:
         """
         Background worker that continuously pulls bytes from the IPC stream.
         Utilizes byte buffering to prevent UTF-8 fragmentation corruption.
@@ -403,33 +502,51 @@ class IpcClient:
         Returns:
             None
         """
+        effective_generation = self._generation if generation is None else generation
+        effective_stop = stop_flag or self._stop_flag
+        effective_socket = sock or self._socket
+        effective_reader = reader or self._reader
         try:
-            while not self._stop_flag.is_set():
-                if not self._socket:
+            while not effective_stop.is_set():
+                if effective_socket is None or effective_generation != self._generation:
                     break
 
                 try:
-                    buffered_event: Optional[IpcEvent] = self._reader.pop_event()
+                    buffered_event: Optional[IpcEvent] = effective_reader.pop_event()
                 except Exception:
                     continue
 
                 if buffered_event is not None:
-                    self._dispatch_event(buffered_event)
+                    self._dispatch_event(
+                        buffered_event, effective_generation, event_queue
+                    )
                     continue
 
                 try:
-                    data: bytes = self._socket.recv(Constants.TCP_BUFFER_SIZE)
+                    data: bytes = effective_socket.recv(Constants.TCP_BUFFER_SIZE)
                 except socket.timeout:
                     continue
 
                 if not data:
-                    self._notify_disconnect()
+                    self._notify_disconnect(
+                        effective_generation,
+                        event_queue=event_queue,
+                        sock=effective_socket,
+                    )
                     break
 
                 try:
-                    self._reader.append_bytes(data)
+                    effective_reader.append_bytes(data)
                 except ValueError:
-                    self._notify_disconnect()
+                    self._notify_disconnect(
+                        effective_generation,
+                        event_queue=event_queue,
+                        sock=effective_socket,
+                    )
                     break
         except Exception:
-            self._notify_disconnect()
+            self._notify_disconnect(
+                effective_generation,
+                event_queue=event_queue,
+                sock=effective_socket,
+            )

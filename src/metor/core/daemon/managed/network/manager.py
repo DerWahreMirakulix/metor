@@ -5,7 +5,8 @@ the complex interactions between the Listener, Receiver, Controller, and Router.
 """
 
 import threading
-from typing import Dict, List, Callable, Optional, Tuple, TYPE_CHECKING
+from contextlib import contextmanager
+from typing import Dict, Iterator, List, Callable, Optional, Tuple, TYPE_CHECKING
 
 from metor.core.api import (
     ConnectionActor,
@@ -113,6 +114,9 @@ class NetworkManager:
             has_live_consumers_callback=has_live_consumers_callback,
             stop_flag=stop_flag,
             config=config,
+        )
+        self._state.set_peer_writer_failure_callback(
+            lambda onion: self._controller.disconnect(onion, is_fallback=True)
         )
 
         self._receiver: StreamReceiver = StreamReceiver(
@@ -413,6 +417,29 @@ class NetworkManager:
         """Returns the delivery semantics fixed at Voice begin."""
         return self._router.voice_delivery(msg_id)
 
+    def inbound_voice_delivery(self, onion: str, msg_id: str) -> Optional[Delivery]:
+        """Returns semantics for an exact retained inbound Voice identity.
+
+        Args:
+            onion (str): Stable peer identity.
+            msg_id (str): Stable Voice identity.
+
+        Returns:
+            Optional[Delivery]: Retained delivery semantics, if present.
+        """
+        return self._router.inbound_voice_delivery(onion, msg_id)
+
+    def live_context_token(self, onion: str) -> object | None:
+        """Returns logical ownership for a restricted LIVE conversation.
+
+        Args:
+            onion (str): Stable peer identity.
+
+        Returns:
+            object | None: Active logical conversation generation.
+        """
+        return self._state.get_live_context_generation(onion)
+
     def read_voice_chunk(
         self,
         onion: str,
@@ -537,6 +564,19 @@ class NetworkManager:
     def get_snapshot_token(self) -> Tuple[object, ...]:
         """Returns an atomic fingerprint used to reject torn projections."""
         return self._state.snapshot_token()
+
+    @contextmanager
+    def snapshot_barrier(self) -> Iterator[None]:
+        """Excludes transport mutation during an aggregate snapshot attempt.
+
+        Args:
+            None
+
+        Returns:
+            Iterator[None]: Context-manager iterator owning transport state.
+        """
+        with self._state.snapshot_barrier():
+            yield
 
     def get_drop_tunnel_state(self, onion: str) -> Optional[TunnelState]:
         """

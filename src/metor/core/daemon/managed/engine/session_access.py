@@ -2,6 +2,7 @@
 
 import socket
 import threading
+import time
 from dataclasses import dataclass
 import secrets
 import json
@@ -16,9 +17,11 @@ from metor.core.api import (
     ConfigureQuickUnlockCommand,
     Delivery,
     FinalizeVoiceCommand,
+    GetVoiceChunkCommand,
     LockedAcceptPolicy,
     NotificationPrivacy,
     QuickUnlockAction,
+    ReleaseVoiceCommand,
     ReauthorizeClientCommand,
     RejectCommand,
     RestrictClientCommand,
@@ -33,6 +36,7 @@ from metor.core.daemon.managed.quick_unlock import (
     QuickUnlockStorageError,
     QuickUnlockStore,
 )
+from metor.utils import Constants
 
 # Local Package Imports
 from ..local_auth import (
@@ -53,6 +57,7 @@ class RestrictedSessionPolicy:
     live_while_locked: bool
     accept_while_locked: LockedAcceptPolicy
     notification_privacy: NotificationPrivacy
+    continued_live_context: object | None = None
     device_lifecycle: bool = False
 
 
@@ -71,6 +76,10 @@ class SessionAccessController(SessionEventMixin):
         resolve_target_callback: Optional[Callable[[str], Optional[str]]] = None,
         voice_target_callback: Optional[Callable[[str], Optional[str]]] = None,
         voice_delivery_callback: Optional[Callable[[str], Optional[Delivery]]] = None,
+        inbound_voice_delivery_callback: Optional[
+            Callable[[str, str], Optional[Delivery]]
+        ] = None,
+        live_context_callback: Optional[Callable[[str], object | None]] = None,
         self_destruct_requires_unlock_callback: Optional[Callable[[], bool]] = None,
     ) -> None:
         """Initializes session access with policy and event callbacks.
@@ -103,7 +112,11 @@ class SessionAccessController(SessionEventMixin):
         self._lock: threading.Lock = threading.Lock()
         self._authenticated_clients: Set[socket.socket] = set()
         self._full_auth_clients: Set[socket.socket] = set()
-        self._sensitive_auth_pending: Set[socket.socket] = set()
+        self._sensitive_auth_pending: dict[socket.socket, QuickUnlockAction] = {}
+        self._sensitive_auth_grants: dict[
+            socket.socket, tuple[QuickUnlockAction, float, int]
+        ] = {}
+        self._auth_runtime_generation = 0
         self._session_consumers: Set[socket.socket] = set()
         self._local_auth: LocalAuthTracker = LocalAuthTracker()
         self._quick_unlock = quick_unlock_store
@@ -111,6 +124,10 @@ class SessionAccessController(SessionEventMixin):
         self._resolve_target = resolve_target_callback or (lambda target: target)
         self._voice_target = voice_target_callback or (lambda _msg_id: None)
         self._voice_delivery = voice_delivery_callback or (lambda _msg_id: None)
+        self._inbound_voice_delivery = inbound_voice_delivery_callback or (
+            lambda _onion, _msg_id: None
+        )
+        self._live_context = live_context_callback or (lambda _onion: None)
         self._self_destruct_requires_unlock = (
             self_destruct_requires_unlock_callback or (lambda: True)
         )
@@ -118,7 +135,8 @@ class SessionAccessController(SessionEventMixin):
         self._restricted_challenges: dict[socket.socket, str] = {}
         self._pin_failures: dict[socket.socket, int] = {}
         self._pin_disabled: set[socket.socket] = set()
-        self._call_handles: dict[socket.socket, dict[str, str]] = {}
+        self._call_handles: dict[socket.socket, dict[str, tuple[str, int]]] = {}
+        self._restriction_generations: dict[socket.socket, int] = {}
 
     def install_context(self, context: Optional[SessionAuthContext]) -> None:
         """Installs the verifier context for the active profile runtime.
@@ -129,6 +147,10 @@ class SessionAccessController(SessionEventMixin):
         Returns:
             None
         """
+        with self._lock:
+            self._auth_runtime_generation += 1
+            self._sensitive_auth_pending.clear()
+            self._sensitive_auth_grants.clear()
         self._local_auth.install_context(context)
 
     def requires_auth(self) -> bool:
@@ -193,13 +215,15 @@ class SessionAccessController(SessionEventMixin):
         with self._lock:
             self._authenticated_clients.discard(conn)
             self._full_auth_clients.discard(conn)
-            self._sensitive_auth_pending.discard(conn)
+            self._sensitive_auth_pending.pop(conn, None)
+            self._sensitive_auth_grants.pop(conn, None)
             self._session_consumers.discard(conn)
             self._restricted.pop(conn, None)
             self._restricted_challenges.pop(conn, None)
             self._pin_failures.pop(conn, None)
             self._pin_disabled.discard(conn)
             self._call_handles.pop(conn, None)
+            self._restriction_generations.pop(conn, None)
         self._local_auth.clear_connection(conn)
 
     def clear_all(self) -> None:
@@ -215,12 +239,14 @@ class SessionAccessController(SessionEventMixin):
             self._authenticated_clients.clear()
             self._full_auth_clients.clear()
             self._sensitive_auth_pending.clear()
+            self._sensitive_auth_grants.clear()
             self._session_consumers.clear()
             self._restricted.clear()
             self._restricted_challenges.clear()
             self._pin_failures.clear()
             self._pin_disabled.clear()
             self._call_handles.clear()
+            self._restriction_generations.clear()
         self._local_auth.install_context(None)
 
     def mark_authenticated(
@@ -292,19 +318,19 @@ class SessionAccessController(SessionEventMixin):
         """
         with self._lock:
             is_authenticated: bool = conn in self._authenticated_clients
-            has_full_auth: bool = conn in self._full_auth_clients
-            sensitive_auth_pending: bool = conn in self._sensitive_auth_pending
+            sensitive_auth_pending = self._sensitive_auth_pending.get(conn)
             restricted_policy = self._restricted.get(conn)
 
         if restricted_policy is not None:
             mapped_call_target = False
+            mapped_call_handle: Optional[str] = None
             if isinstance(cmd, (AcceptCommand, RejectCommand)):
                 with self._lock:
-                    mapped_target = self._call_handles.get(conn, {}).pop(
-                        cmd.target, None
-                    )
-                if mapped_target is not None:
-                    cmd.target = mapped_target
+                    mapped_target = self._call_handles.get(conn, {}).get(cmd.target)
+                    generation = self._restriction_generations.get(conn)
+                if mapped_target is not None and mapped_target[1] == generation:
+                    mapped_call_handle = cmd.target
+                    cmd.target = mapped_target[0]
                     mapped_call_target = True
             if isinstance(cmd, ReauthorizeClientCommand):
                 restricted_retry_after = self.retry_after_seconds()
@@ -336,6 +362,8 @@ class SessionAccessController(SessionEventMixin):
                         ),
                     )
                     return False
+                if mapped_call_target:
+                    self._consume_call_handle(conn, mapped_call_handle)
                 return True
             if isinstance(cmd, AcceptCommand):
                 if (
@@ -352,12 +380,16 @@ class SessionAccessController(SessionEventMixin):
                     )
                     return False
                 if restricted_policy.accept_while_locked is LockedAcceptPolicy.ALL:
+                    if mapped_call_target:
+                        self._consume_call_handle(conn, mapped_call_handle)
                     return True
                 if (
                     restricted_policy.accept_while_locked
                     is LockedAcceptPolicy.SAVED_CONTACTS
                     and self._is_saved_contact(cmd.target)
                 ):
+                    if mapped_call_target:
+                        self._consume_call_handle(conn, mapped_call_handle)
                     return True
             if (
                 isinstance(cmd, BeginVoiceCommand)
@@ -365,15 +397,51 @@ class SessionAccessController(SessionEventMixin):
                 and restricted_policy.live_while_locked
                 and restricted_policy.continued_live_target
                 == self._resolve_target(cmd.target)
+                and restricted_policy.continued_live_context is not None
+                and self._live_context(restricted_policy.continued_live_target or '')
+                == restricted_policy.continued_live_context
             ):
                 return True
             if isinstance(cmd, (AppendVoiceChunkCommand, FinalizeVoiceCommand)):
-                return (
+                if (
                     restricted_policy.live_while_locked
+                    and restricted_policy.continued_live_context is not None
                     and restricted_policy.continued_live_target
                     == self._voice_target(cmd.msg_id)
                     and self._voice_delivery(cmd.msg_id) is Delivery.LIVE
-                )
+                    and self._live_context(
+                        restricted_policy.continued_live_target or ''
+                    )
+                    == restricted_policy.continued_live_context
+                ):
+                    return True
+            if isinstance(cmd, GetVoiceChunkCommand):
+                target = self._resolve_target(cmd.target)
+                if (
+                    cmd.direction.value == 'in'
+                    and restricted_policy.live_while_locked
+                    and restricted_policy.continued_live_context is not None
+                    and target == restricted_policy.continued_live_target
+                    and target is not None
+                    and self._inbound_voice_delivery(target, cmd.msg_id)
+                    is Delivery.LIVE
+                    and self._live_context(target)
+                    == restricted_policy.continued_live_context
+                ):
+                    return True
+            if isinstance(cmd, ReleaseVoiceCommand):
+                target = self._resolve_target(cmd.target)
+                if (
+                    restricted_policy.live_while_locked
+                    and restricted_policy.continued_live_context is not None
+                    and target == restricted_policy.continued_live_target
+                    and target is not None
+                    and self._inbound_voice_delivery(target, cmd.msg_id)
+                    is Delivery.LIVE
+                    and self._live_context(target)
+                    == restricted_policy.continued_live_context
+                ):
+                    return True
             self._send(
                 conn,
                 create_event(
@@ -383,20 +451,32 @@ class SessionAccessController(SessionEventMixin):
             )
             return False
 
-        if isinstance(cmd, ConfigureQuickUnlockCommand) and not has_full_auth:
-            quick_unlock_prompt = self._local_auth.issue_session_challenge(conn)
-            if quick_unlock_prompt is not None:
-                with self._lock:
-                    self._sensitive_auth_pending.add(conn)
-                self._send(
-                    conn,
-                    self._session_auth_event(
-                        EventType.AUTH_REQUIRED, quick_unlock_prompt
-                    ),
+        if isinstance(cmd, ConfigureQuickUnlockCommand):
+            now = time.monotonic()
+            with self._lock:
+                grant = self._sensitive_auth_grants.get(conn)
+                grant_valid = (
+                    grant is not None
+                    and grant[0] is cmd.action
+                    and grant[1] >= now
+                    and grant[2] == self._auth_runtime_generation
                 )
-            else:
-                self._send(conn, create_event(EventType.QUICK_UNLOCK_FAILED))
-            return False
+                if not grant_valid:
+                    self._sensitive_auth_grants.pop(conn, None)
+            if not grant_valid:
+                quick_unlock_prompt = self._local_auth.issue_session_challenge(conn)
+                if quick_unlock_prompt is not None:
+                    with self._lock:
+                        self._sensitive_auth_pending[conn] = cmd.action
+                    self._send(
+                        conn,
+                        self._session_auth_event(
+                            EventType.AUTH_REQUIRED, quick_unlock_prompt
+                        ),
+                    )
+                else:
+                    self._send(conn, create_event(EventType.QUICK_UNLOCK_FAILED))
+                return False
 
         if isinstance(cmd, SelfDestructCommand) and not is_authenticated:
             purge_prompt = self._local_auth.issue_session_challenge(conn)
@@ -434,8 +514,7 @@ class SessionAccessController(SessionEventMixin):
         if not runtime_unlocked:
             self._send(conn, create_event(EventType.DAEMON_LOCKED))
             return False
-        if is_authenticated and not sensitive_auth_pending:
-            self.mark_authenticated(conn)
+        if is_authenticated and sensitive_auth_pending is None:
             self._send(conn, create_event(EventType.SESSION_AUTHENTICATED))
             return False
 
@@ -452,7 +531,13 @@ class SessionAccessController(SessionEventMixin):
         if result.authenticated:
             self.mark_authenticated(conn)
             with self._lock:
-                self._sensitive_auth_pending.discard(conn)
+                action = self._sensitive_auth_pending.pop(conn, None)
+                if action is not None:
+                    self._sensitive_auth_grants[conn] = (
+                        action,
+                        time.monotonic() + Constants.SENSITIVE_AUTH_GRANT_TIMEOUT_SEC,
+                        self._auth_runtime_generation,
+                    )
             self._send(conn, create_event(EventType.SESSION_AUTHENTICATED))
             return False
 
@@ -488,22 +573,33 @@ class SessionAccessController(SessionEventMixin):
                 cmd.device_lifecycle and conn in self._authenticated_clients
             )
             self._full_auth_clients.discard(conn)
-            self._sensitive_auth_pending.discard(conn)
+            self._sensitive_auth_pending.pop(conn, None)
+            self._sensitive_auth_grants.pop(conn, None)
+        continued_target = (
+            self._resolve_target(cmd.continued_live_target)
+            if cmd.live_while_locked and cmd.continued_live_target is not None
+            else None
+        )
         policy = RestrictedSessionPolicy(
             unlock_method=cmd.unlock_method,
-            continued_live_target=(
-                self._resolve_target(cmd.continued_live_target)
-                if cmd.live_while_locked and cmd.continued_live_target is not None
-                else None
-            ),
+            continued_live_target=continued_target,
             live_while_locked=cmd.live_while_locked,
             accept_while_locked=cmd.accept_while_locked,
             notification_privacy=cmd.notification_privacy,
+            continued_live_context=(
+                self._live_context(continued_target)
+                if continued_target is not None
+                else None
+            ),
             device_lifecycle=device_lifecycle,
         )
         challenge: Optional[str] = None
         salt: Optional[str] = None
         with self._lock:
+            self._restriction_generations[conn] = (
+                self._restriction_generations.get(conn, 0) + 1
+            )
+            self._call_handles.pop(conn, None)
             self._restricted[conn] = policy
             self._pin_failures.pop(conn, None)
             self._pin_disabled.discard(conn)
@@ -527,6 +623,7 @@ class SessionAccessController(SessionEventMixin):
                     policy.live_while_locked,
                     policy.accept_while_locked,
                     policy.notification_privacy,
+                    policy.continued_live_context,
                     policy.device_lifecycle,
                 )
                 with self._lock:
@@ -557,9 +654,14 @@ class SessionAccessController(SessionEventMixin):
             IpcEvent: Typed configuration result.
         """
         with self._lock:
-            if conn not in self._full_auth_clients:
+            grant = self._sensitive_auth_grants.pop(conn, None)
+            if (
+                grant is None
+                or grant[0] is not cmd.action
+                or grant[1] < time.monotonic()
+                or grant[2] != self._auth_runtime_generation
+            ):
                 return create_event(EventType.QUICK_UNLOCK_FAILED)
-            self._full_auth_clients.discard(conn)
         if self._quick_unlock is None:
             return create_event(EventType.QUICK_UNLOCK_FAILED)
         try:
@@ -720,6 +822,10 @@ class SessionAccessController(SessionEventMixin):
             self._restricted_challenges.pop(conn, None)
             self._pin_failures.pop(conn, None)
             self._pin_disabled.discard(conn)
+            self._sensitive_auth_pending.pop(conn, None)
+            self._sensitive_auth_grants.pop(conn, None)
+            self._call_handles.pop(conn, None)
+            self._restriction_generations.pop(conn, None)
             if full_password:
                 self._full_auth_clients.add(conn)
             else:
@@ -804,23 +910,16 @@ class SessionAccessController(SessionEventMixin):
             } and isinstance(onion, str):
                 with self._lock:
                     handles = self._call_handles.setdefault(conn, {})
-                    action_handle = next(
-                        (
-                            handle
-                            for handle, target in handles.items()
-                            if target == onion
-                        ),
-                        None,
-                    )
-                    if (
-                        action_handle is None
-                        and event.event_type is EventType.INCOMING_CONNECTION
-                    ):
+                    generation = self._restriction_generations.get(conn, 0)
+                    action_handle = None
+                    if event.event_type is EventType.INCOMING_CONNECTION:
                         action_handle = secrets.token_urlsafe(32)
-                        handles[action_handle] = onion
+                        handles[action_handle] = (onion, generation)
                     if event.event_type is EventType.PENDING_CONNECTION_EXPIRED:
-                        for handle, target in tuple(handles.items()):
-                            if target == onion:
+                        for handle, (target, handle_generation) in tuple(
+                            handles.items()
+                        ):
+                            if target == onion and handle_generation == generation:
                                 action_handle = handle
                                 handles.pop(handle, None)
                                 break
@@ -831,3 +930,17 @@ class SessionAccessController(SessionEventMixin):
                 setattr(clone, field_name, value)
             return clone
         return event
+
+    def _consume_call_handle(self, conn: socket.socket, handle: Optional[str]) -> None:
+        """Consumes a handle only after its action was authorized.
+
+        Args:
+            conn (socket.socket): Restricted client owning the handle.
+            handle (Optional[str]): Exact one-use anonymous handle.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            if handle is not None:
+                self._call_handles.get(conn, {}).pop(handle, None)

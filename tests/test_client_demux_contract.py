@@ -3,6 +3,7 @@
 # ruff: noqa: E402
 
 import json
+import socket
 import sys
 import threading
 import unittest
@@ -26,10 +27,16 @@ class ClientDemuxContractTests(unittest.TestCase):
     def test_event_before_snapshot_response_is_not_discarded(self) -> None:
         """G21: unsolicited revisions survive a synchronous snapshot request."""
         asynchronous: list[IpcEvent] = []
+        delivered = threading.Event()
+
+        def on_event(event: IpcEvent) -> None:
+            asynchronous.append(event)
+            delivered.set()
+
         client = IpcClient(
             port=1,
             timeout=0.1,
-            on_event=asynchronous.append,
+            on_event=on_event,
             on_disconnect=lambda: None,
         )
         client.begin_request('snapshot-request')
@@ -48,6 +55,7 @@ class ClientDemuxContractTests(unittest.TestCase):
         client._dispatch_event(snapshot)
 
         self.assertIs(client.wait_for_response('snapshot-request'), snapshot)
+        self.assertTrue(delivered.wait(timeout=0.2))
         self.assertEqual(asynchronous, [changed])
         client.end_request('snapshot-request')
 
@@ -141,7 +149,7 @@ class ClientDemuxContractTests(unittest.TestCase):
         right.join(timeout=1.0)
 
         self.assertEqual(failures, [IpcDisconnectedError, IpcDisconnectedError])
-        self.assertTrue(disconnected.is_set())
+        self.assertTrue(disconnected.wait(timeout=0.2))
         with client._response_condition:
             client._connection_lost = False
             client._response_waiters.clear()
@@ -150,6 +158,45 @@ class ClientDemuxContractTests(unittest.TestCase):
         response = AckEvent(msg_id='new', request_id='new-stream')
         client._dispatch_event(response)
         self.assertIs(client.wait_for_response('new-stream'), response)
+
+    def test_disconnect_callback_reconnect_starts_fresh_generation_workers(
+        self,
+    ) -> None:
+        """C07: callback reconnect cannot reuse the reader, queue, or old workers."""
+        reconnected = threading.Event()
+        delivered = threading.Event()
+        socket_two = Mock()
+        socket_two.recv.side_effect = socket.timeout
+
+        client: IpcClient
+
+        def on_disconnect() -> None:
+            self.assertTrue(client.connect())
+            reconnected.set()
+
+        client = IpcClient(
+            1,
+            0.1,
+            lambda _event: delivered.set(),
+            on_disconnect,
+        )
+        client._generation = 1
+        client.start_listener()
+        old_reader = client._reader
+        old_queue = client._event_queue
+
+        with patch('metor.client.ipc.socket.socket', return_value=socket_two):
+            client._notify_disconnect(1, event_queue=old_queue)
+            self.assertTrue(reconnected.wait(timeout=1.0))
+
+        self.assertEqual(client._generation, 2)
+        self.assertEqual(client._event_generation, 2)
+        self.assertEqual(client._listener_generation, 2)
+        self.assertIsNot(client._reader, old_reader)
+        self.assertIsNot(client._event_queue, old_queue)
+        client._dispatch_event(AckEvent(msg_id='new-generation'), 2)
+        self.assertTrue(delivered.wait(timeout=1.0))
+        client.stop()
 
 
 if __name__ == '__main__':

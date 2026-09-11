@@ -2997,6 +2997,7 @@ class DaemonHardeningTests(unittest.TestCase):
 
         self.assertEqual(fake_socket.timeouts, [2.5])
         client._listener_thread_main()
+        client._event_thread_main()
         disconnect_mock.assert_called_once()
 
     def test_retunnel_disconnects_existing_live_connection_before_replacement(

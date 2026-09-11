@@ -29,19 +29,30 @@ class BoundedSocketWriter:
         conn: socket.socket,
         *,
         capacity: int,
+        byte_capacity: int = 8 * 1024 * 1024,
+        max_frame_bytes: int = 5 * 1024 * 1024,
         on_failure: Optional[Callable[[socket.socket, Exception], None]] = None,
         on_exit: Optional[Callable[['BoundedSocketWriter'], None]] = None,
-        idle_timeout: float = 30.0,
     ) -> None:
         """Starts a single daemon worker for one socket."""
         if capacity <= 0:
             raise ValueError('Socket writer capacity must be positive.')
+        if byte_capacity <= 0 or max_frame_bytes <= 0:
+            raise ValueError('Socket writer byte limits must be positive.')
         self._conn = conn
         self._queue: queue.Queue[QueuedFrame] = queue.Queue(maxsize=capacity)
+        self._byte_capacity = byte_capacity
+        self._max_frame_bytes = max_frame_bytes
+        self._queued_bytes = 0
         self._on_failure = on_failure
         self._on_exit = on_exit
-        self._idle_timeout = idle_timeout
+        self._state_lock = threading.Lock()
+        self._accepting = True
+        self._socket_closed = False
+        self._drained = threading.Event()
+        self._drained.set()
         self._closed = threading.Event()
+        self._started = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -49,18 +60,51 @@ class BoundedSocketWriter:
         self, payload: bytes, claim: Optional[Callable[[], bool]] = None
     ) -> None:
         """Admits one bounded frame without waiting for socket I/O."""
-        if self._closed.is_set():
-            raise ConnectionError('Socket writer is closed.')
-        try:
-            self._queue.put_nowait(QueuedFrame(payload=payload, claim=claim))
-        except queue.Full as exc:
-            raise FrameQueueFull('Socket writer queue is full.') from exc
+        payload_size = len(payload)
+        if payload_size > self._max_frame_bytes:
+            raise FrameQueueFull('Socket writer frame exceeds its size limit.')
+        with self._state_lock:
+            if not self._accepting:
+                raise ConnectionError('Socket writer is closed.')
+            if self._queued_bytes + payload_size > self._byte_capacity:
+                raise FrameQueueFull('Socket writer byte queue is full.')
+            try:
+                self._queue.put_nowait(QueuedFrame(payload=payload, claim=claim))
+            except queue.Full as exc:
+                raise FrameQueueFull('Socket writer queue is full.') from exc
+            self._queued_bytes += payload_size
+            self._drained.clear()
+
+    def flush(self, timeout: float) -> bool:
+        """Waits a bounded time for accepted frames to finish.
+
+        Args:
+            timeout (float): Maximum wait in seconds.
+
+        Returns:
+            bool: True when every accepted frame reached a terminal outcome.
+        """
+        return self._drained.wait(max(0.0, timeout))
+
+    def wait_started(self, timeout: float) -> bool:
+        """Waits until the sole delivery owner enters its worker loop.
+
+        Args:
+            timeout (float): Maximum wait in seconds.
+
+        Returns:
+            bool: True when worker ownership is established.
+        """
+        return self._started.wait(max(0.0, timeout))
 
     def close(self) -> None:
         """Cancels queued work and interrupts a blocked socket write."""
-        if self._closed.is_set():
-            return
-        self._closed.set()
+        with self._state_lock:
+            self._accepting = False
+            if self._socket_closed:
+                return
+            self._socket_closed = True
+            self._closed.set()
         try:
             self._conn.shutdown(socket.SHUT_RDWR)
         except (OSError, TypeError):
@@ -69,15 +113,26 @@ class BoundedSocketWriter:
             self._conn.close()
         except (OSError, TypeError):
             pass
+        while True:
+            try:
+                item = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            with self._state_lock:
+                self._queued_bytes -= len(item.payload)
+                if self._queued_bytes == 0:
+                    self._drained.set()
+            self._queue.task_done()
 
     def _run(self) -> None:
         """Serially admits claims and writes complete frames."""
+        self._started.set()
         try:
             while not self._closed.is_set():
                 try:
-                    item = self._queue.get(timeout=self._idle_timeout)
+                    item = self._queue.get(timeout=0.1)
                 except queue.Empty:
-                    return
+                    continue
                 try:
                     if self._closed.is_set():
                         return
@@ -85,7 +140,8 @@ class BoundedSocketWriter:
                         continue
                     self._conn.sendall(item.payload)
                 except Exception as exc:
-                    self._closed.set()
+                    with self._state_lock:
+                        self._accepting = False
                     if self._on_failure is not None:
                         try:
                             self._on_failure(self._conn, exc)
@@ -93,8 +149,13 @@ class BoundedSocketWriter:
                             pass
                     return
                 finally:
+                    with self._state_lock:
+                        self._queued_bytes -= len(item.payload)
+                        if self._queued_bytes == 0:
+                            self._drained.set()
                     self._queue.task_done()
         finally:
+            self.close()
             if self._on_exit is not None:
                 try:
                     self._on_exit(self)

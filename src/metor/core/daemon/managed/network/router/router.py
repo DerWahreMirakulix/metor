@@ -267,6 +267,22 @@ class MessageRouter:
             self._voice.outbound_delivery(msg_id) if self._voice is not None else None
         )
 
+    def inbound_voice_delivery(self, onion: str, msg_id: str) -> Optional[Delivery]:
+        """Returns semantics for an exact retained inbound Voice identity.
+
+        Args:
+            onion (str): Stable peer identity.
+            msg_id (str): Stable Voice identity.
+
+        Returns:
+            Optional[Delivery]: Retained delivery semantics, if present.
+        """
+        return (
+            self._voice.inbound_delivery(onion, msg_id)
+            if self._voice is not None
+            else None
+        )
+
     def read_voice_chunk(
         self,
         onion: str,

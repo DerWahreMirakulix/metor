@@ -343,6 +343,28 @@ class VoiceTransferManager(VoiceOutboundMixin):
         """
         return self._config.get_int(SettingKey.MAX_LIVE_VOICE_BUFFER_BYTES)
 
+    def inbound_delivery(self, onion: str, msg_id: str) -> Optional[Delivery]:
+        """Returns retained delivery semantics for an exact inbound identity.
+
+        Args:
+            onion (str): Stable peer identity.
+            msg_id (str): Stable Voice identity.
+
+        Returns:
+            Optional[Delivery]: Retained delivery semantics, if present.
+        """
+        with self._lock:
+            turn = self._inbound.get((onion, msg_id))
+            if turn is not None:
+                return turn.delivery
+        record = self._messages.get_inbound_voice(onion, msg_id)
+        if record is None:
+            return None
+        try:
+            return Delivery(record.delivery)
+        except ValueError:
+            return None
+
     def _used_bytes(self) -> int:
         """Returns current local and inbound in-memory Voice retention.
 
@@ -464,11 +486,20 @@ class VoiceTransferManager(VoiceOutboundMixin):
                         return FrameAdmission.MALFORMED
                     turn.delivery = Delivery.DROP
                     if turn.finalized:
-                        self._promote_turn_blobs(turn)
+                        try:
+                            self._promote_turn_blobs(turn)
+                        except Exception:
+                            return FrameAdmission.RESOURCE_LIMIT
                         self._inbound.pop((onion, msg_id), None)
                         self._broadcast(
                             RuntimeStateChangedEvent(scope='messages', onion=onion)
                         )
+                elif delivery is Delivery.DROP and turn.finalized:
+                    try:
+                        self._promote_turn_blobs(turn)
+                    except Exception:
+                        return FrameAdmission.RESOURCE_LIMIT
+                    self._inbound.pop((onion, msg_id), None)
                 self._send_receive_offset(conn, turn)
                 return FrameAdmission.ACCEPTED
             retained = self._messages.get_inbound_voice(onion, msg_id)
@@ -546,7 +577,10 @@ class VoiceTransferManager(VoiceOutboundMixin):
                     )
                     return FrameAdmission.ACCEPTED
                 alias = self._contacts.ensure_alias_for_onion(onion) or onion
-                blob_id = self._blobs.put(b'', BlobLifecycle.TEMPORARY)
+                try:
+                    blob_id = self._blobs.put(b'', BlobLifecycle.TEMPORARY)
+                except Exception:
+                    return FrameAdmission.RESOURCE_LIMIT
                 turn = VoiceTurn(
                     alias=alias,
                     onion=onion,
@@ -587,7 +621,10 @@ class VoiceTransferManager(VoiceOutboundMixin):
                 ):
                     return FrameAdmission.RESOURCE_LIMIT
             alias = self._contacts.ensure_alias_for_onion(onion) or onion
-            blob_id = self._blobs.put(b'', BlobLifecycle.TEMPORARY)
+            try:
+                blob_id = self._blobs.put(b'', BlobLifecycle.TEMPORARY)
+            except Exception:
+                return FrameAdmission.RESOURCE_LIMIT
             turn = VoiceTurn(
                 alias=alias,
                 onion=onion,
@@ -600,16 +637,19 @@ class VoiceTransferManager(VoiceOutboundMixin):
                 data=bytearray(),
                 timestamp=str(timestamp or datetime.now(timezone.utc).isoformat()),
             )
-            queued = self._messages.queue_message(
-                contact_onion=onion,
-                direction=MessageDirection.IN,
-                delivery=delivery,
-                content_type=ContentType.VOICE,
-                payload=self._metadata(turn),
-                status=MessageStatus.UNREAD,
-                msg_id=msg_id,
-                timestamp=turn.timestamp,
-            )
+            try:
+                queued = self._messages.queue_message(
+                    contact_onion=onion,
+                    direction=MessageDirection.IN,
+                    delivery=delivery,
+                    content_type=ContentType.VOICE,
+                    payload=self._metadata(turn),
+                    status=MessageStatus.UNREAD,
+                    msg_id=msg_id,
+                    timestamp=turn.timestamp,
+                )
+            except Exception:
+                queued = None
             if not queued:
                 self._delete_turn_blobs(turn, BlobLifecycle.TEMPORARY)
                 return FrameAdmission.RESOURCE_LIMIT
@@ -701,19 +741,29 @@ class VoiceTransferManager(VoiceOutboundMixin):
                     and self._used_bytes() + len(chunk) > limit
                 ):
                     return FrameAdmission.RESOURCE_LIMIT
-                chunk_id = self._blobs.put(chunk, BlobLifecycle.TEMPORARY)
+                try:
+                    chunk_id = self._blobs.put(chunk, BlobLifecycle.TEMPORARY)
+                except Exception:
+                    return FrameAdmission.RESOURCE_LIMIT
                 turn.chunk_ids.append(chunk_id)
                 turn.chunk_sizes.append(len(chunk))
                 turn.data.extend(chunk)
                 turn.size_bytes += len(chunk)
-                if not self._messages.update_inbound_voice_metadata(
-                    onion, msg_id, turn.size_bytes, self._metadata(turn)
-                ):
-                    self._blobs.delete(chunk_id, BlobLifecycle.TEMPORARY)
+                try:
+                    updated = self._messages.update_inbound_voice_metadata(
+                        onion, msg_id, turn.size_bytes, self._metadata(turn)
+                    )
+                except Exception:
+                    updated = False
+                if not updated:
                     turn.chunk_ids.pop()
                     turn.chunk_sizes.pop()
                     del turn.data[-len(chunk) :]
                     turn.size_bytes -= len(chunk)
+                    try:
+                        self._blobs.delete(chunk_id, BlobLifecycle.TEMPORARY)
+                    except Exception:
+                        pass
                     return FrameAdmission.RESOURCE_LIMIT
                 if (
                     turn.delivery is Delivery.LIVE
@@ -799,6 +849,26 @@ class VoiceTransferManager(VoiceOutboundMixin):
             if turn.finalized:
                 if size != turn.size_bytes or duration_ms != turn.duration_ms:
                     return FrameAdmission.MALFORMED
+                if turn.delivery is Delivery.DROP:
+                    try:
+                        self._promote_turn_blobs(turn)
+                    except Exception:
+                        return FrameAdmission.RESOURCE_LIMIT
+                    self._inbound.pop((onion, msg_id), None)
+                    self._notify_inbox(turn)
+                    self._broadcast(
+                        VoiceFinalizedEvent(
+                            msg_id=msg_id,
+                            size_bytes=turn.size_bytes,
+                            onion=onion,
+                            delivery=turn.delivery,
+                            direction=MessageDirectionCode.IN,
+                            duration_ms=turn.duration_ms,
+                        )
+                    )
+                    self._broadcast(
+                        RuntimeStateChangedEvent(scope='inbox', onion=onion)
+                    )
                 self._state.send_frame(
                     conn,
                     f'{TorCommand.VOICE_COMMIT_ACK.value} {msg_id}\n'.encode('ascii'),
@@ -806,13 +876,19 @@ class VoiceTransferManager(VoiceOutboundMixin):
                 return FrameAdmission.ACCEPTED
             if size != turn.size_bytes:
                 return FrameAdmission.MALFORMED
+            previous_duration = turn.duration_ms
+            previous_finalized = turn.finalized
             turn.duration_ms = duration_ms
             turn.finalized = True
-            if not self._messages.update_inbound_voice_metadata(
-                onion, msg_id, turn.size_bytes, self._metadata(turn)
-            ):
-                turn.duration_ms = None
-                turn.finalized = False
+            try:
+                updated = self._messages.update_inbound_voice_metadata(
+                    onion, msg_id, turn.size_bytes, self._metadata(turn)
+                )
+            except Exception:
+                updated = False
+            if not updated:
+                turn.duration_ms = previous_duration
+                turn.finalized = previous_finalized
                 return FrameAdmission.RESOURCE_LIMIT
             content = VoiceContent(
                 blob_id=turn.blob_id,
@@ -821,7 +897,10 @@ class VoiceTransferManager(VoiceOutboundMixin):
                 duration_ms=turn.duration_ms,
             )
             if turn.delivery is Delivery.DROP:
-                self._promote_turn_blobs(turn)
+                try:
+                    self._promote_turn_blobs(turn)
+                except Exception:
+                    return FrameAdmission.RESOURCE_LIMIT
                 self._inbound.pop((onion, msg_id), None)
                 self._notify_inbox(turn)
                 self._state.send_frame(

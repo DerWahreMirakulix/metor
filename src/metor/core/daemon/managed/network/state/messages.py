@@ -28,6 +28,7 @@ class StateTrackerMessagesMixin:
     _socket_write_locks: Dict[socket.socket, threading.Lock]
     _socket_writers: Dict[socket.socket, BoundedSocketWriter]
     _live_generations: Dict[Tuple[str, str], int]
+    _next_live_generation: int
 
     def remember_message_request_id(
         self,
@@ -147,6 +148,10 @@ class StateTrackerMessagesMixin:
         """
         with self._lock:
             self._unacked_messages.setdefault(onion, {})[msg_id] = (msg, timestamp)
+            key = (onion, msg_id)
+            if key not in self._live_generations:
+                self._live_generations[key] = self._next_live_generation
+                self._next_live_generation += 1
 
     def remove_unacked_message(
         self, onion: str, msg_id: str

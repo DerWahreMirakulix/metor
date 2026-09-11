@@ -28,10 +28,52 @@ from metor.data import ProfileManager, ProfileSecurityMode
 from metor.data.settings import SettingKey
 from metor.cli.ipc.request import IpcRequestSession
 from metor.cli.handlers import CommandHandlers
-from metor.client import BufferedIpcEventReader, IpcAuthExchange
+from metor.client import (
+    BufferedIpcEventReader,
+    FrontendBootstrapError,
+    FrontendBootstrapResult,
+    FrontendLaunchContext,
+    IpcAuthExchange,
+)
 from metor.ui.terminal import get_session_auth_prompt
 from metor.utils import Constants
 from metor.versioning import IPC_PROTOCOL_MIN_SUPPORTED, IPC_PROTOCOL_VERSION
+
+
+class _DeferredInteractions:
+    """In-memory frontend interactions for deferred bootstrap tests."""
+
+    def __init__(
+        self, *, confirmation: Optional[bool] = True, secret: Optional[str] = None
+    ) -> None:
+        self.confirmation = confirmation
+        self.secret = secret
+        self.statuses: list[str] = []
+        self.started = False
+        self.result: Optional[FrontendBootstrapResult] = None
+        self.error: Optional[FrontendBootstrapError] = None
+
+    def confirm_daemon_start(self) -> Optional[bool]:
+        return self.confirmation
+
+    def request_session_auth_secret(self) -> Optional[str]:
+        return self.secret
+
+    def show_status(self, message: str) -> None:
+        self.statuses.append(message)
+
+
+def _run_deferred_frontend(
+    context: FrontendLaunchContext, interactions: _DeferredInteractions
+) -> int:
+    """Marks UI startup before exercising the public host boundary."""
+    interactions.started = True
+    try:
+        interactions.result = context.host.bootstrap(interactions)
+    except FrontendBootstrapError as exc:
+        interactions.error = exc
+        return exc.exit_code
+    return 0
 
 
 class _ChunkSocket:
@@ -1022,22 +1064,29 @@ class UiIpcContractTests(unittest.TestCase):
         pm.uses_encrypted_storage.return_value = True
         pm.config = Mock()
         pm.config.get_str.return_value = 'never'
+        interactions = _DeferredInteractions()
 
         with (
             patch('metor.cli.handlers.load_frontend', return_value=Mock()),
-            patch('metor.cli.handlers.invoke_frontend') as invoke_frontend,
             patch(
-                'metor.cli.handlers.start_managed_daemon_process',
+                'metor.cli.handlers.invoke_frontend',
+                side_effect=lambda _frontend, context: _run_deferred_frontend(
+                    context, interactions
+                ),
+            ) as invoke_frontend,
+            patch(
+                'metor.application.frontend.start_managed_daemon_process',
                 return_value=True,
             ) as start_mock,
-            patch('builtins.print') as print_mock,
         ):
-            CommandHandlers.handle_chat(cast(ProfileManager, pm))
+            status = CommandHandlers.handle_chat(cast(ProfileManager, pm))
 
         start_mock.assert_not_called()
-        invoke_frontend.assert_not_called()
+        invoke_frontend.assert_called_once()
+        self.assertTrue(interactions.started)
+        self.assertEqual(status, 1)
         self.assertEqual(
-            print_mock.call_args.args[0],
+            str(interactions.error),
             "Daemon is not running! Use 'metor daemon' to start it or rerun with 'metor chat --start-daemon'.",
         )
 
@@ -1061,33 +1110,35 @@ class UiIpcContractTests(unittest.TestCase):
         pm.uses_encrypted_storage.return_value = True
         pm.config = Mock()
         pm.config.get_str.return_value = 'ask'
+        interactions = _DeferredInteractions(confirmation=True)
 
         with (
             patch('metor.cli.handlers.load_frontend', return_value=Mock()),
             patch(
-                'metor.cli.handlers.invoke_frontend', return_value=0
-            ) as invoke_frontend,
-            patch('metor.cli.handlers.prompt_text', return_value='yes') as prompt_mock,
+                'metor.cli.handlers.invoke_frontend',
+                side_effect=lambda _frontend, context: _run_deferred_frontend(
+                    context, interactions
+                ),
+            ),
+            patch('metor.cli.handlers.prompt_text') as prompt_mock,
             patch(
-                'metor.cli.handlers.start_managed_daemon_process',
+                'metor.application.frontend.start_managed_daemon_process',
                 return_value=True,
             ) as start_mock,
-            patch('builtins.print') as print_mock,
         ):
             CommandHandlers.handle_chat(cast(ProfileManager, pm))
 
-        prompt_mock.assert_called_once_with("Type 'yes' to start the local daemon: ")
+        prompt_mock.assert_not_called()
         start_mock.assert_called_once_with(
             cast(ProfileManager, pm),
             start_locked=True,
             session_auth_password=None,
         )
-        self.assertEqual(
-            print_mock.call_args_list[0].args[0], '\nStarting local daemon...'
-        )
-        context = invoke_frontend.call_args.args[1]
-        self.assertTrue(context.daemon_started_by_launcher)
-        self.assertIsNone(context.session_auth_secret)
+        self.assertEqual(interactions.statuses, ['Starting local daemon...'])
+        self.assertTrue(interactions.started)
+        assert interactions.result is not None
+        self.assertTrue(interactions.result.daemon_started_by_launcher)
+        self.assertIsNone(interactions.result.session_auth.take())
 
     def test_handle_chat_start_override_beats_never_policy(self) -> None:
         """
@@ -1109,12 +1160,18 @@ class UiIpcContractTests(unittest.TestCase):
         pm.uses_encrypted_storage.return_value = True
         pm.config = Mock()
         pm.config.get_str.return_value = 'never'
+        interactions = _DeferredInteractions()
 
         with (
             patch('metor.cli.handlers.load_frontend', return_value=Mock()),
-            patch('metor.cli.handlers.invoke_frontend', return_value=0),
             patch(
-                'metor.cli.handlers.start_managed_daemon_process',
+                'metor.cli.handlers.invoke_frontend',
+                side_effect=lambda _frontend, context: _run_deferred_frontend(
+                    context, interactions
+                ),
+            ),
+            patch(
+                'metor.application.frontend.start_managed_daemon_process',
                 return_value=True,
             ) as start_mock,
             patch('builtins.print'),
@@ -1150,22 +1207,30 @@ class UiIpcContractTests(unittest.TestCase):
         pm.uses_encrypted_storage.return_value = True
         pm.config = Mock()
         pm.config.get_str.return_value = 'always'
+        interactions = _DeferredInteractions()
 
         with (
             patch('metor.cli.handlers.load_frontend', return_value=Mock()),
-            patch('metor.cli.handlers.invoke_frontend') as invoke_frontend,
-            patch('metor.cli.handlers.start_managed_daemon_process') as start_mock,
-            patch('builtins.print') as print_mock,
+            patch(
+                'metor.cli.handlers.invoke_frontend',
+                side_effect=lambda _frontend, context: _run_deferred_frontend(
+                    context, interactions
+                ),
+            ) as invoke_frontend,
+            patch(
+                'metor.application.frontend.start_managed_daemon_process'
+            ) as start_mock,
         ):
-            CommandHandlers.handle_chat(
+            status = CommandHandlers.handle_chat(
                 cast(ProfileManager, pm),
                 start_daemon_override=False,
             )
 
         start_mock.assert_not_called()
-        invoke_frontend.assert_not_called()
+        invoke_frontend.assert_called_once()
+        self.assertEqual(status, 1)
         self.assertEqual(
-            print_mock.call_args.args[0],
+            str(interactions.error),
             "Daemon is not running! Use 'metor daemon' to start it or rerun with 'metor chat --start-daemon'.",
         )
 
@@ -1192,18 +1257,22 @@ class UiIpcContractTests(unittest.TestCase):
         pm.config.get_bool.side_effect = lambda key: (
             key is SettingKey.REQUIRE_LOCAL_AUTH
         )
+        interactions = _DeferredInteractions(secret='session-secret')
 
         with (
             patch('metor.cli.handlers.load_frontend', return_value=Mock()),
             patch(
-                'metor.cli.handlers.invoke_frontend', return_value=0
-            ) as invoke_frontend,
+                'metor.cli.handlers.invoke_frontend',
+                side_effect=lambda _frontend, context: _run_deferred_frontend(
+                    context, interactions
+                ),
+            ),
             patch(
                 'metor.cli.handlers.prompt_hidden',
                 return_value='session-secret',
             ),
             patch(
-                'metor.cli.handlers.start_managed_daemon_process',
+                'metor.application.frontend.start_managed_daemon_process',
                 return_value=True,
             ) as start_mock,
         ):
@@ -1214,9 +1283,11 @@ class UiIpcContractTests(unittest.TestCase):
             start_locked=False,
             session_auth_password='session-secret',
         )
-        context = invoke_frontend.call_args.args[1]
-        self.assertTrue(context.daemon_started_by_launcher)
-        self.assertEqual(context.session_auth_secret, 'session-secret')
+        self.assertTrue(interactions.started)
+        assert interactions.result is not None
+        self.assertTrue(interactions.result.daemon_started_by_launcher)
+        self.assertEqual(interactions.result.session_auth.take(), 'session-secret')
+        self.assertIsNone(interactions.result.session_auth.take())
 
     def test_handle_daemon_sanitizes_sensitive_value_errors(self) -> None:
         """

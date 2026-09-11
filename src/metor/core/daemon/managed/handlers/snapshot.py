@@ -73,9 +73,7 @@ class RuntimeSnapshotProjectionMixin:
         entries: List[PendingConnectionEntry] = []
         snapshot: PendingConnectionSnapshot
         for snapshot in self._network.get_pending_connection_snapshots():
-            alias: Optional[str] = self._cm.ensure_alias_for_onion(snapshot.onion)
-            if alias is None:
-                continue
+            alias = self._cm.get_alias_by_onion(snapshot.onion) or snapshot.onion
 
             entries.append(
                 PendingConnectionEntry(
@@ -105,11 +103,10 @@ class RuntimeSnapshotProjectionMixin:
         """
         entries: List[UnreadInboxSummaryEntry] = []
         for summary in self._mm.get_unread_inbox_summaries():
-            alias: Optional[str] = self._cm.ensure_alias_for_onion(
-                summary.contact_onion
+            alias = (
+                self._cm.get_alias_by_onion(summary.contact_onion)
+                or summary.contact_onion
             )
-            if alias is None:
-                continue
 
             entries.append(
                 UnreadInboxSummaryEntry(
@@ -150,15 +147,16 @@ class RuntimeSnapshotProjectionMixin:
             IpcEvent: Snapshot, or a typed retryable unavailable result.
         """
         for _ in range(Constants.RUNTIME_SNAPSHOT_MAX_RETRIES):
-            revision = self._current_revision()
-            state_token = self._network.get_snapshot_token()
-            snapshot = self._compose_runtime_snapshot()
-            if (
-                self._current_revision() == revision
-                and self._network.get_snapshot_token() == state_token
-            ):
-                snapshot.revision = revision
-                return snapshot
+            with self._network.snapshot_barrier():
+                revision = self._current_revision()
+                state_token = self._network.get_snapshot_token()
+                snapshot = self._compose_runtime_snapshot()
+                if (
+                    self._current_revision() == revision
+                    and self._network.get_snapshot_token() == state_token
+                ):
+                    snapshot.revision = revision
+                    return snapshot
         return create_event(
             EventType.RUNTIME_SNAPSHOT_UNAVAILABLE,
             {'retryable': True},
@@ -177,7 +175,7 @@ class RuntimeSnapshotProjectionMixin:
         ]
         conversations = [
             DropConversationSummaryEntry(
-                alias=self._cm.ensure_alias_for_onion(onion) or onion,
+                alias=self._cm.get_alias_by_onion(onion) or onion,
                 onion=onion,
                 unread_count=unread_count,
             )
@@ -204,7 +202,7 @@ class RuntimeSnapshotProjectionMixin:
             session_state = self._network.get_live_state(onion)
             live_contexts.append(
                 LiveContextEntry(
-                    alias=self._cm.ensure_alias_for_onion(onion) or onion,
+                    alias=self._cm.get_alias_by_onion(onion) or onion,
                     onion=onion,
                     saved=onion in saved_onions,
                     session_state=session_state.value,
@@ -276,7 +274,7 @@ class RuntimeSnapshotProjectionMixin:
 
         events: List[TransportStateEvent] = []
         for onion in active_onions:
-            alias = self._cm.ensure_alias_for_onion(onion) or onion
+            alias = self._cm.get_alias_by_onion(onion) or onion
             events.append(self._build_transport_state_event(alias, onion))
         return events
 

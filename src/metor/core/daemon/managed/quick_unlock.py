@@ -79,7 +79,7 @@ class QuickUnlockStore:
             if os.name == 'nt':
                 self._protect_windows_path(temp_path, directory=False)
             else:
-                os.fchmod(descriptor, stat.S_IRUSR | stat.S_IWUSR)
+                self._fchmod(descriptor, stat.S_IRUSR | stat.S_IWUSR)
             with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
                 descriptor = -1
                 json.dump(
@@ -252,20 +252,26 @@ class QuickUnlockStore:
             'FileSystemAccessRule($system,$rights,$inherit,$prop,$allow))); '
             'Set-Acl -LiteralPath $Target -AclObject $acl -ErrorAction Stop'
         )
-        completed = subprocess.run(
-            [
-                'powershell.exe',
-                '-NoProfile',
-                '-NonInteractive',
-                '-Command',
-                script,
-                '-Target',
-                str(path),
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            completed = subprocess.run(
+                [
+                    'powershell.exe',
+                    '-NoProfile',
+                    '-NonInteractive',
+                    '-Command',
+                    script,
+                    '-Target',
+                    str(path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=Constants.QUICK_UNLOCK_HELPER_TIMEOUT_SEC,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise QuickUnlockStorageError(
+                'Windows ACL protection could not be established.'
+            ) from exc
         if completed.returncode != 0:
             raise QuickUnlockStorageError(
                 'Windows ACL protection could not be established.'
@@ -285,20 +291,26 @@ class QuickUnlockStore:
             '[pscustomobject]@{ Protected=$acl.AreAccessRulesProtected; '
             'Current=$current; Rules=$rules } | ConvertTo-Json -Compress -Depth 4'
         )
-        completed = subprocess.run(
-            [
-                'powershell.exe',
-                '-NoProfile',
-                '-NonInteractive',
-                '-Command',
-                script,
-                '-Target',
-                str(path),
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            completed = subprocess.run(
+                [
+                    'powershell.exe',
+                    '-NoProfile',
+                    '-NonInteractive',
+                    '-Command',
+                    script,
+                    '-Target',
+                    str(path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=Constants.QUICK_UNLOCK_HELPER_TIMEOUT_SEC,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise QuickUnlockStorageError(
+                'Windows ACL protection is unreadable.'
+            ) from exc
         if completed.returncode != 0:
             raise QuickUnlockStorageError('Windows ACL protection is unreadable.')
         try:
@@ -348,7 +360,7 @@ class QuickUnlockStore:
             QuickUnlockStore._validate_windows_acl(path)
             return
         status = path.stat(follow_symlinks=False)
-        if status.st_uid != os.getuid():
+        if status.st_uid != QuickUnlockStore._getuid():
             raise QuickUnlockStorageError('Credential path has an unsafe owner.')
         forbidden = stat.S_IRWXG | stat.S_IRWXO
         if status.st_mode & forbidden:
@@ -372,3 +384,19 @@ class QuickUnlockStore:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
+
+    @staticmethod
+    def _fchmod(descriptor: int, mode: int) -> None:
+        """Invokes the POSIX-only descriptor permission primitive safely."""
+        fchmod = getattr(os, 'fchmod', None)
+        if not callable(fchmod):
+            raise OSError('Descriptor permissions are unavailable on this platform.')
+        fchmod(descriptor, mode)
+
+    @staticmethod
+    def _getuid() -> int:
+        """Returns the POSIX owner id without exposing it to Windows type checking."""
+        getuid = getattr(os, 'getuid', None)
+        if not callable(getuid):
+            raise OSError('Owner validation is unavailable on this platform.')
+        return int(getuid())

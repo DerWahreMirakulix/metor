@@ -62,6 +62,8 @@ class StateTrackerConnectionsMixin:
     _unacked_messages: Dict[str, Dict[str, Tuple[str, str]]]
     _last_disconnect_reasons: Dict[str, ConnectionReasonCode]
     _last_disconnect_actors: Dict[str, ConnectionActor]
+    _live_context_generations: Dict[str, int]
+    _next_live_context_generation: int
 
     def set_last_disconnect_reason(
         self,
@@ -415,6 +417,24 @@ class StateTrackerConnectionsMixin:
         with self._lock:
             replaced_active = self._connections.get(onion)
             replaced_pending = self._pending_connections.pop(onion, None)
+            pending_origin = self._pending_connection_origins.get(onion)
+            is_recovery = (
+                replaced_active is not None
+                or onion in self._scheduled_auto_reconnects
+                or onion in self._live_reconnect_grace
+                or onion in self._retunnel_in_progress
+                or pending_origin
+                in {
+                    ConnectionOrigin.AUTO_RECONNECT,
+                    ConnectionOrigin.GRACE_RECONNECT,
+                    ConnectionOrigin.RETUNNEL,
+                }
+            )
+            if onion not in self._live_context_generations or not is_recovery:
+                self._live_context_generations[onion] = (
+                    self._next_live_context_generation
+                )
+                self._next_live_context_generation += 1
             self._connections[onion] = conn
             self._outbound_attempts.discard(onion)
             self._outbound_attempt_origins.pop(onion, None)
@@ -709,6 +729,23 @@ class StateTrackerConnectionsMixin:
         """
         with self._lock:
             return self._connections.get(onion)
+
+    def get_live_context_generation(self, onion: str) -> Optional[int]:
+        """Returns logical conversation ownership for an active LIVE peer.
+
+        Recognized reconnect and retunnel replacement sockets retain this value;
+        a later independent conversation with the same peer receives a new one.
+
+        Args:
+            onion (str): Stable peer identity.
+
+        Returns:
+            Optional[int]: Active logical context generation, if connected.
+        """
+        with self._lock:
+            if onion not in self._connections:
+                return None
+            return self._live_context_generations.get(onion)
 
     def pop_any_connection(self, onion: str) -> Optional[socket.socket]:
         """

@@ -32,6 +32,7 @@ from metor.core.api import (
     RuntimeStateChangedEvent,
     RetainedMessagesEvent,
     VoiceDataEvent,
+    VoiceOperationRejectedEvent,
     VoiceReleasedEvent,
     request_context,
 )
@@ -478,7 +479,8 @@ class AcceptanceRepairContractTests(unittest.TestCase):
         for failure_index in (0, 1):
             with self.subTest(failure_index=failure_index):
                 msg_id = f'crash-boundary-{failure_index}'
-                voice = self._voice(sender=True)
+                events: list[object] = []
+                voice = self._voice(sender=True, events=events)
                 voice.begin(self.receiver_alias, Delivery.LIVE, msg_id, 'opus')
                 voice.append(msg_id, 0, base64.b64encode(b'encrypted').decode('ascii'))
                 calls = 0
@@ -497,8 +499,8 @@ class AcceptanceRepairContractTests(unittest.TestCase):
                     'promote',
                     side_effect=fail_selected_promotion,
                 ):
-                    with self.assertRaises(OSError):
-                        voice.finalize(msg_id, 50)
+                    voice.finalize(msg_id, 50)
+                self.assertIsInstance(events[-1], VoiceOperationRejectedEvent)
 
                 row = next(
                     row
@@ -514,7 +516,7 @@ class AcceptanceRepairContractTests(unittest.TestCase):
                     )
                 )
 
-                self._voice(sender=True)
+                voice.finalize(msg_id, 50)
 
                 self.assertTrue(
                     all(
@@ -580,13 +582,16 @@ class AcceptanceRepairContractTests(unittest.TestCase):
 
     def test_interrupted_drop_draft_promotion_reconciles_before_review(self) -> None:
         """G07: finalized draft objects recover before bounded client reads."""
-        voice = self._voice(sender=True)
+        events: list[object] = []
+        voice = self._voice(sender=True, events=events)
         voice.begin(self.receiver_alias, Delivery.DROP, 'draft-crash', 'opus')
         voice.append('draft-crash', 0, base64.b64encode(b'reviewable').decode('ascii'))
         with patch.object(self.sender_blobs, 'promote', side_effect=OSError('crash')):
-            with self.assertRaises(OSError):
-                voice.finalize('draft-crash', 70)
+            voice.finalize('draft-crash', 70)
+        self.assertIsInstance(events[-1], VoiceOperationRejectedEvent)
         self.assertEqual(len(self.sender_messages.get_voice_draft_payloads()), 1)
+
+        voice.finalize('draft-crash', 70)
 
         recovered = self._voice(sender=True)
         read = recovered.read_chunk(

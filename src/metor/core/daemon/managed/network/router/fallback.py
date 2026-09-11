@@ -127,11 +127,12 @@ class FallbackRouter:
                 return {}
             records = self._mm.promote_pending_live_to_drop(onion)
             if not records:
+                self._promote_voice([])
                 return {}
-            self._promote_voice([record.msg_id for record in records])
             self._state.invalidate_live_generations(
                 onion, [record.msg_id for record in records]
             )
+            self._promote_voice([record.msg_id for record in records])
             unacked: Dict[str, Tuple[str, str]] = {
                 record.msg_id: (record.payload, record.timestamp) for record in records
             }
@@ -165,7 +166,7 @@ class FallbackRouter:
         Returns:
             list[str]: The message IDs replayed successfully.
         """
-        frames: list[tuple[str, str, str]] = []
+        replayed_msg_ids: list[str] = []
         with self._transition_lock:
             if self._purge_fence.is_set():
                 return []
@@ -173,18 +174,18 @@ class FallbackRouter:
             if conn is None:
                 return []
             frames = self._get_pending_live_messages(onion)
-
-        replayed_msg_ids: list[str] = []
-        for msg_id, content, timestamp in frames:
-            if self._purge_fence.is_set():
-                break
-            try:
-                generation = self._state.live_generation(onion, msg_id)
+            for msg_id, content, timestamp in frames:
+                if self._purge_fence.is_set():
+                    break
+                generation = self._state.get_live_generation(onion, msg_id)
+                if generation is None:
+                    continue
+                expected_generation = generation
 
                 def claim(
                     peer: str = onion,
                     identity: str = msg_id,
-                    expected: int = generation,
+                    expected: int = expected_generation,
                 ) -> bool:
                     with self._transition_lock:
                         return (
@@ -192,19 +193,20 @@ class FallbackRouter:
                             and self._state.is_live_generation(peer, identity, expected)
                         )
 
-                self._state.send_frame(
-                    conn,
-                    build_message_frame(
-                        TorCommand.MSG,
-                        msg_id,
-                        content,
-                        timestamp,
-                    ).encode('utf-8'),
-                    claim,
-                )
-            except Exception:
-                break
-            replayed_msg_ids.append(msg_id)
+                try:
+                    self._state.send_frame(
+                        conn,
+                        build_message_frame(
+                            TorCommand.MSG,
+                            msg_id,
+                            content,
+                            timestamp,
+                        ).encode('utf-8'),
+                        claim,
+                    )
+                except Exception:
+                    break
+                replayed_msg_ids.append(msg_id)
         return replayed_msg_ids
 
     def force_fallback(
@@ -239,10 +241,12 @@ class FallbackRouter:
                         'reason': MessageOperationReason.INVALID_SELECTION.value,
                     },
                 )
-            self._promote_voice([record.msg_id for record in records])
+            if not records:
+                self._promote_voice(list(msg_ids or []))
             self._state.invalidate_live_generations(
                 onion, [record.msg_id for record in records]
             )
+            self._promote_voice([record.msg_id for record in records])
             for record in records:
                 self._state.remove_unacked_message(onion, record.msg_id)
                 self._hm.log_event(

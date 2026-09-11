@@ -160,7 +160,9 @@ class IndependentCliContractTests(unittest.TestCase):
                 load.assert_called_once_with(expected)
                 context = invoke.call_args.args[1]
                 self.assertEqual(context.profile, 'profile-a')
-                self.assertEqual(context.port, 37123)
+                interactions = Mock()
+                result = context.host.bootstrap(interactions)
+                self.assertEqual(result.port, 37123)
 
     def test_missing_selected_frontend_prevents_profile_and_daemon_side_effects(
         self,
@@ -174,7 +176,7 @@ class IndependentCliContractTests(unittest.TestCase):
                 'metor.cli.handlers.load_frontend',
                 side_effect=FrontendLaunchError('install metor-ui-missing'),
             ),
-            patch('metor.cli.handlers.start_managed_daemon_process') as start,
+            patch('metor.application.frontend.start_managed_daemon_process') as start,
             patch('sys.stderr', io.StringIO()),
         ):
             status = CommandHandlers.handle_chat(

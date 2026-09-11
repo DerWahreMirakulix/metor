@@ -7,7 +7,7 @@ import secrets
 import socket
 import threading
 from datetime import datetime, timezone
-from typing import Dict, Optional, TypeVar
+from typing import Callable, Dict, Optional, TypeVar
 
 from metor.core.api import (
     ChatStartupStateEvent,
@@ -61,14 +61,15 @@ class Chat:
     def __init__(
         self,
         pm: ProfileManager,
-        prefilled_session_auth_password: Optional[str] = None,
+        startup_session_auth_provider: Optional[Callable[[], Optional[str]]] = None,
     ) -> None:
         """
         Initializes the Chat UI orchestrator.
 
         Args:
             pm (ProfileManager): The manager handling the profile's daemon connection state.
-            prefilled_session_auth_password (Optional[str]): Optional one-time plaintext session-auth password collected during local daemon autostart.
+            startup_session_auth_provider (Optional[Callable]): One-use startup
+                credential provider owned outside the immutable launch context.
 
         Returns:
             None
@@ -83,9 +84,7 @@ class Chat:
         self._conn_event: threading.Event = threading.Event()
         self._disconnect_event: threading.Event = threading.Event()
         self._startup_state: Optional[ChatStartupStateEvent] = None
-        self._prefilled_session_auth_password: Optional[str] = (
-            prefilled_session_auth_password
-        )
+        self._startup_session_auth_provider = startup_session_auth_provider
 
         self._handler: Optional[EventHandler] = None
         self._dispatcher: Optional[CommandDispatcher] = None
@@ -105,10 +104,12 @@ class Chat:
         Returns:
             Optional[str]: The derived proof, or None when the user aborted.
         """
-        if self._prefilled_session_auth_password is not None:
-            password: str = self._prefilled_session_auth_password
-            self._prefilled_session_auth_password = None
-            return build_session_auth_proof(password, challenge, salt)
+        if self._startup_session_auth_provider is not None:
+            provider = self._startup_session_auth_provider
+            self._startup_session_auth_provider = None
+            password = provider()
+            if password is not None:
+                return build_session_auth_proof(password, challenge, salt)
 
         return prompt_session_auth_proof(
             get_session_auth_prompt(self._pm),

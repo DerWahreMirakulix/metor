@@ -154,7 +154,18 @@ class VoiceOutboundMixin:
                     LiveMessageUnavailableEvent(alias=alias, onion=onion, msg_id=msg_id)
                 )
                 return
-            blob_id = self._blobs.put(b'', BlobLifecycle.TEMPORARY)
+            persistence_failed = False
+            try:
+                blob_id = self._blobs.put(b'', BlobLifecycle.TEMPORARY)
+            except Exception:
+                self._broadcast(
+                    VoiceOperationRejectedEvent(
+                        msg_id=msg_id,
+                        onion=onion,
+                        reason=MessageOperationReason.PERSISTENCE_FAILED,
+                    )
+                )
+                return
             turn = VoiceTurn(
                 alias=alias,
                 onion=onion,
@@ -167,19 +178,55 @@ class VoiceOutboundMixin:
                 data=bytearray(),
                 timestamp=datetime.now(timezone.utc).isoformat(),
             )
-            if delivery is Delivery.LIVE:
-                admission = self._messages.queue_pending_live_if_capacity(
-                    onion,
-                    ContentType.VOICE,
-                    self._metadata(turn),
-                    msg_id,
-                    turn.timestamp,
-                    0,
-                    self._config.get_int(SettingKey.MAX_PENDING_LIVE_MSGS),
-                    self._config.get_int(SettingKey.MAX_PENDING_LIVE_BYTES),
-                )
-                if admission is not PendingLiveAdmission.ACCEPTED:
+            try:
+                if delivery is Delivery.LIVE:
+                    admission = self._messages.queue_pending_live_if_capacity(
+                        onion,
+                        ContentType.VOICE,
+                        self._metadata(turn),
+                        msg_id,
+                        turn.timestamp,
+                        0,
+                        self._config.get_int(SettingKey.MAX_PENDING_LIVE_MSGS),
+                        self._config.get_int(SettingKey.MAX_PENDING_LIVE_BYTES),
+                    )
+                else:
+                    admission = (
+                        PendingLiveAdmission.ACCEPTED
+                        if self._messages.queue_message(
+                            contact_onion=onion,
+                            direction=MessageDirection.OUT,
+                            delivery=delivery,
+                            content_type=ContentType.VOICE,
+                            payload=self._metadata(turn),
+                            status=MessageStatus.DRAFT,
+                            msg_id=msg_id,
+                            timestamp=turn.timestamp,
+                        )
+                        else PendingLiveAdmission.DUPLICATE
+                    )
+            except Exception:
+                persistence_failed = True
+                admission = PendingLiveAdmission.DUPLICATE
+            if persistence_failed:
+                try:
                     self._blobs.delete(blob_id, BlobLifecycle.TEMPORARY)
+                except Exception:
+                    pass
+                self._broadcast(
+                    VoiceOperationRejectedEvent(
+                        msg_id=msg_id,
+                        onion=onion,
+                        reason=MessageOperationReason.PERSISTENCE_FAILED,
+                    )
+                )
+                return
+            if delivery is Delivery.LIVE:
+                if admission is not PendingLiveAdmission.ACCEPTED:
+                    try:
+                        self._blobs.delete(blob_id, BlobLifecycle.TEMPORARY)
+                    except Exception:
+                        pass
                     reason = (
                         MessageOperationReason.COUNT_LIMIT
                         if admission is PendingLiveAdmission.COUNT_LIMIT
@@ -202,17 +249,19 @@ class VoiceOutboundMixin:
                         )
                     )
                     return
-            else:
-                self._messages.queue_message(
-                    contact_onion=onion,
-                    direction=MessageDirection.OUT,
-                    delivery=delivery,
-                    content_type=ContentType.VOICE,
-                    payload=self._metadata(turn),
-                    status=MessageStatus.DRAFT,
-                    msg_id=msg_id,
-                    timestamp=turn.timestamp,
+            elif admission is not PendingLiveAdmission.ACCEPTED:
+                try:
+                    self._blobs.delete(blob_id, BlobLifecycle.TEMPORARY)
+                except Exception:
+                    pass
+                self._broadcast(
+                    VoiceOperationRejectedEvent(
+                        msg_id=msg_id,
+                        onion=onion,
+                        reason=MessageOperationReason.PERSISTENCE_FAILED,
+                    )
                 )
+                return
             self._outbound[msg_id] = turn
             if delivery is Delivery.LIVE:
                 self._state.add_unacked_message(
@@ -275,7 +324,9 @@ class VoiceOutboundMixin:
         self, turn: VoiceTurn, conn: socket.socket, payload: bytes
     ) -> None:
         """Queues one LIVE frame with a fallback/purge generation claim."""
-        generation = self._state.live_generation(turn.onion, turn.msg_id)
+        generation = self._state.get_live_generation(turn.onion, turn.msg_id)
+        if generation is None:
+            raise ConnectionError('LIVE emission authority has been revoked.')
 
         def claim() -> bool:
             with self._lock:
@@ -358,32 +409,49 @@ class VoiceOutboundMixin:
                     except OSError:
                         pass
                 return
-            chunk_id = self._blobs.put(chunk, BlobLifecycle.TEMPORARY)
+            try:
+                chunk_id = self._blobs.put(chunk, BlobLifecycle.TEMPORARY)
+            except Exception:
+                self._broadcast(
+                    VoiceOperationRejectedEvent(
+                        msg_id=msg_id,
+                        onion=turn.onion,
+                        reason=MessageOperationReason.PERSISTENCE_FAILED,
+                    )
+                )
+                return
             turn.chunk_ids.append(chunk_id)
             turn.chunk_sizes.append(len(chunk))
             turn.data.extend(chunk)
             turn.size_bytes += len(chunk)
-            if turn.delivery is Delivery.LIVE:
-                admission = self._messages.grow_pending_live_voice_if_capacity(
-                    turn.onion,
-                    msg_id,
-                    offset,
-                    turn.size_bytes,
-                    self._metadata(turn),
-                    self._config.get_int(SettingKey.MAX_PENDING_LIVE_BYTES),
-                )
-                updated = admission is PendingLiveAdmission.ACCEPTED
-            else:
-                updated = self._messages.update_retained_bytes(
-                    turn.onion, msg_id, turn.size_bytes, self._metadata(turn)
-                )
-                admission = PendingLiveAdmission.ACCEPTED
+            try:
+                if turn.delivery is Delivery.LIVE:
+                    admission = self._messages.grow_pending_live_voice_if_capacity(
+                        turn.onion,
+                        msg_id,
+                        offset,
+                        turn.size_bytes,
+                        self._metadata(turn),
+                        self._config.get_int(SettingKey.MAX_PENDING_LIVE_BYTES),
+                    )
+                    updated = admission is PendingLiveAdmission.ACCEPTED
+                else:
+                    updated = self._messages.update_retained_bytes(
+                        turn.onion, msg_id, turn.size_bytes, self._metadata(turn)
+                    )
+                    admission = PendingLiveAdmission.ACCEPTED
+            except Exception:
+                updated = False
+                admission = PendingLiveAdmission.DUPLICATE
             if not updated:
-                self._blobs.delete(chunk_id, BlobLifecycle.TEMPORARY)
                 turn.chunk_ids.pop()
                 turn.chunk_sizes.pop()
                 del turn.data[-len(chunk) :]
                 turn.size_bytes -= len(chunk)
+                try:
+                    self._blobs.delete(chunk_id, BlobLifecycle.TEMPORARY)
+                except Exception:
+                    pass
                 if admission is PendingLiveAdmission.BYTE_LIMIT:
                     self._broadcast(
                         VoiceResourceLimitEvent(
@@ -491,7 +559,9 @@ class VoiceOutboundMixin:
             if self._purge_fence.is_set():
                 return
             turn = self._outbound.get(msg_id)
-            if turn is not None and not turn.finalized:
+            if turn is not None and (
+                not turn.finalized or turn.duration_ms == duration_ms
+            ):
                 frame = self._finalize_locked(turn, duration_ms)
         if frame is not None:
             try:
@@ -512,13 +582,19 @@ class VoiceOutboundMixin:
         Returns:
             Optional[tuple[socket.socket, bytes]]: Deferred terminal frame.
         """
+        previous_duration = turn.duration_ms
+        previous_finalized = turn.finalized
         turn.duration_ms = duration_ms
         turn.finalized = True
-        if not self._messages.update_retained_bytes(
-            turn.onion, turn.msg_id, turn.size_bytes, self._metadata(turn)
-        ):
-            turn.duration_ms = None
-            turn.finalized = False
+        try:
+            updated = self._messages.update_retained_bytes(
+                turn.onion, turn.msg_id, turn.size_bytes, self._metadata(turn)
+            )
+        except Exception:
+            updated = False
+        if not updated:
+            turn.duration_ms = previous_duration
+            turn.finalized = previous_finalized
             self._broadcast(
                 VoiceOperationRejectedEvent(
                     msg_id=turn.msg_id,
@@ -553,9 +629,19 @@ class VoiceOutboundMixin:
                 turn.onion, [turn.msg_id]
             )
             if records:
-                self._promote_turn_blobs(turn)
-                turn.delivery = Delivery.DROP
                 self._state.invalidate_live_generations(turn.onion, [turn.msg_id])
+                turn.delivery = Delivery.DROP
+                try:
+                    self._promote_turn_blobs(turn)
+                except Exception:
+                    self._broadcast(
+                        VoiceOperationRejectedEvent(
+                            msg_id=turn.msg_id,
+                            onion=turn.onion,
+                            reason=MessageOperationReason.PERSISTENCE_FAILED,
+                        )
+                    )
+                    return None
                 self._state.remove_unacked_message(turn.onion, turn.msg_id)
                 self._outbound.pop(turn.msg_id, None)
                 self._broadcast(
@@ -567,7 +653,17 @@ class VoiceOutboundMixin:
                     )
                 )
         elif turn.delivery is Delivery.DROP:
-            self._promote_turn_blobs(turn)
+            try:
+                self._promote_turn_blobs(turn)
+            except Exception:
+                self._broadcast(
+                    VoiceOperationRejectedEvent(
+                        msg_id=turn.msg_id,
+                        onion=turn.onion,
+                        reason=MessageOperationReason.PERSISTENCE_FAILED,
+                    )
+                )
+                return None
             self._outbound.pop(turn.msg_id, None)
         self._broadcast(
             VoiceFinalizedEvent(
@@ -597,9 +693,10 @@ class VoiceOutboundMixin:
             for turn in self._outbound.values():
                 if turn.onion != onion or turn.delivery is not Delivery.LIVE:
                     continue
-                turns.append(turn)
-        for turn in turns:
-            self._send_begin(turn)
+                if self._state.get_live_generation(onion, turn.msg_id) is not None:
+                    turns.append(turn)
+            for turn in turns:
+                self._send_begin(turn)
         return [turn.msg_id for turn in turns]
 
     def promote_fallback(self, msg_ids: list[str]) -> None:
@@ -616,13 +713,27 @@ class VoiceOutboundMixin:
         with self._lock:
             if self._purge_fence.is_set():
                 return
-            for msg_id in msg_ids:
-                turn = self._outbound.get(msg_id)
-                if turn is None:
-                    continue
-                self._promote_turn_blobs(turn)
+            selected = (
+                [
+                    self._outbound[msg_id]
+                    for msg_id in msg_ids
+                    if msg_id in self._outbound
+                    and self._state.get_live_generation(
+                        self._outbound[msg_id].onion, msg_id
+                    )
+                    is None
+                ]
+                if msg_ids
+                else [
+                    turn
+                    for turn in self._outbound.values()
+                    if self._state.get_live_generation(turn.onion, turn.msg_id) is None
+                ]
+            )
+            for turn in selected:
                 turn.delivery = Delivery.DROP
-                self._outbound.pop(msg_id, None)
+                self._promote_turn_blobs(turn)
+                self._outbound.pop(turn.msg_id, None)
 
     def acknowledge(self, onion: str, msg_id: str, next_offset: int) -> None:
         """Advances an outbound Voice resume cursor monotonically.
@@ -646,10 +757,24 @@ class VoiceOutboundMixin:
                 return
             if next_offset < turn.acknowledged_offset or next_offset > turn.size_bytes:
                 return
+            previous_offset = turn.acknowledged_offset
             turn.acknowledged_offset = next_offset
-            self._messages.update_retained_bytes(
-                onion, msg_id, turn.size_bytes, self._metadata(turn)
-            )
+            try:
+                updated = self._messages.update_retained_bytes(
+                    onion, msg_id, turn.size_bytes, self._metadata(turn)
+                )
+            except Exception:
+                updated = False
+            if not updated:
+                turn.acknowledged_offset = previous_offset
+                self._broadcast(
+                    VoiceOperationRejectedEvent(
+                        msg_id=msg_id,
+                        onion=onion,
+                        reason=MessageOperationReason.PERSISTENCE_FAILED,
+                    )
+                )
+                return
             if next_offset < turn.size_bytes:
                 chunk = self._read_turn_range(
                     turn,
@@ -705,9 +830,13 @@ class VoiceOutboundMixin:
                 or not turn.finalized
             ):
                 return
-            if not self._messages.update_outbound_message_status(
-                onion, msg_id, MessageStatus.DELIVERED
-            ):
+            try:
+                completed = self._messages.update_outbound_message_status(
+                    onion, msg_id, MessageStatus.DELIVERED
+                )
+            except Exception:
+                completed = False
+            if not completed:
                 self._broadcast(
                     VoiceOperationRejectedEvent(
                         msg_id=msg_id,
@@ -718,7 +847,10 @@ class VoiceOutboundMixin:
                 return
             self._state.remove_unacked_message(onion, msg_id)
             self._state.invalidate_live_generations(onion, [msg_id])
-            self._delete_turn_blobs(turn, BlobLifecycle.TEMPORARY)
+            try:
+                self._delete_turn_blobs(turn, BlobLifecycle.TEMPORARY)
+            except Exception:
+                pass
             self._outbound.pop(msg_id, None)
 
     def release_consumed(self, onion: str, msg_ids: list[str]) -> None:
@@ -911,7 +1043,10 @@ class VoiceOutboundMixin:
             )
             if should_delete:
                 for blob_id in blob_ids:
-                    self._blobs.delete(blob_id, lifecycle)
+                    try:
+                        self._blobs.delete(blob_id, lifecycle)
+                    except Exception:
+                        pass
             self._inbound.pop((onion, msg_id), None)
         return True
 

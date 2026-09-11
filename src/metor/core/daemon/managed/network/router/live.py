@@ -92,12 +92,13 @@ class LiveMessageRouter:
 
     def _live_frame_claim(self, onion: str, msg_id: str) -> Callable[[], bool]:
         """Creates a last-moment emission claim ordered with fallback."""
-        generation = self._state.live_generation(onion, msg_id)
+        generation = self._state.get_live_generation(onion, msg_id)
 
         def claim() -> bool:
             with self._transition_lock:
                 return (
                     not self._purge_fence.is_set()
+                    and generation is not None
                     and self._state.is_live_generation(onion, msg_id, generation)
                 )
 
@@ -134,24 +135,27 @@ class LiveMessageRouter:
         Returns:
             Optional[MessageOperationReason]: Limit reason, or None after queueing.
         """
-        outcome = self._mm.queue_pending_live_if_capacity(
-            onion,
-            ContentType.TEXT,
-            msg,
-            msg_id,
-            timestamp,
-            0,
-            self._config.get_int(SettingKey.MAX_PENDING_LIVE_MSGS),
-            self._config.get_int(SettingKey.MAX_PENDING_LIVE_BYTES),
-        )
+        with self._transition_lock:
+            if self._purge_fence.is_set():
+                return MessageOperationReason.INVALID_SELECTION
+            outcome = self._mm.queue_pending_live_if_capacity(
+                onion,
+                ContentType.TEXT,
+                msg,
+                msg_id,
+                timestamp,
+                0,
+                self._config.get_int(SettingKey.MAX_PENDING_LIVE_MSGS),
+                self._config.get_int(SettingKey.MAX_PENDING_LIVE_BYTES),
+            )
+            if outcome is PendingLiveAdmission.ACCEPTED:
+                self._state.add_unacked_message(onion, msg_id, msg, timestamp)
         if outcome is PendingLiveAdmission.COUNT_LIMIT:
             return MessageOperationReason.COUNT_LIMIT
         if outcome is PendingLiveAdmission.BYTE_LIMIT:
             return MessageOperationReason.BYTE_LIMIT
         if outcome is PendingLiveAdmission.DUPLICATE:
             return MessageOperationReason.INVALID_SELECTION
-        if outcome is PendingLiveAdmission.ACCEPTED:
-            self._state.add_unacked_message(onion, msg_id, msg, timestamp)
         return None
 
     def send_message(self, target: str, msg: str, msg_id: str) -> None:

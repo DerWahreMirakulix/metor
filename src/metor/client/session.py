@@ -1,6 +1,6 @@
 """High-level endpoint-based reference client for interacting with a Metor daemon."""
 
-from typing import Callable, Optional, Type, TypeVar
+from typing import Callable, Optional, Type, TypeVar, cast
 
 from metor.client.auth import (
     AuthProvider,
@@ -41,6 +41,7 @@ from metor.core.api import (
     VoiceDataEvent,
     VoiceFinalizedEvent,
     VoiceOperationRejectedEvent,
+    VoiceResourceLimitEvent,
     VoiceReleasedEvent,
     VoiceStartedEvent,
     ensure_request_id,
@@ -54,6 +55,28 @@ from metor.versioning import (
 )
 
 T = TypeVar('T', bound=IpcEvent)
+VoiceAppendOutcome = (
+    VoiceChunkAcceptedEvent
+    | VoiceResourceLimitEvent
+    | VoiceFinalizedEvent
+    | VoiceOperationRejectedEvent
+)
+
+
+class MetorRequestRejectedError(RuntimeError):
+    """Carries a typed correlated command outcome that was not its success DTO."""
+
+    def __init__(self, event: IpcEvent) -> None:
+        """Initializes a request error retaining its typed daemon outcome.
+
+        Args:
+            event (IpcEvent): Correlated terminal event returned by the daemon.
+
+        Returns:
+            None
+        """
+        super().__init__(f'Request ended with {event.event_type.value}.')
+        self.event = event
 
 
 def parse_endpoint(endpoint: str | int) -> tuple[str, int]:
@@ -221,10 +244,28 @@ class MetorClient:
 
     def append_voice(
         self, msg_id: str, offset: int, data: str
-    ) -> Optional[VoiceChunkAcceptedEvent]:
-        """Appends one strict Base64 Voice chunk at an exact byte offset."""
-        return self.request(
-            AppendVoiceChunkCommand(msg_id, offset, data), VoiceChunkAcceptedEvent
+    ) -> Optional[VoiceAppendOutcome]:
+        """Appends a chunk and returns every terminal admission outcome.
+
+        Args:
+            msg_id (str): Stable Voice identity.
+            offset (int): Expected contiguous byte offset.
+            data (str): Strict Base64 chunk payload.
+
+        Returns:
+            Optional[VoiceAppendOutcome]: Accepted, finalized, or refused outcome.
+        """
+        return cast(
+            Optional[VoiceAppendOutcome],
+            self._request_types(
+                AppendVoiceChunkCommand(msg_id, offset, data),
+                (
+                    VoiceChunkAcceptedEvent,
+                    VoiceResourceLimitEvent,
+                    VoiceFinalizedEvent,
+                    VoiceOperationRejectedEvent,
+                ),
+            ),
         )
 
     def finalize_voice(
@@ -319,6 +360,22 @@ class MetorClient:
         Returns:
             Optional[T]: Decoded response event, or None if the request failed or was rejected.
         """
+        return cast(Optional[T], self._request_types(cmd, (expected_type,)))
+
+    def _request_types(
+        self,
+        cmd: IpcCommand,
+        expected_types: tuple[type[IpcEvent], ...],
+    ) -> Optional[IpcEvent]:
+        """Executes an exchange with explicit terminal DTO outcomes.
+
+        Args:
+            cmd (IpcCommand): Typed command to send.
+            expected_types (tuple[type[IpcEvent], ...]): Accepted terminal types.
+
+        Returns:
+            Optional[IpcEvent]: Matching terminal event, or None for auth failure.
+        """
         request_id: str = ensure_request_id(cmd)
         self._ipc.begin_request(request_id)
         try:
@@ -345,7 +402,7 @@ class MetorClient:
 
                     continue
 
-                if isinstance(event, expected_type):
+                if isinstance(event, expected_types):
                     return event
 
                 if isinstance(
@@ -353,7 +410,9 @@ class MetorClient:
                 ):
                     return None
                 if isinstance(event, VoiceOperationRejectedEvent):
-                    return None
+                    raise MetorRequestRejectedError(event)
+                self._ipc.dispatch_async_event(event)
+                raise MetorRequestRejectedError(event)
         finally:
             self._ipc.end_request(request_id)
 

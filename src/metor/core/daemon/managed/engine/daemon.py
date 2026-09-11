@@ -174,6 +174,8 @@ class Daemon(DaemonLifecycleMixin):
             resolve_target_callback=self._resolve_contact_target,
             voice_target_callback=self._voice_target,
             voice_delivery_callback=self._voice_delivery,
+            inbound_voice_delivery_callback=self._inbound_voice_delivery,
+            live_context_callback=self._live_context_token,
             self_destruct_requires_unlock_callback=lambda: self._pm.config.get_bool(
                 SettingKey.SELF_DESTRUCT_REQUIRES_UNLOCK
             ),
@@ -609,6 +611,37 @@ class Daemon(DaemonLifecycleMixin):
             self._network.voice_delivery(msg_id) if self._network is not None else None
         )
 
+    def _inbound_voice_delivery(self, onion: str, msg_id: str) -> Optional[Delivery]:
+        """Returns exact retained inbound Voice delivery semantics.
+
+        Args:
+            onion (str): Stable peer identity.
+            msg_id (str): Stable Voice identity.
+
+        Returns:
+            Optional[Delivery]: Retained delivery semantics, if available.
+        """
+        return (
+            self._network.inbound_voice_delivery(onion, msg_id)
+            if self._network is not None
+            else None
+        )
+
+    def _live_context_token(self, onion: str) -> object | None:
+        """Returns logical ownership for a restricted LIVE context.
+
+        Args:
+            onion (str): Stable peer identity.
+
+        Returns:
+            object | None: Active logical conversation generation.
+        """
+        return (
+            self._network.live_context_token(onion)
+            if self._network is not None
+            else None
+        )
+
     def _process_ui_command(self, cmd: IpcCommand, conn: socket.socket) -> None:
         """
         Routes typed IPC commands from the Chat UI or CLI Proxy to dedicated Handlers.
@@ -789,6 +822,7 @@ class Daemon(DaemonLifecycleMixin):
             self._transport_state.invalidate_all_live_generations()
             self._lifecycle = DaemonLifecycle.LOCKING
             self._runtime_stop_flag.set()
+            self._destruction_recipients = {conn}
             self._send_self_destruct_initiated(conn)
             try:
                 threading.Thread(target=self._nuke_data, daemon=True).start()

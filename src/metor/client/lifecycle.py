@@ -1,6 +1,7 @@
 """Frontend-neutral orchestration for changing active profile runtimes."""
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Callable, Optional
 
 from metor.client.session import MetorClient
@@ -13,6 +14,43 @@ class ProfileSwitchResult:
 
     previous_snapshot: RuntimeSnapshotEvent
     current_snapshot: RuntimeSnapshotEvent
+
+
+class ProfileSwitchPhase(str, Enum):
+    """Stable failure phases for frontend profile-switch recovery."""
+
+    SOURCE_SNAPSHOT = 'source_snapshot'
+    CAPTURE_FINALIZATION = 'capture_finalization'
+    SOURCE_PREPARATION = 'source_preparation'
+    SOURCE_RELEASE = 'source_release'
+    TARGET_FACTORY = 'target_factory'
+    TARGET_BOOTSTRAP = 'target_bootstrap'
+    TARGET_SNAPSHOT = 'target_snapshot'
+
+
+class ProfileSwitchError(RuntimeError):
+    """Reports exactly where a profile transition stopped."""
+
+    def __init__(
+        self,
+        phase: ProfileSwitchPhase,
+        message: str,
+        *,
+        source_released: bool = False,
+    ) -> None:
+        """Initializes a phase-aware profile transition failure.
+
+        Args:
+            phase (ProfileSwitchPhase): Phase that did not complete.
+            message (str): Safe user-facing explanation.
+            source_released (bool): Whether the old client was confirmed detached.
+
+        Returns:
+            None
+        """
+        super().__init__(message)
+        self.phase = phase
+        self.source_released = source_released
 
 
 class ProfileRuntimeCoordinator:
@@ -46,7 +84,7 @@ class ProfileRuntimeCoordinator:
         target_profile: str,
         *,
         finalize_active_capture: Optional[Callable[[], None]] = None,
-    ) -> Optional[ProfileSwitchResult]:
+    ) -> ProfileSwitchResult:
         """Performs the canonical reliability-preserving profile transition.
 
         The caller can inspect the current snapshot before invoking this method
@@ -59,25 +97,108 @@ class ProfileRuntimeCoordinator:
                 capture-finalization hook.
 
         Returns:
-            Optional[ProfileSwitchResult]: Both boundary snapshots, or None if
-                preparation/bootstrap could not be confirmed.
-        """
-        previous = self._client.runtime_snapshot()
-        if previous is None:
-            return None
-        if finalize_active_capture is not None:
-            finalize_active_capture()
-        if not self._client.prepare_profile_exit():
-            return None
+            ProfileSwitchResult: Both confirmed boundary snapshots.
 
-        self._client.disconnect()
-        next_client = self._client_factory(target_profile)
-        self._client = next_client
-        if next_client.bootstrap() is None:
-            return None
-        current = next_client.runtime_snapshot()
+        Raises:
+            ProfileSwitchError: With the exact failed transition phase.
+        """
+        try:
+            previous = self._client.runtime_snapshot()
+        except Exception as exc:
+            raise ProfileSwitchError(
+                ProfileSwitchPhase.SOURCE_SNAPSHOT,
+                'The current runtime snapshot raised an exception.',
+            ) from exc
+        if previous is None:
+            raise ProfileSwitchError(
+                ProfileSwitchPhase.SOURCE_SNAPSHOT,
+                'The current runtime snapshot could not be confirmed.',
+            )
+        if finalize_active_capture is not None:
+            try:
+                finalize_active_capture()
+            except Exception as exc:
+                raise ProfileSwitchError(
+                    ProfileSwitchPhase.CAPTURE_FINALIZATION,
+                    'Active capture finalization failed.',
+                ) from exc
+        try:
+            source_prepared = self._client.prepare_profile_exit()
+        except Exception as exc:
+            raise ProfileSwitchError(
+                ProfileSwitchPhase.SOURCE_PREPARATION,
+                'The current runtime profile-exit preparation raised an exception.',
+            ) from exc
+        if not source_prepared:
+            raise ProfileSwitchError(
+                ProfileSwitchPhase.SOURCE_PREPARATION,
+                'The current runtime did not confirm profile-exit preparation.',
+            )
+
+        try:
+            self._client.disconnect()
+        except Exception as exc:
+            raise ProfileSwitchError(
+                ProfileSwitchPhase.SOURCE_RELEASE,
+                'The current runtime client could not confirm release.',
+            ) from exc
+        try:
+            next_client = self._client_factory(target_profile)
+        except Exception as exc:
+            raise ProfileSwitchError(
+                ProfileSwitchPhase.TARGET_FACTORY,
+                'The target runtime client could not be created.',
+                source_released=True,
+            ) from exc
+
+        def dispose_candidate() -> None:
+            """Disposes the partial candidate without masking transition failure.
+
+            Args:
+                None
+
+            Returns:
+                None
+            """
+            try:
+                next_client.disconnect()
+            except Exception:
+                pass
+
+        try:
+            if next_client.bootstrap() is None:
+                raise ProfileSwitchError(
+                    ProfileSwitchPhase.TARGET_BOOTSTRAP,
+                    'The target runtime did not complete bootstrap.',
+                    source_released=True,
+                )
+        except ProfileSwitchError:
+            dispose_candidate()
+            raise
+        except Exception as exc:
+            dispose_candidate()
+            raise ProfileSwitchError(
+                ProfileSwitchPhase.TARGET_BOOTSTRAP,
+                'The target runtime bootstrap raised an exception.',
+                source_released=True,
+            ) from exc
+        try:
+            current = next_client.runtime_snapshot()
+        except Exception as exc:
+            dispose_candidate()
+            raise ProfileSwitchError(
+                ProfileSwitchPhase.TARGET_SNAPSHOT,
+                'The target runtime snapshot raised an exception.',
+                source_released=True,
+            ) from exc
         if current is None:
-            return None
+            dispose_candidate()
+            raise ProfileSwitchError(
+                ProfileSwitchPhase.TARGET_SNAPSHOT,
+                'The target runtime snapshot could not be confirmed.',
+                source_released=True,
+            )
+        self._client = next_client
         return ProfileSwitchResult(
             previous_snapshot=previous,
             current_snapshot=current,

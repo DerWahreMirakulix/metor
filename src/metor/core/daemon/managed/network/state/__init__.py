@@ -2,7 +2,8 @@
 
 import socket
 import threading
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from contextlib import contextmanager
+from typing import Callable, Dict, Iterator, List, Optional, Set, Tuple, cast
 
 from metor.core.api import ConnectionActor, ConnectionOrigin, ConnectionReasonCode
 from metor.utils import Constants
@@ -36,7 +37,7 @@ class StateTracker(
         Returns:
             None
         """
-        self._lock: threading.Lock = threading.Lock()
+        self._lock: threading.Lock = cast(threading.Lock, threading.RLock())
         self._connections: Dict[str, socket.socket] = {}
         self._pending_connections: Dict[str, socket.socket] = {}
         self._pending_connection_reasons: Dict[str, PendingConnectionReason] = {}
@@ -70,6 +71,33 @@ class StateTracker(
         self._socket_writers: Dict[socket.socket, BoundedSocketWriter] = {}
         self._live_generations: Dict[Tuple[str, str], int] = {}
         self._next_live_generation = 1
+        self._live_context_generations: Dict[str, int] = {}
+        self._next_live_context_generation = 1
+        self._peer_writer_failure_callback: Optional[Callable[[str], None]] = None
+
+    @contextmanager
+    def snapshot_barrier(self) -> Iterator[None]:
+        """Excludes transport mutation across one aggregate projection attempt.
+
+        Args:
+            None
+
+        Returns:
+            Iterator[None]: Context-manager iterator owning the state lock.
+        """
+        with self._lock:
+            yield
+
+    def set_peer_writer_failure_callback(self, callback: Callable[[str], None]) -> None:
+        """Installs the transport coordinator for asynchronous writer loss.
+
+        Args:
+            callback (Callable[[str], None]): Peer failure transition callback.
+
+        Returns:
+            None
+        """
+        self._peer_writer_failure_callback = callback
 
     def _writer_exited(self, conn: socket.socket, writer: BoundedSocketWriter) -> None:
         """Drops an idle or failed socket writer without retaining bookkeeping."""
@@ -106,13 +134,44 @@ class StateTracker(
                 writer = BoundedSocketWriter(
                     conn,
                     capacity=Constants.PEER_WRITER_QUEUE_FRAMES,
+                    byte_capacity=Constants.PEER_WRITER_QUEUE_BYTES,
+                    max_frame_bytes=Constants.MAX_STREAM_BYTES,
+                    on_failure=lambda failed, _exc: self._peer_writer_failed(failed),
                     on_exit=lambda exited: self._writer_exited(conn, exited),
                 )
                 self._socket_writers[conn] = writer
-        writer.enqueue(frame, claim)
+        try:
+            writer.enqueue(frame, claim)
+        except Exception:
+            self._peer_writer_failed(conn)
+            raise
+
+    def _peer_writer_failed(self, conn: socket.socket) -> None:
+        """Retires transport ownership when an asynchronous peer write fails."""
+        with self._lock:
+            writer = self._socket_writers.pop(conn, None)
+            self._socket_write_locks.pop(conn, None)
+            onion = next(
+                (
+                    peer
+                    for peer, tracked in (
+                        *self._connections.items(),
+                        *self._pending_connections.items(),
+                    )
+                    if tracked is conn
+                ),
+                None,
+            )
+        if writer is not None:
+            writer.close()
+        if onion is not None and self._peer_writer_failure_callback is not None:
+            try:
+                self._peer_writer_failure_callback(onion)
+            except Exception:
+                pass
 
     def live_generation(self, onion: str, msg_id: str) -> int:
-        """Returns the current emission generation for one LIVE identity."""
+        """Admits and returns a generation for a newly retained LIVE identity."""
         with self._lock:
             key = (onion, msg_id)
             generation = self._live_generations.get(key)
@@ -121,6 +180,19 @@ class StateTracker(
                 self._next_live_generation += 1
                 self._live_generations[key] = generation
             return generation
+
+    def get_live_generation(self, onion: str, msg_id: str) -> Optional[int]:
+        """Returns existing LIVE eligibility without creating replay authority.
+
+        Args:
+            onion (str): Stable peer identity.
+            msg_id (str): Stable message identity.
+
+        Returns:
+            Optional[int]: Existing generation, or None after revocation.
+        """
+        with self._lock:
+            return self._live_generations.get((onion, msg_id))
 
     def is_live_generation(self, onion: str, msg_id: str, generation: int) -> bool:
         """Checks a queued LIVE frame claim at the writer boundary."""
@@ -156,14 +228,45 @@ class StateTracker(
                 ),
                 tuple(
                     sorted(
-                        (key, id(value))
+                        (
+                            key,
+                            id(value),
+                            (
+                                self._pending_connection_reasons[key].value
+                                if key in self._pending_connection_reasons
+                                else None
+                            ),
+                            (
+                                self._pending_connection_origins[key].value
+                                if key in self._pending_connection_origins
+                                else None
+                            ),
+                            self._pending_connection_deadlines.get(key),
+                        )
                         for key, value in self._pending_connections.items()
                     )
                 ),
-                tuple(sorted(self._outbound_attempts)),
+                tuple(
+                    sorted(
+                        (
+                            onion,
+                            (
+                                self._outbound_attempt_origins[onion].value
+                                if onion in self._outbound_attempt_origins
+                                else None
+                            ),
+                            id(self._outbound_sockets.get(onion)),
+                        )
+                        for onion in self._outbound_attempts
+                    )
+                ),
                 tuple(sorted(self._scheduled_auto_reconnects)),
                 tuple(sorted(self._live_reconnect_grace.items())),
+                tuple(sorted(self._local_recovery_opt_outs.items())),
                 tuple(sorted(self._retunnel_in_progress)),
+                tuple(sorted(self._retunnel_reconnects)),
+                tuple(sorted(self._retunnel_recovery_retry_counts.items())),
+                tuple(sorted(self._retunnel_recovery_retry_pending)),
                 tuple(
                     sorted(
                         (peer, tuple(sorted(messages)))
@@ -173,6 +276,9 @@ class StateTracker(
                 tuple(sorted(self._last_disconnect_reasons.items())),
                 tuple(sorted(self._last_disconnect_actors.items())),
                 tuple(sorted(self._ui_focus_counts.items())),
+                tuple(sorted(self._session_last_activity.items())),
+                tuple(sorted(self._live_generations.items())),
+                tuple(sorted(self._live_context_generations.items())),
             )
 
 
