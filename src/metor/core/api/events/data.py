@@ -6,6 +6,7 @@ from typing import ClassVar, Dict, List, Optional
 # Local Package Imports
 from metor.core.api.base import IpcEvent
 from metor.core.api.codes import EventType
+from metor.core.api.content import Delivery
 from metor.core.api.events.entries import (
     ContactEntry,
     DropConversationSummaryEntry,
@@ -30,6 +31,8 @@ class InboxNotificationEvent(IpcEvent):
     alias: str
     onion: Optional[str] = None
     count: int = 1
+    delivery: Delivery = Delivery.DROP
+    source_id: Optional[str] = None
     event_type: EventType = field(default=EventType.INBOX_NOTIFICATION, init=False)
 
 
@@ -72,6 +75,8 @@ class MessagesDataEvent(NestedEntryCastingMixin, IpcEvent):
     messages: List[MessageEntry]
     alias: str
     onion: Optional[str] = None
+    has_older: bool = False
+    page_available: bool = True
     _nested_entry_types: ClassVar[Dict[str, type[object]]] = {
         'messages': MessageEntry,
     }
@@ -142,6 +147,8 @@ class RuntimeSnapshotEvent(NestedEntryCastingMixin, IpcEvent):
     live_contexts: List[LiveContextEntry] = field(default_factory=list)
     pending: List[PendingConnectionEntry] = field(default_factory=list)
     settings_version: str = '1'
+    profile_instance_id: Optional[str] = None
+    authenticated_client_count: Optional[int] = None
     _nested_entry_types: ClassVar[Dict[str, type[object]]] = {
         'contacts': ContactEntry,
         'conversations': DropConversationSummaryEntry,

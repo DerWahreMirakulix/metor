@@ -5,6 +5,16 @@ It is binding: every new or renamed symbol, setting, event, or documentation
 string MUST follow these definitions. When in doubt, extend this file instead
 of inventing a parallel term.
 
+## Graphical frontend
+
+`gui` is the single official graphical frontend ID; `metor-ui-gui` owns
+`metor.ui.gui`. Embedded describes deployment, not another frontend ID.
+`device_config` is the optional absolute device-description path on the public
+launch context; `simulator` is explicit isolated execution, never desktop fallback.
+`pcm_s16le_16000_mono` names the candidate GUI codec: 16 kHz mono signed
+little-endian 16-bit samples, 320-sample capture frames and sample-aligned seeks.
+It does not imply that existing arbitrary Voice codec strings are decodable.
+
 ## Dimension 1 — Message Semantics (User Concept, unchanged)
 
 The user-facing world is split into two message semantics. These terms are
@@ -109,3 +119,257 @@ prefix is client scope and rejected with `CLIENT_SCOPE_KEY_REJECTED`.
 | `DAEMON_CANNOT_MANAGE_UI`                                                                                       | `CLIENT_SCOPE_KEY_REJECTED`        | IPC event                             |
 | `ui.prompt_sign` / `ui.chat_limit` / `ui.chat_buffer_padding` / `ui.inbox_notification_delay`                   | `ui.terminal.*`                    | frontend registry                     |
 | `ui.default_profile` / `ui.ipc_timeout` / `ui.chat_daemon_autostart` / `ui.history_limit` / `ui.messages_limit` | `client.*`                         | settings schema                       |
+
+## Protected GUI metadata
+
+- `DropConversationSummaryEntry.pending_count`: content-free count of pending
+  outbound DROP receipts. It defaults to zero for older IPC-2 writers and remains
+  separate from inbound `unread_count`. Clearing local history does not cancel
+  this delivery state. Core retains its canonical conversation order, with
+  stable peer-identity ties; the GUI applies protected pin order only.
+- `profile_instance_id`: opaque storage-owned identity in a runtime snapshot and
+  protected GUI preference result; independent of profile name and own Onion.
+- `GuiPreferences`: bounded `ui.gui` document with DROP pin identities and
+  application presentation/lock defaults. It contains no aliases or content.
+- `preferences_revision` / `expected_revision`: authoritative revision and
+  compare-and-swap precondition; distinct from runtime/content event revisions.
+- `GetGuiPreferencesCommand` / `SetGuiPreferencesCommand`: public authenticated
+  read/update operations. Security-policy changes additionally require current
+  root-password strength; PIN verifier management remains its existing Core API.
+- `GuiPreferencesEvent` / `GuiPreferencesRejectedEvent`: authoritative values
+  or non-mutating typed `GuiPreferenceFailure`; no plaintext fallback.
+- `profile_instance_id` / `protected_gui_preferences` capabilities: additive
+  IPC-2 support negotiated before the GUI uses these services.
+
+The generated API/schema describe the nested fields and enums. Schema 4 stores
+this namespace under the profile database's protection and deletion boundary.
+
+- `local_acceptance`: opt-in text-send field requesting a local durable result
+  before remote ACK; false preserves the existing command behavior.
+- `TextAcceptedEvent` / `TextRejectedEvent`: local admission or definite rejection,
+  distinct from delivered/read outcomes. Actual delivery may be DROP after Core
+  automatic fallback.
+- `GetMessageOutcomeCommand` / `MessageOutcomeEvent`: exact canonical peer, local
+  direction and logical-ID receipt reconciliation, without reading content. An
+  absent receipt leaves delivery unknown.
+## GUI Voice producer lifecycle
+
+- `RegisterVoiceOwnerCommand` / `VoiceOwnerRegisteredEvent`: establish a Core-issued,
+  connection-bound token for disposable DROP staging and LIVE producer loss.
+- `ReleaseVoiceOwnerCommand` / `VoiceOwnerReleasedEvent`: revoke that connection's
+  owner; `cleanup_pending` means durable cleanup/recovery remains tracked.
+- `VoiceOwnerRejectedEvent`: unsupported policy or stale/wrong connection token.
+- `owner_token`: optional qualification on Voice mutations, preview and retained
+  inventory. It is volatile frontend authority, never a blob path or resume secret.
+- `producer_interrupted`: retained LIVE data whose vanished producer could not yet
+  be finalized. `can_retry_finalization` permits an authenticated explicit
+  `FinalizeVoiceCommand` without claiming the invalidated producer token.
+- `disposable_voice_owner`, `interrupted_voice_recovery`: managed-runtime capability
+  names advertised only with protected SQL staging and an active blob store.
+- `LiveContextEntry.context_generation`: logical conversation identity qualified by
+  the runtime epoch. Recovery preserves it; a later independent call receives a
+  new value. A known retained identity alone grants no active permission.
+- `BeginVoiceCommand.context_generation`: optional expected logical context;
+  stale, ended or pending-inbound context-qualified capture is rejected.
+- `live_context_identity`: capability for snapshot identity and qualified capture.
+- `ListRetainedMessagesCommand.msg_id`: optional exact identity filter, included in
+  the continuation fingerprint. Combine it with peer and direction; it does not
+  read or consume content. `retained_message_identity` advertises this filter.
+
+## Bounded foreground text handoff
+
+- `MarkReadCommand.max_messages`: optional maximum number of returned/consumed
+  text rows. A null value preserves the existing unlimited caller behavior.
+- `MarkReadCommand.max_payload_bytes`: optional budget for the UTF-8 JSON encoding
+  of the selected SQL row string values; selection stops before a row exceeding
+  the remaining budget. It excludes response-envelope/presentation overhead,
+  which consumers reserve separately. Selection and consumption remain atomic.
+- `bounded_text_handoff`: additive IPC-2 capability for these defaulted bounds.
+  The operation remains peer- and delivery-filtered and never consumes Voice.
+
+### Bounded DROP archive paging
+
+- `bounded_archive_pages`: additive IPC-2 capability for optional
+  `GetMessagesCommand.before_msg_id`, `before_direction` and `max_payload_bytes`.
+  Continuation requires both exact identity fields and explicit bounded paging.
+  The boundary is exclusive and qualified by the resolved peer and DROP delivery;
+  equal timestamps are ordered by Core receipt identity. GUI code never receives
+  or interprets SQL receipt numbers.
+- `max_payload_bytes` on archive requests limits the UTF-8 JSON representation of
+  the selected storage-row values, excluding response-envelope overhead, to at
+  most 2 MiB. Bounded requests also require a row limit of 1–200. Core reads rows
+  incrementally and does not fetch an entire archive to trim it afterward.
+- `MessagesDataEvent.has_older` reports another eligible older row; it is not an
+  unread count. `page_available=false` with an empty page means the requested
+  boundary no longer exists or the first row exceeds the requested byte budget.
+  Clients preserve the old page and offer an explicit return to current history.
+  Legacy requests retain their existing history projection and default values.
+
+### Contact identity guards and observations
+
+- `contact_identity_guard`: additive IPC-2 capability for defaulted optional
+  `RemoveContactCommand.onion` and `RenameContactCommand.onion`. The canonical
+  contact service rejects an alias that no longer belongs to that exact identity;
+  legacy alias-only writers retain their behavior. The asserted identity never
+  selects a replacement peer through a reused human label.
+- Contact rename/demotion and orphan-removal broadcasts are uncorrelated state
+  observations. Only the requested operation's actual outcome completes its
+  exchange. In particular, cleanup of a different discovered peer is not a
+  successful result for a rejected contact-removal command.
+
+### Exact incoming-call handles
+
+- `pending_call_handles`: additive IPC-2 capability. Defaulted
+  `AcceptCommand.action_handle`, `RejectCommand.action_handle` and
+  `PendingConnectionEntry.action_handle` bind an action to one pending request
+  owned by that IPC recipient. `IncomingConnectionEvent.action_handle` uses the
+  same recipient-specific authority in both full and restricted sessions.
+  Handle absence preserves legacy target-only requests. An explicit invalid,
+  expired, cross-client or replacement-request handle returns
+  `NO_PENDING_CONNECTION`; it never falls back to a target-only action.
+- Handles survive the same client's successful normal reauthorization while the
+  exact request, runtime and deadline remain valid. Denied restricted Accept
+  does not consume the handle needed by Decline. A new restriction cycle,
+  disconnected client or hard runtime teardown revokes its prior handles.
+- `LiveContextEntry.call_handle`: defaulted optional navigation identity for a
+  call observed by this IPC client and positively accepted into that exact socket,
+  including acceptance by another local client. It is projected only while the
+  accepted logical context still matches its generation. A later call from the
+  same Onion cannot inherit it. This metadata grants no media permission.
+- The network state coordinator owns runtime-only pending source tokens.
+  Session access replaces them with bounded recipient handles before publishing
+  snapshots or incoming events. A late source projection cannot acquire a
+  replacement request's authority; internal source tokens are not exposed as
+  usable client handles. No peer-wire or storage generation changes are involved.
+
+### Restricted state and notification sources
+
+- `restricted_live_projection`: additive IPC-2 capability for the read-only
+  `GetRestrictedClientStateCommand` / `RestrictedClientStateEvent` exchange.
+  The event projects only the requesting connection's current restriction,
+  exact continued target/context generation, session phase and privacy-permitted
+  pending calls / accepted navigation handles. Notifications Off returns neither
+  pending nor accepted call metadata. Full sessions receive `restricted=False`.
+- `continued_live_context_generation`: defaulted optional positive integer on
+  `RestrictClientCommand` qualifies the deliberate foreground target. Core returns
+  the granted target/generation on `ClientRestrictedEvent` and revalidates both
+  on restricted-state queries. Recognized recovery preserves the logical context;
+  terminal end or a fresh manual call does not inherit old media permission.
+- `InboxNotificationEvent.delivery`: defaulted DROP/LIVE kind for content-free
+  unseen activity. `source_id` is a defaulted optional canonical inbound message
+  identity, used to distinguish a new arrival with the same unread count.
+  Anonymous restricted projection removes source identity, Onion and alias;
+  Notifications Off suppresses the event. No message body is part of this DTO.
+  GUI dismissal watermarks and arrival hashes are bounded volatile metadata;
+  current unread totals never establish an exact historical since-lock count.
+
+### Qualified LIVE lifecycle controls
+
+- `qualified_live_control`: capability for optional exact qualifiers on
+  `DisconnectCommand`. `context_generation` identifies the displayed active or
+  recovering context for End; `attempt_id` identifies one current outbound call
+  for Cancel. They are mutually exclusive. Unqualified legacy callers retain
+  their existing semantics.
+- `LiveContextEntry.outbound_attempt_id`: defaulted optional opaque 32-character
+  hexadecimal identity of the current outbound attempt. Cancellation invalidates
+  it; a late connection worker cannot bind to or clear a replacement attempt.
+  Its entropy is defined by `LIVE_ATTEMPT_TOKEN_BYTES`.
+- `LiveControlCompletedEvent` / `LiveControlRejectedEvent`: exact local lifecycle
+  completion or stale-selection rejection. Completion does not imply remote
+  receipt or delivery; rejection is not a transport failure.
+- `qualified_live_retunnel`: capability for optional
+  `RetunnelCommand.context_generation`. Qualified Change route admits only an
+  active LIVE context and rechecks it after circuit IO; it never selects a
+  cached DROP route. `LiveContextEntry.route_changing` is the defaulted Core
+  projection of admitted route replacement and its recognized recovery.
+
+### Safe Core setting descriptors
+
+- `safe_setting_descriptors`: capability for `GetConfigListCommand.safe_descriptors`
+  and `SetConfigCommand.safe_only`. The closed Core catalog exposes permitted
+  profile overrides; global and existing Terminal/CLI operations retain their
+  defaults. It does not grant restricted-session configuration access.
+- `SettingSnapshotEntry.value_type`, `display_name`, `display_group`, `description`,
+  `constraints`, `security_note`, `min_value`, `max_value`, `editable` and `scope`
+  extend the existing effective `key`, `value`, `source` and `category` snapshot.
+  Registry types/defaults/constraints and current configuration remain authoritative.
+- `SetConfigCommand.expected_value`: optional displayed effective string compared
+  under the profile configuration lock before writing a profile override.
+  A stale edit reports the existing typed setting validation error. It does not
+  replace protected GUI-preference document revisions or write global settings.
+
+### Activity metadata pages
+
+- `history_metadata_pages`: capability for opt-in `page_size` and `before_id` on
+  `GetHistoryCommand` / `GetRawHistoryCommand`. The exclusive profile-local ledger
+  anchor is validated atomically with retrieval; it is not a message identity.
+- `metadata_only`: paged history excludes free-form diagnostic text at the SQL
+  boundary. `next_before_id`, `has_older` and `page_available` distinguish a next
+  page from the end of history and an expired anchor. A summary page can contain
+  no displayable rows while retaining a truthful older-page cursor.
+- `record_live` and `record_drop`: optional effective Core retention flags on
+  history results; populated for metadata pages. Existing rows can remain visible
+  while recording is off. No replacement GUI ledger is created.
+- `HISTORY_PAGE_MAX_ITEMS` (200), `HISTORY_METADATA_MAX_CHARS` (512),
+  `HISTORY_PAGE_MAX_BYTES` (2 MiB) and `HISTORY_ANCHOR_MAX` bound the public paging
+  contract. GUI retains one 64-row page and at most 128 cursor bookmarks.
+
+### Optional frontend profile management
+
+- `FrontendProfileManagement`: optional SDK protocol implemented by the local
+  base host. It adds `profile_catalog`, `manage_profile` and
+  `create_profile_entry` without making them requirements of the existing
+  launch-host interface or introducing GUI filesystem access.
+- `FrontendProfileCatalog`: finite local profile metadata, actual selected and
+  default names, and an optional exclusive `next_after` bookmark.
+- `FrontendProfileChange`: one `FrontendProfileAction` (`set_default`, `rename`
+  or `remove`), exact profile name, originally selected host profile and optional
+  new name. `selection_changed` refuses stale host-selection intent.
+- `valid_frontend_profile_name`: exact bounded canonical name validation; path-like
+  input is rejected before host lifecycle calls rather than silently normalized.
+  `FRONTEND_PROFILE_PAGE_ITEMS` and `FRONTEND_PROFILE_NAME_CHARACTERS` bound pages
+  to 64 rows and names to 255 characters.
+- `Settings.set(expected_value=...)`: optional file-lock-protected effective-value
+  comparison for host-owned global reference updates. A GUI-host rename follows
+  the default reference only if it still points to the renamed profile.
+  `renamed_default_unconfirmed` reports a completed directory rename whose default
+  reference update could not be confirmed; it never means the rename was rolled back.
+
+- `ProfileRuntimeCoordinator.switch(on_phase=...)`: optional observer of actual
+  source snapshot, capture finalization, source preparation/release and target
+  factory/bootstrap/snapshot phases; observer failure cannot change the transaction.
+- `ProfileSwitchError.source_prepared`: confirmed Core preparation and hard lock,
+  independently of the existing `source_released` client-detach result.
+- `RuntimeSnapshotEvent.authenticated_client_count`: optional point-in-time
+  authenticated IPC client count, including the caller; None is unavailable,
+  not zero. Used for profile-switch shared-client consequences.
+- GUI `LIFECYCLE_CAPTURE_SECONDS` (65): local wait ceiling for accepted capture
+  finalization before exit/switch. Timeout is unconfirmed preservation and never
+  authorizes an appliance power cut.
+
+- `SelfDestructCommand.operation_id`: optional 32-character lowercase hexadecimal
+  correlation identity (`DESTRUCTION_OPERATION_BYTES = 16`). It is carried by
+  initiated, key-destroyed and terminal reports for the initiating client; it is
+  not an authentication credential or an authorization grant.
+- `SelfDestructRuntimeReleasedEvent`: opt-in exact-operation confirmation that
+  runtime preparation, database close and runtime-key release all succeeded.
+- `SelfDestructSafeEvent`: combined selected-encrypted-profile runtime release
+  and persistent key-protection destruction. File cleanup can still be pending;
+  unrelated runtime safety and host shutdown permission remain separate.
+- `purge_safe_milestone`: support for the optional scoped destruction reports,
+  not permission to invoke destruction. Existing conservative authorization applies.
+- `MessageOutcomeEvent.archive_available`: optional exact receipt's local archive
+  presence, read atomically with delivery/status and without loading any payload.
+  False does not mean pending delivery was cancelled or that a message was never sent.
+- `message_archive_state`: support for the optional archive-presence receipt field.
+- GUI `RECEIPT_TARGETS`: at most three bounded LIVE-item populations plus one
+  archive page (3,064 metadata identities) in uncertain-mutation reconciliation.
+  Reads use original targets; later arrivals never join that batch.
+
+
+GUI volatile interaction bounds: `CONTACT_SELECTION_ITEMS` (128) and
+`CONTACT_SELECTION_BYTES` (64 KiB) bound exact selected-contact removal intent;
+`PLAYBACK_COVERAGE_PER_ITEM` (128 intervals) and
+`PLAYBACK_COVERAGE_INTERVALS` (8192 aggregate intervals, at most 1000 targets)
+bound current-runtime drained PCM coverage. Exceeding coverage limits forgets
+ranges conservatively; it never fabricates heard content or a Core Read receipt.

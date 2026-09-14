@@ -44,9 +44,11 @@ from metor.data import (
     ContactManager,
     MessageManager,
     SettingKey,
+    SqlManager,
 )
+from metor.data.sql import ProfileMetadataRepository
 from metor.data.blob import BlobLifecycle, BlobStore
-from metor.utils import Constants, clean_onion
+from metor.utils import Constants, clean_onion, secure_clear_buffer
 
 # Local Package Imports
 from metor.core.daemon.managed.crypto import Crypto
@@ -55,13 +57,24 @@ from metor.core.daemon.managed.bootstrap import (
     CorruptedStorageError,
     DaemonRuntime,
 )
-from metor.core.daemon.managed.handlers import NetworkCommandHandler
+from metor.core.daemon.managed.handlers import (
+    NetworkCommandHandler,
+    ProfileMetadataCommandHandler,
+)
 from metor.core.daemon.managed.ipc import IpcServer
 from metor.core.daemon.managed.outbox import OutboxWorker
 from metor.core.daemon.managed.network import NetworkManager, StateTracker
 from metor.core.daemon.managed.notify import NotificationService
+from metor.core.daemon.managed.producers import (
+    ProducerCleanup,
+    VoiceProducerService,
+    ProducerBlobAllocator,
+)
 from metor.core.daemon import InvalidMasterPasswordError
-from metor.core.daemon.managed.local_auth import SessionAuthContext
+from metor.core.daemon.managed.local_auth import (
+    SessionAuthContext,
+    create_session_auth_context,
+)
 from metor.core.daemon.managed.quick_unlock import QuickUnlockStore
 from metor.core.daemon.managed.status import DaemonStatus
 from metor.core.daemon.handlers import (
@@ -137,6 +150,7 @@ class Daemon(DaemonLifecycleMixin):
         self._runtime_stop_flag: threading.Event = threading.Event()
         self._domain_operation_lock = threading.RLock()
         self._purge_fence = threading.Event()
+        self._purge_operation_id: str | None = None
         self._require_session_auth: bool = require_session_auth
         self._transport_state: StateTracker = StateTracker()
 
@@ -175,6 +189,12 @@ class Daemon(DaemonLifecycleMixin):
             is_saved_contact_callback=self._is_saved_contact_target,
             resolve_target_callback=self._resolve_contact_target,
             voice_target_callback=self._voice_target,
+            pending_token_callback=lambda onion: self._transport_state.pending_token(
+                onion
+            ),
+            active_connection_callback=lambda onion: (
+                self._transport_state.get_connection(onion)
+            ),
             pending_call_callback=lambda onion: self._transport_state.pending_identity(
                 onion
             ),
@@ -182,6 +202,19 @@ class Daemon(DaemonLifecycleMixin):
             voice_delivery_callback=self._voice_delivery,
             inbound_voice_delivery_callback=self._inbound_voice_delivery,
             live_context_callback=self._live_context_token,
+            live_generation_callback=lambda onion: (
+                self._network.known_live_context_generation(onion)
+                if self._network is not None
+                else None
+            ),
+            live_state_callback=lambda onion: (
+                self._network.get_live_state(onion).value
+                if self._network is not None
+                else 'disconnected'
+            ),
+            pending_projection_callback=lambda: (
+                self._command_dispatcher.pending_call_entries()
+            ),
             self_destruct_requires_unlock_callback=lambda: self._pm.config.get_bool(
                 SettingKey.SELF_DESTRUCT_REQUIRES_UNLOCK
             ),
@@ -291,7 +324,49 @@ class Daemon(DaemonLifecycleMixin):
             self._network.release_consumed_voice,
             delete_persistent_blob,
         )
+
+        def profile_metadata() -> ProfileMetadataRepository:
+            """Resolves storage only for the installed unlocked runtime.
+
+            Args:
+                None
+            Returns:
+                ProfileMetadataRepository: Profile-owned protected namespace.
+            """
+            return SqlManager.opened_profile_metadata(self._pm.paths.get_db_file())
+
+        metadata_handler = ProfileMetadataCommandHandler(
+            profile_metadata,
+            self._session_access.is_full_authenticated,
+            self._broadcast_ipc_event,
+            self._session_access.quick_unlock_available,
+        )
         system_handler = SystemCommandHandler(self._pm, runtime.tm)
+        producers: VoiceProducerService | None = None
+        voice_owner_available = False
+        if active_blob_store is not None:
+            producer_repository = SqlManager.opened_voice_producers(
+                self._pm.paths.get_db_file()
+            )
+            voice_owner_available = producer_repository.protected
+            self._network.set_voice_capture_allocator(
+                ProducerBlobAllocator(producer_repository, active_blob_store).put
+            )
+            producers = VoiceProducerService(
+                ProducerCleanup(
+                    producer_repository,
+                    runtime.mm,
+                    active_blob_store,
+                    self._network.cancel_voice_draft,
+                    self._network.finalize_interrupted_voice,
+                ),
+                self._resolve_contact_target,
+                self._send_to_client,
+                self._purge_fence.is_set,
+                context=lambda onion, msg_id: self._voice_context(onion, msg_id, 'out'),
+                current_context=self._live_context_token,
+            )
+            producers.retry()
         network_handler = NetworkCommandHandler(
             runtime.tm,
             runtime.cm,
@@ -304,11 +379,18 @@ class Daemon(DaemonLifecycleMixin):
             self._session_access.register_session_consumer,
             config=self._pm.config,
             current_revision_cb=self._ipc.current_revision,
+            profile_instance_cb=metadata_handler.instance_id,
+            voice_owner_available=voice_owner_available,
+            authenticated_client_count_cb=lambda: len(
+                self._session_access.authenticated_recipients()
+            ),
         )
         self._command_dispatcher.install_runtime_handlers(
             network=network_handler,
             database=database_handler,
             system=system_handler,
+            metadata=metadata_handler,
+            producers=producers,
         )
 
     def _on_runtime_internal_error(self, message: str) -> None:
@@ -346,6 +428,7 @@ class Daemon(DaemonLifecycleMixin):
                 return
             if event.event_type is not EventType.RUNTIME_STATE_CHANGED:
                 stamp_request_id(event)
+            self._session_access.observe_call_transition(event)
             recipients = (
                 self._session_access.authenticated_recipients()
                 if self._session_access.requires_auth()
@@ -382,6 +465,7 @@ class Daemon(DaemonLifecycleMixin):
             None
         """
         stamp_request_id(event)
+        event = self._session_access.project_pending_snapshot(conn, event)
         self._ipc.send_to(conn, event)
 
     def _sig_handler(self, signum: int, frame: Optional[types.FrameType]) -> None:
@@ -419,6 +503,8 @@ class Daemon(DaemonLifecycleMixin):
                 time.sleep(Constants.WORKER_SLEEP_SEC)
                 if self._session_maintenance is not None:
                     self._session_maintenance.check_idle_timeouts()
+                with self._domain_operation_lock:
+                    self._command_dispatcher.retry_voice_cleanup()
         except KeyboardInterrupt:
             pass
         finally:
@@ -520,6 +606,8 @@ class Daemon(DaemonLifecycleMixin):
         """
         self._session_access.disconnect(conn)
         self._command_dispatcher.clear_client_focus(conn)
+        with self._domain_operation_lock:
+            self._command_dispatcher.disconnect_voice_producer(conn)
 
     def _get_local_auth_lockout_timeout(self) -> float:
         """
@@ -647,10 +735,16 @@ class Daemon(DaemonLifecycleMixin):
 
     def _send_self_destruct_initiated(self, conn: socket.socket) -> None:
         """Best-effort notification that never gates destructive work."""
+        payload: dict[str, JsonValue] | None = None
+        operation_id = getattr(self, '_purge_operation_id', None)
+        if operation_id is not None and conn in getattr(
+            self, '_destruction_recipients', set()
+        ):
+            payload = {'profile': self._pm.profile_name, 'operation_id': operation_id}
         try:
             self._ipc.send_to(
                 conn,
-                create_event(EventType.SELF_DESTRUCT_INITIATED),
+                create_event(EventType.SELF_DESTRUCT_INITIATED, payload),
             )
         except Exception:
             pass
@@ -681,6 +775,16 @@ class Daemon(DaemonLifecycleMixin):
         if pending_action is not None and self._network is not None:
             if isinstance(cmd, AcceptCommand):
                 self._network.accept(cmd.target, expected_pending=pending_action)
+                if (
+                    cmd.action_handle is not None
+                    and self._transport_state.get_connection(cmd.target)
+                    is pending_action
+                ):
+                    generation = self._network.known_live_context_generation(cmd.target)
+                    if generation is not None:
+                        self._session_access.record_accepted_call(
+                            conn, cmd.action_handle, cmd.target, generation
+                        )
                 return
             if isinstance(cmd, RejectCommand):
                 self._network.reject(cmd.target, expected_pending=pending_action)
@@ -766,14 +870,23 @@ class Daemon(DaemonLifecycleMixin):
             if not cmd.new_password:
                 self._ipc.send_to(conn, create_event(EventType.INVALID_NEW_PASSWORD))
                 return
+            replacement_auth = None
             try:
+                if self._require_session_auth:
+                    replacement_auth = create_session_auth_context(cmd.new_password)
                 self._km.change_password(cmd.current_password, cmd.new_password)
+                if replacement_auth is not None:
+                    self._session_access.install_context(replacement_auth)
+                    replacement_auth = None
             except (InvalidMasterPasswordError, InvalidCredentialError):
                 self._ipc.send_to(conn, create_event(EventType.INVALID_PASSWORD))
                 return
             except Exception:
                 self._ipc.send_to(conn, create_event(EventType.PASSWORD_CHANGE_FAILED))
                 return
+            finally:
+                if replacement_auth is not None:
+                    secure_clear_buffer(replacement_auth.proof_key)
             self._ipc.send_to(conn, create_event(EventType.PASSWORD_CHANGED))
             return
 
@@ -802,6 +915,7 @@ class Daemon(DaemonLifecycleMixin):
             return
 
         if isinstance(cmd, SelfDestructCommand):
+            self._purge_operation_id = cmd.operation_id
             self._purge_fence.set()
             self._transport_state.invalidate_all_live_generations()
             self._lifecycle = DaemonLifecycle.LOCKING

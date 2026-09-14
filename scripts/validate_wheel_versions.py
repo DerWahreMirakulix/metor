@@ -64,12 +64,13 @@ def validate_wheel_versions(wheel_paths: Sequence[Path]) -> tuple[str, ...]:
         tuple[str, ...]: Validation errors; empty on success.
     """
     expected_names: set[str] = {'metor', 'metor-sdk', 'metor-ui-terminal'}
+    supported_names = expected_names | {'metor-ui-gui'}
     found_names: set[str] = set()
     ownership: dict[str, set[str]] = {}
     errors: list[str] = []
     for wheel_path in wheel_paths:
         name, version, requirements = wheel_metadata(wheel_path)
-        if name not in expected_names:
+        if name not in supported_names:
             continue
         found_names.add(name)
         ownership[name] = wheel_owned_files(wheel_path)
@@ -82,7 +83,7 @@ def validate_wheel_versions(wheel_paths: Sequence[Path]) -> tuple[str, ...]:
                     f'metor must require {expected_sdk}; found '
                     f'{", ".join(requirements) or "no dependencies"}.'
                 )
-        if name == 'metor-ui-terminal':
+        if name in ('metor-ui-terminal', 'metor-ui-gui'):
             expected_requirements = (
                 f'metor=={APP_VERSION}',
                 f'metor-sdk=={APP_VERSION}',
@@ -90,7 +91,7 @@ def validate_wheel_versions(wheel_paths: Sequence[Path]) -> tuple[str, ...]:
             for expected_requirement in expected_requirements:
                 if expected_requirement not in requirements:
                     errors.append(
-                        'metor-ui-terminal must require '
+                        f'{name} must require '
                         f'{expected_requirement}; found '
                         f'{", ".join(requirements) or "no dependencies"}.'
                     )

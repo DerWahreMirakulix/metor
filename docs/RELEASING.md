@@ -8,7 +8,7 @@ releases and compatibility generations are independent.
 
 | Axis                   | Meaning                                                         | Bump when                                                                  |
 | ---------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| Application            | Version of the Metor product and all three Python distributions | An explicit product release is prepared                                    |
+| Application            | Version of the Metor product and all four Python distributions | An explicit product release is prepared                                    |
 | IPC protocol           | Typed client-daemon NDJSON wire contract                        | A breaking command, event, field, type, or wire-semantics change is made   |
 | Peer protocol          | Daemon-to-daemon Tor wire and handshake contract                | A breaking peer-wire or peer-semantics change is made                      |
 | DB schema              | Durable SQL tables, columns, constraints, and indexes           | Any persistent SQL schema changes, including additive changes              |
@@ -105,7 +105,7 @@ python scripts/generate_compatibility_manifest.py
 python scripts/check_release_compatibility.py --current docs/generated/compatibility.json
 ```
 
-Acceptance gates run on each native host, after the full three-distribution
+Acceptance gates run on each native host, after the full four-distribution
 developer install described in the README:
 
 ```console
@@ -140,7 +140,7 @@ valid stable `vMAJOR.MINOR.PATCH` tag through parsed SemVer ordering. Prerelease
 tags do not establish the normal stable release baseline. It calculates and
 writes `APP_VERSION`, then runs Ruff, Ruff format, Mypy, the complete test
 suite, all generated-document producers twice for reproducibility, compatibility
-gates, Linux and Windows jobs, all three package builds, and wheel-metadata
+gates, Linux and Windows jobs, all four package builds, and wheel-metadata
 validation. The canonical generated outputs are `API.md`, `SETTINGS.md`,
 `api.schema.json`, and `compatibility.json`. Only a non-dry-run request from
 `main` can commit those release changes, create the application release tag,
@@ -153,14 +153,22 @@ commit is tagged directly.
 The tag convention is `v0.2.0`, `v0.3.0`, or `v1.0.0`. Protocol and format
 generations are metadata in each product release, not separate tags.
 
-The three package builds are `metor-sdk`, the headless/base `metor`, and
-`metor-ui-terminal`. Their wheels must have no overlapping files and must use
+The four package builds are `metor-sdk`, the headless/base `metor`,
+`metor-ui-terminal`, and `metor-ui-gui`. Their wheels must have no overlapping files and must use
 the same application version. The release builder accepts `sdk`, `base`,
-`terminal`, or `all`; `terminal` creates a base-plus-Terminal wheelhouse. The
+`terminal`, `gui`, or `all`; UI variants create base-plus-UI wheelhouses. The
 obsolete separate `metor-daemon` distribution and `daemon` bundle variant do
 not exist. The `metor-daemon` executable remains a base-package entry point.
 Offline installers select the intended distribution by name from the
 wheelhouse, allowing pip to resolve only its exact dependencies.
+
+The developing `metor-ui-gui` distribution uses `requirements/gui.lock`. The
+canonical `all` builder, CI and release workflow include its package, dependency
+closure, installed-consumer and ZIP-installer checks. GUI security, media,
+Windows and native-input acceptance gates remain open; workflow inclusion is
+not release approval. [GUI.md](./contracts/GUI.md) records the actual status.
+Wheel metadata validation checks GUI ownership and matching versions whenever
+a GUI wheel is supplied. Full installed-artifact acceptance requires all four.
 
 ## Compatibility gates and human decisions
 

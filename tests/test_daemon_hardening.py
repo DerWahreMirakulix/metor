@@ -3,6 +3,7 @@
 # ruff: noqa: E402
 
 import base64
+from contextlib import nullcontext
 import hashlib
 import json
 import socket
@@ -2104,6 +2105,8 @@ class _RetunnelControllerHarness(ConnectionControllerRetunnelMixin):
         )
         self._cm = cast(ContactManager, self.contact_manager_mock)
         self.state_mock = Mock()
+        self._operation_lock = threading.RLock()
+        self.state_mock.snapshot_barrier.side_effect = nullcontext
         self.state_mock.is_connected_or_pending.side_effect = [True, False]
         self.state_mock.is_retunneling.return_value = True
         self._state = cast(StateTracker, self.state_mock)

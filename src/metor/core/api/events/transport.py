@@ -489,6 +489,25 @@ class MessageDeleteRejectedEvent(IpcEvent):
     )
 
 
+@register_event(EventType.LIVE_CONTROL_REJECTED)
+@dataclass
+class LiveControlRejectedEvent(IpcEvent):
+    """Rejects a stale exact lifecycle action without reporting a transport failure."""
+
+    onion: str = ''
+    reason: MessageOperationReason = MessageOperationReason.INVALID_SELECTION
+    event_type: EventType = field(default=EventType.LIVE_CONTROL_REJECTED, init=False)
+
+
+@register_event(EventType.LIVE_CONTROL_COMPLETED)
+@dataclass
+class LiveControlCompletedEvent(IpcEvent):
+    """Confirms exact local End/Cancel completion independently of remote delivery."""
+
+    onion: str = ''
+    event_type: EventType = field(default=EventType.LIVE_CONTROL_COMPLETED, init=False)
+
+
 @register_event(EventType.LIVE_CONTEXT_DISMISSED)
 @dataclass
 class LiveContextDismissedEvent(IpcEvent):

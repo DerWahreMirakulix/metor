@@ -1,0 +1,252 @@
+{
+  "kind": "native SDL renderer, synthetic SDK DTOs",
+  "sdl_video_driver": "offscreen",
+  "python": "3.11.15",
+  "system": "Linux",
+  "machine": "x86_64",
+  "viewport": [
+    360.0,
+    640.0
+  ],
+  "window": [
+    360.0,
+    664.0
+  ],
+  "rss_bytes": 242339840,
+  "view": "continued_pin",
+  "lock_geometry": [
+    {
+      "text": "Metor",
+      "opacity": 1.0,
+      "color": [
+        0.9529411764705882,
+        0.9686274509803922,
+        0.9647058823529412,
+        1.0
+      ],
+      "canvas": [
+        [
+          "Color",
+          [],
+          []
+        ],
+        [
+          "BindTexture",
+          [],
+          []
+        ],
+        [
+          "Rectangle",
+          [
+            0.0,
+            520.0
+          ],
+          [
+            312.0,
+            51.0
+          ]
+        ]
+      ],
+      "bounds": [
+        0,
+        520.0,
+        312.0,
+        51
+      ],
+      "window": [
+        24.0,
+        517.0
+      ]
+    },
+    {
+      "text": "Locked",
+      "opacity": 1.0,
+      "color": [
+        0.9529411764705882,
+        0.9686274509803922,
+        0.9647058823529412,
+        1.0
+      ],
+      "canvas": [
+        [
+          "Color",
+          [],
+          []
+        ],
+        [
+          "BindTexture",
+          [],
+          []
+        ],
+        [
+          "Rectangle",
+          [
+            0.0,
+            467.0
+          ],
+          [
+            312.0,
+            37.0
+          ]
+        ]
+      ],
+      "bounds": [
+        0,
+        467.0,
+        312.0,
+        37
+      ],
+      "window": [
+        24.0,
+        464.0
+      ]
+    },
+    {
+      "text": "PIN",
+      "opacity": 1.0,
+      "color": [
+        0.9529411764705882,
+        0.9686274509803922,
+        0.9647058823529412,
+        1.0
+      ],
+      "canvas": [
+        [
+          "Color",
+          [],
+          []
+        ],
+        [
+          "BindTexture",
+          [],
+          []
+        ],
+        [
+          "Rectangle",
+          [
+            0.0,
+            412.0
+          ],
+          [
+            312.0,
+            23.0
+          ]
+        ]
+      ],
+      "bounds": [
+        0,
+        412.0,
+        312.0,
+        23
+      ],
+      "window": [
+        24.0,
+        409.0
+      ]
+    },
+    {
+      "text": "Forgot PIN?",
+      "opacity": 1.0,
+      "color": [
+        0.9529411764705882,
+        0.9686274509803922,
+        0.9647058823529412,
+        1.0
+      ],
+      "canvas": [
+        [
+          "Color",
+          [],
+          []
+        ],
+        [
+          "BindTexture",
+          [],
+          []
+        ],
+        [
+          "Rectangle",
+          [
+            12.0,
+            56.0
+          ],
+          [
+            288.0,
+            32.0
+          ]
+        ]
+      ],
+      "bounds": [
+        12.0,
+        56.0,
+        288.0,
+        32.0
+      ],
+      "window": [
+        36.0,
+        53.0
+      ]
+    }
+  ],
+  "lock_scroll_geometry": [
+    {
+      "bounds": [
+        24.0,
+        135.0,
+        312.0,
+        481.0
+      ],
+      "canvas": [
+        [
+          "StencilPush",
+          [],
+          []
+        ],
+        [
+          "BindTexture",
+          [],
+          []
+        ],
+        [
+          "Rectangle",
+          [
+            24.0,
+            135.0
+          ],
+          [
+            312.0,
+            481.0
+          ]
+        ],
+        [
+          "StencilUse",
+          [],
+          []
+        ]
+      ]
+    }
+  ],
+  "notification_summary_geometry": [],
+  "core_integration": false,
+  "physical_input": false,
+  "native_widget_synthetic_keyboard": true,
+  "audio": false,
+  "font_scale": 1.5,
+  "text_field_geometry": [
+    {
+      "size": [
+        312.0,
+        52.0
+      ],
+      "padding": [
+        16.0,
+        16.0,
+        48.0,
+        16.0
+      ],
+      "line_lengths": [
+        0
+      ]
+    }
+  ]
+}

@@ -98,6 +98,8 @@ class RetainedMessageEntry:
     size_bytes: int = 0
     codec: Optional[str] = None
     duration_ms: Optional[int] = None
+    producer_interrupted: bool = False
+    can_retry_finalization: bool = False
 
     def __post_init__(self) -> None:
         """Coerces serialized enum fields into their typed representations.
@@ -146,6 +148,7 @@ class PendingConnectionEntry:
     origin: ConnectionOrigin
     reason: PendingConnectionReasonCode
     expires_at: Optional[str] = None
+    action_handle: Optional[str] = None
 
     def __post_init__(self) -> None:
         """Coerces string-backed origin and reason values to typed enums."""
@@ -177,9 +180,17 @@ class LiveContextEntry:
     recovery_eligible: bool = False
     disconnect_actor: Optional[ConnectionActor] = None
     disconnect_reason: Optional[ConnectionReasonCode] = None
+    context_generation: Optional[int] = None
+    call_handle: Optional[str] = None
+    outbound_attempt_id: Optional[str] = None
+    route_changing: bool = False
 
     def __post_init__(self) -> None:
         """Coerces optional disconnect fields to their public enums."""
+        if self.context_generation is not None and (
+            type(self.context_generation) is not int or self.context_generation <= 0
+        ):
+            raise ValueError('Invalid LIVE context generation')
         if self.disconnect_actor is not None:
             self.disconnect_actor = _coerce_enum(ConnectionActor, self.disconnect_actor)
         if self.disconnect_reason is not None:
@@ -195,6 +206,7 @@ class DropConversationSummaryEntry:
     alias: str
     onion: str
     unread_count: int = 0
+    pending_count: int = 0
 
 
 @dataclass
@@ -223,3 +235,13 @@ class SettingSnapshotEntry:
     value: str
     source: str
     category: str
+    value_type: str = ''
+    display_name: str = ''
+    display_group: str = ''
+    description: str = ''
+    constraints: str = ''
+    security_note: str = ''
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
+    editable: bool = False
+    scope: str = ''

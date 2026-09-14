@@ -238,6 +238,37 @@ class HistoryManager:
         )
         return HistoryProjector.project(raw_entries)[:actual_limit]
 
+    def get_raw_page(
+        self, filter_onion: Optional[str], page_size: int, before_id: Optional[int]
+    ) -> tuple[list[HistoryLedgerEntry], Optional[int], bool, bool]:
+        """Reads finite technical metadata without arbitrary diagnostic text.
+
+        Args:
+            filter_onion: Optional canonical peer filter.
+            page_size: Maximum inspected raw rows.
+            before_id: Exclusive profile-local ledger anchor.
+        Returns:
+            tuple: Metadata, next anchor, older-row flag and availability.
+        """
+        return self._history.get_page(filter_onion, page_size, before_id)
+
+    def get_summary_page(
+        self, filter_onion: Optional[str], page_size: int, before_id: Optional[int]
+    ) -> tuple[list[HistorySummaryEntry], Optional[int], bool, bool]:
+        """Projects one bounded raw page; raw-only pages retain their next anchor.
+
+        Args:
+            filter_onion: Optional canonical peer filter.
+            page_size: Maximum inspected raw rows, including skipped noise.
+            before_id: Exclusive profile-local ledger anchor.
+        Returns:
+            tuple: Summary metadata, next anchor, older-row flag and availability.
+        """
+        entries, next_id, older, available = self.get_raw_page(
+            filter_onion, page_size, before_id
+        )
+        return HistoryProjector.project(entries), next_id, older, available
+
     def clear_history(
         self,
         filter_onion: Optional[str] = None,

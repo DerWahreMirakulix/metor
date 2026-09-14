@@ -1,5 +1,25 @@
 """Facade exports for the strict IPC API layer."""
 
+from metor.core.api.events import (
+    VoiceOwnerRegisteredEvent,
+    VoiceOwnerReleasedEvent,
+    VoiceOwnerRejectedEvent,
+)
+
+from metor.core.api.commands import RegisterVoiceOwnerCommand, ReleaseVoiceOwnerCommand
+
+from metor.core.api.commands import GetMessageOutcomeCommand
+
+from metor.core.api.events import (
+    TextAcceptedEvent,
+    TextRejectedEvent,
+    MessageOutcomeEvent,
+)
+
+from metor.core.api.preferences import GuiPreferences, GuiPreferenceFailure
+from metor.core.api.commands import GetGuiPreferencesCommand, SetGuiPreferencesCommand
+from metor.core.api.events import GuiPreferencesEvent, GuiPreferencesRejectedEvent
+
 from metor.core.api.base import (
     create_request_id,
     ensure_request_id,
@@ -90,6 +110,7 @@ from metor.core.api.commands import (
     RegisterLiveConsumerCommand,
     ReauthorizeClientCommand,
     RestrictClientCommand,
+    GetRestrictedClientStateCommand,
     RejectCommand,
     RemoveContactCommand,
     RemoveProfileCommand,
@@ -156,6 +177,7 @@ from metor.core.api.events import (
     ClientAccessRestrictedEvent,
     ClientReauthorizedEvent,
     ClientRestrictedEvent,
+    RestrictedClientStateEvent,
     IpcClientLimitReachedEvent,
     DaemonLockedEvent,
     DaemonOfflineEvent,
@@ -169,6 +191,8 @@ from metor.core.api.events import (
     FallbackSuccessEvent,
     FallbackRejectedEvent,
     LiveContextDismissedEvent,
+    LiveControlRejectedEvent,
+    LiveControlCompletedEvent,
     LiveContextDismissRejectedEvent,
     LiveMessageResourcePressureEvent,
     LiveMessageUnavailableEvent,
@@ -235,6 +259,8 @@ from metor.core.api.events import (
     SelfDestructKeyDestroyedEvent,
     SelfDestructCleanupFailedEvent,
     SelfDestructInitiatedEvent,
+    SelfDestructRuntimeReleasedEvent,
+    SelfDestructSafeEvent,
     QuickUnlockConfiguredEvent,
     QuickUnlockFailedEvent,
     SettingDataEvent,
@@ -271,6 +297,21 @@ from metor.core.api.registry import CMD_MAP, EVENT_MAP
 
 
 __all__ = [
+    'VoiceOwnerRegisteredEvent',
+    'VoiceOwnerReleasedEvent',
+    'VoiceOwnerRejectedEvent',
+    'RegisterVoiceOwnerCommand',
+    'ReleaseVoiceOwnerCommand',
+    'GetMessageOutcomeCommand',
+    'TextAcceptedEvent',
+    'MessageOutcomeEvent',
+    'TextRejectedEvent',
+    'GuiPreferences',
+    'GuiPreferenceFailure',
+    'GetGuiPreferencesCommand',
+    'SetGuiPreferencesCommand',
+    'GuiPreferencesEvent',
+    'GuiPreferencesRejectedEvent',
     'JsonValue',
     'ContentType',
     'Delivery',
@@ -410,6 +451,8 @@ __all__ = [
     'AlreadyUnlockedEvent',
     'SessionAuthenticatedEvent',
     'SelfDestructInitiatedEvent',
+    'SelfDestructRuntimeReleasedEvent',
+    'SelfDestructSafeEvent',
     'PasswordChangedEvent',
     'PasswordChangeUnsupportedEvent',
     'PasswordChangeFailedEvent',
@@ -448,6 +491,8 @@ __all__ = [
     'FallbackSuccessEvent',
     'FallbackRejectedEvent',
     'LiveContextDismissedEvent',
+    'LiveControlRejectedEvent',
+    'LiveControlCompletedEvent',
     'LiveContextDismissRejectedEvent',
     'LiveMessageResourcePressureEvent',
     'LiveMessageUnavailableEvent',
@@ -500,6 +545,7 @@ __all__ = [
     'ConfigureQuickUnlockCommand',
     'ReauthorizeClientCommand',
     'RestrictClientCommand',
+    'GetRestrictedClientStateCommand',
     'PrepareProfileExitCommand',
     'RuntimeSnapshotEvent',
     'RetainedMessageEntry',
@@ -511,6 +557,7 @@ __all__ = [
     'ClientAccessRestrictedEvent',
     'ClientReauthorizedEvent',
     'ClientRestrictedEvent',
+    'RestrictedClientStateEvent',
     'ProfileExitPreparedEvent',
     'RuntimeStateChangedEvent',
     'QuickUnlockConfiguredEvent',

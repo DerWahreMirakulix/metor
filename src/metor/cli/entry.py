@@ -7,6 +7,7 @@ and delegates to the command dispatcher.
 import argparse
 import os
 import sys
+from pathlib import Path
 from typing import List
 
 from metor.client import FrontendLaunchError, LoadedFrontend, load_frontend
@@ -67,6 +68,19 @@ def run_cli(argv: List[str]) -> int:
                 persist_defaults=False,
             )
         )
+        requested_device = args.device_config
+        if requested_device is None and selected_frontend == 'gui':
+            requested_device = os.environ.get('METOR_DEVICE_CONFIG') or None
+        if (
+            requested_device is not None or args.simulator
+        ) and selected_frontend != 'gui':
+            sys.stderr.write('Device options require the gui frontend.\n')
+            return 2
+        if requested_device is not None:
+            if not requested_device.strip():
+                sys.stderr.write('Device configuration path must not be empty.\n')
+                return 2
+            args.device_config = str(Path(requested_device).absolute())
         try:
             loaded_frontend: LoadedFrontend = load_frontend(selected_frontend)
         except FrontendLaunchError as exc:

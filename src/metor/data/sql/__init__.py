@@ -17,6 +17,8 @@ from metor.data.sql.errors import (
     UnsupportedDatabaseSchemaError,
 )
 from metor.data.sql.manager import SqlManager
+from metor.data.sql.metadata import ProfileMetadataRepository
+from metor.data.sql.producers import VoiceProducerRepository, VoiceProducerItem
 from metor.data.sql.message import MessageReceiptRow, MessageRepository
 from metor.data.sql.peer import PeerRepository, PeerRow
 
@@ -31,6 +33,9 @@ __all__ = [
     'NewerDatabaseSchemaError',
     'PeerRepository',
     'PeerRow',
+    'ProfileMetadataRepository',
+    'VoiceProducerRepository',
+    'VoiceProducerItem',
     'SQLCIPHER_BACKEND',
     'SqlCipherConnection',
     'SqlCipherCursor',

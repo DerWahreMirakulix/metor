@@ -14,7 +14,6 @@ from metor.core.api import (
     CommitVoiceCommand,
     CancelVoiceCommand,
     AppendVoiceChunkCommand,
-    ContentType,
     EventType,
     GetChatStartupStateCommand,
     GetRuntimeSnapshotCommand,
@@ -30,6 +29,8 @@ from metor.core.api import (
     ConnectionsStateEvent,
     ConnectCommand,
     DisconnectCommand,
+    LiveControlRejectedEvent,
+    LiveControlCompletedEvent,
     DismissLiveContextCommand,
     AcceptCommand,
     RejectCommand,
@@ -48,17 +49,16 @@ from metor.core.api import (
     GetTransportStateCommand,
     TextContent,
     VoiceContent,
+    VoiceOperationRejectedEvent,
 )
 from metor.core.tor import TorManager
 from metor.core.daemon.managed.network import NetworkManager
+from metor.core.daemon.managed.models import SessionState
 from metor.data import (
     HistoryManager,
-    HistoryActor,
-    HistoryEvent,
     ContactManager,
     MessageManager,
     MessageDirection,
-    MessageStatus,
     SettingKey,
 )
 from metor.utils import clean_onion
@@ -71,6 +71,7 @@ from metor.versioning import (
 # Local Package Imports
 from metor.core.daemon.managed.outbox import OutboxWorker
 from .snapshot import RuntimeSnapshotProjectionMixin
+from .text import TextCommandHandler
 
 if TYPE_CHECKING:
     from metor.data.profile import Config
@@ -78,6 +79,8 @@ if TYPE_CHECKING:
 
 class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
     """Processes network-related IPC commands from the UI using strict DTOs."""
+
+    _voice_owners: bool = False
 
     @staticmethod
     def _run_request_target(
@@ -112,6 +115,9 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
         register_session_consumer_cb: Callable[[socket.socket], None],
         config: 'Config',
         current_revision_cb: Optional[Callable[[], int]] = None,
+        profile_instance_cb: Optional[Callable[[], str]] = None,
+        voice_owner_available: bool = False,
+        authenticated_client_count_cb: Optional[Callable[[], int]] = None,
     ) -> None:
         """
         Initializes the NetworkCommandHandler.
@@ -129,11 +135,15 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
             config (Config): The profile configuration instance.
             current_revision_cb (Optional[Callable[[], int]]): Current daemon
                 event sequence used to build a race-safe aggregate snapshot.
+            profile_instance_cb: Stable identity supplied by profile storage.
+            voice_owner_available: Protected producer lifecycle is installed.
+            authenticated_client_count_cb: Content-free attached-client count for lifecycle consequences.
 
         Returns:
             None
         """
         self._tm: TorManager = tm
+        self._authenticated_client_count = authenticated_client_count_cb
         self._cm: ContactManager = cm
         self._hm: HistoryManager = hm
         self._mm: MessageManager = mm
@@ -146,8 +156,13 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
         )
         self._config: 'Config' = config
         self._current_revision: Callable[[], int] = current_revision_cb or (lambda: 0)
+        self._profile_instance = profile_instance_cb
+        self._voice_owners = voice_owner_available
         self._client_focuses: Dict[socket.socket, str] = {}
         self._focus_lock: threading.Lock = threading.Lock()
+        self._text_commands = TextCommandHandler(
+            cm, hm, mm, network, outbox, config, self._is_self_target, self._send_event
+        )
 
     def _broadcast_event(self, event: IpcEvent) -> None:
         """
@@ -249,17 +264,23 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
         for conn in connections:
             self._set_client_focus(conn, None)
 
-    def _retunnel_target(self, alias: str, onion: str) -> None:
+    def _retunnel_target(
+        self, alias: str, onion: str, context_generation: Optional[int] = None
+    ) -> None:
         """
         Routes retunnel requests to the live controller or the drop tunnel worker.
 
         Args:
             alias (str): The strict alias resolved for the peer.
             onion (str): The strict onion identity.
+            context_generation: Exact active LIVE assertion; excludes DROP route changes.
 
         Returns:
             None
         """
+        if context_generation is not None:
+            self._network.retunnel(onion, context_generation=context_generation)
+            return
         if self._network.is_connected_or_pending(onion):
             self._outbox.reset_tunnel(onion)
             self._network.retunnel(onion)
@@ -343,10 +364,24 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
                         profile=self._config._paths.profile_name,
                         capabilities=[
                             'text_content',
+                            'bounded_text_handoff',
+                            'bounded_archive_pages',
+                            'contact_identity_guard',
+                            'pending_call_handles',
+                            'restricted_live_projection',
+                            'qualified_live_control',
+                            'qualified_live_retunnel',
+                            'safe_setting_descriptors',
+                            'history_metadata_pages',
+                            'local_text_acceptance',
+                            'message_outcome',
+                            'message_archive_state',
+                            'purge_safe_milestone',
                             'voice_content',
                             'voice_inbound_descriptor',
                             'voice_bounded_read',
                             'retained_message_inventory',
+                            'retained_message_identity',
                             'voice_resume',
                             'voice_terminal_commit',
                             'voice_draft_commit',
@@ -357,7 +392,18 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
                             'runtime_epoch',
                             'runtime_state_invalidation',
                             'runtime_lock',
-                        ],
+                            'live_context_identity',
+                        ]
+                        + (
+                            ['profile_instance_id', 'protected_gui_preferences']
+                            if self._profile_instance is not None
+                            else []
+                        )
+                        + (
+                            ['disposable_voice_owner', 'interrupted_voice_recovery']
+                            if self._voice_owners
+                            else []
+                        ),
                     ),
                 )
 
@@ -371,6 +417,24 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
             self._register_session_consumer(conn)
 
         elif isinstance(cmd, BeginVoiceCommand):
+            if cmd.context_generation is not None:
+                resolved_context = self._cm.resolve_target(cmd.target)
+                if (
+                    cmd.delivery is not Delivery.LIVE
+                    or resolved_context is None
+                    or self._network.get_live_state(resolved_context[1])
+                    in {SessionState.DISCONNECTED, SessionState.PENDING}
+                    or self._network.live_context_token(resolved_context[1])
+                    != cmd.context_generation
+                ):
+                    self._send_event(
+                        conn,
+                        VoiceOperationRejectedEvent(
+                            msg_id=cmd.msg_id,
+                            reason=MessageOperationReason.STALE_CAPTURE,
+                        ),
+                    )
+                    return
             if cmd.delivery is Delivery.DROP and not self._config.get_bool(
                 SettingKey.ALLOW_DROPS
             ):
@@ -606,7 +670,31 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
             )
 
         elif isinstance(cmd, DisconnectCommand):
-            self._network.disconnect(cmd.target, initiated_by_self=True)
+            if cmd.context_generation is not None or cmd.attempt_id is not None:
+                resolved = self._cm.resolve_target(cmd.target)
+                if resolved is None:
+                    self._send_event(conn, LiveControlRejectedEvent())
+                    return
+                _alias, onion = resolved
+                with request_context(None):
+                    completed = self._network.disconnect_qualified(
+                        onion, cmd.context_generation, cmd.attempt_id
+                    )
+                self._send_event(
+                    conn,
+                    LiveControlCompletedEvent(onion)
+                    if completed
+                    else LiveControlRejectedEvent(onion),
+                )
+                if completed:
+                    self._broadcast(
+                        create_event(
+                            EventType.RUNTIME_STATE_CHANGED,
+                            {'scope': 'live_contexts', 'onion': onion},
+                        )
+                    )
+            else:
+                self._network.disconnect(cmd.target, initiated_by_self=True)
 
         elif isinstance(cmd, AcceptCommand):
             self._network.accept(cmd.target)
@@ -614,12 +702,10 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
         elif isinstance(cmd, RejectCommand):
             self._network.reject(cmd.target, initiated_by_self=True)
 
-        elif (
-            isinstance(cmd, SendMessageCommand)
-            and cmd.delivery is Delivery.LIVE
-            and isinstance(cmd.content, TextContent)
+        elif isinstance(cmd, SendMessageCommand) and isinstance(
+            cmd.content, TextContent
         ):
-            self._network.send_message(cmd.target, cmd.content.text, cmd.msg_id)
+            self._text_commands.handle(cmd, conn)
 
         elif isinstance(cmd, FallbackCommand):
             success, event_type, params = self._network.force_fallback(
@@ -709,58 +795,8 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
                 self._retunnel_target,
                 alias,
                 onion,
+                cmd.context_generation,
             )
-
-        elif isinstance(cmd, SendMessageCommand) and isinstance(
-            cmd.content, TextContent
-        ):
-            if not self._config.get_bool(SettingKey.ALLOW_DROPS):
-                self._send_event(conn, create_event(EventType.DROPS_DISABLED))
-                return
-
-            if self._is_self_target(cmd.target):
-                self._send_event(conn, create_event(EventType.CANNOT_DROP_SELF))
-                return
-
-            resolved = self._cm.resolve_target_for_interaction(cmd.target)
-
-            if resolved:
-                alias, onion = resolved
-                self._outbox.remember_message_request_id(
-                    cmd.msg_id,
-                    cmd.request_id,
-                )
-                self._mm.queue_message(
-                    contact_onion=str(onion),
-                    direction=MessageDirection.OUT,
-                    delivery=Delivery.DROP,
-                    content_type=ContentType.TEXT,
-                    payload=cmd.content.text,
-                    status=MessageStatus.PENDING,
-                    msg_id=cmd.msg_id,
-                )
-                if self._config.get_bool(SettingKey.RECORD_DROP_HISTORY):
-                    self._hm.log_event(
-                        HistoryEvent.QUEUED,
-                        onion,
-                        actor=HistoryActor.LOCAL,
-                    )
-
-                self._send_event(
-                    conn,
-                    create_event(
-                        EventType.DROP_QUEUED,
-                        {'alias': alias, 'onion': onion},
-                    ),
-                )
-            else:
-                self._send_event(
-                    conn,
-                    create_event(
-                        EventType.INVALID_TARGET,
-                        {'target': cmd.target},
-                    ),
-                )
 
         elif isinstance(cmd, SwitchCommand):
             if cmd.target is None or cmd.target == '..':

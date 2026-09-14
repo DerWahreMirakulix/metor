@@ -206,6 +206,8 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                         start_daemon_override=getattr(self._args, 'start_daemon', None),
                         frontend_id=getattr(self._args, 'ui', None),
                         list_uis=getattr(self._args, 'list_uis', False),
+                        device_config=getattr(self._args, 'device_config', None),
+                        simulator=getattr(self._args, 'simulator', False),
                     )
                 else:
                     self._exit_code = CommandHandlers.handle_chat(
@@ -214,6 +216,8 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                         frontend_id=getattr(self._args, 'ui', None),
                         list_uis=getattr(self._args, 'list_uis', False),
                         loaded_frontend=loaded_frontend,
+                        device_config=getattr(self._args, 'device_config', None),
+                        simulator=getattr(self._args, 'simulator', False),
                     )
 
         elif cmd == 'cleanup':

@@ -3,7 +3,12 @@
 import socket
 from typing import TYPE_CHECKING, Optional
 
-from metor.core.api import ConnectionOrigin, ConnectionReasonCode
+from metor.core.api import (
+    ConnectionOrigin,
+    ConnectionReasonCode,
+    ConnectionActor,
+    DisconnectedEvent,
+)
 from metor.core.daemon.managed.models import RejectIntent
 
 # Local Package Imports
@@ -162,3 +167,58 @@ class ConnectionControllerSessionMixin(ConnectionControllerSupportMixin):
                 origin=origin,
                 system_reason=system_reason,
             )
+
+    def disconnect_qualified(
+        self, target: str, context_generation: Optional[int], attempt_id: Optional[str]
+    ) -> bool:
+        """Checks an exact displayed identity under the existing lifecycle mutation lock.
+
+        Args:
+            target: Canonical peer or explicit alias to resolve once.
+            context_generation: Active/recovering logical context for End Live.
+            attempt_id: Current outbound calling attempt for Cancel.
+        Returns:
+            bool: Whether the assertion still matched and termination was admitted.
+        """
+        with self._operation_lock, self._state.snapshot_barrier():
+            resolved = self._cm.resolve_target(target)
+            if resolved is None:
+                return False
+            alias, onion = resolved
+            if attempt_id is not None:
+                if (
+                    context_generation is not None
+                    or self._state.get_outbound_attempt_id(onion) != attempt_id
+                ):
+                    return False
+            elif (
+                context_generation is None
+                or self._state.get_live_media_generation(onion) != context_generation
+            ):
+                return False
+            outbound = (
+                self._state.pop_outbound_socket(onion)
+                if attempt_id is not None
+                else None
+            )
+            try:
+                disconnect(
+                    self,
+                    onion,
+                    initiated_by_self=True,
+                    origin=ConnectionOrigin.MANUAL,
+                    suppress_events=attempt_id is not None,
+                )
+            finally:
+                if outbound is not None:
+                    self._state.retire_connection(outbound)
+            if attempt_id is not None:
+                self._broadcast(
+                    DisconnectedEvent(
+                        alias,
+                        onion=onion,
+                        actor=ConnectionActor.LOCAL,
+                        origin=ConnectionOrigin.MANUAL,
+                    )
+                )
+            return True

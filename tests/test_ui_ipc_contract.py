@@ -3,6 +3,7 @@
 # ruff: noqa: E402
 
 import socket
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -23,6 +24,8 @@ from metor.core.api import (
     IpcCommand,
     IpcEvent,
     create_event,
+    FallbackCommand,
+    TransportStateEvent,
 )
 from metor.data import ProfileManager, ProfileSecurityMode
 from metor.data.settings import SettingKey
@@ -404,6 +407,40 @@ class UiIpcContractTests(unittest.TestCase):
     """
     Covers UI IPC contract regression scenarios.
     """
+
+    def test_optional_collections_round_trip_without_accepting_wrong_shapes(
+        self,
+    ) -> None:
+        """Accepts specified optional collections while rejecting malformed selections.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        for selection in (None, ['first'], ['first', 'second']):
+            command = FallbackCommand('peer', selection)
+            decoded = IpcCommand.from_dict(json.loads(command.to_json()))
+            self.assertIsInstance(decoded, FallbackCommand)
+            self.assertEqual(decoded.msg_ids, selection)
+        state = TransportStateEvent('peer', 'disconnected', drop_tunnel={'open': True})
+        decoded_state = IpcEvent.from_dict(json.loads(state.to_json()))
+        self.assertIsInstance(decoded_state, TransportStateEvent)
+        self.assertEqual(decoded_state.drop_tunnel, {'open': True})
+        for selection in ({'first': 'wrong'}, [True], [12], [['first']], 'first'):
+            with self.subTest(selection=selection), self.assertRaises(TypeError):
+                IpcCommand.from_dict(
+                    {'command_type': 'fallback', 'target': 'peer', 'msg_ids': selection}
+                )
+        with self.assertRaises(TypeError):
+            IpcEvent.from_dict(
+                {
+                    'event_type': 'transport_state',
+                    'peer': 'peer',
+                    'session_state': 'disconnected',
+                    'drop_tunnel': [],
+                }
+            )
 
     def test_buffered_event_reader_reassembles_fragmented_ipc_event(self) -> None:
         """

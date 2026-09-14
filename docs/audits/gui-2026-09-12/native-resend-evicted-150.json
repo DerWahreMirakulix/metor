@@ -1,0 +1,15 @@
+{
+  "kind": "native SDL widgets with synthetic input and source descriptors",
+  "core": false,
+  "physical_hardware": false,
+  "audio": false,
+  "logical_size": [
+    360,
+    640
+  ],
+  "font_scale": 1.5,
+  "keyboard_exact_target_once": "pass",
+  "open_menu_eviction": "pass",
+  "received_live_no_resend": "pass",
+  "same_count_root_invalidation": "pass"
+}

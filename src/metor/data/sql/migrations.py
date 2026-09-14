@@ -8,6 +8,7 @@ from metor.versioning import DB_SCHEMA_VERSION
 # Local Package Imports
 from metor.data.sql.backends import SqlCipherConnection, SqlCipherCursor
 from metor.data.sql.errors import DatabaseMigrationError
+from metor.data.sql.schema import create_profile_metadata, create_voice_producers
 
 
 @dataclass(frozen=True)
@@ -28,8 +29,21 @@ class SchemaMigration:
     apply: Callable[[SqlCipherCursor], None]
 
 
-# Register future released migrations here, one adjacent generation per entry.
-SCHEMA_MIGRATIONS: tuple[SchemaMigration, ...] = ()
+def _migrate_three_to_four(cursor: SqlCipherCursor) -> None:
+    """Adds protected GUI metadata and durable Voice producer ownership together.
+
+    Args:
+        cursor: The schema-3 migration transaction.
+    Returns:
+        None
+    """
+    create_profile_metadata(cursor)
+    create_voice_producers(cursor)
+
+
+SCHEMA_MIGRATIONS: tuple[SchemaMigration, ...] = (
+    SchemaMigration(3, 4, _migrate_three_to_four),
+)
 
 
 def migration_path(source_version: int) -> tuple[SchemaMigration, ...]:

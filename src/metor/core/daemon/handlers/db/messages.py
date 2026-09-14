@@ -9,6 +9,8 @@ from metor.core.api import (
     EventType,
     GetInboxCommand,
     GetMessagesCommand,
+    GetMessageOutcomeCommand,
+    MessageOutcomeEvent,
     ListRetainedMessagesCommand,
     InboxCountsEvent,
     IpcEvent,
@@ -97,7 +99,19 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
             return create_event(EventType.INVALID_TARGET, {'target': cmd.target})
 
         alias, onion = resolved
-        messages_raw = self._mm.get_chat_history(onion, cmd.limit)
+        has_older, page_available = False, True
+        if cmd.max_payload_bytes is not None and cmd.limit is not None:
+            messages_raw, has_older, page_available = self._mm.get_chat_page(
+                onion,
+                cmd.limit,
+                cmd.max_payload_bytes,
+                cmd.before_msg_id,
+                MessageDirection(cmd.before_direction.value)
+                if cmd.before_direction is not None
+                else None,
+            )
+        else:
+            messages_raw = self._mm.get_chat_history(onion, cmd.limit)
         messages = [
             MessageEntry(
                 direction=MessageDirectionCode(message.direction),
@@ -111,7 +125,33 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
             )
             for message in messages_raw
         ]
-        return MessagesDataEvent(messages=messages, alias=alias, onion=onion)
+        return MessagesDataEvent(
+            messages=messages,
+            alias=alias,
+            onion=onion,
+            has_older=has_older,
+            page_available=page_available,
+        )
+
+    def _handle_message_outcome(self, cmd: GetMessageOutcomeCommand) -> IpcEvent:
+        """Projects an exact retained receipt without reading or consuming payloads.
+
+        Args:
+            cmd: Stable identity and direction from the authenticated client.
+        Returns:
+            IpcEvent: Content-free receipt facts; absence remains unknown to a sender.
+        """
+        outcome = self._mm.message_state(
+            cmd.onion, cmd.msg_id, MessageDirection(cmd.direction.value)
+        )
+        return MessageOutcomeEvent(
+            cmd.onion,
+            cmd.msg_id,
+            cmd.direction,
+            outcome[0] if outcome else None,
+            MessageStatusCode(outcome[1].value) if outcome else None,
+            outcome[2] if outcome else None,
+        )
 
     def _handle_list_retained_messages(
         self, cmd: ListRetainedMessagesCommand
@@ -133,6 +173,8 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
                 direction=direction,
                 cursor=cmd.cursor,
                 limit=cmd.limit,
+                owner_token=cmd.owner_token,
+                msg_id=cmd.msg_id,
             )
         except ValueError as exc:
             return create_event(
@@ -152,6 +194,9 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
                 size_bytes=message.retained_bytes,
                 codec=message.codec,
                 duration_ms=message.duration_ms,
+                producer_interrupted=message.producer_interrupted,
+                can_retry_finalization=message.producer_interrupted
+                and not message.finalized,
             )
             for message in page.messages
         ]
@@ -246,7 +291,9 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
             return create_event(EventType.PEER_NOT_FOUND, {'target': cmd.target})
 
         alias, onion = resolved
-        raw_messages = self._mm.get_and_read_inbox(onion, cmd.delivery)
+        raw_messages = self._mm.get_and_read_inbox(
+            onion, cmd.delivery, cmd.max_messages, cmd.max_payload_bytes
+        )
         messages_list: List[UnreadMessageEntry] = [
             UnreadMessageEntry(
                 timestamp=str(message[3]),

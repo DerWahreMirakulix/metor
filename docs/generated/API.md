@@ -53,10 +53,13 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [GetConfigListCommand](#getconfiglistcommand)
 - [GetConnectionsCommand](#getconnectionscommand)
 - [GetContactsListCommand](#getcontactslistcommand)
+- [GetGuiPreferencesCommand](#getguipreferencescommand)
 - [GetHistoryCommand](#gethistorycommand)
 - [GetInboxCommand](#getinboxcommand)
+- [GetMessageOutcomeCommand](#getmessageoutcomecommand)
 - [GetMessagesCommand](#getmessagescommand)
 - [GetRawHistoryCommand](#getrawhistorycommand)
+- [GetRestrictedClientStateCommand](#getrestrictedclientstatecommand)
 - [GetRuntimeSnapshotCommand](#getruntimesnapshotcommand)
 - [GetSettingCommand](#getsettingcommand)
 - [GetSettingsListCommand](#getsettingslistcommand)
@@ -70,8 +73,10 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [PrepareProfileExitCommand](#prepareprofileexitcommand)
 - [ReauthorizeClientCommand](#reauthorizeclientcommand)
 - [RegisterLiveConsumerCommand](#registerliveconsumercommand)
+- [RegisterVoiceOwnerCommand](#registervoiceownercommand)
 - [RejectCommand](#rejectcommand)
 - [ReleaseVoiceCommand](#releasevoicecommand)
+- [ReleaseVoiceOwnerCommand](#releasevoiceownercommand)
 - [RemoveContactCommand](#removecontactcommand)
 - [RemoveProfileCommand](#removeprofilecommand)
 - [RenameContactCommand](#renamecontactcommand)
@@ -82,6 +87,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [SendMessageCommand](#sendmessagecommand)
 - [SetConfigCommand](#setconfigcommand)
 - [SetDefaultProfileCommand](#setdefaultprofilecommand)
+- [SetGuiPreferencesCommand](#setguipreferencescommand)
 - [SetSettingCommand](#setsettingcommand)
 - [SwitchCommand](#switchcommand)
 - [SyncConfigCommand](#syncconfigcommand)
@@ -144,6 +150,8 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [DropsDisabledEvent](#dropsdisabledevent)
 - [FallbackRejectedEvent](#fallbackrejectedevent)
 - [FallbackSuccessEvent](#fallbacksuccessevent)
+- [GuiPreferencesEvent](#guipreferencesevent)
+- [GuiPreferencesRejectedEvent](#guipreferencesrejectedevent)
 - [HistoryClearFailedEvent](#historyclearfailedevent)
 - [HistoryClearedEvent](#historyclearedevent)
 - [HistoryClearedAllEvent](#historyclearedallevent)
@@ -163,12 +171,15 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [IpcClientLimitReachedEvent](#ipcclientlimitreachedevent)
 - [LiveContextDismissRejectedEvent](#livecontextdismissrejectedevent)
 - [LiveContextDismissedEvent](#livecontextdismissedevent)
+- [LiveControlCompletedEvent](#livecontrolcompletedevent)
+- [LiveControlRejectedEvent](#livecontrolrejectedevent)
 - [LiveMessageResourcePressureEvent](#livemessageresourcepressureevent)
 - [LiveMessageUnavailableEvent](#livemessageunavailableevent)
 - [LocalAuthRateLimitedEvent](#localauthratelimitedevent)
 - [MaxConnectionsReachedEvent](#maxconnectionsreachedevent)
 - [MessageDeleteRejectedEvent](#messagedeleterejectedevent)
 - [MessageDeletedEvent](#messagedeletedevent)
+- [MessageOutcomeEvent](#messageoutcomeevent)
 - [MessageReceivedEvent](#messagereceivedevent)
 - [MessagesClearFailedEvent](#messagesclearfailedevent)
 - [MessagesClearedEvent](#messagesclearedevent)
@@ -198,6 +209,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [QuickUnlockFailedEvent](#quickunlockfailedevent)
 - [ReadReceiptEvent](#readreceiptevent)
 - [RenameSuccessEvent](#renamesuccessevent)
+- [RestrictedClientStateEvent](#restrictedclientstateevent)
 - [RetainedMessagesEvent](#retainedmessagesevent)
 - [RetainedMessagesUnavailableEvent](#retainedmessagesunavailableevent)
 - [RetunnelFailedEvent](#retunnelfailedevent)
@@ -210,6 +222,8 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [SelfDestructCompletedEvent](#selfdestructcompletedevent)
 - [SelfDestructInitiatedEvent](#selfdestructinitiatedevent)
 - [SelfDestructKeyDestroyedEvent](#selfdestructkeydestroyedevent)
+- [SelfDestructRuntimeReleasedEvent](#selfdestructruntimereleasedevent)
+- [SelfDestructSafeEvent](#selfdestructsafeevent)
 - [SessionAuthenticatedEvent](#sessionauthenticatedevent)
 - [SettingDataEvent](#settingdataevent)
 - [SettingTypeErrorEvent](#settingtypeerrorevent)
@@ -217,6 +231,8 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [SettingUpdatedEvent](#settingupdatedevent)
 - [SettingsListDataEvent](#settingslistdataevent)
 - [SwitchSuccessEvent](#switchsuccessevent)
+- [TextAcceptedEvent](#textacceptedevent)
+- [TextRejectedEvent](#textrejectedevent)
 - [TorKeyDecryptFailedEvent](#torkeydecryptfailedevent)
 - [TorKeyWriteFailedEvent](#torkeywritefailedevent)
 - [TorProcessTerminatedEvent](#torprocessterminatedevent)
@@ -232,6 +248,9 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [VoiceFinalizedEvent](#voicefinalizedevent)
 - [VoiceIncomingStartedEvent](#voiceincomingstartedevent)
 - [VoiceOperationRejectedEvent](#voiceoperationrejectedevent)
+- [VoiceOwnerRegisteredEvent](#voiceownerregisteredevent)
+- [VoiceOwnerRejectedEvent](#voiceownerrejectedevent)
+- [VoiceOwnerReleasedEvent](#voiceownerreleasedevent)
 - [VoiceReleasedEvent](#voicereleasedevent)
 - [VoiceResourceLimitEvent](#voiceresourcelimitevent)
 - [VoiceResourcePressureEvent](#voiceresourcepressureevent)
@@ -243,10 +262,11 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 
 Accepts a pending live connection.
 
-| Field        | Type               | Default  |
-| ------------ | ------------------ | -------- |
-| `request_id` | `Union[str, None]` | `None`   |
-| `target`     | `str`              | Required |
+| Field           | Type               | Default  |
+| --------------- | ------------------ | -------- |
+| `request_id`    | `Union[str, None]` | `None`   |
+| `target`        | `str`              | Required |
+| `action_handle` | `Union[str, None]` | `None`   |
 
 **Wire Value:** `accept`
 
@@ -314,12 +334,13 @@ Requests creation of one local or remote profile entry.
 
 Appends one bounded Base64 Voice chunk at an exact byte offset.
 
-| Field        | Type               | Default  |
-| ------------ | ------------------ | -------- |
-| `request_id` | `Union[str, None]` | `None`   |
-| `msg_id`     | `str`              | Required |
-| `offset`     | `int`              | Required |
-| `data`       | `str`              | Required |
+| Field         | Type               | Default  |
+| ------------- | ------------------ | -------- |
+| `request_id`  | `Union[str, None]` | `None`   |
+| `msg_id`      | `str`              | Required |
+| `offset`      | `int`              | Required |
+| `data`        | `str`              | Required |
+| `owner_token` | `Union[str, None]` | `None`   |
 
 **Wire Value:** `append_voice_chunk`
 
@@ -362,13 +383,15 @@ Authenticates the current IPC session using one daemon-issued proof challenge.
 
 Begins one peer-bound logical Voice turn.
 
-| Field        | Type                | Default  |
-| ------------ | ------------------- | -------- |
-| `request_id` | `Union[str, None]`  | `None`   |
-| `target`     | `str`               | Required |
-| `delivery`   | `<enum 'Delivery'>` | Required |
-| `msg_id`     | `str`               | Required |
-| `codec`      | `str`               | Required |
+| Field                | Type                | Default  |
+| -------------------- | ------------------- | -------- |
+| `request_id`         | `Union[str, None]`  | `None`   |
+| `target`             | `str`               | Required |
+| `delivery`           | `<enum 'Delivery'>` | Required |
+| `msg_id`             | `str`               | Required |
+| `codec`              | `str`               | Required |
+| `owner_token`        | `Union[str, None]`  | `None`   |
+| `context_generation` | `Union[int, None]`  | `None`   |
 
 **Wire Value:** `begin_voice`
 
@@ -390,11 +413,12 @@ Begins one peer-bound logical Voice turn.
 
 Cancels one unsent DROP Voice draft.
 
-| Field        | Type               | Default  |
-| ------------ | ------------------ | -------- |
-| `request_id` | `Union[str, None]` | `None`   |
-| `target`     | `str`              | Required |
-| `msg_id`     | `str`              | Required |
+| Field         | Type               | Default  |
+| ------------- | ------------------ | -------- |
+| `request_id`  | `Union[str, None]` | `None`   |
+| `target`      | `str`              | Required |
+| `msg_id`      | `str`              | Required |
+| `owner_token` | `Union[str, None]` | `None`   |
 
 **Wire Value:** `cancel_voice`
 
@@ -521,11 +545,12 @@ Requests a full profile-database wipe.
 
 Commits one finalized DROP Voice draft to pending delivery.
 
-| Field        | Type               | Default  |
-| ------------ | ------------------ | -------- |
-| `request_id` | `Union[str, None]` | `None`   |
-| `target`     | `str`              | Required |
-| `msg_id`     | `str`              | Required |
+| Field         | Type               | Default  |
+| ------------- | ------------------ | -------- |
+| `request_id`  | `Union[str, None]` | `None`   |
+| `target`      | `str`              | Required |
+| `msg_id`      | `str`              | Required |
+| `owner_token` | `Union[str, None]` | `None`   |
 
 **Wire Value:** `commit_voice`
 
@@ -616,10 +641,12 @@ Deletes one eligible local DROP payload while retaining dedupe metadata.
 
 Requests disconnection from an active peer.
 
-| Field        | Type               | Default  |
-| ------------ | ------------------ | -------- |
-| `request_id` | `Union[str, None]` | `None`   |
-| `target`     | `str`              | Required |
+| Field                | Type               | Default  |
+| -------------------- | ------------------ | -------- |
+| `request_id`         | `Union[str, None]` | `None`   |
+| `target`             | `str`              | Required |
+| `context_generation` | `Union[int, None]` | `None`   |
+| `attempt_id`         | `Union[str, None]` | `None`   |
 
 **Wire Value:** `disconnect`
 
@@ -688,6 +715,7 @@ Finalizes the current logical Voice turn without changing its target.
 | `request_id`  | `Union[str, None]` | `None`   |
 | `msg_id`      | `str`              | Required |
 | `duration_ms` | `Union[int, None]` | `None`   |
+| `owner_token` | `Union[str, None]` | `None`   |
 
 **Wire Value:** `finalize_voice`
 
@@ -795,9 +823,10 @@ Requests the daemon-side effective profile-config snapshot.
 Attributes:
 command_type (CommandType): The stable IPC routing code.
 
-| Field        | Type               | Default |
-| ------------ | ------------------ | ------- |
-| `request_id` | `Union[str, None]` | `None`  |
+| Field              | Type               | Default |
+| ------------------ | ------------------ | ------- |
+| `request_id`       | `Union[str, None]` | `None`  |
+| `safe_descriptors` | `bool`             | `False` |
 
 **Wire Value:** `get_config_list`
 
@@ -853,6 +882,26 @@ Requests the structured address book.
 
 ---
 
+### `GetGuiPreferencesCommand`
+
+Requests protected GUI preferences for the authenticated profile.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+
+**Wire Value:** `get_gui_preferences`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "get_gui_preferences"
+}
+```
+
+---
+
 ### `GetHistoryCommand`
 
 Requests projected user-facing history summary.
@@ -862,6 +911,8 @@ Requests projected user-facing history summary.
 | `request_id` | `Union[str, None]` | `None`  |
 | `target`     | `Union[str, None]` | `None`  |
 | `limit`      | `Union[int, None]` | `None`  |
+| `page_size`  | `Union[int, None]` | `None`  |
+| `before_id`  | `Union[int, None]` | `None`  |
 
 **Wire Value:** `get_history`
 
@@ -895,15 +946,41 @@ Requests unread-message counters.
 
 ---
 
+### `GetMessageOutcomeCommand`
+
+Queries one stable receipt without reading or consuming message content.
+
+| Field        | Type                            | Default                    |
+| ------------ | ------------------------------- | -------------------------- |
+| `request_id` | `Union[str, None]`              | `None`                     |
+| `onion`      | `str`                           | ``                         |
+| `msg_id`     | `str`                           | ``                         |
+| `direction`  | `<enum 'MessageDirectionCode'>` | `MessageDirectionCode.OUT` |
+
+**Wire Value:** `get_message_outcome`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "get_message_outcome"
+}
+```
+
+---
+
 ### `GetMessagesCommand`
 
 Requests stored message history.
 
-| Field        | Type               | Default |
-| ------------ | ------------------ | ------- |
-| `request_id` | `Union[str, None]` | `None`  |
-| `target`     | `Union[str, None]` | `None`  |
-| `limit`      | `Union[int, None]` | `None`  |
+| Field               | Type                                         | Default |
+| ------------------- | -------------------------------------------- | ------- |
+| `request_id`        | `Union[str, None]`                           | `None`  |
+| `target`            | `Union[str, None]`                           | `None`  |
+| `limit`             | `Union[int, None]`                           | `None`  |
+| `before_msg_id`     | `Union[str, None]`                           | `None`  |
+| `before_direction`  | `Union[<enum 'MessageDirectionCode'>, None]` | `None`  |
+| `max_payload_bytes` | `Union[int, None]`                           | `None`  |
 
 **Wire Value:** `get_messages`
 
@@ -926,6 +1003,8 @@ Requests the raw transport history ledger.
 | `request_id` | `Union[str, None]` | `None`  |
 | `target`     | `Union[str, None]` | `None`  |
 | `limit`      | `Union[int, None]` | `None`  |
+| `page_size`  | `Union[int, None]` | `None`  |
+| `before_id`  | `Union[int, None]` | `None`  |
 
 **Wire Value:** `get_raw_history`
 
@@ -934,6 +1013,26 @@ Requests the raw transport history ledger.
 ```json
 {
   "command_type": "get_raw_history"
+}
+```
+
+---
+
+### `GetRestrictedClientStateCommand`
+
+Reads this client's currently effective restricted grants and permitted call metadata.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+
+**Wire Value:** `get_restricted_client_state`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "get_restricted_client_state"
 }
 ```
 
@@ -1033,14 +1132,15 @@ Requests the current transport state for one peer or the whole daemon.
 
 Reads one authenticated bounded range from retained Voice content.
 
-| Field        | Type                            | Default  |
-| ------------ | ------------------------------- | -------- |
-| `request_id` | `Union[str, None]`              | `None`   |
-| `target`     | `str`                           | Required |
-| `msg_id`     | `str`                           | Required |
-| `direction`  | `<enum 'MessageDirectionCode'>` | Required |
-| `offset`     | `int`                           | Required |
-| `max_bytes`  | `int`                           | Required |
+| Field         | Type                            | Default  |
+| ------------- | ------------------------------- | -------- |
+| `request_id`  | `Union[str, None]`              | `None`   |
+| `target`      | `str`                           | Required |
+| `msg_id`      | `str`                           | Required |
+| `direction`   | `<enum 'MessageDirectionCode'>` | Required |
+| `offset`      | `int`                           | Required |
+| `max_bytes`   | `int`                           | Required |
+| `owner_token` | `Union[str, None]`              | `None`   |
 
 **Wire Value:** `get_voice_chunk`
 
@@ -1087,14 +1187,16 @@ Requests initialization and advertises the client IPC support range.
 
 Enumerates retained message identities without reading or consuming content.
 
-| Field        | Type                                         | Default |
-| ------------ | -------------------------------------------- | ------- |
-| `request_id` | `Union[str, None]`                           | `None`  |
-| `target`     | `Union[str, None]`                           | `None`  |
-| `delivery`   | `Union[<enum 'Delivery'>, None]`             | `None`  |
-| `direction`  | `Union[<enum 'MessageDirectionCode'>, None]` | `None`  |
-| `cursor`     | `Union[str, None]`                           | `None`  |
-| `limit`      | `int`                                        | `50`    |
+| Field         | Type                                         | Default |
+| ------------- | -------------------------------------------- | ------- |
+| `request_id`  | `Union[str, None]`                           | `None`  |
+| `target`      | `Union[str, None]`                           | `None`  |
+| `delivery`    | `Union[<enum 'Delivery'>, None]`             | `None`  |
+| `direction`   | `Union[<enum 'MessageDirectionCode'>, None]` | `None`  |
+| `cursor`      | `Union[str, None]`                           | `None`  |
+| `limit`       | `int`                                        | `50`    |
+| `owner_token` | `Union[str, None]`                           | `None`  |
+| `msg_id`      | `Union[str, None]`                           | `None`  |
 
 **Wire Value:** `list_retained_messages`
 
@@ -1132,11 +1234,13 @@ Securely releases the active profile runtime without stopping IPC.
 
 Reads and clears unread messages for a peer.
 
-| Field        | Type                             | Default  |
-| ------------ | -------------------------------- | -------- |
-| `request_id` | `Union[str, None]`               | `None`   |
-| `target`     | `str`                            | Required |
-| `delivery`   | `Union[<enum 'Delivery'>, None]` | `None`   |
+| Field               | Type                             | Default  |
+| ------------------- | -------------------------------- | -------- |
+| `request_id`        | `Union[str, None]`               | `None`   |
+| `target`            | `str`                            | Required |
+| `delivery`          | `Union[<enum 'Delivery'>, None]` | `None`   |
+| `max_messages`      | `Union[int, None]`               | `None`   |
+| `max_payload_bytes` | `Union[int, None]`               | `None`   |
 
 **Wire Value:** `mark_read`
 
@@ -1240,14 +1344,36 @@ Marks the current IPC session as an interactive live consumer.
 
 ---
 
+### `RegisterVoiceOwnerCommand`
+
+Registers disposable DROP staging and interrupted-LIVE producer cleanup.
+
+| Field             | Type               | Default |
+| ----------------- | ------------------ | ------- |
+| `request_id`      | `Union[str, None]` | `None`  |
+| `disposable_drop` | `bool`             | `True`  |
+
+**Wire Value:** `register_voice_owner`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "register_voice_owner"
+}
+```
+
+---
+
 ### `RejectCommand`
 
 Rejects a pending live connection.
 
-| Field        | Type               | Default  |
-| ------------ | ------------------ | -------- |
-| `request_id` | `Union[str, None]` | `None`   |
-| `target`     | `str`              | Required |
+| Field           | Type               | Default  |
+| --------------- | ------------------ | -------- |
+| `request_id`    | `Union[str, None]` | `None`   |
+| `target`        | `str`              | Required |
+| `action_handle` | `Union[str, None]` | `None`   |
 
 **Wire Value:** `reject`
 
@@ -1286,6 +1412,27 @@ Consumes one finalized inbound Voice item after client handoff.
 
 ---
 
+### `ReleaseVoiceOwnerCommand`
+
+Releases only this session's owner; pending cleanup remains Core-owned.
+
+| Field         | Type               | Default |
+| ------------- | ------------------ | ------- |
+| `request_id`  | `Union[str, None]` | `None`  |
+| `owner_token` | `str`              | ``      |
+
+**Wire Value:** `release_voice_owner`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "release_voice_owner"
+}
+```
+
+---
+
 ### `RemoveContactCommand`
 
 Removes a saved contact or discovered peer.
@@ -1294,6 +1441,7 @@ Removes a saved contact or discovered peer.
 | ------------ | ------------------ | -------- |
 | `request_id` | `Union[str, None]` | `None`   |
 | `alias`      | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `remove_contact`
 
@@ -1340,6 +1488,7 @@ Renames an existing contact or discovered peer.
 | `request_id` | `Union[str, None]` | `None`   |
 | `old_alias`  | `str`              | Required |
 | `new_alias`  | `str`              | Required |
+| `onion`      | `Union[str, None]` | `None`   |
 
 **Wire Value:** `rename_contact`
 
@@ -1383,15 +1532,16 @@ Requests renaming of one local profile directory.
 
 Places only the requesting authenticated IPC session in restricted state.
 
-| Field                   | Type                           | Default                               |
-| ----------------------- | ------------------------------ | ------------------------------------- |
-| `request_id`            | `Union[str, None]`             | `None`                                |
-| `unlock_method`         | `<enum 'ClientUnlockMethod'>`  | `ClientUnlockMethod.PROFILE_PASSWORD` |
-| `continued_live_target` | `Union[str, None]`             | `None`                                |
-| `live_while_locked`     | `bool`                         | `False`                               |
-| `accept_while_locked`   | `<enum 'LockedAcceptPolicy'>`  | `LockedAcceptPolicy.NONE`             |
-| `notification_privacy`  | `<enum 'NotificationPrivacy'>` | `NotificationPrivacy.OFF`             |
-| `device_lifecycle`      | `bool`                         | `False`                               |
+| Field                               | Type                           | Default                               |
+| ----------------------------------- | ------------------------------ | ------------------------------------- |
+| `request_id`                        | `Union[str, None]`             | `None`                                |
+| `unlock_method`                     | `<enum 'ClientUnlockMethod'>`  | `ClientUnlockMethod.PROFILE_PASSWORD` |
+| `continued_live_target`             | `Union[str, None]`             | `None`                                |
+| `live_while_locked`                 | `bool`                         | `False`                               |
+| `accept_while_locked`               | `<enum 'LockedAcceptPolicy'>`  | `LockedAcceptPolicy.NONE`             |
+| `notification_privacy`              | `<enum 'NotificationPrivacy'>` | `NotificationPrivacy.OFF`             |
+| `device_lifecycle`                  | `bool`                         | `False`                               |
+| `continued_live_context_generation` | `Union[int, None]`             | `None`                                |
 
 **Wire Value:** `restrict_client`
 
@@ -1409,10 +1559,11 @@ Places only the requesting authenticated IPC session in restricted state.
 
 Retunnels an active connection over a new Tor circuit.
 
-| Field        | Type               | Default  |
-| ------------ | ------------------ | -------- |
-| `request_id` | `Union[str, None]` | `None`   |
-| `target`     | `str`              | Required |
+| Field                | Type               | Default  |
+| -------------------- | ------------------ | -------- |
+| `request_id`         | `Union[str, None]` | `None`   |
+| `target`             | `str`              | Required |
+| `context_generation` | `Union[int, None]` | `None`   |
 
 **Wire Value:** `retunnel`
 
@@ -1431,9 +1582,10 @@ Retunnels an active connection over a new Tor circuit.
 
 Triggers daemon self-destruction.
 
-| Field        | Type               | Default |
-| ------------ | ------------------ | ------- |
-| `request_id` | `Union[str, None]` | `None`  |
+| Field          | Type                   | Default |
+| -------------- | ---------------------- | ------- |
+| `request_id`   | `Union[str, None]`     | `None`  |
+| `operation_id` | `UnionType[str, None]` | `None`  |
 
 **Wire Value:** `self_destruct`
 
@@ -1451,13 +1603,14 @@ Triggers daemon self-destruction.
 
 Sends typed content using the requested delivery semantics.
 
-| Field        | Type                               | Default  |
-| ------------ | ---------------------------------- | -------- |
-| `request_id` | `Union[str, None]`                 | `None`   |
-| `target`     | `str`                              | Required |
-| `delivery`   | `<enum 'Delivery'>`                | Required |
-| `content`    | `Union[TextContent, VoiceContent]` | Required |
-| `msg_id`     | `str`                              | Required |
+| Field              | Type                               | Default  |
+| ------------------ | ---------------------------------- | -------- |
+| `request_id`       | `Union[str, None]`                 | `None`   |
+| `target`           | `str`                              | Required |
+| `delivery`         | `<enum 'Delivery'>`                | Required |
+| `content`          | `Union[TextContent, VoiceContent]` | Required |
+| `msg_id`           | `str`                              | Required |
+| `local_acceptance` | `bool`                             | `False`  |
 
 **Wire Value:** `send_message`
 
@@ -1484,11 +1637,13 @@ setting_key (str): The fully-qualified config key to update.
 setting_value (Union[str, int, float, bool]): The new primitive value.
 command_type (CommandType): The stable IPC routing code.
 
-| Field           | Type                           | Default  |
-| --------------- | ------------------------------ | -------- |
-| `request_id`    | `Union[str, None]`             | `None`   |
-| `setting_key`   | `str`                          | Required |
-| `setting_value` | `Union[str, int, float, bool]` | Required |
+| Field            | Type                           | Default  |
+| ---------------- | ------------------------------ | -------- |
+| `request_id`     | `Union[str, None]`             | `None`   |
+| `setting_key`    | `str`                          | Required |
+| `setting_value`  | `Union[str, int, float, bool]` | Required |
+| `safe_only`      | `bool`                         | `False`  |
+| `expected_value` | `Union[str, None]`             | `None`   |
 
 **Wire Value:** `set_config`
 
@@ -1521,6 +1676,28 @@ Requests one new default-profile selection.
 {
   "command_type": "set_default_profile",
   "profile_name": "string"
+}
+```
+
+---
+
+### `SetGuiPreferencesCommand`
+
+Requests an atomic update; root security policy needs password strength.
+
+| Field               | Type               | Default     |
+| ------------------- | ------------------ | ----------- |
+| `request_id`        | `Union[str, None]` | `None`      |
+| `expected_revision` | `int`              | `0`         |
+| `preferences`       | `GuiPreferences`   | `Factory()` |
+
+**Wire Value:** `set_gui_preferences`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "set_gui_preferences"
 }
 ```
 
@@ -2088,15 +2265,17 @@ Confirms that only the requesting restricted client was reauthorized.
 
 Confirms per-session restriction and supplies a one-use unlock challenge.
 
-| Field              | Type                          | Default  |
-| ------------------ | ----------------------------- | -------- |
-| `request_id`       | `Union[str, None]`            | `None`   |
-| `revision`         | `Union[int, None]`            | `None`   |
-| `epoch`            | `Union[str, None]`            | `None`   |
-| `unlock_method`    | `<enum 'ClientUnlockMethod'>` | Required |
-| `challenge`        | `Union[str, None]`            | `None`   |
-| `salt`             | `Union[str, None]`            | `None`   |
-| `device_lifecycle` | `bool`                        | `False`  |
+| Field                               | Type                          | Default  |
+| ----------------------------------- | ----------------------------- | -------- |
+| `request_id`                        | `Union[str, None]`            | `None`   |
+| `revision`                          | `Union[int, None]`            | `None`   |
+| `epoch`                             | `Union[str, None]`            | `None`   |
+| `unlock_method`                     | `<enum 'ClientUnlockMethod'>` | Required |
+| `challenge`                         | `Union[str, None]`            | `None`   |
+| `salt`                              | `Union[str, None]`            | `None`   |
+| `device_lifecycle`                  | `bool`                        | `False`  |
+| `continued_live_target`             | `Union[str, None]`            | `None`   |
+| `continued_live_context_generation` | `Union[int, None]`            | `None`   |
 
 **Wire Value:** `client_restricted`
 
@@ -3009,6 +3188,54 @@ Signals that pending live messages were converted to drops.
 
 ---
 
+### `GuiPreferencesEvent`
+
+Returns current protected preferences and the stable owning profile ID.
+
+| Field                  | Type               | Default     |
+| ---------------------- | ------------------ | ----------- |
+| `request_id`           | `Union[str, None]` | `None`      |
+| `revision`             | `Union[int, None]` | `None`      |
+| `epoch`                | `Union[str, None]` | `None`      |
+| `profile_instance_id`  | `str`              | ``          |
+| `preferences_revision` | `int`              | `0`         |
+| `preferences`          | `GuiPreferences`   | `Factory()` |
+
+**Wire Value:** `gui_preferences`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "gui_preferences"
+}
+```
+
+---
+
+### `GuiPreferencesRejectedEvent`
+
+Rejects a policy update without optimistic mutation or profile disclosure.
+
+| Field        | Type                            | Default                            |
+| ------------ | ------------------------------- | ---------------------------------- |
+| `request_id` | `Union[str, None]`              | `None`                             |
+| `revision`   | `Union[int, None]`              | `None`                             |
+| `epoch`      | `Union[str, None]`              | `None`                             |
+| `reason`     | `<enum 'GuiPreferenceFailure'>` | `GuiPreferenceFailure.UNAVAILABLE` |
+
+**Wire Value:** `gui_preferences_rejected`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "gui_preferences_rejected"
+}
+```
+
+---
+
 ### `HistoryClearFailedEvent`
 
 Signals that clearing history failed.
@@ -3084,15 +3311,21 @@ Signals that profile history was cleared.
 
 Returns projected user-facing history rows.
 
-| Field        | Type                            | Default  |
-| ------------ | ------------------------------- | -------- |
-| `request_id` | `Union[str, None]`              | `None`   |
-| `revision`   | `Union[int, None]`              | `None`   |
-| `epoch`      | `Union[str, None]`              | `None`   |
-| `entries`    | `Sequence[SummaryHistoryEntry]` | Required |
-| `profile`    | `str`                           | Required |
-| `alias`      | `Union[str, None]`              | `None`   |
-| `peer_onion` | `Union[str, None]`              | `None`   |
+| Field            | Type                            | Default  |
+| ---------------- | ------------------------------- | -------- |
+| `request_id`     | `Union[str, None]`              | `None`   |
+| `revision`       | `Union[int, None]`              | `None`   |
+| `epoch`          | `Union[str, None]`              | `None`   |
+| `entries`        | `Sequence[SummaryHistoryEntry]` | Required |
+| `profile`        | `str`                           | Required |
+| `alias`          | `Union[str, None]`              | `None`   |
+| `peer_onion`     | `Union[str, None]`              | `None`   |
+| `next_before_id` | `Union[int, None]`              | `None`   |
+| `has_older`      | `bool`                          | `False`  |
+| `page_available` | `bool`                          | `True`   |
+| `metadata_only`  | `bool`                          | `False`  |
+| `record_live`    | `Union[bool, None]`             | `None`   |
+| `record_drop`    | `Union[bool, None]`             | `None`   |
 
 **Wire Value:** `history_data`
 
@@ -3112,15 +3345,21 @@ Returns projected user-facing history rows.
 
 Returns raw transport history ledger rows.
 
-| Field        | Type                        | Default  |
-| ------------ | --------------------------- | -------- |
-| `request_id` | `Union[str, None]`          | `None`   |
-| `revision`   | `Union[int, None]`          | `None`   |
-| `epoch`      | `Union[str, None]`          | `None`   |
-| `entries`    | `Sequence[RawHistoryEntry]` | Required |
-| `profile`    | `str`                       | Required |
-| `alias`      | `Union[str, None]`          | `None`   |
-| `peer_onion` | `Union[str, None]`          | `None`   |
+| Field            | Type                        | Default  |
+| ---------------- | --------------------------- | -------- |
+| `request_id`     | `Union[str, None]`          | `None`   |
+| `revision`       | `Union[int, None]`          | `None`   |
+| `epoch`          | `Union[str, None]`          | `None`   |
+| `entries`        | `Sequence[RawHistoryEntry]` | Required |
+| `profile`        | `str`                       | Required |
+| `alias`          | `Union[str, None]`          | `None`   |
+| `peer_onion`     | `Union[str, None]`          | `None`   |
+| `next_before_id` | `Union[int, None]`          | `None`   |
+| `has_older`      | `bool`                      | `False`  |
+| `page_available` | `bool`                      | `True`   |
+| `metadata_only`  | `bool`                      | `False`  |
+| `record_live`    | `Union[bool, None]`         | `None`   |
+| `record_drop`    | `Union[bool, None]`         | `None`   |
 
 **Wire Value:** `history_raw_data`
 
@@ -3194,14 +3433,16 @@ Carries buffered or unread offline messages.
 
 Signals new unread offline messages for a peer.
 
-| Field        | Type               | Default  |
-| ------------ | ------------------ | -------- |
-| `request_id` | `Union[str, None]` | `None`   |
-| `revision`   | `Union[int, None]` | `None`   |
-| `epoch`      | `Union[str, None]` | `None`   |
-| `alias`      | `str`              | Required |
-| `onion`      | `Union[str, None]` | `None`   |
-| `count`      | `int`              | `1`      |
+| Field        | Type                | Default         |
+| ------------ | ------------------- | --------------- |
+| `request_id` | `Union[str, None]`  | `None`          |
+| `revision`   | `Union[int, None]`  | `None`          |
+| `epoch`      | `Union[str, None]`  | `None`          |
+| `alias`      | `str`               | Required        |
+| `onion`      | `Union[str, None]`  | `None`          |
+| `count`      | `int`               | `1`             |
+| `delivery`   | `<enum 'Delivery'>` | `Delivery.DROP` |
+| `source_id`  | `Union[str, None]`  | `None`          |
 
 **Wire Value:** `inbox_notification`
 
@@ -3488,6 +3729,53 @@ Confirms destruction of resolved inbound disconnected LIVE state.
 
 ---
 
+### `LiveControlCompletedEvent`
+
+Confirms exact local End/Cancel completion independently of remote delivery.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `revision`   | `Union[int, None]` | `None`  |
+| `epoch`      | `Union[str, None]` | `None`  |
+| `onion`      | `str`              | ``      |
+
+**Wire Value:** `live_control_completed`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "live_control_completed"
+}
+```
+
+---
+
+### `LiveControlRejectedEvent`
+
+Rejects a stale exact lifecycle action without reporting a transport failure.
+
+| Field        | Type                              | Default                                    |
+| ------------ | --------------------------------- | ------------------------------------------ |
+| `request_id` | `Union[str, None]`                | `None`                                     |
+| `revision`   | `Union[int, None]`                | `None`                                     |
+| `epoch`      | `Union[str, None]`                | `None`                                     |
+| `onion`      | `str`                             | ``                                         |
+| `reason`     | `<enum 'MessageOperationReason'>` | `MessageOperationReason.INVALID_SELECTION` |
+
+**Wire Value:** `live_control_rejected`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "live_control_rejected"
+}
+```
+
+---
+
 ### `LiveMessageResourcePressureEvent`
 
 Rejects a LIVE send that would exceed the retained pending budget.
@@ -3653,6 +3941,34 @@ Confirms local payload deletion for one DROP message.
 
 ---
 
+### `MessageOutcomeEvent`
+
+Returns content-free receipt facts; absence does not prove non-delivery.
+
+| Field               | Type                                      | Default                    |
+| ------------------- | ----------------------------------------- | -------------------------- |
+| `request_id`        | `Union[str, None]`                        | `None`                     |
+| `revision`          | `Union[int, None]`                        | `None`                     |
+| `epoch`             | `Union[str, None]`                        | `None`                     |
+| `onion`             | `str`                                     | ``                         |
+| `msg_id`            | `str`                                     | ``                         |
+| `direction`         | `<enum 'MessageDirectionCode'>`           | `MessageDirectionCode.OUT` |
+| `delivery`          | `Union[<enum 'Delivery'>, None]`          | `None`                     |
+| `status`            | `Union[<enum 'MessageStatusCode'>, None]` | `None`                     |
+| `archive_available` | `Union[bool, None]`                       | `None`                     |
+
+**Wire Value:** `message_outcome`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "message_outcome"
+}
+```
+
+---
+
 ### `MessageReceivedEvent`
 
 Carries inbound typed content and independent delivery semantics.
@@ -3808,14 +4124,16 @@ Signals that non-contact messages for a profile were cleared.
 
 Returns stored chat messages for a peer.
 
-| Field        | Type                 | Default  |
-| ------------ | -------------------- | -------- |
-| `request_id` | `Union[str, None]`   | `None`   |
-| `revision`   | `Union[int, None]`   | `None`   |
-| `epoch`      | `Union[str, None]`   | `None`   |
-| `messages`   | `List[MessageEntry]` | Required |
-| `alias`      | `str`                | Required |
-| `onion`      | `Union[str, None]`   | `None`   |
+| Field            | Type                 | Default  |
+| ---------------- | -------------------- | -------- |
+| `request_id`     | `Union[str, None]`   | `None`   |
+| `revision`       | `Union[int, None]`   | `None`   |
+| `epoch`          | `Union[str, None]`   | `None`   |
+| `messages`       | `List[MessageEntry]` | Required |
+| `alias`          | `str`                | Required |
+| `onion`          | `Union[str, None]`   | `None`   |
+| `has_older`      | `bool`               | `False`  |
+| `page_available` | `bool`               | `True`   |
 
 **Wire Value:** `messages_data`
 
@@ -4394,6 +4712,36 @@ Synchronizes a peer alias rename across UIs.
 
 ---
 
+### `RestrictedClientStateEvent`
+
+Projects only current per-client grants and notification-permitted call metadata.
+
+| Field                               | Type                           | Default                   |
+| ----------------------------------- | ------------------------------ | ------------------------- |
+| `request_id`                        | `Union[str, None]`             | `None`                    |
+| `revision`                          | `Union[int, None]`             | `None`                    |
+| `epoch`                             | `Union[str, None]`             | `None`                    |
+| `restricted`                        | `bool`                         | `False`                   |
+| `continued_live_target`             | `Union[str, None]`             | `None`                    |
+| `continued_live_context_generation` | `Union[int, None]`             | `None`                    |
+| `session_state`                     | `str`                          | `disconnected`            |
+| `notification_privacy`              | `<enum 'NotificationPrivacy'>` | `NotificationPrivacy.OFF` |
+| `accept_while_locked`               | `<enum 'LockedAcceptPolicy'>`  | `LockedAcceptPolicy.NONE` |
+| `pending`                           | `List[PendingConnectionEntry]` | `Factory()`               |
+| `accepted_handles`                  | `List[str]`                    | `Factory()`               |
+
+**Wire Value:** `restricted_client_state`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "restricted_client_state"
+}
+```
+
+---
+
 ### `RetainedMessagesEvent`
 
 Returns one stable page of non-consuming retained-item descriptors.
@@ -4526,18 +4874,20 @@ Signals that retunneling succeeded for a peer.
 
 Returns one aggregate, content-free runtime projection for rich clients.
 
-| Field              | Type                                 | Default     |
-| ------------------ | ------------------------------------ | ----------- |
-| `request_id`       | `Union[str, None]`                   | `None`      |
-| `revision`         | `Union[int, None]`                   | `None`      |
-| `epoch`            | `Union[str, None]`                   | `None`      |
-| `profile`          | `str`                                | Required    |
-| `onion`            | `str`                                | Required    |
-| `contacts`         | `List[ContactEntry]`                 | `Factory()` |
-| `conversations`    | `List[DropConversationSummaryEntry]` | `Factory()` |
-| `live_contexts`    | `List[LiveContextEntry]`             | `Factory()` |
-| `pending`          | `List[PendingConnectionEntry]`       | `Factory()` |
-| `settings_version` | `str`                                | `1`         |
+| Field                        | Type                                 | Default     |
+| ---------------------------- | ------------------------------------ | ----------- |
+| `request_id`                 | `Union[str, None]`                   | `None`      |
+| `revision`                   | `Union[int, None]`                   | `None`      |
+| `epoch`                      | `Union[str, None]`                   | `None`      |
+| `profile`                    | `str`                                | Required    |
+| `onion`                      | `str`                                | Required    |
+| `contacts`                   | `List[ContactEntry]`                 | `Factory()` |
+| `conversations`              | `List[DropConversationSummaryEntry]` | `Factory()` |
+| `live_contexts`              | `List[LiveContextEntry]`             | `Factory()` |
+| `pending`                    | `List[PendingConnectionEntry]`       | `Factory()` |
+| `settings_version`           | `str`                                | `1`         |
+| `profile_instance_id`        | `Union[str, None]`                   | `None`      |
+| `authenticated_client_count` | `Union[int, None]`                   | `None`      |
 
 **Wire Value:** `runtime_snapshot`
 
@@ -4613,6 +4963,7 @@ Reports the exact failed destruction phase and irreversible state.
 | `profile`       | `str`              | Required  |
 | `phase`         | `str`              | `cleanup` |
 | `key_destroyed` | `bool`             | `True`    |
+| `operation_id`  | `Union[str, None]` | `None`    |
 
 **Wire Value:** `self_destruct_cleanup_failed`
 
@@ -4631,11 +4982,13 @@ Reports the exact failed destruction phase and irreversible state.
 
 Signals that protected key access was destroyed before cleanup completion.
 
-| Field        | Type               | Default |
-| ------------ | ------------------ | ------- |
-| `request_id` | `Union[str, None]` | `None`  |
-| `revision`   | `Union[int, None]` | `None`  |
-| `epoch`      | `Union[str, None]` | `None`  |
+| Field          | Type               | Default |
+| -------------- | ------------------ | ------- |
+| `request_id`   | `Union[str, None]` | `None`  |
+| `revision`     | `Union[int, None]` | `None`  |
+| `epoch`        | `Union[str, None]` | `None`  |
+| `profile`      | `Union[str, None]` | `None`  |
+| `operation_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `self_destruct_completed`
 
@@ -4653,11 +5006,13 @@ Signals that protected key access was destroyed before cleanup completion.
 
 Signals that daemon self-destruction has started.
 
-| Field        | Type               | Default |
-| ------------ | ------------------ | ------- |
-| `request_id` | `Union[str, None]` | `None`  |
-| `revision`   | `Union[int, None]` | `None`  |
-| `epoch`      | `Union[str, None]` | `None`  |
+| Field          | Type               | Default |
+| -------------- | ------------------ | ------- |
+| `request_id`   | `Union[str, None]` | `None`  |
+| `revision`     | `Union[int, None]` | `None`  |
+| `epoch`        | `Union[str, None]` | `None`  |
+| `profile`      | `Union[str, None]` | `None`  |
+| `operation_id` | `Union[str, None]` | `None`  |
 
 **Wire Value:** `self_destruct_initiated`
 
@@ -4675,12 +5030,13 @@ Signals that daemon self-destruction has started.
 
 Confirms irreversible destruction of protected profile-key access.
 
-| Field        | Type               | Default  |
-| ------------ | ------------------ | -------- |
-| `request_id` | `Union[str, None]` | `None`   |
-| `revision`   | `Union[int, None]` | `None`   |
-| `epoch`      | `Union[str, None]` | `None`   |
-| `profile`    | `str`              | Required |
+| Field          | Type               | Default  |
+| -------------- | ------------------ | -------- |
+| `request_id`   | `Union[str, None]` | `None`   |
+| `revision`     | `Union[int, None]` | `None`   |
+| `epoch`        | `Union[str, None]` | `None`   |
+| `profile`      | `str`              | Required |
+| `operation_id` | `Union[str, None]` | `None`   |
 
 **Wire Value:** `self_destruct_key_destroyed`
 
@@ -4690,6 +5046,59 @@ Confirms irreversible destruction of protected profile-key access.
 {
   "event_type": "self_destruct_key_destroyed",
   "profile": "string"
+}
+```
+
+---
+
+### `SelfDestructRuntimeReleasedEvent`
+
+Confirms fenced runtime shutdown, database close and runtime-key release for one purge.
+
+| Field          | Type               | Default |
+| -------------- | ------------------ | ------- |
+| `request_id`   | `Union[str, None]` | `None`  |
+| `revision`     | `Union[int, None]` | `None`  |
+| `epoch`        | `Union[str, None]` | `None`  |
+| `profile`      | `str`              | ``      |
+| `operation_id` | `str`              | ``      |
+
+**Wire Value:** `self_destruct_runtime_released`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "self_destruct_runtime_released"
+}
+```
+
+---
+
+### `SelfDestructSafeEvent`
+
+Confirms combined encrypted-profile access destruction and local power-off safety.
+
+The exact operation has released all runtime access, closed the database,
+cleared runtime keys and destroyed persistent key protection. File cleanup
+may still be running. This says nothing about unrelated host runtimes and
+does not itself grant a caller permission to shut down the host.
+
+| Field          | Type               | Default |
+| -------------- | ------------------ | ------- |
+| `request_id`   | `Union[str, None]` | `None`  |
+| `revision`     | `Union[int, None]` | `None`  |
+| `epoch`        | `Union[str, None]` | `None`  |
+| `profile`      | `str`              | ``      |
+| `operation_id` | `str`              | ``      |
+
+**Wire Value:** `self_destruct_safe`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "self_destruct_safe"
 }
 ```
 
@@ -4862,6 +5271,56 @@ Confirms a focus switch or focus clear operation.
 ```json
 {
   "event_type": "switch_success"
+}
+```
+
+---
+
+### `TextAcceptedEvent`
+
+Confirms durable local text admission without claiming peer delivery.
+
+| Field        | Type                | Default         |
+| ------------ | ------------------- | --------------- |
+| `request_id` | `Union[str, None]`  | `None`          |
+| `revision`   | `Union[int, None]`  | `None`          |
+| `epoch`      | `Union[str, None]`  | `None`          |
+| `onion`      | `str`               | ``              |
+| `msg_id`     | `str`               | ``              |
+| `delivery`   | `<enum 'Delivery'>` | `Delivery.LIVE` |
+
+**Wire Value:** `text_accepted`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "text_accepted"
+}
+```
+
+---
+
+### `TextRejectedEvent`
+
+Rejects a local text admission without treating resource pressure as unknown.
+
+| Field        | Type                              | Default                                    |
+| ------------ | --------------------------------- | ------------------------------------------ |
+| `request_id` | `Union[str, None]`                | `None`                                     |
+| `revision`   | `Union[int, None]`                | `None`                                     |
+| `epoch`      | `Union[str, None]`                | `None`                                     |
+| `onion`      | `str`                             | ``                                         |
+| `msg_id`     | `str`                             | ``                                         |
+| `reason`     | `<enum 'MessageOperationReason'>` | `MessageOperationReason.INVALID_SELECTION` |
+
+**Wire Value:** `text_rejected`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "text_rejected"
 }
 ```
 
@@ -5283,6 +5742,75 @@ Rejects a Voice operation with a machine-readable reason.
   "event_type": "voice_operation_rejected",
   "msg_id": "string",
   "reason": "invalid_selection"
+}
+```
+
+---
+
+### `VoiceOwnerRegisteredEvent`
+
+Grants one connection-bound disposable staging owner for this runtime.
+
+| Field         | Type               | Default |
+| ------------- | ------------------ | ------- |
+| `request_id`  | `Union[str, None]` | `None`  |
+| `revision`    | `Union[int, None]` | `None`  |
+| `epoch`       | `Union[str, None]` | `None`  |
+| `owner_token` | `str`              | ``      |
+
+**Wire Value:** `voice_owner_registered`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "voice_owner_registered"
+}
+```
+
+---
+
+### `VoiceOwnerRejectedEvent`
+
+Rejects unsupported or stale owner operations without claiming cleanup.
+
+| Field        | Type                              | Default                                |
+| ------------ | --------------------------------- | -------------------------------------- |
+| `request_id` | `Union[str, None]`                | `None`                                 |
+| `revision`   | `Union[int, None]`                | `None`                                 |
+| `epoch`      | `Union[str, None]`                | `None`                                 |
+| `reason`     | `<enum 'MessageOperationReason'>` | `MessageOperationReason.STALE_CAPTURE` |
+
+**Wire Value:** `voice_owner_rejected`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "voice_owner_rejected"
+}
+```
+
+---
+
+### `VoiceOwnerReleasedEvent`
+
+Revokes an owner; remaining cleanup is durably tracked and retried by Core.
+
+| Field             | Type               | Default |
+| ----------------- | ------------------ | ------- |
+| `request_id`      | `Union[str, None]` | `None`  |
+| `revision`        | `Union[int, None]` | `None`  |
+| `epoch`           | `Union[str, None]` | `None`  |
+| `cleanup_pending` | `bool`             | `False` |
+
+**Wire Value:** `voice_owner_released`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "voice_owner_released"
 }
 ```
 

@@ -12,7 +12,7 @@
     "minimum_supported": 1
   },
   "database": {
-    "current": 3,
+    "current": 4,
     "minimum_supported": 3,
     "schema": {
       "tables": [
@@ -642,6 +642,186 @@
           ],
           "name": "peers",
           "sql": "CREATE TABLE peers (\n    onion TEXT PRIMARY KEY NOT NULL CHECK (onion <> ''),\n    alias TEXT UNIQUE NOT NULL CHECK (alias <> ''),\n    alias_state TEXT NOT NULL CHECK (alias_state IN ('saved', 'discovered')),\n    created_at TEXT NOT NULL CHECK (created_at <> ''),\n    updated_at TEXT NOT NULL CHECK (updated_at <> '')\n)"
+        },
+        {
+          "columns": [
+            [
+              0,
+              "name",
+              "TEXT",
+              1,
+              null,
+              1,
+              0
+            ],
+            [
+              1,
+              "revision",
+              "INTEGER",
+              1,
+              "0",
+              0,
+              0
+            ],
+            [
+              2,
+              "value",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ]
+          ],
+          "foreign_keys": [],
+          "indexes": [
+            {
+              "columns": [
+                [
+                  0,
+                  0,
+                  "name",
+                  0,
+                  "BINARY",
+                  1
+                ],
+                [
+                  1,
+                  -1,
+                  null,
+                  0,
+                  "BINARY",
+                  0
+                ]
+              ],
+              "name": "sqlite_autoindex_profile_metadata_1",
+              "origin": "pk",
+              "partial": 0,
+              "unique": 1
+            }
+          ],
+          "name": "profile_metadata",
+          "sql": "CREATE TABLE profile_metadata (\n    name TEXT PRIMARY KEY NOT NULL CHECK (name IN ('instance_id', 'ui.gui')),\n    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),\n    value TEXT NOT NULL\n)"
+        },
+        {
+          "columns": [
+            [
+              0,
+              "msg_id",
+              "TEXT",
+              1,
+              null,
+              1,
+              0
+            ],
+            [
+              1,
+              "peer_onion",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ],
+            [
+              2,
+              "owner_token",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ],
+            [
+              3,
+              "delivery",
+              "TEXT",
+              1,
+              null,
+              0,
+              0
+            ],
+            [
+              4,
+              "interrupted",
+              "INTEGER",
+              1,
+              "0",
+              0,
+              0
+            ],
+            [
+              5,
+              "allocated_ids",
+              "TEXT",
+              1,
+              "'[]'",
+              0,
+              0
+            ],
+            [
+              6,
+              "cleanup_payload",
+              "TEXT",
+              0,
+              null,
+              0,
+              0
+            ]
+          ],
+          "foreign_keys": [],
+          "indexes": [
+            {
+              "columns": [
+                [
+                  0,
+                  2,
+                  "owner_token",
+                  0,
+                  "BINARY",
+                  1
+                ],
+                [
+                  1,
+                  -1,
+                  null,
+                  0,
+                  "BINARY",
+                  0
+                ]
+              ],
+              "name": "idx_voice_producer_owner",
+              "origin": "c",
+              "partial": 0,
+              "unique": 0
+            },
+            {
+              "columns": [
+                [
+                  0,
+                  0,
+                  "msg_id",
+                  0,
+                  "BINARY",
+                  1
+                ],
+                [
+                  1,
+                  -1,
+                  null,
+                  0,
+                  "BINARY",
+                  0
+                ]
+              ],
+              "name": "sqlite_autoindex_voice_producer_items_1",
+              "origin": "pk",
+              "partial": 0,
+              "unique": 1
+            }
+          ],
+          "name": "voice_producer_items",
+          "sql": "CREATE TABLE voice_producer_items (\n    msg_id TEXT PRIMARY KEY NOT NULL CHECK (msg_id <> ''),\n    peer_onion TEXT NOT NULL CHECK (peer_onion <> ''),\n    owner_token TEXT NOT NULL CHECK (owner_token <> ''),\n    delivery TEXT NOT NULL CHECK (delivery IN ('live', 'drop')),\n    interrupted INTEGER NOT NULL DEFAULT 0 CHECK (interrupted IN (0, 1)),\n    allocated_ids TEXT NOT NULL DEFAULT '[]',\n    cleanup_payload TEXT\n)"
         }
       ]
     }
@@ -747,17 +927,26 @@
         "get_contacts_list": {
           "$ref": "#/definitions/GetContactsListCommand"
         },
+        "get_gui_preferences": {
+          "$ref": "#/definitions/GetGuiPreferencesCommand"
+        },
         "get_history": {
           "$ref": "#/definitions/GetHistoryCommand"
         },
         "get_inbox": {
           "$ref": "#/definitions/GetInboxCommand"
         },
+        "get_message_outcome": {
+          "$ref": "#/definitions/GetMessageOutcomeCommand"
+        },
         "get_messages": {
           "$ref": "#/definitions/GetMessagesCommand"
         },
         "get_raw_history": {
           "$ref": "#/definitions/GetRawHistoryCommand"
+        },
+        "get_restricted_client_state": {
+          "$ref": "#/definitions/GetRestrictedClientStateCommand"
         },
         "get_runtime_snapshot": {
           "$ref": "#/definitions/GetRuntimeSnapshotCommand"
@@ -798,11 +987,17 @@
         "register_live_consumer": {
           "$ref": "#/definitions/RegisterLiveConsumerCommand"
         },
+        "register_voice_owner": {
+          "$ref": "#/definitions/RegisterVoiceOwnerCommand"
+        },
         "reject": {
           "$ref": "#/definitions/RejectCommand"
         },
         "release_voice": {
           "$ref": "#/definitions/ReleaseVoiceCommand"
+        },
+        "release_voice_owner": {
+          "$ref": "#/definitions/ReleaseVoiceOwnerCommand"
         },
         "remove_contact": {
           "$ref": "#/definitions/RemoveContactCommand"
@@ -834,6 +1029,9 @@
         "set_default_profile": {
           "$ref": "#/definitions/SetDefaultProfileCommand"
         },
+        "set_gui_preferences": {
+          "$ref": "#/definitions/SetGuiPreferencesCommand"
+        },
         "set_setting": {
           "$ref": "#/definitions/SetSettingCommand"
         },
@@ -850,6 +1048,16 @@
       "definitions": {
         "AcceptCommand": {
           "properties": {
+            "action_handle": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -1411,6 +1619,16 @@
             "offset": {
               "type": "integer"
             },
+            "owner_token": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -1641,6 +1859,16 @@
             "codec": {
               "type": "string"
             },
+            "context_generation": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "delivery": {
               "enum": [
                 "live",
@@ -1650,6 +1878,16 @@
             },
             "msg_id": {
               "type": "string"
+            },
+            "owner_token": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "request_id": {
               "anyOf": [
@@ -1678,6 +1916,16 @@
           "properties": {
             "msg_id": {
               "type": "string"
+            },
+            "owner_token": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "request_id": {
               "anyOf": [
@@ -1859,7 +2107,70 @@
               ]
             },
             "pending": {
-              "items": {},
+              "items": {
+                "properties": {
+                  "action_handle": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "alias": {
+                    "type": "string"
+                  },
+                  "expires_at": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "onion": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "origin": {
+                    "enum": [
+                      "manual",
+                      "auto_reconnect",
+                      "retunnel",
+                      "incoming",
+                      "grace_reconnect",
+                      "mutual_connect",
+                      "auto_accept_contact"
+                    ],
+                    "type": "string"
+                  },
+                  "reason": {
+                    "enum": [
+                      "user_accept",
+                      "consumer_absent"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "alias",
+                  "onion",
+                  "origin",
+                  "reason"
+                ],
+                "title": "PendingConnectionEntry",
+                "type": "object"
+              },
               "type": "array"
             },
             "request_id": {
@@ -1883,7 +2194,41 @@
               ]
             },
             "unread": {
-              "items": {},
+              "items": {
+                "properties": {
+                  "alias": {
+                    "type": "string"
+                  },
+                  "drop_unread": {
+                    "type": "integer"
+                  },
+                  "live_unread": {
+                    "type": "integer"
+                  },
+                  "onion": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "total_unread": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "alias",
+                  "onion",
+                  "total_unread",
+                  "drop_unread",
+                  "live_unread"
+                ],
+                "title": "UnreadInboxSummaryEntry",
+                "type": "object"
+              },
               "type": "array"
             }
           },
@@ -2071,6 +2416,26 @@
                 }
               ]
             },
+            "continued_live_context_generation": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "continued_live_target": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "device_lifecycle": {
               "type": "boolean"
             },
@@ -2173,6 +2538,16 @@
             "msg_id": {
               "type": "string"
             },
+            "owner_token": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -2243,7 +2618,74 @@
         "ConfigListDataEvent": {
           "properties": {
             "entries": {
-              "items": {},
+              "items": {
+                "properties": {
+                  "category": {
+                    "type": "string"
+                  },
+                  "constraints": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "display_group": {
+                    "type": "string"
+                  },
+                  "display_name": {
+                    "type": "string"
+                  },
+                  "editable": {
+                    "type": "boolean"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "max_value": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "min_value": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "security_note": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  },
+                  "value_type": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "key",
+                  "value",
+                  "source",
+                  "category"
+                ],
+                "title": "SettingSnapshotEntry",
+                "type": "object"
+              },
               "type": "array"
             },
             "epoch": {
@@ -3466,7 +3908,25 @@
         "ContactsDataEvent": {
           "properties": {
             "discovered": {
-              "items": {},
+              "items": {
+                "properties": {
+                  "alias": {
+                    "type": "string"
+                  },
+                  "onion": {
+                    "type": "string"
+                  },
+                  "saved": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "alias",
+                  "onion"
+                ],
+                "title": "ContactEntry",
+                "type": "object"
+              },
               "type": "array"
             },
             "epoch": {
@@ -3503,7 +3963,25 @@
               ]
             },
             "saved": {
-              "items": {},
+              "items": {
+                "properties": {
+                  "alias": {
+                    "type": "string"
+                  },
+                  "onion": {
+                    "type": "string"
+                  },
+                  "saved": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "alias",
+                  "onion"
+                ],
+                "title": "ContactEntry",
+                "type": "object"
+              },
               "type": "array"
             }
           },
@@ -3782,6 +4260,26 @@
         },
         "DisconnectCommand": {
           "properties": {
+            "attempt_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "context_generation": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -4302,6 +4800,16 @@
             "msg_id": {
               "type": "string"
             },
+            "owner_token": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -4400,6 +4908,9 @@
                   "type": "null"
                 }
               ]
+            },
+            "safe_descriptors": {
+              "type": "boolean"
             }
           },
           "title": "GetConfigListCommand",
@@ -4443,9 +4954,45 @@
           "title": "GetContactsListCommand",
           "type": "object"
         },
+        "GetGuiPreferencesCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "GetGuiPreferencesCommand",
+          "type": "object"
+        },
         "GetHistoryCommand": {
           "properties": {
+            "before_id": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "limit": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "page_size": {
               "anyOf": [
                 {
                   "type": "integer"
@@ -4495,9 +5042,72 @@
           "title": "GetInboxCommand",
           "type": "object"
         },
+        "GetMessageOutcomeCommand": {
+          "properties": {
+            "direction": {
+              "enum": [
+                "in",
+                "out"
+              ],
+              "type": "string"
+            },
+            "msg_id": {
+              "type": "string"
+            },
+            "onion": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "GetMessageOutcomeCommand",
+          "type": "object"
+        },
         "GetMessagesCommand": {
           "properties": {
+            "before_direction": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "in",
+                    "out"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "before_msg_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "limit": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "max_payload_bytes": {
               "anyOf": [
                 {
                   "type": "integer"
@@ -4533,7 +5143,27 @@
         },
         "GetRawHistoryCommand": {
           "properties": {
+            "before_id": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "limit": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "page_size": {
               "anyOf": [
                 {
                   "type": "integer"
@@ -4565,6 +5195,22 @@
             }
           },
           "title": "GetRawHistoryCommand",
+          "type": "object"
+        },
+        "GetRestrictedClientStateCommand": {
+          "properties": {
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "GetRestrictedClientStateCommand",
           "type": "object"
         },
         "GetRuntimeSnapshotCommand": {
@@ -4665,6 +5311,16 @@
             "offset": {
               "type": "integer"
             },
+            "owner_token": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -4687,6 +5343,150 @@
             "max_bytes"
           ],
           "title": "GetVoiceChunkCommand",
+          "type": "object"
+        },
+        "GuiPreferencesEvent": {
+          "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "preferences": {
+              "properties": {
+                "accept_live_locked": {
+                  "enum": [
+                    "all",
+                    "saved_contacts",
+                    "none"
+                  ],
+                  "type": "string"
+                },
+                "auto_play": {
+                  "type": "boolean"
+                },
+                "idle_seconds": {
+                  "type": "integer"
+                },
+                "keep_live_locked": {
+                  "type": "boolean"
+                },
+                "keyboard_layout": {
+                  "type": "string"
+                },
+                "notifications_locked": {
+                  "enum": [
+                    "show_all",
+                    "anonymize",
+                    "off"
+                  ],
+                  "type": "string"
+                },
+                "pins": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "setup_complete": {
+                  "type": "boolean"
+                },
+                "show_profile_locked": {
+                  "type": "boolean"
+                },
+                "unlock_method": {
+                  "enum": [
+                    "pin",
+                    "profile_password",
+                    "none"
+                  ],
+                  "type": "string"
+                }
+              },
+              "title": "GuiPreferences",
+              "type": "object"
+            },
+            "preferences_revision": {
+              "type": "integer"
+            },
+            "profile_instance_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "GuiPreferencesEvent",
+          "type": "object"
+        },
+        "GuiPreferencesRejectedEvent": {
+          "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "enum": [
+                "unavailable",
+                "unsupported",
+                "full_auth_required",
+                "conflict",
+                "protected_storage_unavailable",
+                "invalid_preferences",
+                "pin_unavailable"
+              ],
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "GuiPreferencesRejectedEvent",
           "type": "object"
         },
         "HistoryClearFailedEvent": {
@@ -4842,6 +5642,25 @@
                 }
               ]
             },
+            "has_older": {
+              "type": "boolean"
+            },
+            "metadata_only": {
+              "type": "boolean"
+            },
+            "next_before_id": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "page_available": {
+              "type": "boolean"
+            },
             "peer_onion": {
               "anyOf": [
                 {
@@ -4854,6 +5673,26 @@
             },
             "profile": {
               "type": "string"
+            },
+            "record_drop": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "record_live": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "request_id": {
               "anyOf": [
@@ -4906,6 +5745,25 @@
                 }
               ]
             },
+            "has_older": {
+              "type": "boolean"
+            },
+            "metadata_only": {
+              "type": "boolean"
+            },
+            "next_before_id": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "page_available": {
+              "type": "boolean"
+            },
             "peer_onion": {
               "anyOf": [
                 {
@@ -4918,6 +5776,26 @@
             },
             "profile": {
               "type": "string"
+            },
+            "record_drop": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "record_live": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "request_id": {
               "anyOf": [
@@ -5011,7 +5889,97 @@
               "type": "boolean"
             },
             "messages": {
-              "items": {},
+              "items": {
+                "properties": {
+                  "content": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "text": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "enum": [
+                              "text",
+                              "voice"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "text"
+                        ],
+                        "title": "TextContent",
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "blob_id": {
+                            "type": "string"
+                          },
+                          "codec": {
+                            "type": "string"
+                          },
+                          "duration_ms": {
+                            "anyOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "size_bytes": {
+                            "type": "integer"
+                          },
+                          "type": {
+                            "enum": [
+                              "text",
+                              "voice"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "blob_id",
+                          "codec",
+                          "size_bytes"
+                        ],
+                        "title": "VoiceContent",
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "delivery": {
+                    "enum": [
+                      "live",
+                      "drop"
+                    ],
+                    "type": "string"
+                  },
+                  "msg_id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "timestamp": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "timestamp",
+                  "delivery",
+                  "content"
+                ],
+                "title": "UnreadMessageEntry",
+                "type": "object"
+              },
               "type": "array"
             },
             "onion": {
@@ -5059,6 +6027,13 @@
             "count": {
               "type": "integer"
             },
+            "delivery": {
+              "enum": [
+                "live",
+                "drop"
+              ],
+              "type": "string"
+            },
             "epoch": {
               "anyOf": [
                 {
@@ -5093,6 +6068,16 @@
               "anyOf": [
                 {
                   "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "source_id": {
+              "anyOf": [
+                {
+                  "type": "string"
                 },
                 {
                   "type": "null"
@@ -5617,6 +6602,26 @@
             "limit": {
               "type": "integer"
             },
+            "msg_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "owner_token": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -5771,6 +6776,108 @@
             "alias"
           ],
           "title": "LiveContextDismissedEvent",
+          "type": "object"
+        },
+        "LiveControlCompletedEvent": {
+          "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "onion": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "LiveControlCompletedEvent",
+          "type": "object"
+        },
+        "LiveControlRejectedEvent": {
+          "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "onion": {
+              "type": "string"
+            },
+            "reason": {
+              "enum": [
+                "invalid_selection",
+                "wrong_peer",
+                "not_pending_live",
+                "not_drop",
+                "pending_delivery",
+                "not_found",
+                "no_recovery",
+                "count_limit",
+                "byte_limit",
+                "outbound_pending_live",
+                "active_live_context",
+                "ambiguous_identity",
+                "not_finalized",
+                "invalid_range",
+                "unsupported_content",
+                "media_limit",
+                "malformed_chunk",
+                "stale_capture",
+                "persistence_failed"
+              ],
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "LiveControlRejectedEvent",
           "type": "object"
         },
         "LiveMessageResourcePressureEvent": {
@@ -6014,6 +7121,26 @@
                 }
               ]
             },
+            "max_messages": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "max_payload_bytes": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -6217,6 +7344,96 @@
           "title": "MessageDeletedEvent",
           "type": "object"
         },
+        "MessageOutcomeEvent": {
+          "properties": {
+            "archive_available": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "delivery": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "live",
+                    "drop"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "direction": {
+              "enum": [
+                "in",
+                "out"
+              ],
+              "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "msg_id": {
+              "type": "string"
+            },
+            "onion": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "status": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "delivered",
+                    "unread",
+                    "read",
+                    "draft"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "MessageOutcomeEvent",
+          "type": "object"
+        },
         "MessageReceivedEvent": {
           "properties": {
             "alias": {
@@ -6224,8 +7441,62 @@
             },
             "content": {
               "anyOf": [
-                {},
-                {}
+                {
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "enum": [
+                        "text",
+                        "voice"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "title": "TextContent",
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "blob_id": {
+                      "type": "string"
+                    },
+                    "codec": {
+                      "type": "string"
+                    },
+                    "duration_ms": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "size_bytes": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "enum": [
+                        "text",
+                        "voice"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "blob_id",
+                    "codec",
+                    "size_bytes"
+                  ],
+                  "title": "VoiceContent",
+                  "type": "object"
+                }
               ]
             },
             "delivery": {
@@ -6543,8 +7814,120 @@
                 }
               ]
             },
+            "has_older": {
+              "type": "boolean"
+            },
             "messages": {
-              "items": {},
+              "items": {
+                "properties": {
+                  "content": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "text": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "enum": [
+                              "text",
+                              "voice"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "text"
+                        ],
+                        "title": "TextContent",
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "blob_id": {
+                            "type": "string"
+                          },
+                          "codec": {
+                            "type": "string"
+                          },
+                          "duration_ms": {
+                            "anyOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "size_bytes": {
+                            "type": "integer"
+                          },
+                          "type": {
+                            "enum": [
+                              "text",
+                              "voice"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "blob_id",
+                          "codec",
+                          "size_bytes"
+                        ],
+                        "title": "VoiceContent",
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "delivery": {
+                    "enum": [
+                      "live",
+                      "drop"
+                    ],
+                    "type": "string"
+                  },
+                  "direction": {
+                    "enum": [
+                      "in",
+                      "out"
+                    ],
+                    "type": "string"
+                  },
+                  "msg_id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "status": {
+                    "enum": [
+                      "pending",
+                      "delivered",
+                      "unread",
+                      "read",
+                      "draft"
+                    ],
+                    "type": "string"
+                  },
+                  "timestamp": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "direction",
+                  "status",
+                  "delivery",
+                  "content",
+                  "timestamp"
+                ],
+                "title": "MessageEntry",
+                "type": "object"
+              },
               "type": "array"
             },
             "onion": {
@@ -6556,6 +7939,9 @@
                   "type": "null"
                 }
               ]
+            },
+            "page_available": {
+              "type": "boolean"
             },
             "request_id": {
               "anyOf": [
@@ -7502,7 +8888,37 @@
               ]
             },
             "profiles": {
-              "items": {},
+              "items": {
+                "properties": {
+                  "is_active": {
+                    "type": "boolean"
+                  },
+                  "is_remote": {
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "port": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "is_active",
+                  "is_remote",
+                  "port"
+                ],
+                "title": "ProfileEntry",
+                "type": "object"
+              },
               "type": "array"
             },
             "request_id": {
@@ -7796,8 +9212,37 @@
           "title": "RegisterLiveConsumerCommand",
           "type": "object"
         },
+        "RegisterVoiceOwnerCommand": {
+          "properties": {
+            "disposable_drop": {
+              "type": "boolean"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "RegisterVoiceOwnerCommand",
+          "type": "object"
+        },
         "RejectCommand": {
           "properties": {
+            "action_handle": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -7844,10 +9289,39 @@
           "title": "ReleaseVoiceCommand",
           "type": "object"
         },
+        "ReleaseVoiceOwnerCommand": {
+          "properties": {
+            "owner_token": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "ReleaseVoiceOwnerCommand",
+          "type": "object"
+        },
         "RemoveContactCommand": {
           "properties": {
             "alias": {
               "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "request_id": {
               "anyOf": [
@@ -7905,6 +9379,16 @@
             },
             "old_alias": {
               "type": "string"
+            },
+            "onion": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "request_id": {
               "anyOf": [
@@ -8022,6 +9506,16 @@
               ],
               "type": "string"
             },
+            "continued_live_context_generation": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "continued_live_target": {
               "anyOf": [
                 {
@@ -8068,6 +9562,157 @@
           "title": "RestrictClientCommand",
           "type": "object"
         },
+        "RestrictedClientStateEvent": {
+          "properties": {
+            "accept_while_locked": {
+              "enum": [
+                "all",
+                "saved_contacts",
+                "none"
+              ],
+              "type": "string"
+            },
+            "accepted_handles": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "continued_live_context_generation": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "continued_live_target": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "notification_privacy": {
+              "enum": [
+                "show_all",
+                "anonymize",
+                "off"
+              ],
+              "type": "string"
+            },
+            "pending": {
+              "items": {
+                "properties": {
+                  "action_handle": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "alias": {
+                    "type": "string"
+                  },
+                  "expires_at": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "onion": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "origin": {
+                    "enum": [
+                      "manual",
+                      "auto_reconnect",
+                      "retunnel",
+                      "incoming",
+                      "grace_reconnect",
+                      "mutual_connect",
+                      "auto_accept_contact"
+                    ],
+                    "type": "string"
+                  },
+                  "reason": {
+                    "enum": [
+                      "user_accept",
+                      "consumer_absent"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "alias",
+                  "onion",
+                  "origin",
+                  "reason"
+                ],
+                "title": "PendingConnectionEntry",
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "restricted": {
+              "type": "boolean"
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "session_state": {
+              "type": "string"
+            }
+          },
+          "title": "RestrictedClientStateEvent",
+          "type": "object"
+        },
         "RetainedMessagesEvent": {
           "properties": {
             "epoch": {
@@ -8084,7 +9729,94 @@
               "type": "string"
             },
             "messages": {
-              "items": {},
+              "items": {
+                "properties": {
+                  "alias": {
+                    "type": "string"
+                  },
+                  "can_retry_finalization": {
+                    "type": "boolean"
+                  },
+                  "codec": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "content_type": {
+                    "enum": [
+                      "text",
+                      "voice"
+                    ],
+                    "type": "string"
+                  },
+                  "delivery": {
+                    "enum": [
+                      "live",
+                      "drop"
+                    ],
+                    "type": "string"
+                  },
+                  "direction": {
+                    "enum": [
+                      "in",
+                      "out"
+                    ],
+                    "type": "string"
+                  },
+                  "duration_ms": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "finalized": {
+                    "type": "boolean"
+                  },
+                  "msg_id": {
+                    "type": "string"
+                  },
+                  "onion": {
+                    "type": "string"
+                  },
+                  "producer_interrupted": {
+                    "type": "boolean"
+                  },
+                  "size_bytes": {
+                    "type": "integer"
+                  },
+                  "status": {
+                    "enum": [
+                      "pending",
+                      "delivered",
+                      "unread",
+                      "read",
+                      "draft"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "onion",
+                  "alias",
+                  "direction",
+                  "delivery",
+                  "status",
+                  "content_type",
+                  "msg_id",
+                  "finalized"
+                ],
+                "title": "RetainedMessageEntry",
+                "type": "object"
+              },
               "type": "array"
             },
             "next_cursor": {
@@ -8168,6 +9900,16 @@
         },
         "RetunnelCommand": {
           "properties": {
+            "context_generation": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -8387,12 +10129,61 @@
         },
         "RuntimeSnapshotEvent": {
           "properties": {
+            "authenticated_client_count": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "contacts": {
-              "items": {},
+              "items": {
+                "properties": {
+                  "alias": {
+                    "type": "string"
+                  },
+                  "onion": {
+                    "type": "string"
+                  },
+                  "saved": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "alias",
+                  "onion"
+                ],
+                "title": "ContactEntry",
+                "type": "object"
+              },
               "type": "array"
             },
             "conversations": {
-              "items": {},
+              "items": {
+                "properties": {
+                  "alias": {
+                    "type": "string"
+                  },
+                  "onion": {
+                    "type": "string"
+                  },
+                  "pending_count": {
+                    "type": "integer"
+                  },
+                  "unread_count": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "alias",
+                  "onion"
+                ],
+                "title": "DropConversationSummaryEntry",
+                "type": "object"
+              },
               "type": "array"
             },
             "epoch": {
@@ -8406,18 +10197,198 @@
               ]
             },
             "live_contexts": {
-              "items": {},
+              "items": {
+                "properties": {
+                  "alias": {
+                    "type": "string"
+                  },
+                  "call_handle": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "context_generation": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "disconnect_actor": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "local",
+                          "remote",
+                          "system"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "disconnect_reason": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "peer_ended_session",
+                          "retry_exhausted",
+                          "max_connections_reached",
+                          "retunnel_pending_connection_missing",
+                          "late_acceptance_timeout",
+                          "outbound_attempt_rejected",
+                          "outbound_attempt_closed_before_acceptance",
+                          "pending_acceptance_expired",
+                          "mutual_tiebreaker_loser",
+                          "duplicate_incoming_connected",
+                          "duplicate_incoming_pending",
+                          "live_backlog_limit_reached",
+                          "live_voice_limit_reached",
+                          "invalid_peer_frame",
+                          "idle_timeout"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "onion": {
+                    "type": "string"
+                  },
+                  "outbound_attempt_id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "pending_outbound_count": {
+                    "type": "integer"
+                  },
+                  "recovery_eligible": {
+                    "type": "boolean"
+                  },
+                  "route_changing": {
+                    "type": "boolean"
+                  },
+                  "saved": {
+                    "type": "boolean"
+                  },
+                  "session_state": {
+                    "type": "string"
+                  },
+                  "unseen_count": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "alias",
+                  "onion",
+                  "saved",
+                  "session_state"
+                ],
+                "title": "LiveContextEntry",
+                "type": "object"
+              },
               "type": "array"
             },
             "onion": {
               "type": "string"
             },
             "pending": {
-              "items": {},
+              "items": {
+                "properties": {
+                  "action_handle": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "alias": {
+                    "type": "string"
+                  },
+                  "expires_at": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "onion": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "origin": {
+                    "enum": [
+                      "manual",
+                      "auto_reconnect",
+                      "retunnel",
+                      "incoming",
+                      "grace_reconnect",
+                      "mutual_connect",
+                      "auto_accept_contact"
+                    ],
+                    "type": "string"
+                  },
+                  "reason": {
+                    "enum": [
+                      "user_accept",
+                      "consumer_absent"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "alias",
+                  "onion",
+                  "origin",
+                  "reason"
+                ],
+                "title": "PendingConnectionEntry",
+                "type": "object"
+              },
               "type": "array"
             },
             "profile": {
               "type": "string"
+            },
+            "profile_instance_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "request_id": {
               "anyOf": [
@@ -8556,6 +10527,16 @@
             "key_destroyed": {
               "type": "boolean"
             },
+            "operation_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "phase": {
               "type": "string"
             },
@@ -8591,6 +10572,16 @@
         },
         "SelfDestructCommand": {
           "properties": {
+            "operation_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -8608,6 +10599,26 @@
         "SelfDestructCompletedEvent": {
           "properties": {
             "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "operation_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "profile": {
               "anyOf": [
                 {
                   "type": "string"
@@ -8653,6 +10664,26 @@
                 }
               ]
             },
+            "operation_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "profile": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -8680,6 +10711,16 @@
         "SelfDestructKeyDestroyedEvent": {
           "properties": {
             "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "operation_id": {
               "anyOf": [
                 {
                   "type": "string"
@@ -8719,12 +10760,150 @@
           "title": "SelfDestructKeyDestroyedEvent",
           "type": "object"
         },
+        "SelfDestructRuntimeReleasedEvent": {
+          "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "operation_id": {
+              "type": "string"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "SelfDestructRuntimeReleasedEvent",
+          "type": "object"
+        },
+        "SelfDestructSafeEvent": {
+          "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "operation_id": {
+              "type": "string"
+            },
+            "profile": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "SelfDestructSafeEvent",
+          "type": "object"
+        },
         "SendMessageCommand": {
           "properties": {
             "content": {
               "anyOf": [
-                {},
-                {}
+                {
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "enum": [
+                        "text",
+                        "voice"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "title": "TextContent",
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "blob_id": {
+                      "type": "string"
+                    },
+                    "codec": {
+                      "type": "string"
+                    },
+                    "duration_ms": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "size_bytes": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "enum": [
+                        "text",
+                        "voice"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "blob_id",
+                    "codec",
+                    "size_bytes"
+                  ],
+                  "title": "VoiceContent",
+                  "type": "object"
+                }
               ]
             },
             "delivery": {
@@ -8733,6 +10912,9 @@
                 "drop"
               ],
               "type": "string"
+            },
+            "local_acceptance": {
+              "type": "boolean"
             },
             "msg_id": {
               "type": "string"
@@ -8798,6 +10980,16 @@
         },
         "SetConfigCommand": {
           "properties": {
+            "expected_value": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -8807,6 +10999,9 @@
                   "type": "null"
                 }
               ]
+            },
+            "safe_only": {
+              "type": "boolean"
             },
             "setting_key": {
               "type": "string"
@@ -8855,6 +11050,79 @@
             "profile_name"
           ],
           "title": "SetDefaultProfileCommand",
+          "type": "object"
+        },
+        "SetGuiPreferencesCommand": {
+          "properties": {
+            "expected_revision": {
+              "type": "integer"
+            },
+            "preferences": {
+              "properties": {
+                "accept_live_locked": {
+                  "enum": [
+                    "all",
+                    "saved_contacts",
+                    "none"
+                  ],
+                  "type": "string"
+                },
+                "auto_play": {
+                  "type": "boolean"
+                },
+                "idle_seconds": {
+                  "type": "integer"
+                },
+                "keep_live_locked": {
+                  "type": "boolean"
+                },
+                "keyboard_layout": {
+                  "type": "string"
+                },
+                "notifications_locked": {
+                  "enum": [
+                    "show_all",
+                    "anonymize",
+                    "off"
+                  ],
+                  "type": "string"
+                },
+                "pins": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "setup_complete": {
+                  "type": "boolean"
+                },
+                "show_profile_locked": {
+                  "type": "boolean"
+                },
+                "unlock_method": {
+                  "enum": [
+                    "pin",
+                    "profile_password",
+                    "none"
+                  ],
+                  "type": "string"
+                }
+              },
+              "title": "GuiPreferences",
+              "type": "object"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "SetGuiPreferencesCommand",
           "type": "object"
         },
         "SetSettingCommand": {
@@ -9079,7 +11347,74 @@
         "SettingsListDataEvent": {
           "properties": {
             "entries": {
-              "items": {},
+              "items": {
+                "properties": {
+                  "category": {
+                    "type": "string"
+                  },
+                  "constraints": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "display_group": {
+                    "type": "string"
+                  },
+                  "display_name": {
+                    "type": "string"
+                  },
+                  "editable": {
+                    "type": "boolean"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "max_value": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "min_value": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "security_note": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  },
+                  "value_type": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "key",
+                  "value",
+                  "source",
+                  "category"
+                ],
+                "title": "SettingSnapshotEntry",
+                "type": "object"
+              },
               "type": "array"
             },
             "epoch": {
@@ -9218,6 +11553,121 @@
             }
           },
           "title": "SyncConfigCommand",
+          "type": "object"
+        },
+        "TextAcceptedEvent": {
+          "properties": {
+            "delivery": {
+              "enum": [
+                "live",
+                "drop"
+              ],
+              "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "msg_id": {
+              "type": "string"
+            },
+            "onion": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "TextAcceptedEvent",
+          "type": "object"
+        },
+        "TextRejectedEvent": {
+          "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "msg_id": {
+              "type": "string"
+            },
+            "onion": {
+              "type": "string"
+            },
+            "reason": {
+              "enum": [
+                "invalid_selection",
+                "wrong_peer",
+                "not_pending_live",
+                "not_drop",
+                "pending_delivery",
+                "not_found",
+                "no_recovery",
+                "count_limit",
+                "byte_limit",
+                "outbound_pending_live",
+                "active_live_context",
+                "ambiguous_identity",
+                "not_finalized",
+                "invalid_range",
+                "unsupported_content",
+                "media_limit",
+                "malformed_chunk",
+                "stale_capture",
+                "persistence_failed"
+              ],
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "TextRejectedEvent",
           "type": "object"
         },
         "TorKeyDecryptFailedEvent": {
@@ -9595,7 +12045,97 @@
               ]
             },
             "messages": {
-              "items": {},
+              "items": {
+                "properties": {
+                  "content": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "text": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "enum": [
+                              "text",
+                              "voice"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "text"
+                        ],
+                        "title": "TextContent",
+                        "type": "object"
+                      },
+                      {
+                        "properties": {
+                          "blob_id": {
+                            "type": "string"
+                          },
+                          "codec": {
+                            "type": "string"
+                          },
+                          "duration_ms": {
+                            "anyOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "size_bytes": {
+                            "type": "integer"
+                          },
+                          "type": {
+                            "enum": [
+                              "text",
+                              "voice"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "blob_id",
+                          "codec",
+                          "size_bytes"
+                        ],
+                        "title": "VoiceContent",
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "delivery": {
+                    "enum": [
+                      "live",
+                      "drop"
+                    ],
+                    "type": "string"
+                  },
+                  "msg_id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "timestamp": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "timestamp",
+                  "delivery",
+                  "content"
+                ],
+                "title": "UnreadMessageEntry",
+                "type": "object"
+              },
               "type": "array"
             },
             "onion": {
@@ -10224,6 +12764,144 @@
           "title": "VoiceOperationRejectedEvent",
           "type": "object"
         },
+        "VoiceOwnerRegisteredEvent": {
+          "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "owner_token": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "VoiceOwnerRegisteredEvent",
+          "type": "object"
+        },
+        "VoiceOwnerRejectedEvent": {
+          "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "enum": [
+                "invalid_selection",
+                "wrong_peer",
+                "not_pending_live",
+                "not_drop",
+                "pending_delivery",
+                "not_found",
+                "no_recovery",
+                "count_limit",
+                "byte_limit",
+                "outbound_pending_live",
+                "active_live_context",
+                "ambiguous_identity",
+                "not_finalized",
+                "invalid_range",
+                "unsupported_content",
+                "media_limit",
+                "malformed_chunk",
+                "stale_capture",
+                "persistence_failed"
+              ],
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "VoiceOwnerRejectedEvent",
+          "type": "object"
+        },
+        "VoiceOwnerReleasedEvent": {
+          "properties": {
+            "cleanup_pending": {
+              "type": "boolean"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "title": "VoiceOwnerReleasedEvent",
+          "type": "object"
+        },
         "VoiceReleasedEvent": {
           "properties": {
             "alias": {
@@ -10702,6 +13380,12 @@
         "fallback_success": {
           "$ref": "#/definitions/FallbackSuccessEvent"
         },
+        "gui_preferences": {
+          "$ref": "#/definitions/GuiPreferencesEvent"
+        },
+        "gui_preferences_rejected": {
+          "$ref": "#/definitions/GuiPreferencesRejectedEvent"
+        },
         "history_clear_failed": {
           "$ref": "#/definitions/HistoryClearFailedEvent"
         },
@@ -10759,6 +13443,12 @@
         "live_context_dismissed": {
           "$ref": "#/definitions/LiveContextDismissedEvent"
         },
+        "live_control_completed": {
+          "$ref": "#/definitions/LiveControlCompletedEvent"
+        },
+        "live_control_rejected": {
+          "$ref": "#/definitions/LiveControlRejectedEvent"
+        },
         "live_message_resource_pressure": {
           "$ref": "#/definitions/LiveMessageResourcePressureEvent"
         },
@@ -10776,6 +13466,9 @@
         },
         "message_deleted": {
           "$ref": "#/definitions/MessageDeletedEvent"
+        },
+        "message_outcome": {
+          "$ref": "#/definitions/MessageOutcomeEvent"
         },
         "message_received": {
           "$ref": "#/definitions/MessageReceivedEvent"
@@ -10864,6 +13557,9 @@
         "rename_success": {
           "$ref": "#/definitions/RenameSuccessEvent"
         },
+        "restricted_client_state": {
+          "$ref": "#/definitions/RestrictedClientStateEvent"
+        },
         "retained_messages": {
           "$ref": "#/definitions/RetainedMessagesEvent"
         },
@@ -10900,6 +13596,12 @@
         "self_destruct_key_destroyed": {
           "$ref": "#/definitions/SelfDestructKeyDestroyedEvent"
         },
+        "self_destruct_runtime_released": {
+          "$ref": "#/definitions/SelfDestructRuntimeReleasedEvent"
+        },
+        "self_destruct_safe": {
+          "$ref": "#/definitions/SelfDestructSafeEvent"
+        },
         "session_authenticated": {
           "$ref": "#/definitions/SessionAuthenticatedEvent"
         },
@@ -10920,6 +13622,12 @@
         },
         "switch_success": {
           "$ref": "#/definitions/SwitchSuccessEvent"
+        },
+        "text_accepted": {
+          "$ref": "#/definitions/TextAcceptedEvent"
+        },
+        "text_rejected": {
+          "$ref": "#/definitions/TextRejectedEvent"
         },
         "tor_key_decrypt_failed": {
           "$ref": "#/definitions/TorKeyDecryptFailedEvent"
@@ -10965,6 +13673,15 @@
         },
         "voice_operation_rejected": {
           "$ref": "#/definitions/VoiceOperationRejectedEvent"
+        },
+        "voice_owner_registered": {
+          "$ref": "#/definitions/VoiceOwnerRegisteredEvent"
+        },
+        "voice_owner_rejected": {
+          "$ref": "#/definitions/VoiceOwnerRejectedEvent"
+        },
+        "voice_owner_released": {
+          "$ref": "#/definitions/VoiceOwnerReleasedEvent"
         },
         "voice_released": {
           "$ref": "#/definitions/VoiceReleasedEvent"

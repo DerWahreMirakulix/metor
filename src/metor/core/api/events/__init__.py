@@ -1,5 +1,21 @@
 """Facade exports for strict daemon-to-UI DTO packages."""
 
+from metor.core.api.events.producers import (
+    VoiceOwnerRegisteredEvent,
+    VoiceOwnerReleasedEvent,
+    VoiceOwnerRejectedEvent,
+)
+
+from metor.core.api.events.acceptance import (
+    TextAcceptedEvent,
+    TextRejectedEvent,
+    MessageOutcomeEvent,
+)
+
+from metor.core.api.events.preferences import (
+    GuiPreferencesEvent,
+    GuiPreferencesRejectedEvent,
+)
 from metor.core.api.events.contacts import (
     AliasInUseEvent,
     AliasNotFoundEvent,
@@ -78,6 +94,7 @@ from metor.core.api.events.runtime import (
     ClientAccessRestrictedEvent,
     ClientReauthorizedEvent,
     ClientRestrictedEvent,
+    RestrictedClientStateEvent,
     ConfigDataEvent,
     ConfigSyncedEvent,
     ConfigUpdateFailedEvent,
@@ -106,6 +123,8 @@ from metor.core.api.events.runtime import (
     SelfDestructKeyDestroyedEvent,
     SelfDestructCleanupFailedEvent,
     SelfDestructInitiatedEvent,
+    SelfDestructRuntimeReleasedEvent,
+    SelfDestructSafeEvent,
     SessionAuthenticatedEvent,
     SettingDataEvent,
     SettingTypeErrorEvent,
@@ -135,6 +154,8 @@ from metor.core.api.events.transport import (
     FallbackSuccessEvent,
     FallbackRejectedEvent,
     LiveContextDismissedEvent,
+    LiveControlRejectedEvent,
+    LiveControlCompletedEvent,
     LiveContextDismissRejectedEvent,
     LiveMessageResourcePressureEvent,
     LiveMessageUnavailableEvent,
@@ -176,6 +197,14 @@ from metor.core.api.events.transport import (
 
 
 __all__ = [
+    'VoiceOwnerRegisteredEvent',
+    'VoiceOwnerReleasedEvent',
+    'VoiceOwnerRejectedEvent',
+    'TextAcceptedEvent',
+    'MessageOutcomeEvent',
+    'TextRejectedEvent',
+    'GuiPreferencesEvent',
+    'GuiPreferencesRejectedEvent',
     'ContactEntry',
     'DropConversationSummaryEntry',
     'LiveContextEntry',
@@ -240,6 +269,8 @@ __all__ = [
     'AlreadyUnlockedEvent',
     'SessionAuthenticatedEvent',
     'SelfDestructInitiatedEvent',
+    'SelfDestructRuntimeReleasedEvent',
+    'SelfDestructSafeEvent',
     'PasswordChangedEvent',
     'PasswordChangeUnsupportedEvent',
     'PasswordChangeFailedEvent',
@@ -275,6 +306,8 @@ __all__ = [
     'FallbackSuccessEvent',
     'FallbackRejectedEvent',
     'LiveContextDismissedEvent',
+    'LiveControlRejectedEvent',
+    'LiveControlCompletedEvent',
     'LiveContextDismissRejectedEvent',
     'LiveMessageResourcePressureEvent',
     'LiveMessageUnavailableEvent',
@@ -316,6 +349,7 @@ __all__ = [
     'ClientAccessRestrictedEvent',
     'ClientReauthorizedEvent',
     'ClientRestrictedEvent',
+    'RestrictedClientStateEvent',
     'ProfileExitPreparedEvent',
     'RuntimeStateChangedEvent',
     'QuickUnlockConfiguredEvent',

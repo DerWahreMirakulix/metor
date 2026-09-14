@@ -117,6 +117,7 @@ class DatabaseCommandContactsMixin(DatabaseCommandHandlerSupportMixin):
         result: ContactOperationResult = self._cm.remove_contact(
             cmd.alias,
             active_onions,
+            expected_onion=cmd.onion,
         )
         if result.success:
             self._emit_contact_side_effects(result.renames, result.removals)
@@ -137,9 +138,10 @@ class DatabaseCommandContactsMixin(DatabaseCommandHandlerSupportMixin):
         result: ContactOperationResult = self._cm.rename_contact(
             cmd.old_alias,
             cmd.new_alias,
+            expected_onion=cmd.onion,
         )
         if result.success:
-            self._broadcast(
+            self._broadcast_contact_event(
                 create_event(
                     EventType.RENAME_SUCCESS,
                     {

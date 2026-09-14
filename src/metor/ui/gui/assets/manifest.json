@@ -1,0 +1,393 @@
+{
+  "revisions": {
+    "google/fonts": "809e4d8b8d7e9364a914909bb777679606c178b8",
+    "lucide-icons/lucide": "f12b0de177fbc2a6795e99be065887e72b237123"
+  },
+  "assets": [
+    {
+      "path": "fonts/InterTight-variable.ttf",
+      "source": "https://raw.githubusercontent.com/google/fonts/809e4d8b8d7e9364a914909bb777679606c178b8/ofl/intertight/InterTight%5Bwght%5D.ttf",
+      "sha256": "b81b73dcb64df3c230cabade7df6c5773bf863233f24c9ee51087519f1f88b6f"
+    },
+    {
+      "path": "fonts/OFL.txt",
+      "source": "https://raw.githubusercontent.com/google/fonts/809e4d8b8d7e9364a914909bb777679606c178b8/ofl/intertight/OFL.txt",
+      "sha256": "50240ab035cf1b6b3307940235481d515c4b6de3ab1fa843dbe59e7892cb9d58"
+    },
+    {
+      "path": "icons/LICENSE",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/LICENSE",
+      "sha256": "1e7290b35280a048667bbf0ebabac1c7fd52a75300e8b2946ac165715997f2bc"
+    },
+    {
+      "path": "icons/chevron-left.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/chevron-left.svg",
+      "sha256": "83b0681aa38bf55e9d52a1e4b4cced624abe1fe7678ecafda133a574f1161d93"
+    },
+    {
+      "path": "icons/chevron-right.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/chevron-right.svg",
+      "sha256": "2758143d7b2434e4aa7307dfd34405c87909ff4052f21b5f3f40d45224b4f19b"
+    },
+    {
+      "path": "icons/bell.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/bell.svg",
+      "sha256": "394889e9631fe3a9a63be9a479a95b451b708e432d895978d21d9130b5ee5dbe"
+    },
+    {
+      "path": "icons/users.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/users.svg",
+      "sha256": "c94a3781b154ab2716e1696c25c50d37b4b5634f26cb80ae1cdea20cfafc49c1"
+    },
+    {
+      "path": "icons/settings.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/settings.svg",
+      "sha256": "3c7bee2696ce0c2d48d34e813f4fcda31f0ad21ab9309aee3751cde4280ad737"
+    },
+    {
+      "path": "icons/ellipsis.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/ellipsis.svg",
+      "sha256": "4f495cc72013ffdfec677f03b33a150f7b4dd741979283fd6853a09024bca112"
+    },
+    {
+      "path": "icons/plus.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/plus.svg",
+      "sha256": "7f6af73bf1ff6c4bca3f18351c8d1bdec6749c0c2530c4de5da85d520c21df17"
+    },
+    {
+      "path": "icons/search.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/search.svg",
+      "sha256": "9322d964b61cf729b3a81210568d5a97eaf4a1f3239f25a056fda3013bf35611"
+    },
+    {
+      "path": "icons/mic.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/mic.svg",
+      "sha256": "2db62a8268f7a16f0bd0f062ccd21ec4a3733d19a9d88f5332798b4ce437b757"
+    },
+    {
+      "path": "icons/mic-off.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/mic-off.svg",
+      "sha256": "d1ab9ea1f638142a61fab3510d39629a862a4f18812b7642933d5466dd09429a"
+    },
+    {
+      "path": "icons/play.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/play.svg",
+      "sha256": "e646902a5a8ba055ce573c6f51d10bb6eb9d230e7d6e84a9e6c81f599778ffc1"
+    },
+    {
+      "path": "icons/pause.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/pause.svg",
+      "sha256": "0f4280e6dcc1047551bbc6ef8a9f1a34959de13c7f077d9667d12ab90c8fbca7"
+    },
+    {
+      "path": "icons/volume-2.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/volume-2.svg",
+      "sha256": "fb404f9c128a0579de67b399177631e5edb3502fdc247ceb30e8b15754b46071"
+    },
+    {
+      "path": "icons/volume-x.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/volume-x.svg",
+      "sha256": "59b3477f34d36b7bdccde4ca162f4c93808d5c052c5aafd3e909b031c29201c5"
+    },
+    {
+      "path": "icons/rotate-cw.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/rotate-cw.svg",
+      "sha256": "ddcfe6d87240475946935e77411cd4d15a06f3d28a9b921bafed224ebe953668"
+    },
+    {
+      "path": "icons/refresh-cw.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/refresh-cw.svg",
+      "sha256": "2e10dd403c85a24f163d59fc6151aa21147fe9402e1305dfc8979208caee8944"
+    },
+    {
+      "path": "icons/send.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/send.svg",
+      "sha256": "a489257f447b808ab6b258ae888fa49686885bbc30a7a2774d97a01f11f9cd5e"
+    },
+    {
+      "path": "icons/trash-2.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/trash-2.svg",
+      "sha256": "e63698acf757d3043fcb4a9ea6ffceff9dd84708707eafc879c86b34a6ff2786"
+    },
+    {
+      "path": "icons/lock.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/lock.svg",
+      "sha256": "d2cfe60cac8deaef36442b5c8218c1e61abe18222784b2a370ea090d13fca840"
+    },
+    {
+      "path": "icons/key-round.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/key-round.svg",
+      "sha256": "f8cdea843754ed360e36b04bf6aa2c2b3610935dd39ffc685a36c4d0a05be248"
+    },
+    {
+      "path": "icons/user-round.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/user-round.svg",
+      "sha256": "84870f26f3faf8da45da84174517519e81b9e8f00319c78954fcbb74f50038a1"
+    },
+    {
+      "path": "icons/camera.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/camera.svg",
+      "sha256": "f48b4e6cb69c736630202728ed0fd41d8dbe3f2b743a644eaf58a69099dcb6d2"
+    },
+    {
+      "path": "icons/qr-code.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/qr-code.svg",
+      "sha256": "920cb79ab4b2fd23c36a16de3ca533c4896cb989adb823eb7dec97fd840d30f5"
+    },
+    {
+      "path": "icons/copy.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/copy.svg",
+      "sha256": "ea80e566c7a12628a447cb53179b19aea4f60b9143e2becd0d0f20bf260e5718"
+    },
+    {
+      "path": "icons/pin.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/pin.svg",
+      "sha256": "55e8e5e04bcb671179fc1dd589abf09cf6a1e71301ff14eb739419cfab6011e7"
+    },
+    {
+      "path": "icons/keyboard.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/keyboard.svg",
+      "sha256": "f509925ca81964ed06251ad4702e989bb81a566ffc74d15c2226b4f07ded67be"
+    },
+    {
+      "path": "icons/x.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/x.svg",
+      "sha256": "4a9cdab38fbb96162e7dace28e33f4ca0e49d8963a6162abc3d4691b7d675117"
+    },
+    {
+      "path": "icons/triangle-alert.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/triangle-alert.svg",
+      "sha256": "4866f38b8560d410f21e3226413e0b77997b6dfbb6931fadfe0a0d5aef9ffeb4"
+    },
+    {
+      "path": "icons/info.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/info.svg",
+      "sha256": "bc977a64eb96f3e9c1041ffd09a3fceb70e3e65c02b571f76064062ed31f3cb9"
+    },
+    {
+      "path": "icons/history.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/history.svg",
+      "sha256": "a98ff758157910b9fc9d42d5d5dc80c2f4e037afa5f8ea4dee5f5649f03d438d"
+    },
+    {
+      "path": "icons/log-out.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/log-out.svg",
+      "sha256": "ef5acaea068568b087096ca3da84f41982e7518860de199305dc28f0928ff75a"
+    },
+    {
+      "path": "icons/power.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/power.svg",
+      "sha256": "1e6b84a659aa43f826cdd8df0a63d349720004e2ccb10c33e415a990a311aa05"
+    },
+    {
+      "path": "icons/check.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/check.svg",
+      "sha256": "7f33acc9a77a61659531044525fc008edebe215bf4dcf1c789c8674ad3277db0"
+    },
+    {
+      "path": "icons/square.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/square.svg",
+      "sha256": "bd979354f0ab184b95cecf03eedefe40c2dc65830ac6d7e60017b2b25a354acb"
+    },
+    {
+      "path": "icons/square-check.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/square-check.svg",
+      "sha256": "929cdff3bf27aeaff13260d4acf9d1afe62997e0ca88222032fb568dfc93005c"
+    },
+    {
+      "path": "fonts/InterTight-400.ttf",
+      "source": "InterTight-variable.ttf; fonttools 4.59.2 instancer",
+      "sha256": "a6f1990c74a8b7207e33fee27471b6490ca666c68e55b765cc0baab81a0e7550"
+    },
+    {
+      "path": "fonts/InterTight-500.ttf",
+      "source": "InterTight-variable.ttf; fonttools 4.59.2 instancer",
+      "sha256": "951693b65f088c9f92fdb52020c5cf96b4453d784a80c7efb677a6d3877bebf8"
+    },
+    {
+      "path": "fonts/InterTight-600.ttf",
+      "source": "InterTight-variable.ttf; fonttools 4.59.2 instancer",
+      "sha256": "e5019989a06653aa59b22c9319c10cc35c30cc93976f66037e2cb7b36a2cd4db"
+    },
+    {
+      "path": "fonts/InterTight-700.ttf",
+      "source": "InterTight-variable.ttf; fonttools 4.59.2 instancer",
+      "sha256": "aa8e55aa7400d711f2861c73ec65351f5b1c99a33219d90bdc9b2be8385e828e"
+    },
+    {
+      "path": "icons/users-native.svg",
+      "source": "icons/users.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "97a627de7ab72e756718271a97b44d29b988adaf6296e1eaa93b1e4e022e11ff"
+    },
+    {
+      "path": "icons/lock-native.svg",
+      "source": "icons/lock.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "af40103e9517e4a0fd9d6cd82911a384bbb6ba754cceeca92da0c9984c9f9045"
+    },
+    {
+      "path": "icons/pin-native.svg",
+      "source": "icons/pin.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "b6be86bdfba6644b82ab506f9bdf97f842cc319f82c4d4ff98d25e3a3f7bb3e3"
+    },
+    {
+      "path": "icons/volume-2-native.svg",
+      "source": "icons/volume-2.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "1016b902a86c201d5b6c24ebfe7cfa4964110c00fd88e9e6db87dc799d43d912"
+    },
+    {
+      "path": "icons/refresh-cw-native.svg",
+      "source": "icons/refresh-cw.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "33c1f9ae61f4507fe51dfc575670a798ec3823db7aeb80163a2832e245a4a3b6"
+    },
+    {
+      "path": "icons/volume-x-native.svg",
+      "source": "icons/volume-x.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "8e55ae712bbbde24d21bc53fe52328d8b99c70f28a54275fe053efe1ae396b26"
+    },
+    {
+      "path": "icons/trash-2-native.svg",
+      "source": "icons/trash-2.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "fd95e774b0e9ec752c1a4b4081bf34b1425ce127ac85cf711b8d10d5decd2358"
+    },
+    {
+      "path": "icons/info-native.svg",
+      "source": "icons/info.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "d8379f0b6e18579885ee89dcc380ab4b004953a563e5734c28dcf0794c32adbe"
+    },
+    {
+      "path": "icons/keyboard-native.svg",
+      "source": "icons/keyboard.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "4f3831b4b2b9b1669f740efd6569e02ba78ef1521249779c058784d31b085747"
+    },
+    {
+      "path": "icons/key-round-native.svg",
+      "source": "icons/key-round.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "ed9ce59a474be5778db75d112b908b10c460b90ea8ca9a62d3f9d28122bc5e35"
+    },
+    {
+      "path": "icons/history-native.svg",
+      "source": "icons/history.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "9d96112ea071ec39ce2668083a72ae795a0b8d0027a6869fa30e9998b20c4b12"
+    },
+    {
+      "path": "icons/pause-native.svg",
+      "source": "icons/pause.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "2e6df983c8dd16bfd3c5e5a9478ae2978871cbbaa74cd6468758343674f57304"
+    },
+    {
+      "path": "icons/triangle-alert-native.svg",
+      "source": "icons/triangle-alert.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "75a872ee05bbe4607ff73afb1854a18c6406f6e1e855a2943b3006e00a6a2448"
+    },
+    {
+      "path": "icons/square-native.svg",
+      "source": "icons/square.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "548c24c5aa699ff3e9566770943df45f99c352a31b3f9dc939763b93ec3a70dd"
+    },
+    {
+      "path": "icons/chevron-left-native.svg",
+      "source": "icons/chevron-left.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "cdc14f7766b624e482f11628af375f0ad7ec89931b64a773defd6561ca819ddb"
+    },
+    {
+      "path": "icons/search-native.svg",
+      "source": "icons/search.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "88d542cc6ef0f86474b12101aa3fcc781d0b04f452f169720a88baf8f472d454"
+    },
+    {
+      "path": "icons/user-round-native.svg",
+      "source": "icons/user-round.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "3353bda3ccab31a16927bf5d68887b2cb43af559849e1502f7af5d537632cdc7"
+    },
+    {
+      "path": "icons/mic-native.svg",
+      "source": "icons/mic.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "345a8c173fe72d362f50b33280b0d7165a2888c1b93a749908c2c4836a13e1c4"
+    },
+    {
+      "path": "icons/power-native.svg",
+      "source": "icons/power.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "02fe924aad13ca4b0d77f90750113482942eb9be31ed8e48d29853aaf478cba6"
+    },
+    {
+      "path": "icons/x-native.svg",
+      "source": "icons/x.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "bf5361bcae9a1273561e7de110a79f72e0e60a3de8b0e50412d1c7f979760f0c"
+    },
+    {
+      "path": "icons/qr-code-native.svg",
+      "source": "icons/qr-code.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "5a76721b81924716615b16c67351c2329050449dec15fe4333258edcefe17d1c"
+    },
+    {
+      "path": "icons/chevron-right-native.svg",
+      "source": "icons/chevron-right.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "73022a2c88285ff9c6e3ee2b45359e6b3e5ff43f625bf2b9ce663dcfcf3d009f"
+    },
+    {
+      "path": "icons/bell-native.svg",
+      "source": "icons/bell.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "1ca73170e98b1daab195a8559863d105e2cc613734c75857d6817f2adf7d9abb"
+    },
+    {
+      "path": "icons/copy-native.svg",
+      "source": "icons/copy.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "17810aa1b9d040dbca83d5dafd6a5792d84bce28cb55a096805d518f5ec4eec9"
+    },
+    {
+      "path": "icons/rotate-cw-native.svg",
+      "source": "icons/rotate-cw.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "1ec0d4442a6943c915a0c5884ecc1b817b03f5118d85afd99bdf127fd0bf3383"
+    },
+    {
+      "path": "icons/check-native.svg",
+      "source": "icons/check.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "1389d45aa0c810342cddd5292119fb6c21f0d001fe69ecb492349ecb9768ca96"
+    },
+    {
+      "path": "icons/mic-off-native.svg",
+      "source": "icons/mic-off.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "9a49eff115096bbaec8ea5e6fb14d18e08e19138b2273da4fff8d8561608d8c3"
+    },
+    {
+      "path": "icons/log-out-native.svg",
+      "source": "icons/log-out.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "05ecd645faaa57c2f8a426a75a416e9e7336866ad111fc50bf3061c1fc9cddd6"
+    },
+    {
+      "path": "icons/square-check-native.svg",
+      "source": "icons/square-check.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "9aefe0cae73f643bc8ce025904149225640bebe280a80352f04e6c695fb454ac"
+    },
+    {
+      "path": "icons/camera-native.svg",
+      "source": "icons/camera.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "4a3a3336bc4d360cce14a42c58404ba5d3ad6577f07647b7834e0c16097a41fb"
+    },
+    {
+      "path": "icons/settings-native.svg",
+      "source": "icons/settings.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "c79e839358a335d874f7a33cb4fa8cfa377af05ab7e2730b4ee125159a094e29"
+    },
+    {
+      "path": "icons/plus-native.svg",
+      "source": "icons/plus.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "c30e55160eb4493e9c77874ff64d8da444bd1a5f14f41c30640ed428ec90319c"
+    },
+    {
+      "path": "icons/play-native.svg",
+      "source": "icons/play.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "a3b1ca8b7a8aece03d43223e822d13a7dac8d3e34d7a12b3cb5d5067ae9f8eed"
+    },
+    {
+      "path": "icons/send-native.svg",
+      "source": "icons/send.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "967c73c6a43cdb46ea71cf9dd4d6fdb6c7bf76da72b13a45d8eaae97c1b52f09"
+    },
+    {
+      "path": "icons/ellipsis-native.svg",
+      "source": "icons/ellipsis.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
+      "sha256": "2913f890cc28e15699319a8b9b8916e8f48f6289815711d8a1ae8594aaf8e226"
+    }
+  ]
+}

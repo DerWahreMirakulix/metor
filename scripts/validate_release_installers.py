@@ -74,17 +74,42 @@ def validate_zip(archive: Path) -> None:
                 raise RuntimeError(
                     'Installer did not resolve its declared frontend target.'
                 )
+            has_gui = 'metor-ui-gui' in inventory
+            if has_gui != archive.name.startswith('metor-ui-gui-'):
+                raise RuntimeError('Installer did not resolve its declared GUI target.')
+            if has_gui:
+                run(
+                    [
+                        str(executable),
+                        '-I',
+                        '-c',
+                        'import sys; from metor.client import load_frontend; '
+                        'assert load_frontend("gui"); assert "kivy" not in sys.modules',
+                    ]
+                )
+                run(
+                    [
+                        str(executable),
+                        '-I',
+                        '-m',
+                        'metor',
+                        'chat',
+                        '--ui',
+                        'gui',
+                        '--help',
+                    ]
+                )
         print('NATIVE_OFFLINE_ZIP_OK', archive.name)
 
 
 def main() -> None:
-    """Validates all three native release variants supplied by the caller."""
+    """Validates all four native release variants supplied by the caller."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('bundle_root', type=Path)
     root = parser.parse_args().bundle_root
     archives = sorted(root.glob('*.zip'))
-    if len(archives) != 3:
-        raise ValueError('Expected SDK, base and Terminal ZIPs.')
+    if len(archives) != 4:
+        raise ValueError('Expected SDK, base, Terminal and GUI ZIPs.')
     for archive in archives:
         validate_zip(archive)
 

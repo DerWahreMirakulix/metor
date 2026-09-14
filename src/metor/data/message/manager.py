@@ -205,6 +205,34 @@ class MessageManager:
         """Returns one exact-direction retained Voice metadata record."""
         return self._messages.get_voice_payload(contact_onion, msg_id, direction)
 
+    def message_outcome(
+        self, onion: str, msg_id: str, direction: MessageDirection
+    ) -> tuple[Delivery, MessageStatus] | None:
+        """Exposes content-free durable receipt facts for exact-ID reconciliation.
+
+        Args:
+            onion: Canonical peer identity, never a mutable alias.
+            msg_id: Exact logical message ID.
+            direction: Qualified local message direction.
+        Returns:
+            tuple[Delivery, MessageStatus] | None: Retained receipt facts, if any.
+        """
+        return self._messages.message_outcome(onion, msg_id, direction)
+
+    def message_state(
+        self, onion: str, msg_id: str, direction: MessageDirection
+    ) -> tuple[Delivery, MessageStatus, bool] | None:
+        """Exposes atomic receipt/archive metadata through the existing storage owner.
+
+        Args:
+            onion: Canonical peer identity.
+            msg_id: Exact message identity.
+            direction: Explicit local direction.
+        Returns:
+            tuple[Delivery, MessageStatus, bool] | None: Receipt facts and local archive availability.
+        """
+        return self._messages.message_state(onion, msg_id, direction)
+
     def list_retained_messages(
         self,
         contact_onion: Optional[str] = None,
@@ -212,10 +240,12 @@ class MessageManager:
         direction: Optional[MessageDirection] = None,
         cursor: Optional[str] = None,
         limit: int = Constants.DEFAULT_RETAINED_PAGE_SIZE,
+        owner_token: Optional[str] = None,
+        msg_id: Optional[str] = None,
     ) -> RetainedMessagePage:
         """Returns a non-consuming page of retained logical identities."""
         return self._messages.list_retained_messages(
-            contact_onion, delivery, direction, cursor, limit
+            contact_onion, delivery, direction, cursor, limit, owner_token, msg_id
         )
 
     def release_inbound_voice(
@@ -494,19 +524,33 @@ class MessageManager:
         """
         return self._messages.get_unread_inbox_summaries()
 
-    def get_drop_conversation_summaries(self) -> List[Tuple[str, int]]:
+    def get_drop_conversation_summaries(self) -> List[Tuple[str, int, int]]:
         """Returns DROP conversation identities and unread counts without content.
 
         Args:
             None
 
         Returns:
-            List[Tuple[str, int]]: Peer onion and unread DROP count rows.
+            List[Tuple[str, int, int]]: Peer onion, unread and pending outbound DROP counts.
         """
         return self._messages.get_drop_conversation_summaries()
 
+    def get_live_activity(self) -> Dict[str, str]:
+        """Projects unresolved LIVE recency through the canonical receipt owner.
+
+        Args:
+            None
+        Returns:
+            Dict[str, str]: Content-free peer receipt timestamps.
+        """
+        return self._messages.get_live_activity()
+
     def get_and_read_inbox(
-        self, contact_onion: str, delivery: Optional[Delivery] = None
+        self,
+        contact_onion: str,
+        delivery: Optional[Delivery] = None,
+        max_messages: Optional[int] = None,
+        max_payload_bytes: Optional[int] = None,
     ) -> List[Tuple[int, str, str, str, Optional[str], str]]:
         """
         Retrieves unread inbox rows for one contact and executes the consume policy.
@@ -514,6 +558,8 @@ class MessageManager:
         Args:
             contact_onion (str): The target onion address.
             delivery (Optional[Delivery]): Optional delivery filter.
+            max_messages: Optional foreground row ceiling.
+            max_payload_bytes: Optional serialized content ceiling.
 
         Returns:
             List[Tuple[int, str, str, str, Optional[str], str]]: Message rows including content type.
@@ -522,6 +568,8 @@ class MessageManager:
             contact_onion,
             self._pm.config.get_bool(SettingKey.EPHEMERAL_MESSAGES),
             delivery,
+            max_messages,
+            max_payload_bytes,
         )
 
     def get_chat_history(
@@ -543,6 +591,29 @@ class MessageManager:
             limit if limit is not None else Constants.DEFAULT_MESSAGES_LIMIT
         )
         return self._messages.get_chat_history(contact_onion, actual_limit)
+
+    def get_chat_page(
+        self,
+        contact_onion: str,
+        limit: int,
+        max_payload_bytes: int,
+        before_msg_id: Optional[str] = None,
+        before_direction: Optional[MessageDirection] = None,
+    ) -> tuple[List[StoredMessageRecord], bool, bool]:
+        """Delegates non-consuming bounded archive access to its persistence owner.
+
+        Args:
+            contact_onion: Resolved peer identity.
+            limit: Validated maximum rows.
+            max_payload_bytes: Serialized row budget.
+            before_msg_id: Optional exclusive boundary identity.
+            before_direction: Exact boundary direction.
+        Returns:
+            tuple[List[StoredMessageRecord], bool, bool]: Rows, older state and availability.
+        """
+        return self._messages.get_chat_page(
+            contact_onion, limit, max_payload_bytes, before_msg_id, before_direction
+        )
 
     def get_drop_voice_payloads(
         self,

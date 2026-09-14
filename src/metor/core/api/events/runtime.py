@@ -1,11 +1,18 @@
 """Runtime, auth, settings, and config IPC event DTOs."""
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import ClassVar, Optional
 
 # Local Package Imports
 from metor.core.api.base import IpcEvent
-from metor.core.api.codes import ClientUnlockMethod, EventType
+from metor.core.api.codes import (
+    ClientUnlockMethod,
+    EventType,
+    NotificationPrivacy,
+    LockedAcceptPolicy,
+)
+from .entries import PendingConnectionEntry
+from .shared import NestedEntryCastingMixin
 from metor.core.api.registry import register_event
 
 
@@ -77,7 +84,28 @@ class ClientRestrictedEvent(IpcEvent):
     challenge: Optional[str] = None
     salt: Optional[str] = None
     device_lifecycle: bool = False
+    continued_live_target: Optional[str] = None
+    continued_live_context_generation: Optional[int] = None
     event_type: EventType = field(default=EventType.CLIENT_RESTRICTED, init=False)
+
+
+@register_event(EventType.RESTRICTED_CLIENT_STATE)
+@dataclass
+class RestrictedClientStateEvent(NestedEntryCastingMixin, IpcEvent):
+    """Projects only current per-client grants and notification-permitted call metadata."""
+
+    restricted: bool = False
+    continued_live_target: Optional[str] = None
+    continued_live_context_generation: Optional[int] = None
+    session_state: str = 'disconnected'
+    notification_privacy: NotificationPrivacy = NotificationPrivacy.OFF
+    accept_while_locked: LockedAcceptPolicy = LockedAcceptPolicy.NONE
+    pending: list[PendingConnectionEntry] = field(default_factory=list)
+    accepted_handles: list[str] = field(default_factory=list)
+    _nested_entry_types: ClassVar[dict[str, type[object]]] = {
+        'pending': PendingConnectionEntry
+    }
+    event_type: EventType = field(default=EventType.RESTRICTED_CLIENT_STATE, init=False)
 
 
 @register_event(EventType.CLIENT_REAUTHORIZED)
@@ -128,6 +156,8 @@ class QuickUnlockFailedEvent(IpcEvent):
 class SelfDestructInitiatedEvent(IpcEvent):
     """Signals that daemon self-destruction has started."""
 
+    profile: Optional[str] = None
+    operation_id: Optional[str] = None
     event_type: EventType = field(
         default=EventType.SELF_DESTRUCT_INITIATED,
         init=False,
@@ -139,6 +169,8 @@ class SelfDestructInitiatedEvent(IpcEvent):
 class SelfDestructCompletedEvent(IpcEvent):
     """Signals that protected key access was destroyed before cleanup completion."""
 
+    profile: Optional[str] = None
+    operation_id: Optional[str] = None
     event_type: EventType = field(
         default=EventType.SELF_DESTRUCT_COMPLETED,
         init=False,
@@ -151,6 +183,7 @@ class SelfDestructKeyDestroyedEvent(IpcEvent):
     """Confirms irreversible destruction of protected profile-key access."""
 
     profile: str
+    operation_id: Optional[str] = None
     event_type: EventType = field(
         default=EventType.SELF_DESTRUCT_KEY_DESTROYED,
         init=False,
@@ -165,10 +198,39 @@ class SelfDestructCleanupFailedEvent(IpcEvent):
     profile: str
     phase: str = 'cleanup'
     key_destroyed: bool = True
+    operation_id: Optional[str] = None
     event_type: EventType = field(
         default=EventType.SELF_DESTRUCT_CLEANUP_FAILED,
         init=False,
     )
+
+
+@register_event(EventType.SELF_DESTRUCT_RUNTIME_RELEASED)
+@dataclass
+class SelfDestructRuntimeReleasedEvent(IpcEvent):
+    """Confirms fenced runtime shutdown, database close and runtime-key release for one purge."""
+
+    profile: str = ''
+    operation_id: str = ''
+    event_type: EventType = field(
+        default=EventType.SELF_DESTRUCT_RUNTIME_RELEASED, init=False
+    )
+
+
+@register_event(EventType.SELF_DESTRUCT_SAFE)
+@dataclass
+class SelfDestructSafeEvent(IpcEvent):
+    """Confirms combined encrypted-profile access destruction and local power-off safety.
+
+    The exact operation has released all runtime access, closed the database,
+    cleared runtime keys and destroyed persistent key protection. File cleanup
+    may still be running. This says nothing about unrelated host runtimes and
+    does not itself grant a caller permission to shut down the host.
+    """
+
+    profile: str = ''
+    operation_id: str = ''
+    event_type: EventType = field(default=EventType.SELF_DESTRUCT_SAFE, init=False)
 
 
 @register_event(EventType.PROFILE_EXIT_PREPARED)

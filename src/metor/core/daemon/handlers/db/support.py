@@ -1,6 +1,7 @@
 """Shared support logic for the modular database command handlers."""
 
 from typing import Callable, List, Optional
+from dataclasses import replace
 
 from metor.core.api import (
     ContactRemovedEvent,
@@ -14,6 +15,7 @@ from metor.core.api import (
     RenameSuccessEvent,
     SummaryHistoryEntry,
     HistorySummaryEventCode,
+    request_context,
 )
 from metor.data import ContactManager, HistoryManager, MessageManager
 from metor.data.contact import ContactAliasChange, ContactRemoval
@@ -33,6 +35,17 @@ class DatabaseCommandHandlerSupportMixin:
     _mm: MessageManager
     _get_active_onions: Callable[[], List[str]]
     _broadcast: Callable[[IpcEvent], None]
+
+    def _broadcast_contact_event(self, event: IpcEvent) -> None:
+        """Publishes contact side effects without completing an unrelated request.
+
+        Args:
+            event: Canonical rename/removal observation for attached clients.
+        Returns:
+            None
+        """
+        with request_context(None):
+            self._broadcast(replace(event, request_id=None))
 
     def _build_raw_history_entry(
         self,
@@ -121,7 +134,7 @@ class DatabaseCommandHandlerSupportMixin:
             None
         """
         for rename in renames:
-            self._broadcast(
+            self._broadcast_contact_event(
                 RenameSuccessEvent(
                     old_alias=rename.old_alias,
                     new_alias=rename.new_alias,
@@ -132,7 +145,7 @@ class DatabaseCommandHandlerSupportMixin:
             )
 
         for removal in removals:
-            self._broadcast(
+            self._broadcast_contact_event(
                 ContactRemovedEvent(
                     alias=removal.alias,
                     onion=removal.onion,
@@ -151,7 +164,7 @@ class DatabaseCommandHandlerSupportMixin:
             None
         """
         for alias, onion in removed_peers:
-            self._broadcast(
+            self._broadcast_contact_event(
                 ContactRemovedEvent(
                     alias=alias,
                     onion=onion,

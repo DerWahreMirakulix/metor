@@ -94,6 +94,7 @@ class RetainedMessageRecord:
     retained_bytes: int
     codec: Optional[str] = None
     duration_ms: Optional[int] = None
+    producer_interrupted: bool = False
 
 
 @dataclass(frozen=True)

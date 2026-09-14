@@ -1,5 +1,8 @@
 """Central schema bootstrap helpers for the SQL persistence package."""
 
+import secrets
+
+from metor.shared import Constants
 from metor.data.sql.backends import SqlCipherConnection, SqlCipherCursor
 from metor.versioning import DB_SCHEMA_VERSION
 
@@ -67,6 +70,57 @@ CREATE TABLE IF NOT EXISTS message_archive (
 )
 """
 
+PROFILE_METADATA_TABLE_QUERY: str = """
+CREATE TABLE IF NOT EXISTS profile_metadata (
+    name TEXT PRIMARY KEY NOT NULL CHECK (name IN ('instance_id', 'ui.gui')),
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    value TEXT NOT NULL
+)
+"""
+
+
+def create_profile_metadata(cursor: SqlCipherCursor) -> None:
+    """Creates profile-owned metadata and assigns one stable random instance ID.
+
+    Args:
+        cursor: Cursor within the schema creation or migration transaction.
+    Returns:
+        None
+    """
+    cursor.execute(PROFILE_METADATA_TABLE_QUERY)
+    cursor.execute(
+        'INSERT OR IGNORE INTO profile_metadata (name, value) VALUES (?, ?)',
+        ('instance_id', secrets.token_hex(Constants.PROFILE_INSTANCE_BYTES)),
+    )
+
+
+VOICE_PRODUCERS_TABLE_QUERY: str = """
+CREATE TABLE IF NOT EXISTS voice_producer_items (
+    msg_id TEXT PRIMARY KEY NOT NULL CHECK (msg_id <> ''),
+    peer_onion TEXT NOT NULL CHECK (peer_onion <> ''),
+    owner_token TEXT NOT NULL CHECK (owner_token <> ''),
+    delivery TEXT NOT NULL CHECK (delivery IN ('live', 'drop')),
+    interrupted INTEGER NOT NULL DEFAULT 0 CHECK (interrupted IN (0, 1)),
+    allocated_ids TEXT NOT NULL DEFAULT '[]',
+    cleanup_payload TEXT
+)
+"""
+
+
+def create_voice_producers(cursor: SqlCipherCursor) -> None:
+    """Creates durable owner claims and retryable disposable cleanup intents.
+
+    Args:
+        cursor: Active creation or migration transaction.
+    Returns:
+        None
+    """
+    cursor.execute(VOICE_PRODUCERS_TABLE_QUERY)
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_voice_producer_owner ON voice_producer_items (owner_token)'
+    )
+
+
 INDEX_QUERIES: tuple[str, ...] = (
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_message_receipts_identity ON message_receipts (peer_onion, msg_id, direction)',
     'CREATE INDEX IF NOT EXISTS idx_message_receipts_unread ON message_receipts (peer_onion, direction, status)',
@@ -92,6 +146,8 @@ def create_core_schema(cursor: SqlCipherCursor) -> None:
     cursor.execute(INBOUND_SPOOL_TABLE_QUERY)
     cursor.execute(OUTBOX_SPOOL_TABLE_QUERY)
     cursor.execute(MESSAGE_ARCHIVE_TABLE_QUERY)
+    create_profile_metadata(cursor)
+    create_voice_producers(cursor)
     for index_query in INDEX_QUERIES:
         cursor.execute(index_query)
 

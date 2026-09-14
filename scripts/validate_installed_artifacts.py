@@ -115,10 +115,12 @@ def audit_wheel_records(wheels: tuple[Path, ...]) -> None:
     selected = {
         path.name: path
         for path in wheels
-        if path.name.startswith(('metor-', 'metor_sdk-', 'metor_ui_terminal-'))
+        if path.name.startswith(
+            ('metor-', 'metor_sdk-', 'metor_ui_terminal-', 'metor_ui_gui-')
+        )
     }
-    if len(selected) != 3:
-        raise RuntimeError('Expected exactly three coordinated Metor wheel names.')
+    if len(selected) != 4:
+        raise RuntimeError('Expected exactly four coordinated Metor wheel names.')
     owned: dict[str, str] = {}
     contents: dict[str, bytes] = {}
     expected_markers = {
@@ -311,6 +313,15 @@ py-modules = ["closure_fake"]
         if 'FAKE_DYNAMIC_IPC_OK' not in output:
             raise RuntimeError('Installed fake did not complete dynamic IPC.')
         run([str(executable), '-m', 'pip', 'uninstall', '-y', 'metor-closure-fake'])
+        install('metor-ui-gui')
+        gui_probe = (
+            'import sys; from metor.client import load_frontend; '
+            'assert load_frontend("gui"); assert "kivy" not in sys.modules; '
+            'from metor.ui.gui.theme import font_path; assert font_path(); '
+            'print("GUI_LAZY_INSTALLED_ENTRY_OK")'
+        )
+        run([str(executable), '-I', '-c', gui_probe])
+        run([str(executable), '-I', '-m', 'metor', 'chat', '--ui', 'gui', '--help'])
         install('metor-ui-terminal')
         terminal_output = run([str(executable), '-I', '-c', TERMINAL_HARNESS])
         if (
@@ -327,12 +338,23 @@ py-modules = ["closure_fake"]
             ]
         )
         run([str(executable), '-m', 'pip', 'uninstall', '-y', 'metor-ui-terminal'])
+        run([str(executable), '-I', '-c', gui_probe])
         run([str(executable), '-I', '-m', 'metor', '--help'])
         run([str(executable), '-m', 'pip', 'check'])
         inventory = run([str(executable), '-I', '-m', 'metor', 'chat', '--list-ui'])
         if 'metor-ui-terminal' in inventory:
             raise RuntimeError('Uninstalled frontend remained in metadata inventory.')
         install('metor-ui-terminal')
+        run([str(executable), '-m', 'pip', 'uninstall', '-y', 'metor-ui-gui'])
+        run(
+            [
+                str(executable),
+                '-I',
+                '-c',
+                'from metor.client import load_frontend; assert load_frontend("terminal"); '
+                'from metor.ui.terminal import Help; print("TERMINAL_SURVIVES_GUI_UNINSTALL_OK")',
+            ]
+        )
         run(
             [
                 str(executable),

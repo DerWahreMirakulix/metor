@@ -131,3 +131,42 @@ class MessageReceiptStore:
         if not rows:
             return None
         return self._receipt_from_row(rows[0])
+
+    def message_outcome(
+        self, onion: str, msg_id: str, direction: MessageDirection
+    ) -> tuple[Delivery, MessageStatus] | None:
+        """Reads exact receipt facts without loading content or changing handoff state.
+
+        Args:
+            onion: Canonical peer identity.
+            msg_id: Exact logical message ID.
+            direction: Local direction qualifying this identity.
+        Returns:
+            tuple[Delivery, MessageStatus] | None: Durable facts or no retained receipt.
+        """
+        state = self.message_state(onion, msg_id, direction)
+        return (state[0], state[1]) if state is not None else None
+
+    def message_state(
+        self, onion: str, msg_id: str, direction: MessageDirection
+    ) -> tuple[Delivery, MessageStatus, bool] | None:
+        """Reads exact receipt and archive presence atomically without selecting payloads.
+
+        Args:
+            onion: Canonical peer identity.
+            msg_id: Exact logical message identity.
+            direction: Explicit local direction.
+        Returns:
+            tuple[Delivery, MessageStatus, bool] | None: Receipt facts and local archive presence.
+        """
+        rows = self._sql.fetchall(
+            'SELECT r.delivery, r.status, EXISTS('
+            'SELECT 1 FROM message_archive AS a WHERE a.receipt_id = r.id) '
+            'FROM message_receipts AS r WHERE r.peer_onion = ? '
+            'AND r.direction = ? AND r.msg_id = ?',
+            (onion, direction.value, msg_id),
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        return Delivery(str(row[0])), MessageStatus(str(row[1])), bool(row[2])

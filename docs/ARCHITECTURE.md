@@ -219,6 +219,17 @@ SQLCipher access, clears any injected runtime keys, calls
 key-first ordering. If cleanup fails after key destruction, nothing recreates
 protected key material.
 
+An opt-in `SelfDestructCommand.operation_id` binds GUI lifecycle reports to one
+accepted operation on its already authorized connection. `SelfDestructRuntimeReleased`
+requires successful runtime preparation, database close and runtime-key release.
+`SelfDestructSafe` additionally requires persistent key-protection removal and is
+emitted only for encrypted profiles, before best-effort file cleanup. Key removal,
+an initiated event, EOF or process exit alone does not provide that guarantee.
+The safe event covers only the selected profile; an independently validated host
+binding must still establish that shutting down the appliance cannot interrupt
+other unprepared runtimes. These additive reports do not grant destruction or
+host-power authority and do not weaken the accepted restricted-client policy.
+
 Hard-locked daemons reject anonymous self-destruction. An authenticated client
 may deliberately enter restricted mode with the `device_lifecycle` capability;
 only that fixed lock-cycle capability can prepare profile exit or self-destruct
@@ -314,6 +325,8 @@ Use this document when you need to answer one of these questions:
 - [api.schema.json](./generated/api.schema.json): Generated JSON Schema wire contract for the typed IPC DTOs.
 - [GLOSSARY.md](./GLOSSARY.md): Canonical terminology reference for settings namespaces, transport fields, and renamed symbols.
 - [EMBEDDED_UI.md](./contracts/EMBEDDED_UI.md): Embedded frontend ownership, platform ports, projections, recovery rules, and contract matrix.
+- [GUI.md](./contracts/GUI.md): Native GUI contract, approved v1.0 inputs,
+  platform decision and implementation gates.
 - [AUDIT.md](./governance/AUDIT.md): Review checklist for security, OPSEC, concurrency, and architecture risks.
 - [CONTRIBUTE.md](./CONTRIBUTE.md): Coding rules, import boundaries, typing requirements, and formatting standards.
 

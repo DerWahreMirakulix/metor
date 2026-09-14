@@ -19,6 +19,8 @@ from metor.core.api import (
     ReadReceiptEvent,
     RuntimeStateChangedEvent,
     TextContent,
+    TextAcceptedEvent,
+    TextRejectedEvent,
     get_current_request_id,
 )
 from metor.core.daemon.managed.models import TorCommand
@@ -158,13 +160,20 @@ class LiveMessageRouter:
             return MessageOperationReason.INVALID_SELECTION
         return None
 
-    def send_message(self, target: str, msg: str, msg_id: str) -> None:
+    def send_message(
+        self,
+        target: str,
+        msg: str,
+        msg_id: str,
+        local_result: Optional[Callable[[IpcEvent], None]] = None,
+    ) -> None:
         """Sends one live message or durably defers it for recovery.
 
         Args:
             target (str): The target alias or onion.
             msg (str): The message content.
             msg_id (str): The unique message identifier.
+            local_result: Optional requesting-client callback for local admission outcomes.
 
         Returns:
             None
@@ -196,6 +205,10 @@ class LiveMessageRouter:
                             request_id=request_id,
                         )
                     )
+                    if local_result is not None:
+                        local_result(TextRejectedEvent(onion, msg_id, limit_reason))
+                elif local_result is not None:
+                    local_result(TextAcceptedEvent(onion, msg_id, Delivery.LIVE))
                 return
             if not self._config.get_bool(SettingKey.FALLBACK_TO_DROP):
                 self._broadcast(
@@ -216,6 +229,8 @@ class LiveMessageRouter:
                 status=MessageStatus.PENDING,
                 msg_id=msg_id,
             )
+            if local_result is not None:
+                local_result(TextAcceptedEvent(onion, msg_id, Delivery.DROP))
             self._hm.log_event(
                 HistoryEvent.QUEUED,
                 onion,
@@ -249,7 +264,11 @@ class LiveMessageRouter:
                         request_id=request_id,
                     )
                 )
+                if local_result is not None:
+                    local_result(TextRejectedEvent(onion, msg_id, limit_reason))
                 return
+            if local_result is not None:
+                local_result(TextAcceptedEvent(onion, msg_id, Delivery.LIVE))
             self._state.send_frame(
                 conn,
                 build_message_frame(TorCommand.MSG, msg_id, msg, timestamp).encode(
@@ -333,7 +352,13 @@ class LiveMessageRouter:
                 )
             elif has_clients:
                 self._broadcast(
-                    InboxNotificationEvent(alias=alias, onion=onion, count=1)
+                    InboxNotificationEvent(
+                        alias=alias,
+                        onion=onion,
+                        count=1,
+                        delivery=Delivery.LIVE,
+                        source_id=msg_id,
+                    )
                 )
             else:
                 self._notify_callback(

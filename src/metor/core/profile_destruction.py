@@ -41,6 +41,8 @@ def destroy_profile_storage(
     protector: Optional[KeyProtector] = None,
     cleanup: Callable[[Path], None] = secure_remove_path,
     key_destroyed_callback: Optional[Callable[[], None]] = None,
+    runtime_released_callback: Optional[Callable[[], None]] = None,
+    safe_callback: Optional[Callable[[], None]] = None,
     failure_callback: Optional[Callable[[str, bool], None]] = None,
 ) -> ProfileDestructionResult:
     """Destroys PMK access before best-effort encrypted-file cleanup.
@@ -51,7 +53,9 @@ def destroy_profile_storage(
         clear_runtime_keys (Optional[Callable]): Runtime key-release hook.
         protector (Optional[KeyProtector]): Injected PMK protector.
         cleanup (Callable[[Path], None]): Defense-in-depth filesystem cleanup.
-        key_destroyed_callback (Optional[Callable]): Irreversible-milestone hook.
+        key_destroyed_callback (Optional[Callable]): Persistent-key removal only.
+        runtime_released_callback: Hook after every runtime release prerequisite succeeds.
+        safe_callback: Combined runtime/key removal hook before file cleanup.
         failure_callback (Optional[Callable]): Failure phase and key-state hook.
 
     Returns:
@@ -79,6 +83,12 @@ def destroy_profile_storage(
         except Exception as exc:
             runtime_keys_cleared = False
             errors[DestructionPhase.RUNTIME_KEY_RELEASE] = exc
+    runtime_safe = runtime_prepared and database_closed and runtime_keys_cleared
+    if runtime_safe and runtime_released_callback is not None:
+        try:
+            runtime_released_callback()
+        except Exception as exc:
+            errors[DestructionPhase.MILESTONE_NOTIFICATION] = exc
     key_destroyed = False
     try:
         active_protector = protector or PasswordKeyProtector(
@@ -92,6 +102,11 @@ def destroy_profile_storage(
     if key_destroyed and key_destroyed_callback is not None:
         try:
             key_destroyed_callback()
+        except Exception as exc:
+            errors[DestructionPhase.MILESTONE_NOTIFICATION] = exc
+    if runtime_safe and key_destroyed and safe_callback is not None:
+        try:
+            safe_callback()
         except Exception as exc:
             errors[DestructionPhase.MILESTONE_NOTIFICATION] = exc
     cleanup_completed = False

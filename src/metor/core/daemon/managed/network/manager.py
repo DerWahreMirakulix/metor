@@ -247,6 +247,32 @@ class NetworkManager:
             None
         """
         self._controller.disconnect_all()
+
+    def disconnect_qualified(
+        self, target: str, context_generation: Optional[int], attempt_id: Optional[str]
+    ) -> bool:
+        """Delegates exact End/Cancel admission to the existing atomic lifecycle owner.
+
+        Args:
+            target: Original canonical peer.
+            context_generation: Expected logical active/recovering generation.
+            attempt_id: Expected outbound calling attempt.
+        Returns:
+            bool: Whether the original identity was still eligible.
+        """
+        return self._controller.disconnect_qualified(
+            target, context_generation, attempt_id
+        )
+
+    def get_outbound_attempt_id(self, onion: str) -> Optional[str]:
+        """Projects the current opaque calling identity without changing lifecycle state.
+
+        Args:
+            onion: Canonical peer.
+        Returns:
+            Optional[str]: Current outbound attempt identity.
+        """
+        return self._state.get_outbound_attempt_id(onion)
         self._router.finalize_pending_live_messages()
 
     def abort_all(self) -> None:
@@ -260,17 +286,28 @@ class NetworkManager:
         """
         self._state.abort_all_sockets()
 
-    def retunnel(self, target: str) -> None:
+    def retunnel(self, target: str, context_generation: Optional[int] = None) -> None:
         """
         Forces a Tor circuit rotation and reconnects.
 
         Args:
             target (str): The target alias or onion address.
+            context_generation: Optional exact active LIVE identity from the caller.
 
         Returns:
             None
         """
-        self._controller.retunnel(target)
+        self._controller.retunnel(target, context_generation=context_generation)
+
+    def is_retunneling(self, onion: str) -> bool:
+        """Projects route replacement already admitted by the connection owner.
+
+        Args:
+            onion: Canonical LIVE peer.
+        Returns:
+            bool: Whether circuit rotation or its recognized recovery is in progress.
+        """
+        return self._state.is_retunneling(onion)
 
     def is_connected_or_pending(self, onion: str) -> bool:
         """
@@ -364,7 +401,13 @@ class NetworkManager:
         """
         return self._router.force_fallback(target, msg_ids)
 
-    def send_message(self, target: str, msg: str, msg_id: str) -> None:
+    def send_message(
+        self,
+        target: str,
+        msg: str,
+        msg_id: str,
+        local_result: Optional[Callable[[IpcEvent], None]] = None,
+    ) -> None:
         """
         Sends a live chat message and buffers it for ACK verification.
 
@@ -372,11 +415,15 @@ class NetworkManager:
             target (str): The target alias or onion.
             msg (str): The message content.
             msg_id (str): The unique message identifier.
+            local_result: Optional requesting-client callback for local admission outcomes.
 
         Returns:
             None
         """
-        self._router.send_message(target, msg, msg_id)
+        if local_result is None:
+            self._router.send_message(target, msg, msg_id)
+        else:
+            self._router.send_message(target, msg, msg_id, local_result)
 
     def begin_voice(
         self, target: str, delivery: Delivery, msg_id: str, codec: str
@@ -456,7 +503,17 @@ class NetworkManager:
         Returns:
             object | None: Active logical conversation generation.
         """
-        return self._state.get_live_context_generation(onion)
+        return self._state.get_live_media_generation(onion)
+
+    def known_live_context_generation(self, onion: str) -> Optional[int]:
+        """Projects a logical context lifetime without granting active permission.
+
+        Args:
+            onion: Canonical peer.
+        Returns:
+            Optional[int]: Known active/recovering/retained context identity.
+        """
+        return self._state.known_live_context_generation(onion)
 
     def read_voice_chunk(
         self,
@@ -489,6 +546,29 @@ class NetworkManager:
     def cancel_voice_draft(self, target: str, msg_id: str) -> bool:
         """Cancels one unsent DROP Voice draft."""
         return self._router.cancel_voice_draft(target, msg_id)
+
+    def finalize_interrupted_voice(self, onion: str, msg_id: str) -> bool:
+        """Delegates accepted-prefix finalization after producer revocation.
+
+        Args:
+            onion: Canonical peer.
+            msg_id: Exact interrupted recording identity.
+        Returns:
+            bool: Whether canonical finalization is confirmed.
+        """
+        return self._router.finalize_interrupted_voice(onion, msg_id)
+
+    def set_voice_capture_allocator(
+        self, allocator: Callable[[str, bytes], str]
+    ) -> None:
+        """Installs the protected producer allocation boundary.
+
+        Args:
+            allocator: Core pre-write object journal adapter.
+        Returns:
+            None
+        """
+        self._router.set_voice_capture_allocator(allocator)
 
     def dismiss_inbound_voice(self, onion: str) -> None:
         """Releases inbound Voice payloads for a dismissed LIVE context."""
@@ -578,6 +658,16 @@ class NetworkManager:
     def get_last_disconnect_actor(self, onion: str) -> Optional[ConnectionActor]:
         """Returns the last machine-readable disconnect actor for snapshots."""
         return self._state.get_last_disconnect_actor(onion)
+
+    def get_session_last_activity(self, onion: str) -> Optional[float]:
+        """Projects Core-observed LIVE activity for canonical root ordering.
+
+        Args:
+            onion: Canonical peer identity.
+        Returns:
+            Optional[float]: Last local transport activity, if retained.
+        """
+        return self._state.get_session_last_activity(onion)
 
     def get_snapshot_token(self) -> Tuple[object, ...]:
         """Returns an atomic fingerprint used to reject torn projections."""

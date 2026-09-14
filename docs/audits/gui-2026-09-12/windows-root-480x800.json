@@ -1,0 +1,21 @@
+{
+  "kind": "native SDL renderer, synthetic SDK DTOs",
+  "sdl_video_driver": "native default",
+  "python": "3.11.9",
+  "system": "Windows",
+  "machine": "AMD64",
+  "viewport": [
+    480,
+    800.0
+  ],
+  "window": [
+    480,
+    824
+  ],
+  "rss_bytes": 169906176,
+  "view": "root",
+  "core_integration": false,
+  "physical_input": false,
+  "native_widget_synthetic_keyboard": true,
+  "audio": false
+}

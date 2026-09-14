@@ -14,6 +14,9 @@ PROGRESS_EVENTS = frozenset(
 )
 REJECTION_EVENTS = frozenset(
     {
+        EventType.GUI_PREFERENCES_REJECTED,
+        EventType.TEXT_REJECTED,
+        EventType.VOICE_OWNER_REJECTED,
         EventType.VOICE_OPERATION_REJECTED,
         EventType.VOICE_RESOURCE_LIMIT,
         EventType.FALLBACK_REJECTED,

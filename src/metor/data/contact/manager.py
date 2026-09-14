@@ -150,6 +150,7 @@ class ContactManager:
         self,
         old_alias: str,
         new_alias: str,
+        expected_onion: Optional[str] = None,
     ) -> ContactOperationResult:
         """
         Renames a contact or discovered peer dynamically.
@@ -157,6 +158,7 @@ class ContactManager:
         Args:
             old_alias (str): The current alias.
             new_alias (str): The desired new alias.
+            expected_onion: Optional immutable identity guard for stale alias controls.
 
         Returns:
             ContactOperationResult: The typed address-book mutation result.
@@ -179,13 +181,16 @@ class ContactManager:
             )
 
         peer = self._peers.get_by_alias(old_alias)
-        if peer is None:
+        if peer is None or (
+            expected_onion is not None and peer.onion != clean_onion(expected_onion)
+        ):
             return ContactOperationResult(
                 False,
                 ContactOperationType.ALIAS_NOT_FOUND,
                 {'alias': old_alias},
             )
 
+        onion = peer.onion
         self._peers.update_alias(peer.onion, new_alias)
         result_params: Dict[str, str] = {
             'old_alias': old_alias,
@@ -203,6 +208,7 @@ class ContactManager:
         self,
         alias: str,
         active_onions: Optional[List[str]] = None,
+        expected_onion: Optional[str] = None,
     ) -> ContactOperationResult:
         """
         Removes a saved contact or anonymizes a renamed discovered peer.
@@ -210,6 +216,7 @@ class ContactManager:
         Args:
             alias (str): The contact to remove.
             active_onions (Optional[List[str]]): Currently connected onions functioning as a shield.
+            expected_onion: Optional immutable identity guard for stale alias controls.
 
         Returns:
             ContactOperationResult: The typed address-book mutation result.
@@ -217,7 +224,9 @@ class ContactManager:
         active_onions = [clean_onion(onion) for onion in (active_onions or [])]
         alias = alias.strip().lower()
         peer = self._peers.get_by_alias(alias)
-        if peer is None:
+        if peer is None or (
+            expected_onion is not None and peer.onion != clean_onion(expected_onion)
+        ):
             return ContactOperationResult(
                 False,
                 ContactOperationType.PEER_NOT_FOUND,

@@ -138,7 +138,9 @@ class DropMessageRouter:
         if alias:
             if self._has_clients_callback():
                 self._broadcast(
-                    InboxNotificationEvent(alias=alias, onion=onion, count=1)
+                    InboxNotificationEvent(
+                        alias=alias, onion=onion, count=1, source_id=msg_id
+                    )
                 )
             else:
                 self._notify_callback(

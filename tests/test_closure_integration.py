@@ -394,7 +394,9 @@ class ClosureDaemonTests(unittest.TestCase):
         state = daemon._transport_state
         state.add_pending_connection(onion, one, b'', expiry_deadline=time.time() + 20)
         recipient = next(iter(daemon._session_access._restricted))
-        event = IncomingConnectionEvent(alias='peer', onion=onion)
+        event = IncomingConnectionEvent(
+            alias='peer', onion=onion, action_handle=state.pending_token(onion, one)
+        )
         first = daemon._session_access.filter_restricted_event(recipient, event)
         duplicate = daemon._session_access.filter_restricted_event(recipient, event)
         self.assertEqual(first.action_handle, duplicate.action_handle)

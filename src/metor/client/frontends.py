@@ -280,6 +280,8 @@ class FrontendLaunchContext:
     host: FrontendHost
     start_daemon: bool | None = None
     contract_version: int = FRONTEND_LAUNCH_CONTRACT_VERSION
+    device_config: str | None = None
+    simulator: bool = False
 
 
 class FrontendEntry(Protocol):

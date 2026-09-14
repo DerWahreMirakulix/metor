@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
+from metor.shared import Constants
+
 # Local Package Imports
 from metor.core.api.base import IpcCommand
 from metor.core.api.codes import CommandType
@@ -85,7 +87,30 @@ class DisconnectCommand(IpcCommand):
     """Requests disconnection from an active peer."""
 
     target: str
+    context_generation: Optional[int] = None
+    attempt_id: Optional[str] = None
     command_type: CommandType = field(default=CommandType.DISCONNECT, init=False)
+
+    def __post_init__(self) -> None:
+        """Validates mutually exclusive logical-context and outbound-attempt assertions.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        if self.context_generation is not None and (
+            type(self.context_generation) is not int or self.context_generation <= 0
+        ):
+            raise ValueError('Invalid LIVE context generation')
+        if self.attempt_id is not None and (
+            not isinstance(self.attempt_id, str)
+            or len(self.attempt_id) != 2 * Constants.LIVE_ATTEMPT_TOKEN_BYTES
+            or any(character not in '0123456789abcdef' for character in self.attempt_id)
+        ):
+            raise ValueError('Invalid LIVE attempt identity')
+        if self.context_generation is not None and self.attempt_id is not None:
+            raise ValueError('LIVE end requires one exact identity')
 
 
 @register_command(CommandType.ACCEPT)
@@ -94,6 +119,7 @@ class AcceptCommand(IpcCommand):
     """Accepts a pending live connection."""
 
     target: str
+    action_handle: Optional[str] = None
     command_type: CommandType = field(default=CommandType.ACCEPT, init=False)
 
 
@@ -103,6 +129,7 @@ class RejectCommand(IpcCommand):
     """Rejects a pending live connection."""
 
     target: str
+    action_handle: Optional[str] = None
     command_type: CommandType = field(default=CommandType.REJECT, init=False)
 
 
@@ -163,7 +190,21 @@ class RetunnelCommand(IpcCommand):
     """Retunnels an active connection over a new Tor circuit."""
 
     target: str
+    context_generation: Optional[int] = None
     command_type: CommandType = field(default=CommandType.RETUNNEL, init=False)
+
+    def __post_init__(self) -> None:
+        """Validates an optional exact active LIVE context assertion.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        if self.context_generation is not None and (
+            type(self.context_generation) is not int or self.context_generation <= 0
+        ):
+            raise ValueError('context_generation must be a positive integer')
 
 
 @register_command(CommandType.RESTRICT_CLIENT)
@@ -177,9 +218,34 @@ class RestrictClientCommand(IpcCommand):
     accept_while_locked: LockedAcceptPolicy = LockedAcceptPolicy.NONE
     notification_privacy: NotificationPrivacy = NotificationPrivacy.OFF
     device_lifecycle: bool = False
+    continued_live_context_generation: Optional[int] = None
     command_type: CommandType = field(
         default=CommandType.RESTRICT_CLIENT,
         init=False,
+    )
+
+    def __post_init__(self) -> None:
+        """Rejects ambiguous context qualifiers before authorization.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        if self.continued_live_context_generation is not None and (
+            type(self.continued_live_context_generation) is not int
+            or self.continued_live_context_generation <= 0
+        ):
+            raise ValueError('Invalid continued LIVE context generation')
+
+
+@register_command(CommandType.GET_RESTRICTED_CLIENT_STATE)
+@dataclass
+class GetRestrictedClientStateCommand(IpcCommand):
+    """Reads this client's currently effective restricted grants and permitted call metadata."""
+
+    command_type: CommandType = field(
+        default=CommandType.GET_RESTRICTED_CLIENT_STATE, init=False
     )
 
 

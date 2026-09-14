@@ -1,0 +1,20 @@
+{
+  "kind": "native offscreen renderer, synthetic SDK DTOs",
+  "python": "3.11.15",
+  "system": "Linux",
+  "machine": "x86_64",
+  "viewport": [
+    480.0,
+    800.0
+  ],
+  "window": [
+    480.0,
+    824.0
+  ],
+  "rss_bytes": 179085312,
+  "view": "root",
+  "core_integration": false,
+  "physical_input": false,
+  "native_widget_synthetic_keyboard": true,
+  "audio": false
+}

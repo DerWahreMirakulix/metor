@@ -86,10 +86,13 @@ def connect_to(
         controller.accept(target, origin=origin)
         return
 
+    attempt_id = controller._state.get_outbound_attempt_id(onion)
+    if attempt_id is None:
+        return
     max_conn: int = controller._config.get_int(SettingKey.MAX_CONCURRENT_CONNECTIONS)
     tracked_socket_count: int = controller._state.get_tracked_live_socket_count()
     if tracked_socket_count >= max_conn and not retunnel_reconnect:
-        controller._state.discard_outbound_attempt(onion)
+        controller._state.discard_outbound_attempt(onion, attempt_id)
         if origin is ConnectionOrigin.AUTO_RECONNECT:
             controller._state.clear_scheduled_auto_reconnect(onion)
         controller._broadcast(
@@ -116,6 +119,8 @@ def connect_to(
         for retry_index in range(max_retries + 1):
             if controller._stop_flag.is_set():
                 break
+            if controller._state.get_outbound_attempt_id(onion) != attempt_id:
+                return
             if not retunnel_reconnect and controller._state.is_connected_or_pending(
                 onion
             ):
@@ -123,7 +128,9 @@ def connect_to(
             conn: Optional[socket.socket] = None
             try:
                 conn = controller._tm.connect(onion)
-                controller._state.bind_outbound_socket(onion, conn)
+                if not controller._state.bind_outbound_socket(onion, conn, attempt_id):
+                    controller._state.retire_connection(conn)
+                    return
                 conn.settimeout(controller._config.get_float(SettingKey.TOR_TIMEOUT))
 
                 stream = TcpStreamReader(conn)
@@ -188,7 +195,7 @@ def connect_to(
                 if conn is not None:
                     controller._state.retire_connection(conn)
                     controller._state.clear_bound_outbound_socket(onion, conn)
-                if not controller._state.has_outbound_attempt(onion):
+                if controller._state.get_outbound_attempt_id(onion) != attempt_id:
                     return
                 if not retunnel_reconnect and controller._state.is_connected_or_pending(
                     onion
@@ -247,4 +254,4 @@ def connect_to(
                         )
     finally:
         if not handshake_success:
-            controller._state.discard_outbound_attempt(onion)
+            controller._state.discard_outbound_attempt(onion, attempt_id)

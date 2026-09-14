@@ -1,0 +1,40 @@
+{
+  "kind": "native SDL renderer, synthetic SDK DTOs",
+  "sdl_video_driver": "offscreen",
+  "python": "3.11.15",
+  "system": "Linux",
+  "machine": "x86_64",
+  "viewport": [
+    360.0,
+    640.0
+  ],
+  "window": [
+    360.0,
+    664.0
+  ],
+  "rss_bytes": 211251200,
+  "view": "locked_notice",
+  "notification_summary_geometry": [],
+  "core_integration": false,
+  "physical_input": false,
+  "native_widget_synthetic_keyboard": true,
+  "audio": false,
+  "font_scale": 1.5,
+  "text_field_geometry": [
+    {
+      "size": [
+        312.0,
+        52.0
+      ],
+      "padding": [
+        16.0,
+        16.0,
+        48.0,
+        16.0
+      ],
+      "line_lengths": [
+        0
+      ]
+    }
+  ]
+}

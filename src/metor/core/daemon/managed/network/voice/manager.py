@@ -215,6 +215,47 @@ class VoiceTransferManager(VoiceOutboundMixin):
             if turn is not None:
                 self._inbound[(inbound_record.peer_onion, inbound_record.msg_id)] = turn
 
+    def finalize_interrupted(self, onion: str, msg_id: str) -> bool:
+        """Freezes a vanished LIVE producer at its durable accepted prefix.
+
+        Args:
+            onion: Canonical owner peer.
+            msg_id: Exact outbound identity whose producer lease was revoked.
+        Returns:
+            bool: Whether canonical finalization is confirmed; failures remain retryable.
+        """
+        if self._purge_fence.is_set():
+            return False
+        with self._lock:
+            record = self._messages.get_voice_payload(
+                onion, msg_id, MessageDirection.OUT
+            )
+            if record is None:
+                return True
+            if self._metadata_finalized(record.payload):
+                return True
+            # A failed append may have evicted RAM state while SQL retained its prefix.
+            turn = self._outbound.get(msg_id)
+            if turn is None:
+                turn = self._turn_from_metadata(
+                    onion,
+                    msg_id,
+                    record.payload,
+                    datetime.now(timezone.utc).isoformat(),
+                    Delivery(record.delivery),
+                    BlobLifecycle.TEMPORARY,
+                )
+                if turn is None:
+                    return False
+                self._outbound[msg_id] = turn
+            if turn.onion != onion:
+                return False
+        self.finalize(msg_id, turn.duration_ms)
+        canonical = self._messages.get_voice_payload(
+            onion, msg_id, MessageDirection.OUT
+        )
+        return canonical is None or self._metadata_finalized(canonical.payload)
+
     def _turn_from_metadata(
         self,
         onion: str,
@@ -998,7 +1039,13 @@ class VoiceTransferManager(VoiceOutboundMixin):
         """Emits content-free attached or detached unseen notification metadata."""
         if self._has_clients():
             self._broadcast(
-                InboxNotificationEvent(alias=turn.alias, onion=turn.onion, count=1)
+                InboxNotificationEvent(
+                    alias=turn.alias,
+                    onion=turn.onion,
+                    count=1,
+                    delivery=turn.delivery,
+                    source_id=turn.msg_id,
+                )
             )
             return
         self._notify(

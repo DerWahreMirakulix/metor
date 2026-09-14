@@ -1,6 +1,8 @@
 """Base-owned deferred bootstrap services for independently installed frontends."""
 
 from typing import Optional
+from collections.abc import Iterator
+from contextlib import contextmanager
 import threading
 
 from metor.client import (
@@ -14,6 +16,10 @@ from metor.client import (
     FrontendProfileOperationResult,
     FrontendProfileSecurity,
     FrontendProfileState,
+    FrontendProfileAction,
+    FrontendProfileCatalog,
+    FrontendProfileChange,
+    valid_frontend_profile_name,
     OneUseSecretProvider,
 )
 from metor.data import (
@@ -21,8 +27,10 @@ from metor.data import (
     ProfileManager,
     ProfileSecurityMode,
     SettingKey,
+    Settings,
+    SettingValidationError,
 )
-from metor.utils import TypeCaster, ProcessManager
+from metor.utils import Constants, TypeCaster, ProcessManager
 
 # Local Package Imports
 from .runtime import PlaintextLockedDaemonError, start_managed_daemon_process
@@ -154,6 +162,11 @@ class LocalFrontendHost:
         Returns:
             FrontendProfileState: State for the new selection.
         """
+        if not valid_frontend_profile_name(profile):
+            raise FrontendBootstrapError(
+                'Invalid profile name.',
+                reason=FrontendBootstrapReason.INVALID_CONFIGURATION,
+            )
         if not self._attempt_lock.acquire(blocking=False):
             raise FrontendBootstrapError(
                 'Frontend bootstrap is already running.',
@@ -184,21 +197,34 @@ class LocalFrontendHost:
         Returns:
             FrontendProfileOperationResult: Public creation result.
         """
-        if not self._attempt_lock.acquire(blocking=False):
-            raise FrontendBootstrapError(
-                'Frontend bootstrap is already running.',
-                reason=FrontendBootstrapReason.BUSY,
-            )
         try:
-            return self._create_profile(request, secret)
+            with self._catalog_boundary():
+                return self._create_profile(request, secret)
         finally:
-            self._attempt_lock.release()
+            if secret is not None:
+                secret.take()
 
     def _create_profile(
-        self, request: FrontendProfileCreateRequest, secret: OneUseSecretProvider | None
+        self,
+        request: FrontendProfileCreateRequest,
+        secret: OneUseSecretProvider | None,
+        *,
+        select: bool = True,
     ) -> FrontendProfileOperationResult:
-        """Creates a profile while owning the selection/bootstrap transition."""
+        """Creates a profile while owning the selection/bootstrap transition.
+
+        Args:
+            request: Explicit public creation inputs.
+            secret: One-use creation password.
+            select: Whether creation also selects the new first-run profile.
+        Returns:
+            FrontendProfileOperationResult: Actual creation outcome.
+        """
         password = secret.take() if secret is not None else None
+        if not valid_frontend_profile_name(request.profile):
+            return FrontendProfileOperationResult(
+                False, 'invalid_name', request.profile
+            )
         security = (
             ProfileSecurityMode.ENCRYPTED
             if request.security is FrontendProfileSecurity.ENCRYPTED
@@ -211,13 +237,152 @@ class LocalFrontendHost:
             security_mode=security,
             master_password=password,
         )
-        if result.success:
+        if result.success and select:
             self._profile = ProfileManager(request.profile)
         return FrontendProfileOperationResult(
             success=result.success,
             code=result.operation_type.value,
             profile=request.profile,
         )
+
+    def profile_catalog(
+        self,
+        after: str | None = None,
+        limit: int = Constants.FRONTEND_PROFILE_PAGE_ITEMS,
+    ) -> FrontendProfileCatalog:
+        """Returns a finite local profile page through the existing catalog owner.
+
+        Args:
+            after: Exclusive profile-name bookmark; deletion does not retarget it.
+            limit: Maximum entries, bounded independently of local catalog size.
+        Returns:
+            FrontendProfileCatalog: Current selected/default metadata and next bookmark.
+        """
+        if (
+            type(limit) is not int
+            or not 1 <= limit <= Constants.FRONTEND_PROFILE_PAGE_ITEMS
+        ):
+            raise ValueError('Invalid profile page size')
+        if after is not None and not valid_frontend_profile_name(after):
+            raise ValueError('Invalid profile bookmark')
+        with self._catalog_boundary():
+            names = [
+                name
+                for name in ProfileManager.get_all_profiles()
+                if valid_frontend_profile_name(name) and (after is None or name > after)
+            ]
+            entries = []
+            for name in names[:limit]:
+                profile = ProfileManager(name)
+                entries.append(
+                    FrontendProfileState(
+                        name,
+                        profile.exists(),
+                        profile.is_remote(),
+                        profile.is_daemon_running(),
+                    )
+                )
+            return FrontendProfileCatalog(
+                tuple(entries),
+                self._profile.profile_name,
+                ProfileManager.load_default_profile(),
+                names[limit - 1] if len(names) > limit else None,
+            )
+
+    def manage_profile(
+        self, change: FrontendProfileChange
+    ) -> FrontendProfileOperationResult:
+        """Routes exact local catalog changes without stopping a running runtime.
+
+        Args:
+            change: Confirmed target and original host selection.
+        Returns:
+            FrontendProfileOperationResult: Existing base eligibility result or stale context refusal.
+        """
+        change.__post_init__()
+        with self._catalog_boundary():
+            if change.selected_profile != self._profile.profile_name:
+                return FrontendProfileOperationResult(
+                    False, 'selection_changed', change.profile
+                )
+            if change.action is FrontendProfileAction.SET_DEFAULT:
+                result = ProfileManager.set_default_profile(change.profile)
+            elif change.action is FrontendProfileAction.REMOVE:
+                result = ProfileManager.remove_profile_folder(
+                    change.profile, self._profile.profile_name
+                )
+            elif change.action is FrontendProfileAction.RENAME and change.new_name:
+                renamed = ProfileManager(change.new_name)
+                result = ProfileManager.rename_profile_folder(
+                    change.profile, change.new_name
+                )
+                if result.success and self._profile.profile_name == change.profile:
+                    self._profile = renamed
+                if result.success:
+                    try:
+                        Settings.set(
+                            SettingKey.DEFAULT_PROFILE,
+                            change.new_name,
+                            expected_value=change.profile,
+                        )
+                    except SettingValidationError:
+                        pass
+                    except Exception:
+                        return FrontendProfileOperationResult(
+                            False, 'renamed_default_unconfirmed', change.new_name
+                        )
+            else:
+                return FrontendProfileOperationResult(
+                    False, 'unsupported', change.profile
+                )
+            return FrontendProfileOperationResult(
+                result.success,
+                result.operation_type.value,
+                change.new_name
+                if result.success
+                and change.action is FrontendProfileAction.RENAME
+                and change.new_name
+                else change.profile,
+            )
+
+    def create_profile_entry(
+        self,
+        request: FrontendProfileCreateRequest,
+        secret: OneUseSecretProvider | None = None,
+    ) -> FrontendProfileOperationResult:
+        """Creates through the existing lifecycle while retaining current host selection.
+
+        Args:
+            request: Explicit creation inputs.
+            secret: One-use creation credential.
+        Returns:
+            FrontendProfileOperationResult: Existing base creation result.
+        """
+        try:
+            with self._catalog_boundary():
+                return self._create_profile(request, secret, select=False)
+        finally:
+            if secret is not None:
+                secret.take()
+
+    @contextmanager
+    def _catalog_boundary(self) -> Iterator[None]:
+        """Rejects concurrent catalog changes while bootstrap owns the host selection.
+
+        Args:
+            None
+        Returns:
+            Iterator[None]: Held profile/selection boundary for one local operation.
+        """
+        if not self._attempt_lock.acquire(blocking=False):
+            raise FrontendBootstrapError(
+                'Frontend bootstrap is already running.',
+                reason=FrontendBootstrapReason.BUSY,
+            )
+        try:
+            yield
+        finally:
+            self._attempt_lock.release()
 
     def bootstrap(self, interactions: FrontendInteractions) -> FrontendBootstrapResult:
         """Performs one retryable bootstrap attempt after the frontend has started.

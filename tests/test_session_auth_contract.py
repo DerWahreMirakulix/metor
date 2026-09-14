@@ -436,6 +436,7 @@ class SessionAuthContractTests(unittest.TestCase):
         accept = AcceptCommand(cast(str, alice.action_handle))
         self.assertTrue(controller.authorize(accept, conn, True))
         self.assertEqual(accept.target, 'alice-onion')
+        pending.pop('bob-onion')
         expired = cast(
             PendingConnectionExpiredEvent,
             controller.filter_restricted_event(

@@ -1,0 +1,36 @@
+{
+  "status": "development_slice_incomplete",
+  "frontend": "gui",
+  "distribution": "metor-ui-gui",
+  "python_tested": "3.11.15",
+  "renderer": "Kivy 2.3.1 / SDL2 / OpenGL",
+  "linux_x86_64": {
+    "offline_install": "tested",
+    "offscreen_render": "tested",
+    "desktop_input": "untested",
+    "native_audio_devices_observed": 0,
+    "headset_full_duplex": "untested",
+    "speaker_aec": "unsupported"
+  },
+  "windows_x86_64": {
+    "python_tested": "3.11.9 embeddable isolated runtime",
+    "os_build": "10.0.26200.9445",
+    "native_dependency_imports": "tested",
+    "native_sdl_window": "tested",
+    "root_480x800": "tested",
+    "headset_route": "Razer BlackShark V2 HS 2.4",
+    "bounded_duplex_capture_playback": "tested; captured bytes discarded",
+    "gui_ptt": "tested with synthetic focused Space input, actual Razer capture/review and temporary encrypted Core; 2026-09-14",
+    "canonical_installer": "pending validation with restored full temporary runtime",
+    "coinstall_uninstall": "unverified",
+    "speaker_aec": "unsupported",
+    "current_validation_runtime": "official CPython 3.11.9 NuGet package with pip and venv; temporary isolated installation"
+  },
+  "physical_adapters": [],
+  "arm_pi": "untested",
+  "simulator_description_adapters": [
+    "simulator"
+  ],
+  "host_shutdown": "not_bound",
+  "purge": "not_bound"
+}

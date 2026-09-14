@@ -134,11 +134,18 @@ jobs:
           python -m pip wheel --no-deps --no-build-isolation . -w dist/wheels
           python -m pip wheel --no-deps --no-build-isolation packaging/sdk -w dist/wheels
           python -m pip wheel --no-deps --no-build-isolation packaging/terminal -w dist/wheels
+          python -m pip wheel --no-deps --no-build-isolation packaging/gui -w dist/wheels
           python scripts/validate_wheel_versions.py dist/wheels/*.whl
 
       - name: Build platform release bundles
         shell: bash
         run: python scripts/build_release_wheelhouse.py --output-dir dist/release --skip-pip-upgrade --variant all
+
+      - name: Validate installed consumers and every native installer
+        shell: bash
+        run: |
+          python scripts/validate_installed_artifacts.py dist/release
+          python scripts/validate_release_installers.py dist/release
 
       - name: Smoke-test Linux bundle installers
         if: runner.os == 'Linux'

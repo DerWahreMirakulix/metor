@@ -387,9 +387,11 @@ class ApiSchemaGenerator:
             return {'type': 'number'}
         if field_type is bool:
             return {'type': 'boolean'}
+        if isinstance(field_type, type) and dataclasses.is_dataclass(field_type):
+            return self._dto_schema(field_type)
         return {}
 
-    def _dto_schema(self, cls: Type['IpcMessage']) -> Dict[str, Any]:
+    def _dto_schema(self, cls: type[Any]) -> Dict[str, Any]:
         """
         Builds one JSON Schema object schema for a command or event DTO.
 
@@ -398,7 +400,7 @@ class ApiSchemaGenerator:
         default are listed as required.
 
         Args:
-            cls (Type[IpcMessage]): The dataclass type to introspect.
+            cls: The registered DTO or nested public dataclass to introspect.
 
         Returns:
             Dict[str, Any]: The JSON Schema object schema for the DTO.

@@ -53,6 +53,7 @@ class Constants(ContractConstants):
     )
 
     SENSITIVE_AUTH_GRANT_TIMEOUT_SEC: float = 60.0
+    PENDING_CALL_TOKEN_BYTES: int = 32
     MAX_ANONYMOUS_CALL_HANDLES: int = 128
     QUICK_UNLOCK_HELPER_TIMEOUT_SEC: float = 10.0
     TOR_HANDSHAKE_CHALLENGE_BYTES: int = (

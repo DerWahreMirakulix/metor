@@ -37,6 +37,7 @@ class ProfileSwitchError(RuntimeError):
         message: str,
         *,
         source_released: bool = False,
+        source_prepared: bool = False,
     ) -> None:
         """Initializes a phase-aware profile transition failure.
 
@@ -44,6 +45,7 @@ class ProfileSwitchError(RuntimeError):
             phase (ProfileSwitchPhase): Phase that did not complete.
             message (str): Safe user-facing explanation.
             source_released (bool): Whether the old client was confirmed detached.
+            source_prepared (bool): Whether Core confirmed its hard-lock boundary.
 
         Returns:
             None
@@ -51,6 +53,7 @@ class ProfileSwitchError(RuntimeError):
         super().__init__(message)
         self.phase = phase
         self.source_released = source_released
+        self.source_prepared = source_prepared or source_released
 
 
 class ProfileRuntimeCoordinator:
@@ -84,6 +87,7 @@ class ProfileRuntimeCoordinator:
         target_profile: str,
         *,
         finalize_active_capture: Optional[Callable[[], None]] = None,
+        on_phase: Optional[Callable[[ProfileSwitchPhase], None]] = None,
     ) -> ProfileSwitchResult:
         """Performs the canonical reliability-preserving profile transition.
 
@@ -95,6 +99,8 @@ class ProfileRuntimeCoordinator:
             target_profile (str): Profile to start/select through the factory.
             finalize_active_capture (Optional[Callable[[], None]]): Frontend
                 capture-finalization hook.
+            on_phase (Optional[Callable[[ProfileSwitchPhase], None]]): Read-only
+                progress observer called immediately before each actual phase.
 
         Returns:
             ProfileSwitchResult: Both confirmed boundary snapshots.
@@ -102,6 +108,22 @@ class ProfileRuntimeCoordinator:
         Raises:
             ProfileSwitchError: With the exact failed transition phase.
         """
+
+        def phase_started(phase: ProfileSwitchPhase) -> None:
+            """Reports progress without letting a failed observer change lifecycle truth.
+
+            Args:
+                phase: Actual operation about to begin.
+            Returns:
+                None
+            """
+            if on_phase is not None:
+                try:
+                    on_phase(phase)
+                except Exception:
+                    pass
+
+        phase_started(ProfileSwitchPhase.SOURCE_SNAPSHOT)
         try:
             previous = self._client.runtime_snapshot()
         except Exception as exc:
@@ -115,6 +137,7 @@ class ProfileRuntimeCoordinator:
                 'The current runtime snapshot could not be confirmed.',
             )
         if finalize_active_capture is not None:
+            phase_started(ProfileSwitchPhase.CAPTURE_FINALIZATION)
             try:
                 finalize_active_capture()
             except Exception as exc:
@@ -122,6 +145,7 @@ class ProfileRuntimeCoordinator:
                     ProfileSwitchPhase.CAPTURE_FINALIZATION,
                     'Active capture finalization failed.',
                 ) from exc
+        phase_started(ProfileSwitchPhase.SOURCE_PREPARATION)
         try:
             source_prepared = self._client.prepare_profile_exit()
         except Exception as exc:
@@ -135,13 +159,16 @@ class ProfileRuntimeCoordinator:
                 'The current runtime did not confirm profile-exit preparation.',
             )
 
+        phase_started(ProfileSwitchPhase.SOURCE_RELEASE)
         try:
             self._client.disconnect()
         except Exception as exc:
             raise ProfileSwitchError(
                 ProfileSwitchPhase.SOURCE_RELEASE,
                 'The current runtime client could not confirm release.',
+                source_prepared=True,
             ) from exc
+        phase_started(ProfileSwitchPhase.TARGET_FACTORY)
         try:
             next_client = self._client_factory(target_profile)
         except Exception as exc:
@@ -165,6 +192,7 @@ class ProfileRuntimeCoordinator:
             except Exception:
                 pass
 
+        phase_started(ProfileSwitchPhase.TARGET_BOOTSTRAP)
         try:
             if next_client.bootstrap() is None:
                 raise ProfileSwitchError(
@@ -182,6 +210,7 @@ class ProfileRuntimeCoordinator:
                 'The target runtime bootstrap raised an exception.',
                 source_released=True,
             ) from exc
+        phase_started(ProfileSwitchPhase.TARGET_SNAPSHOT)
         try:
             current = next_client.runtime_snapshot()
         except Exception as exc:

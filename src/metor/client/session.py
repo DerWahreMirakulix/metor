@@ -236,15 +236,30 @@ class MetorClient:
         )
 
     def begin_voice(
-        self, target: str, delivery: Delivery, msg_id: str, codec: str
+        self,
+        target: str,
+        delivery: Delivery,
+        msg_id: str,
+        codec: str,
+        *,
+        owner_token: Optional[str] = None,
+        context_generation: Optional[int] = None,
     ) -> Optional[VoiceStartedEvent]:
         """Begins one bounded Voice upload or LIVE turn."""
         return self.request(
-            BeginVoiceCommand(target, delivery, msg_id, codec), VoiceStartedEvent
+            BeginVoiceCommand(
+                target, delivery, msg_id, codec, owner_token, context_generation
+            ),
+            VoiceStartedEvent,
         )
 
     def append_voice(
-        self, msg_id: str, offset: int, data: str
+        self,
+        msg_id: str,
+        offset: int,
+        data: str,
+        *,
+        owner_token: Optional[str] = None,
     ) -> Optional[VoiceAppendOutcome]:
         """Appends a chunk and returns every terminal admission outcome.
 
@@ -252,6 +267,7 @@ class MetorClient:
             msg_id (str): Stable Voice identity.
             offset (int): Expected contiguous byte offset.
             data (str): Strict Base64 chunk payload.
+            owner_token: Optional Core-issued disposable producer qualification.
 
         Returns:
             Optional[VoiceAppendOutcome]: Accepted, finalized, or refused outcome.
@@ -259,7 +275,7 @@ class MetorClient:
         return cast(
             Optional[VoiceAppendOutcome],
             self._request_types(
-                AppendVoiceChunkCommand(msg_id, offset, data),
+                AppendVoiceChunkCommand(msg_id, offset, data, owner_token),
                 (
                     VoiceChunkAcceptedEvent,
                     VoiceResourceLimitEvent,
@@ -270,20 +286,32 @@ class MetorClient:
         )
 
     def finalize_voice(
-        self, msg_id: str, duration_ms: Optional[int] = None
+        self,
+        msg_id: str,
+        duration_ms: Optional[int] = None,
+        *,
+        owner_token: Optional[str] = None,
     ) -> Optional[VoiceFinalizedEvent]:
         """Finalizes capture without publishing a DROP draft."""
         return self.request(
-            FinalizeVoiceCommand(msg_id, duration_ms), VoiceFinalizedEvent
+            FinalizeVoiceCommand(msg_id, duration_ms, owner_token), VoiceFinalizedEvent
         )
 
-    def commit_voice(self, target: str, msg_id: str) -> Optional[VoiceCommittedEvent]:
+    def commit_voice(
+        self, target: str, msg_id: str, *, owner_token: Optional[str] = None
+    ) -> Optional[VoiceCommittedEvent]:
         """Publishes one finalized DROP Voice draft for delivery."""
-        return self.request(CommitVoiceCommand(target, msg_id), VoiceCommittedEvent)
+        return self.request(
+            CommitVoiceCommand(target, msg_id, owner_token), VoiceCommittedEvent
+        )
 
-    def cancel_voice(self, target: str, msg_id: str) -> Optional[VoiceCancelledEvent]:
+    def cancel_voice(
+        self, target: str, msg_id: str, *, owner_token: Optional[str] = None
+    ) -> Optional[VoiceCancelledEvent]:
         """Cancels one unpublished DROP Voice draft."""
-        return self.request(CancelVoiceCommand(target, msg_id), VoiceCancelledEvent)
+        return self.request(
+            CancelVoiceCommand(target, msg_id, owner_token), VoiceCancelledEvent
+        )
 
     def get_voice_chunk(
         self,
@@ -292,10 +320,14 @@ class MetorClient:
         direction: MessageDirectionCode,
         offset: int,
         max_bytes: int,
+        *,
+        owner_token: Optional[str] = None,
     ) -> Optional[VoiceDataEvent]:
         """Retrieves one authorized bounded range without exposing daemon storage."""
         return self.request(
-            GetVoiceChunkCommand(target, msg_id, direction, offset, max_bytes),
+            GetVoiceChunkCommand(
+                target, msg_id, direction, offset, max_bytes, owner_token
+            ),
             VoiceDataEvent,
         )
 
@@ -326,6 +358,8 @@ class MetorClient:
         direction: Optional[MessageDirectionCode] = None,
         cursor: Optional[str] = None,
         limit: int = Constants.DEFAULT_RETAINED_PAGE_SIZE,
+        owner_token: Optional[str] = None,
+        msg_id: Optional[str] = None,
     ) -> Optional[RetainedMessagesEvent]:
         """Discovers retained identities without reading or consuming content."""
         return self.request(
@@ -335,6 +369,8 @@ class MetorClient:
                 direction=direction,
                 cursor=cursor,
                 limit=limit,
+                owner_token=owner_token,
+                msg_id=msg_id,
             ),
             RetainedMessagesEvent,
         )

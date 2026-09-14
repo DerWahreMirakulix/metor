@@ -18,6 +18,16 @@
         },
         "target": {
           "type": "string"
+        },
+        "action_handle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -126,6 +136,16 @@
         },
         "data": {
           "type": "string"
+        },
+        "owner_token": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -185,6 +205,26 @@
         },
         "codec": {
           "type": "string"
+        },
+        "owner_token": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "context_generation": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -213,6 +253,16 @@
         },
         "msg_id": {
           "type": "string"
+        },
+        "owner_token": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -352,6 +402,16 @@
         },
         "msg_id": {
           "type": "string"
+        },
+        "owner_token": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -483,6 +543,26 @@
         },
         "target": {
           "type": "string"
+        },
+        "context_generation": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attempt_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -567,6 +647,16 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "owner_token": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -661,6 +751,9 @@
               "type": "null"
             }
           ]
+        },
+        "safe_descriptors": {
+          "type": "boolean"
         }
       }
     },
@@ -702,6 +795,22 @@
         }
       }
     },
+    "GetGuiPreferencesCommand": {
+      "title": "GetGuiPreferencesCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
     "GetHistoryCommand": {
       "title": "GetHistoryCommand",
       "type": "object",
@@ -735,6 +844,26 @@
               "type": "null"
             }
           ]
+        },
+        "page_size": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "before_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -751,6 +880,35 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "GetMessageOutcomeCommand": {
+      "title": "GetMessageOutcomeCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "onion": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "in",
+            "out"
+          ],
+          "type": "string"
         }
       }
     },
@@ -779,6 +937,40 @@
           ]
         },
         "limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "before_msg_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "before_direction": {
+          "anyOf": [
+            {
+              "enum": [
+                "in",
+                "out"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_payload_bytes": {
           "anyOf": [
             {
               "type": "integer"
@@ -818,6 +1010,42 @@
           "anyOf": [
             {
               "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "page_size": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "before_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "GetRestrictedClientStateCommand": {
+      "title": "GetRestrictedClientStateCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -938,6 +1166,16 @@
         },
         "max_bytes": {
           "type": "integer"
+        },
+        "owner_token": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1038,6 +1276,26 @@
         },
         "limit": {
           "type": "integer"
+        },
+        "owner_token": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "msg_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -1082,6 +1340,26 @@
                 "drop"
               ],
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_messages": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_payload_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -1208,6 +1486,25 @@
         }
       }
     },
+    "RegisterVoiceOwnerCommand": {
+      "title": "RegisterVoiceOwnerCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "disposable_drop": {
+          "type": "boolean"
+        }
+      }
+    },
     "RejectCommand": {
       "title": "RejectCommand",
       "type": "object",
@@ -1224,6 +1521,16 @@
         },
         "target": {
           "type": "string"
+        },
+        "action_handle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1256,6 +1563,25 @@
         "msg_id"
       ]
     },
+    "ReleaseVoiceOwnerCommand": {
+      "title": "ReleaseVoiceOwnerCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "owner_token": {
+          "type": "string"
+        }
+      }
+    },
     "RemoveContactCommand": {
       "title": "RemoveContactCommand",
       "type": "object",
@@ -1272,6 +1598,16 @@
         },
         "alias": {
           "type": "string"
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1329,6 +1665,16 @@
         },
         "new_alias": {
           "type": "string"
+        },
+        "onion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1415,6 +1761,16 @@
         },
         "device_lifecycle": {
           "type": "boolean"
+        },
+        "continued_live_context_generation": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -1434,6 +1790,16 @@
         },
         "target": {
           "type": "string"
+        },
+        "context_generation": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1445,6 +1811,16 @@
       "type": "object",
       "properties": {
         "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "operation_id": {
           "anyOf": [
             {
               "type": "string"
@@ -1482,12 +1858,69 @@
         },
         "content": {
           "anyOf": [
-            {},
-            {}
+            {
+              "title": "TextContent",
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "text",
+                    "voice"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "text"
+              ]
+            },
+            {
+              "title": "VoiceContent",
+              "type": "object",
+              "properties": {
+                "blob_id": {
+                  "type": "string"
+                },
+                "codec": {
+                  "type": "string"
+                },
+                "size_bytes": {
+                  "type": "integer"
+                },
+                "duration_ms": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": {
+                  "enum": [
+                    "text",
+                    "voice"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "blob_id",
+                "codec",
+                "size_bytes"
+              ]
+            }
           ]
         },
         "msg_id": {
           "type": "string"
+        },
+        "local_acceptance": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -1529,6 +1962,19 @@
               "type": "boolean"
             }
           ]
+        },
+        "safe_only": {
+          "type": "boolean"
+        },
+        "expected_value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1557,6 +2003,79 @@
       "required": [
         "profile_name"
       ]
+    },
+    "SetGuiPreferencesCommand": {
+      "title": "SetGuiPreferencesCommand",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expected_revision": {
+          "type": "integer"
+        },
+        "preferences": {
+          "title": "GuiPreferences",
+          "type": "object",
+          "properties": {
+            "pins": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "auto_play": {
+              "type": "boolean"
+            },
+            "keep_live_locked": {
+              "type": "boolean"
+            },
+            "accept_live_locked": {
+              "enum": [
+                "all",
+                "saved_contacts",
+                "none"
+              ],
+              "type": "string"
+            },
+            "notifications_locked": {
+              "enum": [
+                "show_all",
+                "anonymize",
+                "off"
+              ],
+              "type": "string"
+            },
+            "unlock_method": {
+              "enum": [
+                "pin",
+                "profile_password",
+                "none"
+              ],
+              "type": "string"
+            },
+            "idle_seconds": {
+              "type": "integer"
+            },
+            "show_profile_locked": {
+              "type": "boolean"
+            },
+            "keyboard_layout": {
+              "type": "string"
+            },
+            "setup_complete": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
     },
     "SetSettingCommand": {
       "title": "SetSettingCommand",
@@ -2451,11 +2970,108 @@
         },
         "pending": {
           "type": "array",
-          "items": {}
+          "items": {
+            "title": "PendingConnectionEntry",
+            "type": "object",
+            "properties": {
+              "alias": {
+                "type": "string"
+              },
+              "onion": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "origin": {
+                "enum": [
+                  "manual",
+                  "auto_reconnect",
+                  "retunnel",
+                  "incoming",
+                  "grace_reconnect",
+                  "mutual_connect",
+                  "auto_accept_contact"
+                ],
+                "type": "string"
+              },
+              "reason": {
+                "enum": [
+                  "user_accept",
+                  "consumer_absent"
+                ],
+                "type": "string"
+              },
+              "expires_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "action_handle": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "alias",
+              "onion",
+              "origin",
+              "reason"
+            ]
+          }
         },
         "unread": {
           "type": "array",
-          "items": {}
+          "items": {
+            "title": "UnreadInboxSummaryEntry",
+            "type": "object",
+            "properties": {
+              "alias": {
+                "type": "string"
+              },
+              "onion": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "total_unread": {
+                "type": "integer"
+              },
+              "drop_unread": {
+                "type": "integer"
+              },
+              "live_unread": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "alias",
+              "onion",
+              "total_unread",
+              "drop_unread",
+              "live_unread"
+            ]
+          }
         }
       },
       "required": [
@@ -2605,6 +3221,26 @@
         },
         "device_lifecycle": {
           "type": "boolean"
+        },
+        "continued_live_target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "continued_live_context_generation": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -2738,7 +3374,74 @@
         },
         "entries": {
           "type": "array",
-          "items": {}
+          "items": {
+            "title": "SettingSnapshotEntry",
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "value_type": {
+                "type": "string"
+              },
+              "display_name": {
+                "type": "string"
+              },
+              "display_group": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "constraints": {
+                "type": "string"
+              },
+              "security_note": {
+                "type": "string"
+              },
+              "min_value": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "max_value": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "editable": {
+                "type": "boolean"
+              },
+              "scope": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "value",
+              "source",
+              "category"
+            ]
+          }
         }
       },
       "required": [
@@ -3887,11 +4590,47 @@
         },
         "saved": {
           "type": "array",
-          "items": {}
+          "items": {
+            "title": "ContactEntry",
+            "type": "object",
+            "properties": {
+              "alias": {
+                "type": "string"
+              },
+              "onion": {
+                "type": "string"
+              },
+              "saved": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "alias",
+              "onion"
+            ]
+          }
         },
         "discovered": {
           "type": "array",
-          "items": {}
+          "items": {
+            "title": "ContactEntry",
+            "type": "object",
+            "properties": {
+              "alias": {
+                "type": "string"
+              },
+              "onion": {
+                "type": "string"
+              },
+              "saved": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "alias",
+              "onion"
+            ]
+          }
         },
         "profile": {
           "type": "string"
@@ -4556,6 +5295,150 @@
         "msg_ids"
       ]
     },
+    "GuiPreferencesEvent": {
+      "title": "GuiPreferencesEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "profile_instance_id": {
+          "type": "string"
+        },
+        "preferences_revision": {
+          "type": "integer"
+        },
+        "preferences": {
+          "title": "GuiPreferences",
+          "type": "object",
+          "properties": {
+            "pins": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "auto_play": {
+              "type": "boolean"
+            },
+            "keep_live_locked": {
+              "type": "boolean"
+            },
+            "accept_live_locked": {
+              "enum": [
+                "all",
+                "saved_contacts",
+                "none"
+              ],
+              "type": "string"
+            },
+            "notifications_locked": {
+              "enum": [
+                "show_all",
+                "anonymize",
+                "off"
+              ],
+              "type": "string"
+            },
+            "unlock_method": {
+              "enum": [
+                "pin",
+                "profile_password",
+                "none"
+              ],
+              "type": "string"
+            },
+            "idle_seconds": {
+              "type": "integer"
+            },
+            "show_profile_locked": {
+              "type": "boolean"
+            },
+            "keyboard_layout": {
+              "type": "string"
+            },
+            "setup_complete": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "GuiPreferencesRejectedEvent": {
+      "title": "GuiPreferencesRejectedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "enum": [
+            "unavailable",
+            "unsupported",
+            "full_auth_required",
+            "conflict",
+            "protected_storage_unavailable",
+            "invalid_preferences",
+            "pin_unavailable"
+          ],
+          "type": "string"
+        }
+      }
+    },
     "HistoryClearFailedEvent": {
       "title": "HistoryClearFailedEvent",
       "type": "object",
@@ -4743,6 +5626,45 @@
               "type": "null"
             }
           ]
+        },
+        "next_before_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "has_older": {
+          "type": "boolean"
+        },
+        "page_available": {
+          "type": "boolean"
+        },
+        "metadata_only": {
+          "type": "boolean"
+        },
+        "record_live": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "record_drop": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -4802,6 +5724,45 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_before_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "has_older": {
+          "type": "boolean"
+        },
+        "page_available": {
+          "type": "boolean"
+        },
+        "metadata_only": {
+          "type": "boolean"
+        },
+        "record_live": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "record_drop": {
+          "anyOf": [
+            {
+              "type": "boolean"
             },
             {
               "type": "null"
@@ -4905,7 +5866,97 @@
         },
         "messages": {
           "type": "array",
-          "items": {}
+          "items": {
+            "title": "UnreadMessageEntry",
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "string"
+              },
+              "delivery": {
+                "enum": [
+                  "live",
+                  "drop"
+                ],
+                "type": "string"
+              },
+              "content": {
+                "anyOf": [
+                  {
+                    "title": "TextContent",
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "text",
+                          "voice"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "text"
+                    ]
+                  },
+                  {
+                    "title": "VoiceContent",
+                    "type": "object",
+                    "properties": {
+                      "blob_id": {
+                        "type": "string"
+                      },
+                      "codec": {
+                        "type": "string"
+                      },
+                      "size_bytes": {
+                        "type": "integer"
+                      },
+                      "duration_ms": {
+                        "anyOf": [
+                          {
+                            "type": "integer"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "type": {
+                        "enum": [
+                          "text",
+                          "voice"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "blob_id",
+                      "codec",
+                      "size_bytes"
+                    ]
+                  }
+                ]
+              },
+              "msg_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "timestamp",
+              "delivery",
+              "content"
+            ]
+          }
         },
         "inbox_counts": {
           "type": "object"
@@ -4967,6 +6018,23 @@
         },
         "count": {
           "type": "integer"
+        },
+        "delivery": {
+          "enum": [
+            "live",
+            "drop"
+          ],
+          "type": "string"
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -5547,6 +6615,108 @@
         "alias"
       ]
     },
+    "LiveControlCompletedEvent": {
+      "title": "LiveControlCompletedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "onion": {
+          "type": "string"
+        }
+      }
+    },
+    "LiveControlRejectedEvent": {
+      "title": "LiveControlRejectedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "onion": {
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "invalid_selection",
+            "wrong_peer",
+            "not_pending_live",
+            "not_drop",
+            "pending_delivery",
+            "not_found",
+            "no_recovery",
+            "count_limit",
+            "byte_limit",
+            "outbound_pending_live",
+            "active_live_context",
+            "ambiguous_identity",
+            "not_finalized",
+            "invalid_range",
+            "unsupported_content",
+            "media_limit",
+            "malformed_chunk",
+            "stale_capture",
+            "persistence_failed"
+          ],
+          "type": "string"
+        }
+      }
+    },
     "LiveMessageResourcePressureEvent": {
       "title": "LiveMessageResourcePressureEvent",
       "type": "object",
@@ -5939,6 +7109,96 @@
         "msg_id"
       ]
     },
+    "MessageOutcomeEvent": {
+      "title": "MessageOutcomeEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "onion": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "in",
+            "out"
+          ],
+          "type": "string"
+        },
+        "delivery": {
+          "anyOf": [
+            {
+              "enum": [
+                "live",
+                "drop"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "enum": [
+                "pending",
+                "delivered",
+                "unread",
+                "read",
+                "draft"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "archive_available": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
     "MessageReceivedEvent": {
       "title": "MessageReceivedEvent",
       "type": "object",
@@ -5985,8 +7245,62 @@
         },
         "content": {
           "anyOf": [
-            {},
-            {}
+            {
+              "title": "TextContent",
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "text",
+                    "voice"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "text"
+              ]
+            },
+            {
+              "title": "VoiceContent",
+              "type": "object",
+              "properties": {
+                "blob_id": {
+                  "type": "string"
+                },
+                "codec": {
+                  "type": "string"
+                },
+                "size_bytes": {
+                  "type": "integer"
+                },
+                "duration_ms": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": {
+                  "enum": [
+                    "text",
+                    "voice"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "blob_id",
+                "codec",
+                "size_bytes"
+              ]
+            }
           ]
         },
         "onion": {
@@ -6286,7 +7600,116 @@
         },
         "messages": {
           "type": "array",
-          "items": {}
+          "items": {
+            "title": "MessageEntry",
+            "type": "object",
+            "properties": {
+              "direction": {
+                "enum": [
+                  "in",
+                  "out"
+                ],
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "pending",
+                  "delivered",
+                  "unread",
+                  "read",
+                  "draft"
+                ],
+                "type": "string"
+              },
+              "delivery": {
+                "enum": [
+                  "live",
+                  "drop"
+                ],
+                "type": "string"
+              },
+              "content": {
+                "anyOf": [
+                  {
+                    "title": "TextContent",
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "text",
+                          "voice"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "text"
+                    ]
+                  },
+                  {
+                    "title": "VoiceContent",
+                    "type": "object",
+                    "properties": {
+                      "blob_id": {
+                        "type": "string"
+                      },
+                      "codec": {
+                        "type": "string"
+                      },
+                      "size_bytes": {
+                        "type": "integer"
+                      },
+                      "duration_ms": {
+                        "anyOf": [
+                          {
+                            "type": "integer"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "type": {
+                        "enum": [
+                          "text",
+                          "voice"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "blob_id",
+                      "codec",
+                      "size_bytes"
+                    ]
+                  }
+                ]
+              },
+              "timestamp": {
+                "type": "string"
+              },
+              "msg_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "direction",
+              "status",
+              "delivery",
+              "content",
+              "timestamp"
+            ]
+          }
         },
         "alias": {
           "type": "string"
@@ -6300,6 +7723,12 @@
               "type": "null"
             }
           ]
+        },
+        "has_older": {
+          "type": "boolean"
+        },
+        "page_available": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -7185,7 +8614,37 @@
         },
         "profiles": {
           "type": "array",
-          "items": {}
+          "items": {
+            "title": "ProfileEntry",
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "is_active": {
+                "type": "boolean"
+              },
+              "is_remote": {
+                "type": "boolean"
+              },
+              "port": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "is_active",
+              "is_remote",
+              "port"
+            ]
+          }
         }
       },
       "required": [
@@ -7465,6 +8924,157 @@
         "new_alias"
       ]
     },
+    "RestrictedClientStateEvent": {
+      "title": "RestrictedClientStateEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "restricted": {
+          "type": "boolean"
+        },
+        "continued_live_target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "continued_live_context_generation": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_state": {
+          "type": "string"
+        },
+        "notification_privacy": {
+          "enum": [
+            "show_all",
+            "anonymize",
+            "off"
+          ],
+          "type": "string"
+        },
+        "accept_while_locked": {
+          "enum": [
+            "all",
+            "saved_contacts",
+            "none"
+          ],
+          "type": "string"
+        },
+        "pending": {
+          "type": "array",
+          "items": {
+            "title": "PendingConnectionEntry",
+            "type": "object",
+            "properties": {
+              "alias": {
+                "type": "string"
+              },
+              "onion": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "origin": {
+                "enum": [
+                  "manual",
+                  "auto_reconnect",
+                  "retunnel",
+                  "incoming",
+                  "grace_reconnect",
+                  "mutual_connect",
+                  "auto_accept_contact"
+                ],
+                "type": "string"
+              },
+              "reason": {
+                "enum": [
+                  "user_accept",
+                  "consumer_absent"
+                ],
+                "type": "string"
+              },
+              "expires_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "action_handle": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "alias",
+              "onion",
+              "origin",
+              "reason"
+            ]
+          }
+        },
+        "accepted_handles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "RetainedMessagesEvent": {
       "title": "RetainedMessagesEvent",
       "type": "object",
@@ -7501,7 +9111,94 @@
         },
         "messages": {
           "type": "array",
-          "items": {}
+          "items": {
+            "title": "RetainedMessageEntry",
+            "type": "object",
+            "properties": {
+              "onion": {
+                "type": "string"
+              },
+              "alias": {
+                "type": "string"
+              },
+              "direction": {
+                "enum": [
+                  "in",
+                  "out"
+                ],
+                "type": "string"
+              },
+              "delivery": {
+                "enum": [
+                  "live",
+                  "drop"
+                ],
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "pending",
+                  "delivered",
+                  "unread",
+                  "read",
+                  "draft"
+                ],
+                "type": "string"
+              },
+              "content_type": {
+                "enum": [
+                  "text",
+                  "voice"
+                ],
+                "type": "string"
+              },
+              "msg_id": {
+                "type": "string"
+              },
+              "finalized": {
+                "type": "boolean"
+              },
+              "size_bytes": {
+                "type": "integer"
+              },
+              "codec": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "duration_ms": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "producer_interrupted": {
+                "type": "boolean"
+              },
+              "can_retry_finalization": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "onion",
+              "alias",
+              "direction",
+              "delivery",
+              "status",
+              "content_type",
+              "msg_id",
+              "finalized"
+            ]
+          }
         },
         "next_cursor": {
           "anyOf": [
@@ -7802,22 +9499,251 @@
         },
         "contacts": {
           "type": "array",
-          "items": {}
+          "items": {
+            "title": "ContactEntry",
+            "type": "object",
+            "properties": {
+              "alias": {
+                "type": "string"
+              },
+              "onion": {
+                "type": "string"
+              },
+              "saved": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "alias",
+              "onion"
+            ]
+          }
         },
         "conversations": {
           "type": "array",
-          "items": {}
+          "items": {
+            "title": "DropConversationSummaryEntry",
+            "type": "object",
+            "properties": {
+              "alias": {
+                "type": "string"
+              },
+              "onion": {
+                "type": "string"
+              },
+              "unread_count": {
+                "type": "integer"
+              },
+              "pending_count": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "alias",
+              "onion"
+            ]
+          }
         },
         "live_contexts": {
           "type": "array",
-          "items": {}
+          "items": {
+            "title": "LiveContextEntry",
+            "type": "object",
+            "properties": {
+              "alias": {
+                "type": "string"
+              },
+              "onion": {
+                "type": "string"
+              },
+              "saved": {
+                "type": "boolean"
+              },
+              "session_state": {
+                "type": "string"
+              },
+              "unseen_count": {
+                "type": "integer"
+              },
+              "pending_outbound_count": {
+                "type": "integer"
+              },
+              "recovery_eligible": {
+                "type": "boolean"
+              },
+              "disconnect_actor": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "local",
+                      "remote",
+                      "system"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "disconnect_reason": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "peer_ended_session",
+                      "retry_exhausted",
+                      "max_connections_reached",
+                      "retunnel_pending_connection_missing",
+                      "late_acceptance_timeout",
+                      "outbound_attempt_rejected",
+                      "outbound_attempt_closed_before_acceptance",
+                      "pending_acceptance_expired",
+                      "mutual_tiebreaker_loser",
+                      "duplicate_incoming_connected",
+                      "duplicate_incoming_pending",
+                      "live_backlog_limit_reached",
+                      "live_voice_limit_reached",
+                      "invalid_peer_frame",
+                      "idle_timeout"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "context_generation": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "call_handle": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "outbound_attempt_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "route_changing": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "alias",
+              "onion",
+              "saved",
+              "session_state"
+            ]
+          }
         },
         "pending": {
           "type": "array",
-          "items": {}
+          "items": {
+            "title": "PendingConnectionEntry",
+            "type": "object",
+            "properties": {
+              "alias": {
+                "type": "string"
+              },
+              "onion": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "origin": {
+                "enum": [
+                  "manual",
+                  "auto_reconnect",
+                  "retunnel",
+                  "incoming",
+                  "grace_reconnect",
+                  "mutual_connect",
+                  "auto_accept_contact"
+                ],
+                "type": "string"
+              },
+              "reason": {
+                "enum": [
+                  "user_accept",
+                  "consumer_absent"
+                ],
+                "type": "string"
+              },
+              "expires_at": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "action_handle": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "alias",
+              "onion",
+              "origin",
+              "reason"
+            ]
+          }
         },
         "settings_version": {
           "type": "string"
+        },
+        "profile_instance_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "authenticated_client_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -7958,6 +9884,16 @@
         },
         "key_destroyed": {
           "type": "boolean"
+        },
+        "operation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -7997,6 +9933,26 @@
               "type": "null"
             }
           ]
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "operation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -8025,6 +9981,26 @@
           ]
         },
         "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "operation_id": {
           "anyOf": [
             {
               "type": "string"
@@ -8072,11 +10048,105 @@
         },
         "profile": {
           "type": "string"
+        },
+        "operation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
         "profile"
       ]
+    },
+    "SelfDestructRuntimeReleasedEvent": {
+      "title": "SelfDestructRuntimeReleasedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "profile": {
+          "type": "string"
+        },
+        "operation_id": {
+          "type": "string"
+        }
+      }
+    },
+    "SelfDestructSafeEvent": {
+      "title": "SelfDestructSafeEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "profile": {
+          "type": "string"
+        },
+        "operation_id": {
+          "type": "string"
+        }
+      }
     },
     "SessionAuthenticatedEvent": {
       "title": "SessionAuthenticatedEvent",
@@ -8333,7 +10403,74 @@
         },
         "entries": {
           "type": "array",
-          "items": {}
+          "items": {
+            "title": "SettingSnapshotEntry",
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "value_type": {
+                "type": "string"
+              },
+              "display_name": {
+                "type": "string"
+              },
+              "display_group": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "constraints": {
+                "type": "string"
+              },
+              "security_note": {
+                "type": "string"
+              },
+              "min_value": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "max_value": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "editable": {
+                "type": "boolean"
+              },
+              "scope": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "value",
+              "source",
+              "category"
+            ]
+          }
         }
       },
       "required": [
@@ -8393,6 +10530,121 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "TextAcceptedEvent": {
+      "title": "TextAcceptedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "onion": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "delivery": {
+          "enum": [
+            "live",
+            "drop"
+          ],
+          "type": "string"
+        }
+      }
+    },
+    "TextRejectedEvent": {
+      "title": "TextRejectedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "onion": {
+          "type": "string"
+        },
+        "msg_id": {
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "invalid_selection",
+            "wrong_peer",
+            "not_pending_live",
+            "not_drop",
+            "pending_delivery",
+            "not_found",
+            "no_recovery",
+            "count_limit",
+            "byte_limit",
+            "outbound_pending_live",
+            "active_live_context",
+            "ambiguous_identity",
+            "not_finalized",
+            "invalid_range",
+            "unsupported_content",
+            "media_limit",
+            "malformed_chunk",
+            "stale_capture",
+            "persistence_failed"
+          ],
+          "type": "string"
         }
       }
     },
@@ -8769,7 +11021,97 @@
         },
         "messages": {
           "type": "array",
-          "items": {}
+          "items": {
+            "title": "UnreadMessageEntry",
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "string"
+              },
+              "delivery": {
+                "enum": [
+                  "live",
+                  "drop"
+                ],
+                "type": "string"
+              },
+              "content": {
+                "anyOf": [
+                  {
+                    "title": "TextContent",
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "text",
+                          "voice"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "text"
+                    ]
+                  },
+                  {
+                    "title": "VoiceContent",
+                    "type": "object",
+                    "properties": {
+                      "blob_id": {
+                        "type": "string"
+                      },
+                      "codec": {
+                        "type": "string"
+                      },
+                      "size_bytes": {
+                        "type": "integer"
+                      },
+                      "duration_ms": {
+                        "anyOf": [
+                          {
+                            "type": "integer"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "type": {
+                        "enum": [
+                          "text",
+                          "voice"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "blob_id",
+                      "codec",
+                      "size_bytes"
+                    ]
+                  }
+                ]
+              },
+              "msg_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "timestamp",
+              "delivery",
+              "content"
+            ]
+          }
         },
         "alias": {
           "type": "string"
@@ -9378,6 +11720,144 @@
         "reason"
       ]
     },
+    "VoiceOwnerRegisteredEvent": {
+      "title": "VoiceOwnerRegisteredEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "owner_token": {
+          "type": "string"
+        }
+      }
+    },
+    "VoiceOwnerRejectedEvent": {
+      "title": "VoiceOwnerRejectedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "enum": [
+            "invalid_selection",
+            "wrong_peer",
+            "not_pending_live",
+            "not_drop",
+            "pending_delivery",
+            "not_found",
+            "no_recovery",
+            "count_limit",
+            "byte_limit",
+            "outbound_pending_live",
+            "active_live_context",
+            "ambiguous_identity",
+            "not_finalized",
+            "invalid_range",
+            "unsupported_content",
+            "media_limit",
+            "malformed_chunk",
+            "stale_capture",
+            "persistence_failed"
+          ],
+          "type": "string"
+        }
+      }
+    },
+    "VoiceOwnerReleasedEvent": {
+      "title": "VoiceOwnerReleasedEvent",
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "epoch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cleanup_pending": {
+          "type": "boolean"
+        }
+      }
+    },
     "VoiceReleasedEvent": {
       "title": "VoiceReleasedEvent",
       "type": "object",
@@ -9772,17 +12252,26 @@
     "get_contacts_list": {
       "$ref": "#/definitions/GetContactsListCommand"
     },
+    "get_gui_preferences": {
+      "$ref": "#/definitions/GetGuiPreferencesCommand"
+    },
     "get_history": {
       "$ref": "#/definitions/GetHistoryCommand"
     },
     "get_inbox": {
       "$ref": "#/definitions/GetInboxCommand"
     },
+    "get_message_outcome": {
+      "$ref": "#/definitions/GetMessageOutcomeCommand"
+    },
     "get_messages": {
       "$ref": "#/definitions/GetMessagesCommand"
     },
     "get_raw_history": {
       "$ref": "#/definitions/GetRawHistoryCommand"
+    },
+    "get_restricted_client_state": {
+      "$ref": "#/definitions/GetRestrictedClientStateCommand"
     },
     "get_runtime_snapshot": {
       "$ref": "#/definitions/GetRuntimeSnapshotCommand"
@@ -9823,11 +12312,17 @@
     "register_live_consumer": {
       "$ref": "#/definitions/RegisterLiveConsumerCommand"
     },
+    "register_voice_owner": {
+      "$ref": "#/definitions/RegisterVoiceOwnerCommand"
+    },
     "reject": {
       "$ref": "#/definitions/RejectCommand"
     },
     "release_voice": {
       "$ref": "#/definitions/ReleaseVoiceCommand"
+    },
+    "release_voice_owner": {
+      "$ref": "#/definitions/ReleaseVoiceOwnerCommand"
     },
     "remove_contact": {
       "$ref": "#/definitions/RemoveContactCommand"
@@ -9858,6 +12353,9 @@
     },
     "set_default_profile": {
       "$ref": "#/definitions/SetDefaultProfileCommand"
+    },
+    "set_gui_preferences": {
+      "$ref": "#/definitions/SetGuiPreferencesCommand"
     },
     "set_setting": {
       "$ref": "#/definitions/SetSettingCommand"
@@ -10038,6 +12536,12 @@
     "fallback_success": {
       "$ref": "#/definitions/FallbackSuccessEvent"
     },
+    "gui_preferences": {
+      "$ref": "#/definitions/GuiPreferencesEvent"
+    },
+    "gui_preferences_rejected": {
+      "$ref": "#/definitions/GuiPreferencesRejectedEvent"
+    },
     "history_clear_failed": {
       "$ref": "#/definitions/HistoryClearFailedEvent"
     },
@@ -10095,6 +12599,12 @@
     "live_context_dismissed": {
       "$ref": "#/definitions/LiveContextDismissedEvent"
     },
+    "live_control_completed": {
+      "$ref": "#/definitions/LiveControlCompletedEvent"
+    },
+    "live_control_rejected": {
+      "$ref": "#/definitions/LiveControlRejectedEvent"
+    },
     "live_message_resource_pressure": {
       "$ref": "#/definitions/LiveMessageResourcePressureEvent"
     },
@@ -10112,6 +12622,9 @@
     },
     "message_deleted": {
       "$ref": "#/definitions/MessageDeletedEvent"
+    },
+    "message_outcome": {
+      "$ref": "#/definitions/MessageOutcomeEvent"
     },
     "message_received": {
       "$ref": "#/definitions/MessageReceivedEvent"
@@ -10200,6 +12713,9 @@
     "rename_success": {
       "$ref": "#/definitions/RenameSuccessEvent"
     },
+    "restricted_client_state": {
+      "$ref": "#/definitions/RestrictedClientStateEvent"
+    },
     "retained_messages": {
       "$ref": "#/definitions/RetainedMessagesEvent"
     },
@@ -10236,6 +12752,12 @@
     "self_destruct_key_destroyed": {
       "$ref": "#/definitions/SelfDestructKeyDestroyedEvent"
     },
+    "self_destruct_runtime_released": {
+      "$ref": "#/definitions/SelfDestructRuntimeReleasedEvent"
+    },
+    "self_destruct_safe": {
+      "$ref": "#/definitions/SelfDestructSafeEvent"
+    },
     "session_authenticated": {
       "$ref": "#/definitions/SessionAuthenticatedEvent"
     },
@@ -10256,6 +12778,12 @@
     },
     "switch_success": {
       "$ref": "#/definitions/SwitchSuccessEvent"
+    },
+    "text_accepted": {
+      "$ref": "#/definitions/TextAcceptedEvent"
+    },
+    "text_rejected": {
+      "$ref": "#/definitions/TextRejectedEvent"
     },
     "tor_key_decrypt_failed": {
       "$ref": "#/definitions/TorKeyDecryptFailedEvent"
@@ -10301,6 +12829,15 @@
     },
     "voice_operation_rejected": {
       "$ref": "#/definitions/VoiceOperationRejectedEvent"
+    },
+    "voice_owner_registered": {
+      "$ref": "#/definitions/VoiceOwnerRegisteredEvent"
+    },
+    "voice_owner_rejected": {
+      "$ref": "#/definitions/VoiceOwnerRejectedEvent"
+    },
+    "voice_owner_released": {
+      "$ref": "#/definitions/VoiceOwnerReleasedEvent"
     },
     "voice_released": {
       "$ref": "#/definitions/VoiceReleasedEvent"

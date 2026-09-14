@@ -20,6 +20,7 @@ from metor.data.message.models import (
 from metor.data.sql.backends import SqlCipherCursor, SqlParam
 from .receipts import MessageReceiptRow
 from .history import MessageHistoryMixin
+from .archive import MessageArchiveMixin
 from .inbound import MessageInboundMixin
 from .outbox import MessageOutboxMixin
 
@@ -27,7 +28,9 @@ if TYPE_CHECKING:
     from metor.data.sql.manager import SqlManager
 
 
-class MessageRepository(MessageInboundMixin, MessageOutboxMixin, MessageHistoryMixin):
+class MessageRepository(
+    MessageInboundMixin, MessageOutboxMixin, MessageHistoryMixin, MessageArchiveMixin
+):
     """Centralized durable message spool, archive, and receipt helpers."""
 
     def __init__(self, sql: 'SqlManager') -> None:
@@ -47,6 +50,8 @@ class MessageRepository(MessageInboundMixin, MessageOutboxMixin, MessageHistoryM
         contact_onion: Optional[str],
         delivery: Optional[Delivery],
         direction: Optional[MessageDirection],
+        owner_token: Optional[str] = None,
+        msg_id: Optional[str] = None,
     ) -> tuple[str, list[SqlParam], str]:
         """Builds the bounded inventory predicate and stable filter identity."""
         clauses = [
@@ -57,6 +62,23 @@ class MessageRepository(MessageInboundMixin, MessageOutboxMixin, MessageHistoryM
             'OR a.receipt_id IS NOT NULL)',
         ]
         params: list[SqlParam] = []
+        if msg_id is not None:
+            if not is_valid_message_id(msg_id):
+                raise ValueError('Invalid retained-message identity')
+            clauses.append('r.msg_id = ?')
+            params.append(msg_id)
+        if owner_token is None:
+            clauses.append(
+                "NOT (r.direction = 'out' AND r.status = 'draft' AND EXISTS "
+                '(SELECT 1 FROM voice_producer_items AS p WHERE p.msg_id = r.msg_id))'
+            )
+        else:
+            clauses.append(
+                "(r.status <> 'draft' OR (r.direction = 'out' AND EXISTS "
+                '(SELECT 1 FROM voice_producer_items AS p WHERE p.msg_id = r.msg_id '
+                'AND p.owner_token = ? AND p.cleanup_payload IS NULL)))'
+            )
+            params.append(owner_token)
         normalized_onion = clean_onion(contact_onion) if contact_onion else None
         if normalized_onion is not None:
             clauses.append('r.peer_onion = ?')
@@ -72,6 +94,8 @@ class MessageRepository(MessageInboundMixin, MessageOutboxMixin, MessageHistoryM
                 'target': normalized_onion,
                 'delivery': delivery.value if delivery is not None else None,
                 'direction': direction.value if direction is not None else None,
+                'owner': owner_token,
+                'msg_id': msg_id,
             },
             sort_keys=True,
             separators=(',', ':'),
@@ -147,6 +171,7 @@ class MessageRepository(MessageInboundMixin, MessageOutboxMixin, MessageHistoryM
             retained_bytes=retained_bytes,
             codec=codec,
             duration_ms=duration_ms,
+            producer_interrupted=bool(row[9]),
         )
 
     def list_retained_messages(
@@ -156,6 +181,8 @@ class MessageRepository(MessageInboundMixin, MessageOutboxMixin, MessageHistoryM
         direction: Optional[MessageDirection] = None,
         cursor: Optional[str] = None,
         limit: int = Constants.DEFAULT_RETAINED_PAGE_SIZE,
+        owner_token: Optional[str] = None,
+        msg_id: Optional[str] = None,
     ) -> RetainedMessagePage:
         """Returns a non-consuming, stable page of retained logical identities.
 
@@ -165,7 +192,7 @@ class MessageRepository(MessageInboundMixin, MessageOutboxMixin, MessageHistoryM
         if type(limit) is not int or not 1 <= limit <= Constants.MAX_RETAINED_PAGE_SIZE:
             raise ValueError('Invalid retained-message page size.')
         predicate, params, fingerprint = self._retained_filter(
-            contact_onion, delivery, direction
+            contact_onion, delivery, direction, owner_token, msg_id
         )
         joins = (
             ' FROM message_receipts AS r '
@@ -222,7 +249,10 @@ class MessageRepository(MessageInboundMixin, MessageOutboxMixin, MessageHistoryM
                 sql_cursor.execute(
                     'SELECT r.id, r.peer_onion, r.direction, r.delivery, '
                     'r.content_type, r.msg_id, r.status, r.retained_bytes, '
-                    'COALESCE(i.payload, o.payload, a.payload)'
+                    'COALESCE(i.payload, o.payload, a.payload), '
+                    "CASE WHEN r.direction = 'out' THEN EXISTS "
+                    '(SELECT 1 FROM voice_producer_items AS p WHERE p.msg_id = r.msg_id '
+                    'AND p.interrupted = 1) ELSE 0 END'
                     + joins
                     + 'WHERE '
                     + predicate

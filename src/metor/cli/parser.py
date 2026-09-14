@@ -60,9 +60,13 @@ class CliParser:
         args.list_uis = False
         args.chat_help = False
         args.start_daemon = None
+        args.device_config = None
+        args.simulator = False
         if args.command == 'chat':
             chat_parser = argparse.ArgumentParser(prog='metor chat', add_help=False)
             chat_parser.add_argument('--ui')
+            chat_parser.add_argument('--device-config')
+            chat_parser.add_argument('--simulator', action='store_true')
             chat_parser.add_argument('--list-uis', action='store_true')
             start_daemon_group = chat_parser.add_mutually_exclusive_group()
             start_daemon_group.add_argument(
@@ -80,6 +84,8 @@ class CliParser:
             args.list_uis = chat_args.list_uis
             args.chat_help = chat_args.chat_help
             args.start_daemon = chat_args.start_daemon
+            args.device_config = chat_args.device_config
+            args.simulator = chat_args.simulator
             args.extra = chat_unknown
             args.subcommand = chat_unknown[0] if chat_unknown else None
 

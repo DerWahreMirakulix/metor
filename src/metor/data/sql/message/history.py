@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Dict, List, Optional, Tuple, cast
 
 from metor.core.api import ContentType, Delivery, is_valid_message_id
@@ -9,7 +10,6 @@ from metor.data.message.models import (
     MessageDeleteOutcome,
     MessageDirection,
     MessageStatus,
-    StoredMessageRecord,
     UnreadInboxSummaryRecord,
 )
 from metor.data.sql.backends import SqlParam
@@ -77,35 +77,62 @@ class MessageHistoryMixin(MessageReceiptStore):
             for row in rows
         ]
 
-    def get_drop_conversation_summaries(self) -> List[Tuple[str, int]]:
+    def get_drop_conversation_summaries(self) -> List[Tuple[str, int, int]]:
         """Returns DROP conversation identities and unread counts without payloads.
 
         Args:
             None
 
         Returns:
-            List[Tuple[str, int]]: Peer onion and unread DROP count rows.
+            List[Tuple[str, int, int]]: Peer, unread and pending DROP counts in canonical activity order.
         """
         rows = self._sql.fetchall(
-            'SELECT r.peer_onion, COALESCE(SUM(CASE WHEN r.direction = ? AND r.status = ? THEN 1 ELSE 0 END), 0) '
+            'SELECT r.peer_onion, COALESCE(SUM(CASE WHEN r.direction = ? AND r.status = ? THEN 1 ELSE 0 END), 0), '
+            'COALESCE(SUM(CASE WHEN r.direction = ? AND r.status = ? THEN 1 ELSE 0 END), 0) '
             'FROM message_receipts AS r '
             'LEFT JOIN message_archive AS a ON a.receipt_id = r.id '
             'WHERE r.delivery = ? AND (a.receipt_id IS NOT NULL OR r.status = ?) '
-            'GROUP BY r.peer_onion ORDER BY MAX(r.created_at) DESC',
+            'GROUP BY r.peer_onion ORDER BY MAX(r.created_at) DESC, r.peer_onion ASC',
             (
                 MessageDirection.IN.value,
                 MessageStatus.UNREAD.value,
+                MessageDirection.OUT.value,
+                MessageStatus.PENDING.value,
                 Delivery.DROP.value,
                 MessageStatus.PENDING.value,
             ),
         )
-        return [(str(row[0]), int(str(row[1]))) for row in rows]
+        return [(str(row[0]), int(str(row[1])), int(str(row[2]))) for row in rows]
+
+    def get_live_activity(self) -> Dict[str, str]:
+        """Reads canonical retained LIVE receipt recency without selecting message payloads.
+
+        Args:
+            None
+        Returns:
+            Dict[str, str]: Peer-to-receipt update timestamp for unresolved LIVE work.
+        """
+        rows = self._sql.fetchall(
+            'SELECT peer_onion, MAX(updated_at) FROM message_receipts '
+            'WHERE delivery = ? AND ((direction = ? AND status = ?) '
+            'OR (direction = ? AND status = ?)) GROUP BY peer_onion',
+            (
+                Delivery.LIVE.value,
+                MessageDirection.IN.value,
+                MessageStatus.UNREAD.value,
+                MessageDirection.OUT.value,
+                MessageStatus.PENDING.value,
+            ),
+        )
+        return {str(row[0]): str(row[1]) for row in rows}
 
     def get_and_read_inbox(
         self,
         contact_onion: str,
         ephemeral_messages: bool,
         delivery: Optional[Delivery] = None,
+        max_messages: Optional[int] = None,
+        max_payload_bytes: Optional[int] = None,
     ) -> List[Tuple[int, str, str, str, Optional[str], str]]:
         """
         Retrieves unread inbox rows and applies consume semantics atomically.
@@ -114,6 +141,8 @@ class MessageHistoryMixin(MessageReceiptStore):
             contact_onion (str): The peer onion identity.
             ephemeral_messages (bool): Whether consumed drop payloads should be shredded.
             delivery (Optional[Delivery]): Optional delivery semantics filter.
+            max_messages: Optional foreground handoff row ceiling.
+            max_payload_bytes: Optional serialized row-content budget.
 
         Returns:
             List[Tuple[int, str, str, str, Optional[str], str]]: Unread rows with content type.
@@ -138,15 +167,24 @@ class MessageHistoryMixin(MessageReceiptStore):
             f'{delivery_filter} '
             'ORDER BY r.created_at ASC, r.id ASC'
         )
+        if max_messages is not None:
+            query += ' LIMIT ?'
+            params.append(max_messages)
 
         with self._sql.transaction() as cursor:
-            rows = cast(
-                List[Tuple[SqlParam, ...]],
-                cursor.execute(
-                    query,
-                    tuple(params),
-                ).fetchall(),
-            )
+            cursor.execute(query, tuple(params))
+            rows: List[Tuple[SqlParam, ...]] = []
+            encoded_bytes = 0
+            while raw := cursor.fetchone():
+                row = cast(Tuple[SqlParam, ...], raw)
+                size = len(json.dumps([str(value) for value in row]).encode('utf-8'))
+                if (
+                    max_payload_bytes is not None
+                    and encoded_bytes + size > max_payload_bytes
+                ):
+                    break
+                rows.append(row)
+                encoded_bytes += size
 
             messages: List[Tuple[int, str, str, str, Optional[str], str]] = [
                 (
@@ -199,52 +237,6 @@ class MessageHistoryMixin(MessageReceiptStore):
                 )
 
         return messages
-
-    def get_chat_history(
-        self,
-        contact_onion: str,
-        limit: int,
-    ) -> List[StoredMessageRecord]:
-        """
-        Retrieves visible chat history rows for one peer.
-
-        Args:
-            contact_onion (str): The peer onion identity.
-            limit (int): The result limit.
-
-        Returns:
-            List[StoredMessageRecord]: Visible chat history rows ordered chronologically.
-        """
-        query = """
-            SELECT r.direction, r.status, a.payload, r.created_at, r.msg_id, r.content_type
-            FROM message_receipts AS r
-            INNER JOIN message_archive AS a ON a.receipt_id = r.id
-            WHERE r.peer_onion = ?
-              AND a.payload != ''
-              AND r.delivery = ?
-            ORDER BY r.created_at DESC, r.id DESC
-            LIMIT ?
-        """
-        rows = self._sql.fetchall(
-            query,
-            (
-                clean_onion(contact_onion),
-                Delivery.DROP.value,
-                limit,
-            ),
-        )
-        rows.reverse()
-        return [
-            StoredMessageRecord(
-                direction=str(row[0]),
-                status=str(row[1]),
-                payload=str(row[2]),
-                timestamp=str(row[3]),
-                msg_id=str(row[4]),
-                content_type=str(row[5]),
-            )
-            for row in rows
-        ]
 
     def get_drop_voice_payloads(
         self,
@@ -331,6 +323,12 @@ class MessageHistoryMixin(MessageReceiptStore):
             )
         where = ' AND '.join(filters)
         with self._sql.transaction() as cursor:
+            pin_rows = cursor.execute(
+                f'SELECT DISTINCT peer_onion FROM message_receipts WHERE {where}',
+                tuple(params),
+            ).fetchall()
+            removed = {str(row[0]) for row in pin_rows}
+            self._sql.metadata.prune_pins(cursor, removed)
             rows = cast(
                 List[Tuple[SqlParam, ...]],
                 cursor.execute(

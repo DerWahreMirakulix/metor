@@ -133,20 +133,30 @@ class MessageRouter:
             transition_lock=transition_lock,
         )
 
-    def send_message(self, target: str, msg: str, msg_id: str) -> None:
+    def send_message(
+        self,
+        target: str,
+        msg: str,
+        msg_id: str,
+        local_result: Optional[Callable[[IpcEvent], None]] = None,
+    ) -> None:
         """Delegates outbound live delivery to the live router.
 
         Args:
             target (str): The target alias or onion.
             msg (str): The message content.
             msg_id (str): The unique message identifier.
+            local_result: Optional requesting-client callback for local admission outcomes.
 
         Returns:
             None
         """
         if not self._purge_fence.is_set():
             with self._operation_lock:
-                self._live.send_message(target, msg, msg_id)
+                if local_result is None:
+                    self._live.send_message(target, msg, msg_id)
+                else:
+                    self._live.send_message(target, msg, msg_id, local_result)
 
     def process_incoming_msg(
         self, conn: socket.socket, onion: str, payload_id: str, b64_payload: str
@@ -349,6 +359,34 @@ class MessageRouter:
             if self._voice is not None and not self._purge_fence.is_set()
             else False
         )
+
+    def finalize_interrupted_voice(self, onion: str, msg_id: str) -> bool:
+        """Delegates canonical producer-loss finalization.
+
+        Args:
+            onion: Exact canonical peer.
+            msg_id: Interrupted outbound recording identity.
+        Returns:
+            bool: Whether the durable prefix is finalized.
+        """
+        return (
+            self._voice.finalize_interrupted(onion, msg_id)
+            if self._voice is not None and not self._purge_fence.is_set()
+            else False
+        )
+
+    def set_voice_capture_allocator(
+        self, allocator: Callable[[str, bytes], str]
+    ) -> None:
+        """Installs protected capture allocation before frontend admission.
+
+        Args:
+            allocator: Core pre-write object journal adapter.
+        Returns:
+            None
+        """
+        if self._voice is not None:
+            self._voice.set_capture_allocator(allocator)
 
     def dismiss_inbound_voice(self, onion: str) -> None:
         """Releases all inbound Voice retention for a dismissed LIVE context."""

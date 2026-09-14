@@ -112,6 +112,12 @@ class BaseHistoryDataEvent(NestedEntryCastingMixin, IpcEvent):
     profile: str
     alias: Optional[str] = None
     peer_onion: Optional[str] = None
+    next_before_id: Optional[int] = None
+    has_older: bool = False
+    page_available: bool = True
+    metadata_only: bool = False
+    record_live: Optional[bool] = None
+    record_drop: Optional[bool] = None
 
 
 @register_event(EventType.HISTORY_DATA)

@@ -515,6 +515,7 @@ class Config:
         value: ProfileConfigValue,
         *,
         allow_mutating_structural_keys: bool = False,
+        expected_value: Optional[str] = None,
     ) -> None:
         """
         Writes a setting safely using a file lock, applying nested formatting.
@@ -523,6 +524,7 @@ class Config:
         Args:
             key (Union[ProfileConfigKey, SettingKey, str]): The setting to save.
             value (ProfileConfigValue): The value to persist.
+            expected_value: Optional displayed effective value for atomic stale-edit rejection.
 
         Returns:
             None
@@ -580,6 +582,10 @@ class Config:
 
         with FileLock(config_file):
             data = self._load(persist_defaults=False)
+            if expected_value is not None and self.get_str(key_str) != expected_value:
+                raise SettingValidationError(
+                    'This setting changed elsewhere. Reload its current value before saving.'
+                )
             data[key_str] = normalized_value
             self._write_nested(data)
 

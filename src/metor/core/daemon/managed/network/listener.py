@@ -778,6 +778,7 @@ class InboundListener:
             if pending_reason is PendingConnectionReason.USER_ACCEPT:
                 self._broadcast(
                     IncomingConnectionEvent(
+                        action_handle=self._state.pending_token(onion, conn),
                         alias=alias,
                         onion=onion,
                         origin=ConnectionOrigin.INCOMING,

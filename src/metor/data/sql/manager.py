@@ -24,6 +24,8 @@ from metor.data.sql.errors import (
 from metor.data.sql.message import MessageRepository
 from metor.data.sql.migrations import migrate_schema
 from metor.data.sql.peer import PeerRepository
+from metor.data.sql.metadata import ProfileMetadataRepository
+from metor.data.sql.producers import VoiceProducerRepository
 from metor.data.sql.runtime_mirror import (
     capture_sqlcipher_stderr,
     cleanup_runtime_mirror_file,
@@ -44,6 +46,8 @@ class SqlManager:
     """Manages one pooled SQLCipher connection and the central persistence schema."""
 
     _connections: Dict[str, SqlCipherConnection] = {}
+    _metadata_repositories: Dict[str, ProfileMetadataRepository] = {}
+    _producer_repositories: Dict[str, VoiceProducerRepository] = {}
     _pool_lock: threading.Lock = threading.Lock()
     _db_lock: threading.Lock = threading.Lock()
     _log_callback: Optional[Callable[[str], None]] = None
@@ -94,6 +98,8 @@ class SqlManager:
         path_str: str = str(Path(db_path).absolute())
         with cls._pool_lock:
             conn = cls._connections.pop(path_str, None)
+            cls._metadata_repositories.pop(path_str, None)
+            cls._producer_repositories.pop(path_str, None)
 
         if conn is not None:
             try:
@@ -143,6 +149,13 @@ class SqlManager:
             cursor.execute('PRAGMA foreign_keys = ON')
             cursor.execute('SELECT count(*) FROM sqlite_master;')
             cursor.fetchone()
+            source_version = read_schema_version(cursor)
+            if source_version > DB_SCHEMA_VERSION:
+                raise NewerDatabaseSchemaError('Cannot export a newer database schema.')
+            if source_version < DB_SCHEMA_MIN_SUPPORTED:
+                raise LegacyDatabaseSchemaError(
+                    'Cannot export an unsupported database schema.'
+                )
 
             safe_target_path: str = str(target_db.absolute()).replace("'", "''")
             target_key_clause = f"x'{target_key.hex()}'" if target_key else ''
@@ -151,7 +164,7 @@ class SqlManager:
             )
             try:
                 cursor.execute("SELECT sqlcipher_export('migrated')")
-                cursor.execute(f'PRAGMA migrated.user_version = {DB_SCHEMA_VERSION}')
+                cursor.execute(f'PRAGMA migrated.user_version = {source_version}')
             finally:
                 try:
                     cursor.execute('DETACH DATABASE migrated')
@@ -199,6 +212,54 @@ class SqlManager:
         self.peers: PeerRepository = PeerRepository(self)
         self.messages: MessageRepository = MessageRepository(self)
         self.history: HistoryRepository = HistoryRepository(self)
+        with SqlManager._pool_lock:
+            self.metadata: ProfileMetadataRepository = (
+                SqlManager._metadata_repositories.setdefault(
+                    str(self.db_path.absolute()),
+                    ProfileMetadataRepository(self, self._uses_sqlcipher_key),
+                )
+            )
+
+            self.producers: VoiceProducerRepository = (
+                SqlManager._producer_repositories.setdefault(
+                    str(self.db_path.absolute()),
+                    VoiceProducerRepository(self, self._uses_sqlcipher_key),
+                )
+            )
+
+    @classmethod
+    def opened_voice_producers(cls, db_path: str | Path) -> VoiceProducerRepository:
+        """Returns producer persistence belonging to an already opened runtime.
+
+        Args:
+            db_path: Active Core-owned profile database identity.
+        Returns:
+            VoiceProducerRepository: Existing bounded claim/cleanup repository.
+        Raises:
+            ValueError: If the runtime has no initialized database for this path.
+        """
+        with cls._pool_lock:
+            repository = cls._producer_repositories.get(str(Path(db_path).absolute()))
+            if repository is None:
+                raise ValueError('Profile database is not open')
+            return repository
+
+    @classmethod
+    def opened_profile_metadata(cls, db_path: str | Path) -> ProfileMetadataRepository:
+        """Resolves metadata from storage already opened by the active runtime.
+
+        Args:
+            db_path: Runtime-owned profile database identity.
+        Returns:
+            ProfileMetadataRepository: Existing repository with its actual protection mode.
+        Raises:
+            ValueError: If no initialized runtime database owns this path.
+        """
+        with cls._pool_lock:
+            repository = cls._metadata_repositories.get(str(Path(db_path).absolute()))
+            if repository is None:
+                raise ValueError('Profile database is not open')
+            return repository
 
     def _get_connection(self) -> SqlCipherConnection:
         """
@@ -295,6 +356,8 @@ class SqlManager:
                     except Exception:
                         pass
                     del SqlManager._connections[path_str]
+                    SqlManager._metadata_repositories.pop(path_str, None)
+                    SqlManager._producer_repositories.pop(path_str, None)
             raise
         except (
             sqlite3.DatabaseError,
@@ -310,6 +373,8 @@ class SqlManager:
                     except Exception:
                         pass
                     del SqlManager._connections[path_str]
+                    SqlManager._metadata_repositories.pop(path_str, None)
+                    SqlManager._producer_repositories.pop(path_str, None)
             error_text: str = str(exc).strip() or exc.__class__.__name__
             raise DatabaseCorruptedError(
                 f'Profile database could not be opened safely. Details: {error_text}'
@@ -410,3 +475,4 @@ class SqlManager:
             cursor.execute('DELETE FROM history_ledger')
             cursor.execute('DELETE FROM message_receipts')
             cursor.execute('DELETE FROM peers')
+            cursor.execute('DELETE FROM profile_metadata WHERE name = ?', ('ui.gui',))

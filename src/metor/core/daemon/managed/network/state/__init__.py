@@ -1,6 +1,6 @@
 """Public network state types and coordinator."""
 
-from .connections import PendingConnectionSnapshot
+from .pending import PendingConnectionSnapshot
 from .tracker import StateTracker
 from .types import PendingConnectionReason
 

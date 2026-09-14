@@ -1,7 +1,7 @@
 """Settings and config command DTOs."""
 
 from dataclasses import dataclass, field
-from typing import Union
+from typing import Optional, Union
 
 # Local Package Imports
 from metor.core.api.base import IpcCommand
@@ -71,6 +71,8 @@ class SetConfigCommand(IpcCommand):
 
     setting_key: str
     setting_value: Union[str, int, float, bool]
+    safe_only: bool = False
+    expected_value: Optional[str] = None
     command_type: CommandType = field(default=CommandType.SET_CONFIG, init=False)
 
 
@@ -99,6 +101,7 @@ class GetConfigListCommand(IpcCommand):
         command_type (CommandType): The stable IPC routing code.
     """
 
+    safe_descriptors: bool = False
     command_type: CommandType = field(default=CommandType.GET_CONFIG_LIST, init=False)
 
 

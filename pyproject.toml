@@ -77,3 +77,11 @@ module = [
     "stem.*",
 ]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["kivy", "kivy.*", "sounddevice", "qrcode", "qrcode.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["metor.ui.gui.widgets.*", "metor.ui.gui.views.*", "metor.ui.gui.app"]
+disallow_subclassing_any = false

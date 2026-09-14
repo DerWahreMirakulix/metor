@@ -18,7 +18,7 @@ INSTALL_GUIDE_NAME: str = 'INSTALL.txt'
 INSTALL_SHELL_NAME: str = 'install.sh'
 INSTALL_WINDOWS_NAME: str = 'install.cmd'
 CHECKSUM_FILE_NAME: str = 'SHA256SUMS.txt'
-RELEASE_VARIANTS: tuple[str, ...] = ('base', 'terminal', 'sdk')
+RELEASE_VARIANTS: tuple[str, ...] = ('base', 'terminal', 'sdk', 'gui')
 
 
 def clean_packaging_artifacts(repo_root: Path) -> None:
@@ -36,6 +36,8 @@ def clean_packaging_artifacts(repo_root: Path) -> None:
     shutil.rmtree(repo_root / 'packaging' / 'terminal' / 'build', ignore_errors=True)
     shutil.rmtree(repo_root / 'src' / 'metor_sdk.egg-info', ignore_errors=True)
     shutil.rmtree(repo_root / 'src' / 'metor_ui_terminal.egg-info', ignore_errors=True)
+    shutil.rmtree(repo_root / 'packaging' / 'gui' / 'build', ignore_errors=True)
+    shutil.rmtree(repo_root / 'src' / 'metor_ui_gui.egg-info', ignore_errors=True)
 
 
 def normalize_machine(machine: str) -> str:
@@ -75,7 +77,7 @@ def build_bundle_name(
         machine (str): The host architecture label.
         python_major (int): The Python major version.
         python_minor (int): The Python minor version.
-        variant (str): The distribution variant ('base', 'terminal', or 'sdk').
+        variant (str): The distribution variant ('base', 'terminal', 'gui', or 'sdk').
 
     Returns:
         str: The bundle directory name.
@@ -89,6 +91,8 @@ def build_bundle_name(
         prefix = 'metor-ui-terminal-wheelhouse'
     elif variant == 'sdk':
         prefix = 'metor-sdk-wheelhouse'
+    elif variant == 'gui':
+        prefix = 'metor-ui-gui-wheelhouse'
 
     return f'{prefix}-{system_slug}-{machine_slug}-py{python_major}{python_minor}'
 
@@ -366,7 +370,7 @@ def build_release_wheelhouse(
     Args:
         output_dir (Path): The directory that should contain the bundle folder.
         skip_pip_upgrade (bool): Whether to skip upgrading pip first.
-        variant (str): The distribution variant ('base', 'terminal', or 'sdk').
+        variant (str): The distribution variant ('base', 'terminal', 'gui', or 'sdk').
 
     Returns:
         Path: The generated bundle directory.
@@ -418,6 +422,10 @@ def build_release_wheelhouse(
         req_lock = 'requirements/base.lock'
         package_name = 'metor-ui-terminal'
         wheel_sources = ('packaging/sdk', '.', 'packaging/terminal')
+    elif variant == 'gui':
+        req_lock = 'requirements/gui.lock'
+        package_name = 'metor-ui-gui'
+        wheel_sources = ('packaging/sdk', '.', 'packaging/gui')
     else:
         req_lock = 'requirements/base.lock'
         package_name = 'metor'
@@ -493,7 +501,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         '--variant',
-        choices=('base', 'terminal', 'sdk', 'all'),
+        choices=(*RELEASE_VARIANTS, 'all'),
         default='base',
         help='Distribution bundle variant to build.',
     )
@@ -512,7 +520,7 @@ def main() -> None:
     """
     args = parse_args()
     if args.variant == 'all':
-        for variant in ('base', 'terminal', 'sdk'):
+        for variant in RELEASE_VARIANTS:
             build_release_wheelhouse(
                 args.output_dir,
                 skip_pip_upgrade=args.skip_pip_upgrade,

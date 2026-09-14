@@ -309,6 +309,7 @@ class Help:
             f'\n{Theme.GREEN}Usage:{Theme.RESET} metor chat '
             '[--ui FRONTEND] [--list-uis] '
             '[--start-daemon|--no-start-daemon]\n'
+            '           [--device-config PATH] [--simulator]\n'
             f'{Theme.YELLOW}Description:{Theme.RESET} Launch one independently '
             'installed interactive frontend.\n\n'
             f'{Theme.PURPLE}Options:{Theme.RESET}\n'
@@ -328,6 +329,15 @@ class Help:
             )
             + cls._format_line(
                 '  ', '--no-start-daemon', 'Do not start a missing local daemon.', 32
+            )
+            + cls._format_line(
+                '  ',
+                '--device-config PATH',
+                'GUI: use an explicit device description.',
+                32,
+            )
+            + cls._format_line(
+                '  ', '--simulator', 'GUI: isolated, non-destructive simulation.', 32
             )
         )
 

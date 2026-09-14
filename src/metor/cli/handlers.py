@@ -361,6 +361,8 @@ class CommandHandlers:
         frontend_id: Optional[str] = None,
         list_uis: bool = False,
         loaded_frontend: Optional[LoadedFrontend] = None,
+        device_config: Optional[str] = None,
+        simulator: bool = False,
     ) -> int:
         """
         Validates daemon state and launches the interactive Chat UI.
@@ -395,6 +397,8 @@ class CommandHandlers:
             profile=pm.profile_name,
             host=create_local_frontend_host(pm, start_daemon_override),
             start_daemon=start_daemon_override,
+            device_config=device_config,
+            simulator=simulator,
         )
         try:
             return invoke_frontend(loaded_frontend, context)

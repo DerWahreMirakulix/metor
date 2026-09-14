@@ -13,12 +13,13 @@ system model, then use the focused references when you need exact contracts.
   [canonical terminology](docs/GLOSSARY.md).
 - Build against the daemon with the generated [IPC API reference](docs/generated/API.md)
   and [settings reference](docs/generated/SETTINGS.md).
-- Work on an embedded frontend through the [embedded UI contract](docs/contracts/EMBEDDED_UI.md).
+- Work on the native GUI through the [GUI contract and development status](docs/contracts/GUI.md)
+  and the [frontend-neutral Core boundary](docs/contracts/EMBEDDED_UI.md).
 - Contribute using the [contribution guide](docs/CONTRIBUTE.md) and
   [security audit checklist](docs/governance/AUDIT.md).
 - Prepare a release with the [release and versioning guide](docs/RELEASING.md).
-- Review the corrected foundation and native/artifact evidence in the
-  [closure report](docs/governance/REFACTOR_CLOSURE.md).
+- Review GUI implementation evidence and open acceptance gates in the
+  [GUI acceptance report](docs/audits/GUI_IMPLEMENTATION_2026-09-12.md).
 
 ## 🌟 Key Features
 
@@ -69,13 +70,14 @@ For security reasons and to prevent supply-chain attacks, Metor **does not** bun
 
 ### Distribution Matrix
 
-Metor is split into three non-overlapping packages:
+Metor is split into four non-overlapping packages:
 
 | Package            | Contents                                                                                 | Typical Use Case                          | Install Target             |
 | :----------------- | :--------------------------------------------------------------------------------------- | :---------------------------------------- | :------------------------- |
 | **`metor-sdk`**         | IPC client, typed API/wire DTOs, proof helpers, and the public frontend launcher contract | Client integration or a third-party frontend | `pip install metor-sdk` |
 | **`metor`**             | General CLI, daemon, storage, Tor and local profile/process orchestration; no interactive UI | Headless/base installation | `pip install metor` |
 | **`metor-ui-terminal`** | Interactive Terminal chat, slash-command help, rendering, theme and frontend resources | Current interactive frontend | `pip install metor-ui-terminal` |
+| **`metor-ui-gui`** | Native Kivy GUI and bundled local assets | Incomplete development slice; [acceptance status](docs/contracts/GUI.md) | `pip install metor-ui-gui` |
 
 Official package versions are coordinated exactly. `metor` depends on the
 matching SDK; installing the Terminal UI pulls in matching base and SDK
@@ -142,14 +144,17 @@ pip install --no-deps --no-build-isolation packaging/terminal
 # Recommended security-conscious developer installation
 python -m pip install --upgrade pip==26.0.1
 pip install -r requirements/dev.lock
+pip install -r requirements/gui.lock
 pip install --no-deps --no-build-isolation -e packaging/sdk
 pip install --no-deps --no-build-isolation -e .
 pip install --no-deps --no-build-isolation -e packaging/terminal
+pip install --no-deps --no-build-isolation -e packaging/gui
 python -m pip check
 python -m metor chat --list-ui
 ```
 
-For deliberately base-only development omit the Terminal install, not the SDK.
+For deliberately base-only development omit both UI installs and GUI dependencies,
+retaining the SDK.
 Source visibility alone does not register frontend entry points. The managed
 `metor-daemon` entry needs no interactive display; it is distinct from the
 short-lived offline executor used by applicable one-shot CLI commands.

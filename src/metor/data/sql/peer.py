@@ -226,7 +226,12 @@ class PeerRepository:
         Returns:
             None
         """
-        self._sql.execute('DELETE FROM peers WHERE alias = ?', (alias,))
+        with self._sql.transaction() as cursor:
+            cursor.execute('SELECT onion FROM peers WHERE alias = ?', (alias,))
+            row = cursor.fetchone()
+            if isinstance(row, tuple) and isinstance(row[0], str):
+                self._sql.metadata.prune_pins(cursor, {row[0]})
+            cursor.execute('DELETE FROM peers WHERE alias = ?', (alias,))
 
     def delete_by_onion(self, onion: str) -> None:
         """
@@ -238,7 +243,9 @@ class PeerRepository:
         Returns:
             None
         """
-        self._sql.execute('DELETE FROM peers WHERE onion = ?', (onion,))
+        with self._sql.transaction() as cursor:
+            self._sql.metadata.prune_pins(cursor, {onion})
+            cursor.execute('DELETE FROM peers WHERE onion = ?', (onion,))
 
     def has_references(self, onion: str) -> bool:
         """
@@ -317,6 +324,9 @@ class PeerRepository:
                 (str(row[0]), str(row[1])) for row in rows
             ]
             if deleted_peers:
+                self._sql.metadata.prune_pins(
+                    cursor, {onion for _alias, onion in deleted_peers}
+                )
                 cursor.execute(delete_query, params)
 
         return deleted_peers

@@ -43,6 +43,8 @@ class RuntimeSnapshotProjectionMixin:
     _network: 'NetworkManager'
     _config: 'Config'
     _current_revision: Callable[[], int]
+    _profile_instance: Optional[Callable[[], str]] = None
+    _authenticated_client_count: Optional[Callable[[], int]] = None
 
     @staticmethod
     def _format_pending_expiry(expires_at: Optional[float]) -> Optional[str]:
@@ -60,7 +62,7 @@ class RuntimeSnapshotProjectionMixin:
 
         return datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat()
 
-    def _build_pending_startup_entries(self) -> List[PendingConnectionEntry]:
+    def pending_call_entries(self) -> List[PendingConnectionEntry]:
         """
         Builds typed retained pending-request entries for chat startup rendering.
 
@@ -86,6 +88,7 @@ class RuntimeSnapshotProjectionMixin:
                         else PendingConnectionReasonCode.USER_ACCEPT.value
                     ),
                     expires_at=self._format_pending_expiry(snapshot.expires_at),
+                    action_handle=snapshot.action_handle,
                 )
             )
 
@@ -133,7 +136,7 @@ class RuntimeSnapshotProjectionMixin:
         return ChatStartupStateEvent(
             active=self._network.get_active_aliases(),
             contacts=self._cm.get_all_contacts(),
-            pending=self._build_pending_startup_entries(),
+            pending=self.pending_call_entries(),
             unread=self._build_unread_startup_entries(),
         )
 
@@ -147,6 +150,11 @@ class RuntimeSnapshotProjectionMixin:
             IpcEvent: Snapshot, or a typed retryable unavailable result.
         """
         for _ in range(Constants.RUNTIME_SNAPSHOT_MAX_RETRIES):
+            attached = (
+                self._authenticated_client_count()
+                if self._authenticated_client_count
+                else None
+            )
             with self._network.snapshot_barrier():
                 revision = self._current_revision()
                 state_token = self._network.get_snapshot_token()
@@ -156,6 +164,7 @@ class RuntimeSnapshotProjectionMixin:
                     and self._network.get_snapshot_token() == state_token
                 ):
                     snapshot.revision = revision
+                    snapshot.authenticated_client_count = attached
                     return snapshot
         return create_event(
             EventType.RUNTIME_SNAPSHOT_UNAVAILABLE,
@@ -178,8 +187,9 @@ class RuntimeSnapshotProjectionMixin:
                 alias=self._cm.get_alias_by_onion(onion) or onion,
                 onion=onion,
                 unread_count=unread_count,
+                pending_count=pending_count,
             )
-            for onion, unread_count in self._mm.get_drop_conversation_summaries()
+            for onion, unread_count, pending_count in self._mm.get_drop_conversation_summaries()
         ]
         unread_by_onion = {
             summary.contact_onion: summary
@@ -194,8 +204,22 @@ class RuntimeSnapshotProjectionMixin:
         relevant_onions.update(
             record.peer_onion for record in self._mm.get_pending_live_outbox()
         )
+        receipt_activity = self._mm.get_live_activity()
+        activity: dict[str, float] = {}
+        for onion in relevant_onions:
+            recent = self._network.get_session_last_activity(onion) or 0.0
+            stamp = receipt_activity.get(onion)
+            if stamp is not None:
+                try:
+                    parsed = datetime.fromisoformat(stamp)
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=timezone.utc)
+                    recent = max(recent, parsed.timestamp())
+                except (ValueError, OverflowError):
+                    pass
+            activity[onion] = recent
         live_contexts = []
-        for onion in sorted(relevant_onions):
+        for onion in sorted(relevant_onions, key=lambda peer: (-activity[peer], peer)):
             summary = unread_by_onion.get(onion)
             disconnect_reason = self._network.get_last_disconnect_reason(onion)
             disconnect_actor = self._network.get_last_disconnect_actor(onion)
@@ -206,28 +230,29 @@ class RuntimeSnapshotProjectionMixin:
                     onion=onion,
                     saved=onion in saved_onions,
                     session_state=session_state.value,
+                    route_changing=self._network.is_retunneling(onion),
                     unseen_count=summary.live_unread if summary else 0,
                     pending_outbound_count=len(self._mm.get_pending_live_outbox(onion)),
-                    recovery_eligible=session_state
-                    in {
-                        SessionState.CONNECTED,
-                        SessionState.CONNECTING,
-                        SessionState.PENDING,
-                        SessionState.RETUNNELING,
-                        SessionState.RECONNECT_GRACE,
-                        SessionState.RECONNECT_SCHEDULED,
-                    },
+                    recovery_eligible=self._network.live_context_token(onion)
+                    is not None,
                     disconnect_actor=disconnect_actor,
                     disconnect_reason=disconnect_reason,
+                    context_generation=self._network.known_live_context_generation(
+                        onion
+                    ),
+                    outbound_attempt_id=self._network.get_outbound_attempt_id(onion),
                 )
             )
         return RuntimeSnapshotEvent(
             profile=self._config._paths.profile_name,
+            profile_instance_id=self._profile_instance()
+            if self._profile_instance
+            else None,
             onion=self._tm.onion or '',
             contacts=contacts,
             conversations=conversations,
             live_contexts=live_contexts,
-            pending=self._build_pending_startup_entries(),
+            pending=self.pending_call_entries(),
             settings_version=hashlib.sha256(
                 repr(self._config.get_setting_snapshots()).encode('utf-8')
             ).hexdigest(),

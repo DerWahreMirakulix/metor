@@ -28,7 +28,8 @@ Load the minimum relevant context for the task:
 - IPC/API work: the IPC sections of [ARCHITECTURE.md](./ARCHITECTURE.md), generated [API.md](./generated/API.md), and [api.schema.json](./generated/api.schema.json).
 - Settings work: generated [SETTINGS.md](./generated/SETTINGS.md), [GLOSSARY.md](./GLOSSARY.md), and the settings implementation.
 - Release/versioning work: [RELEASING.md](./RELEASING.md), `src/metor/versioning/__init__.py`, and generated [compatibility.json](./generated/compatibility.json) where relevant.
-- Embedded UI work: [EMBEDDED_UI.md](./contracts/EMBEDDED_UI.md).
+- GUI work: [GUI.md](./contracts/GUI.md), its approved functional/layout inputs,
+  and the frontend-neutral [EMBEDDED_UI.md](./contracts/EMBEDDED_UI.md) boundary.
 - Security, persistence, concurrency, or audit work: [AUDIT.md](./governance/AUDIT.md).
 
 For work affecting release automation, packaging, version values, wire

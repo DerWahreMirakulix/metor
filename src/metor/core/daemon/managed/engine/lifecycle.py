@@ -103,6 +103,10 @@ class DaemonLifecycleMixin:
             ('session_authority', self._session_access.clear_all),
             ('focus', self._command_dispatcher.clear_all_focus),
         ]
+        if preserve_reliability:
+            steps.insert(
+                0, ('voice_producers', self._command_dispatcher.release_voice_producers)
+            )
         if self._outbox is not None:
             steps.append(('outbox', self._outbox.stop))
         if self._network is not None:
@@ -169,6 +173,11 @@ class DaemonLifecycleMixin:
         failure_phase = 'unknown'
         key_destroyed = False
         profile_name = getattr(self._pm, 'profile_name', 'unknown')
+        operation_id = getattr(self, '_purge_operation_id', None)
+        try:
+            encrypted = self._pm.uses_encrypted_storage() is True
+        except Exception:
+            encrypted = False
 
         def publish(
             event_type: EventType, payload: dict[str, JsonValue] | None = None
@@ -177,6 +186,9 @@ class DaemonLifecycleMixin:
             ipc = getattr(self, '_ipc', None)
             if ipc is None:
                 return
+            if operation_id is not None:
+                payload = dict(payload or {})
+                payload.update(profile=profile_name, operation_id=operation_id)
             recipients: set[socket.socket] = getattr(
                 self, '_destruction_recipients', set()
             )
@@ -200,11 +212,35 @@ class DaemonLifecycleMixin:
             failure_phase = phase
             key_destroyed = destroyed
 
+        def report_runtime_released() -> None:
+            """Reports completed runtime release only to a client opting into scoped milestones.
+
+            Args:
+                None
+            Returns:
+                None
+            """
+            if operation_id is not None:
+                publish(EventType.SELF_DESTRUCT_RUNTIME_RELEASED)
+
+        def report_safe() -> None:
+            """Reports combined power-off safety only for encrypted profile storage.
+
+            Args:
+                None
+            Returns:
+                None
+            """
+            if operation_id is not None and encrypted:
+                publish(EventType.SELF_DESTRUCT_SAFE)
+
         try:
             destroy_profile_storage(
                 self._pm,
                 prepare_runtime=lambda: self._lock_runtime(preserve_reliability=False),
                 key_destroyed_callback=report_key_destroyed,
+                runtime_released_callback=report_runtime_released,
+                safe_callback=report_safe,
                 failure_callback=record_failure,
             )
             publish(EventType.SELF_DESTRUCT_COMPLETED)

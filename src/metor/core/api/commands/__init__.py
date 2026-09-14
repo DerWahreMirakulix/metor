@@ -1,5 +1,17 @@
 """Facade exports for strict command DTO packages."""
 
+from metor.core.api.commands.producers import (
+    RegisterVoiceOwnerCommand,
+    ReleaseVoiceOwnerCommand,
+)
+
+from metor.core.api.commands.messages import GetMessageOutcomeCommand
+
+from metor.core.api.commands.preferences import (
+    GetGuiPreferencesCommand,
+    SetGuiPreferencesCommand,
+)
+
 from metor.core.api.commands.address import GenerateAddressCommand, GetAddressCommand
 from metor.core.api.commands.contacts import (
     AddContactCommand,
@@ -52,6 +64,7 @@ from metor.core.api.commands.session import (
     RegisterLiveConsumerCommand,
     ReauthorizeClientCommand,
     RestrictClientCommand,
+    GetRestrictedClientStateCommand,
     RejectCommand,
     RetunnelCommand,
     SwitchCommand,
@@ -76,6 +89,11 @@ from metor.core.api.commands.transport import GetTransportStateCommand
 
 
 __all__ = [
+    'RegisterVoiceOwnerCommand',
+    'ReleaseVoiceOwnerCommand',
+    'GetMessageOutcomeCommand',
+    'GetGuiPreferencesCommand',
+    'SetGuiPreferencesCommand',
     'InitCommand',
     'GetChatStartupStateCommand',
     'GetRuntimeSnapshotCommand',
@@ -93,6 +111,7 @@ __all__ = [
     'ConfigureQuickUnlockCommand',
     'ReauthorizeClientCommand',
     'RestrictClientCommand',
+    'GetRestrictedClientStateCommand',
     'RetunnelCommand',
     'GetContactsListCommand',
     'AddContactCommand',

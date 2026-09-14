@@ -30,6 +30,7 @@ class StateTrackerMessagesMixin:
     _lock: threading.RLock
     _connections: Dict[str, socket.socket]
     _pending_connections: Dict[str, socket.socket]
+    _pending_connection_tokens: Dict[str, str]
     _outbound_sockets: Dict[str, socket.socket]
     _unacked_messages: Dict[str, Dict[str, Tuple[str, str]]]
     _message_request_ids: Dict[str, str]
@@ -37,6 +38,7 @@ class StateTrackerMessagesMixin:
     _unauthenticated_connections: Set[socket.socket]
     _locally_terminated_sockets: WeakSet[socket.socket]
     _outbound_attempts: Set[str]
+    _outbound_attempt_ids: Dict[str, str]
     _scheduled_auto_reconnects: Set[str]
     _live_reconnect_grace: Dict[str, float]
     _retunnel_in_progress: Set[str]
@@ -330,9 +332,11 @@ class StateTrackerMessagesMixin:
             )
             self._connections.clear()
             self._pending_connections.clear()
+            self._pending_connection_tokens.clear()
             self._outbound_sockets.clear()
             self._unauthenticated_connections.clear()
             self._outbound_attempts.clear()
+            self._outbound_attempt_ids.clear()
             self._scheduled_auto_reconnects.clear()
             self._live_reconnect_grace.clear()
             self._retunnel_in_progress.clear()

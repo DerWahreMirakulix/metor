@@ -38,6 +38,13 @@ from metor.client.lifecycle import (
     ProfileSwitchResult,
 )
 from metor.client.stream import BufferedIpcEventReader
+from metor.client.profiles import (
+    FrontendProfileAction,
+    FrontendProfileCatalog,
+    FrontendProfileChange,
+    FrontendProfileManagement,
+    valid_frontend_profile_name,
+)
 from metor.client.frontends import (
     FRONTEND_ENTRY_POINT_GROUP,
     FRONTEND_LAUNCH_CONTRACT_VERSION,
@@ -64,6 +71,11 @@ from metor.client.frontends import (
 )
 
 __all__ = [
+    'FrontendProfileAction',
+    'FrontendProfileCatalog',
+    'FrontendProfileChange',
+    'FrontendProfileManagement',
+    'valid_frontend_profile_name',
     'AuthProvider',
     'BufferedIpcEventReader',
     'IpcAuthExchange',

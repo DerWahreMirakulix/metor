@@ -98,6 +98,16 @@ def _coerce_and_validate(
         origin: object = get_origin(expected_type)
         args: Tuple[object, ...] = get_args(expected_type) or ()
 
+        if (
+            origin is Union
+            and type(None) in args
+            and len(args) == 2
+            and value is not None
+        ):
+            expected_type = next(arg for arg in args if arg is not type(None))
+            origin = get_origin(expected_type)
+            args = get_args(expected_type) or ()
+
         if origin is Union:
             is_optional: bool = type(None) in args
             if value is None:
@@ -163,7 +173,15 @@ def _coerce_and_validate(
                 if isinstance(expected_type, type) and issubclass(expected_type, Enum):
                     coerced[key] = expected_type(value)
                 elif origin in (list, dict):
-                    if not isinstance(value, (list, dict)):
+                    if not isinstance(value, cast(type, origin)):
+                        raise TypeError()
+                    if (
+                        origin is list
+                        and args == (str,)
+                        and not all(
+                            isinstance(item, str) for item in cast(list[object], value)
+                        )
+                    ):
                         raise TypeError()
                     coerced[key] = value
                 elif (

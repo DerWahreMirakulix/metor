@@ -4,6 +4,7 @@ import socket
 from typing import Callable, Optional
 
 from metor.core.api import (
+    PendingConnectionEntry,
     AcceptCommand,
     AddContactCommand,
     ClearContactsCommand,
@@ -25,6 +26,8 @@ from metor.core.api import (
     GetAddressCommand,
     GetChatStartupStateCommand,
     GetRuntimeSnapshotCommand,
+    GetGuiPreferencesCommand,
+    SetGuiPreferencesCommand,
     GetVoiceChunkCommand,
     GetConfigCommand,
     GetConfigListCommand,
@@ -33,6 +36,7 @@ from metor.core.api import (
     GetHistoryCommand,
     GetInboxCommand,
     GetMessagesCommand,
+    GetMessageOutcomeCommand,
     ListRetainedMessagesCommand,
     GetRawHistoryCommand,
     GetSettingCommand,
@@ -62,7 +66,8 @@ from metor.core.daemon.handlers import (
 )
 
 # Local Package Imports
-from ..handlers import NetworkCommandHandler
+from ..handlers import NetworkCommandHandler, ProfileMetadataCommandHandler
+from ..producers import VoiceProducerService
 
 
 class DaemonCommandDispatcher:
@@ -87,12 +92,16 @@ class DaemonCommandDispatcher:
         self._network_handler: Optional[NetworkCommandHandler] = None
         self._database_handler: Optional[DatabaseCommandHandler] = None
         self._system_handler: Optional[SystemCommandHandler] = None
+        self._metadata_handler: Optional[ProfileMetadataCommandHandler] = None
+        self._producers: Optional[VoiceProducerService] = None
 
     def install_runtime_handlers(
         self,
         network: NetworkCommandHandler,
         database: DatabaseCommandHandler,
         system: SystemCommandHandler,
+        metadata: Optional[ProfileMetadataCommandHandler] = None,
+        producers: Optional[VoiceProducerService] = None,
     ) -> None:
         """Installs handlers backed by the active unlocked runtime.
 
@@ -100,6 +109,8 @@ class DaemonCommandDispatcher:
             network (NetworkCommandHandler): Network command adapter.
             database (DatabaseCommandHandler): Persistence command adapter.
             system (SystemCommandHandler): System command adapter.
+            metadata: Protected profile GUI metadata adapter.
+            producers: Optional protected Voice producer lifecycle owner.
 
         Returns:
             None
@@ -107,6 +118,8 @@ class DaemonCommandDispatcher:
         self._network_handler = network
         self._database_handler = database
         self._system_handler = system
+        self._metadata_handler = metadata
+        self._producers = producers
 
     def clear_runtime_handlers(self) -> None:
         """Drops all handlers backed by a locked profile runtime.
@@ -120,6 +133,41 @@ class DaemonCommandDispatcher:
         self._network_handler = None
         self._database_handler = None
         self._system_handler = None
+        self._metadata_handler = None
+        self._producers = None
+
+    def release_voice_producers(self) -> None:
+        """Revokes producers before normal profile storage release.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        if self._producers is not None:
+            self._producers.release_all()
+
+    def retry_voice_cleanup(self) -> None:
+        """Retries orphan cleanup on the existing daemon maintenance cadence.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        if self._producers is not None:
+            self._producers.retry()
+
+    def disconnect_voice_producer(self, conn: socket.socket) -> None:
+        """Invalidates the exact disconnected connection's producer lease.
+
+        Args:
+            conn: Confirmed disconnected IPC connection.
+        Returns:
+            None
+        """
+        if self._producers is not None:
+            self._producers.disconnect(conn)
 
     def clear_client_focus(self, conn: socket.socket) -> None:
         """Clears network focus owned by a disconnected IPC client.
@@ -146,6 +194,26 @@ class DaemonCommandDispatcher:
             self._network_handler.clear_all_focus()
 
     def dispatch(self, cmd: IpcCommand, conn: socket.socket) -> None:
+        """Guards owned staging before invoking an existing domain handler.
+
+        Args:
+            cmd: Session-authorized typed command.
+            conn: Requesting IPC connection.
+        Returns:
+            None
+        """
+        if self._producers is not None:
+            if not self._producers.before(cmd, conn):
+                return
+            if isinstance(cmd, ClearProfileDbCommand):
+                self._producers.release_all()
+        try:
+            self._dispatch(cmd, conn)
+        finally:
+            if self._producers is not None:
+                self._producers.after(cmd)
+
+    def _dispatch(self, cmd: IpcCommand, conn: socket.socket) -> None:
         """Routes one authorized command to its owning handler.
 
         Args:
@@ -155,6 +223,13 @@ class DaemonCommandDispatcher:
         Returns:
             None
         """
+        if isinstance(cmd, (GetGuiPreferencesCommand, SetGuiPreferencesCommand)):
+            if self._metadata_handler is None:
+                self._send(conn, create_event(EventType.DAEMON_OFFLINE))
+            else:
+                self._send(conn, self._metadata_handler.handle(cmd, conn))
+            return
+
         if isinstance(
             cmd,
             (
@@ -216,6 +291,7 @@ class DaemonCommandDispatcher:
                 GetRawHistoryCommand,
                 ClearHistoryCommand,
                 GetMessagesCommand,
+                GetMessageOutcomeCommand,
                 ListRetainedMessagesCommand,
                 ClearMessagesCommand,
                 DeleteMessageCommand,
@@ -234,3 +310,15 @@ class DaemonCommandDispatcher:
                 self._send(conn, create_event(EventType.DAEMON_OFFLINE))
                 return
             self._send(conn, self._system_handler.handle(cmd))
+
+    def pending_call_entries(self) -> list[PendingConnectionEntry]:
+        """Reads current content-free pending requests through the runtime projection owner.
+
+        Args:
+            None
+        Returns:
+            list[PendingConnectionEntry]: Current source-qualified requests or an empty locked runtime.
+        """
+        if self._network_handler is None:
+            return []
+        return self._network_handler.pending_call_entries()

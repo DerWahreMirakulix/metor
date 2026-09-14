@@ -1128,7 +1128,13 @@ class Settings:
         return TypeCaster.to_bool(default_val)
 
     @classmethod
-    def set(cls, key: SettingKey, value: SettingValue) -> None:
+    def set(
+        cls,
+        key: SettingKey,
+        value: SettingValue,
+        *,
+        expected_value: Optional[SettingValue] = None,
+    ) -> None:
         """
         Updates a setting value and saves it safely to the nested JSON file using a lock.
         Enforces strict type validation against the default configuration schema.
@@ -1136,6 +1142,8 @@ class Settings:
         Args:
             key (SettingKey): The setting key enum to update.
             value (SettingValue): The new value for the setting.
+            expected_value (Optional[SettingValue]): Optional effective value to
+                compare under the same file lock before changing it.
 
         Raises:
             TypeError: If the provided value does not match the expected type schema.
@@ -1154,6 +1162,12 @@ class Settings:
             category: str
             sub_key: str
             category, sub_key = key.value.split('.', 1)
+
+            if (
+                expected_value is not None
+                and data[category].get(sub_key, cls._DEFAULTS[key]) != expected_value
+            ):
+                raise SettingValidationError('Setting changed elsewhere.')
 
             data[category][sub_key] = value
 

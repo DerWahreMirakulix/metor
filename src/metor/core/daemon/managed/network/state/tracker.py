@@ -11,9 +11,9 @@ from metor.utils import Constants
 from metor.core.daemon.managed.models import TunnelState
 from metor.core.daemon.managed.writer import BoundedSocketWriter
 from metor.core.daemon.managed.network.state.connections import (
-    PendingConnectionSnapshot,
     StateTrackerConnectionsMixin,
 )
+from .pending import PendingConnectionSnapshot, StateTrackerPendingMixin
 from metor.core.daemon.managed.network.state.messages import StateTrackerMessagesMixin
 from metor.core.daemon.managed.network.state.retunnel import StateTrackerRetunnelMixin
 from metor.core.daemon.managed.network.state.transport import StateTrackerTransportMixin
@@ -22,6 +22,7 @@ from metor.core.daemon.managed.network.state.types import PendingConnectionReaso
 
 class StateTracker(
     StateTrackerConnectionsMixin,
+    StateTrackerPendingMixin,
     StateTrackerMessagesMixin,
     StateTrackerTransportMixin,
     StateTrackerRetunnelMixin,
@@ -44,8 +45,10 @@ class StateTracker(
         self._pending_connection_reasons: Dict[str, PendingConnectionReason] = {}
         self._pending_connection_origins: Dict[str, ConnectionOrigin] = {}
         self._pending_connection_deadlines: Dict[str, float] = {}
+        self._pending_connection_tokens: Dict[str, str] = {}
         self._unauthenticated_connections: Set[socket.socket] = set()
         self._outbound_attempts: Set[str] = set()
+        self._outbound_attempt_ids: Dict[str, str] = {}
         self._outbound_attempt_origins: Dict[str, ConnectionOrigin] = {}
         self._outbound_sockets: Dict[str, socket.socket] = {}
         self._outbound_connected_origin_overrides: Dict[str, ConnectionOrigin] = {}

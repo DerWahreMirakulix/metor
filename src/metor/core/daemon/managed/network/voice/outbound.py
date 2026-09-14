@@ -58,6 +58,30 @@ class VoiceOutboundMixin:
     _purge_fence: threading.Event
     _outbound: dict[str, VoiceTurn]
     _inbound: dict[tuple[str, str], VoiceTurn]
+    _capture_allocator: Optional[Callable[[str, bytes], str]] = None
+
+    def set_capture_allocator(self, allocator: Callable[[str, bytes], str]) -> None:
+        """Installs the Core pre-write ownership hook before command admission.
+
+        Args:
+            allocator: Profile-bound allocator preserving legacy unowned behavior.
+        Returns:
+            None
+        """
+        self._capture_allocator = allocator
+
+    def _put_capture_blob(self, msg_id: str, payload: bytes) -> str:
+        """Allocates capture bytes through the installed ownership boundary.
+
+        Args:
+            msg_id: Exact recording identity.
+            payload: Bounded anchor or encoded chunk bytes.
+        Returns:
+            str: Stored logical object ID.
+        """
+        if self._capture_allocator is not None:
+            return self._capture_allocator(msg_id, payload)
+        return self._blobs.put(payload, BlobLifecycle.TEMPORARY)
 
     def _canonical_outbound_metadata(self, turn: VoiceTurn) -> bool | None:
         """Reconciles an ambiguous write without deleting possibly committed bytes.
@@ -171,7 +195,7 @@ class VoiceOutboundMixin:
                 return
             persistence_failed = False
             try:
-                blob_id = self._blobs.put(b'', BlobLifecycle.TEMPORARY)
+                blob_id = self._put_capture_blob(msg_id, b'')
             except Exception:
                 self._broadcast(
                     VoiceOperationRejectedEvent(
@@ -182,7 +206,7 @@ class VoiceOutboundMixin:
                 )
                 return
             turn = VoiceTurn(
-                context_generation=self._state.get_live_context_generation(onion),
+                context_generation=self._state.get_live_media_generation(onion),
                 alias=alias,
                 onion=onion,
                 msg_id=msg_id,
@@ -432,7 +456,7 @@ class VoiceOutboundMixin:
                         pass
                 return
             try:
-                chunk_id = self._blobs.put(chunk, BlobLifecycle.TEMPORARY)
+                chunk_id = self._put_capture_blob(msg_id, chunk)
             except Exception:
                 self._broadcast(
                     VoiceOperationRejectedEvent(
