@@ -1,121 +1,238 @@
-# GUI implementation and acceptance report — 2026-09-12
+# GUI implementation and acceptance report — updated 2026-09-15
 
-**Incomplete development implementation. Functional/design acceptance is OPEN.**
-The requested complete GUI has not been delivered. Passing baseline regressions,
-installed-package tests and a native renderer slice do not complete WP-G2–G5 or
-the required V/A/S/L inventories. This report records the actual work and the
-remaining gates; it does not amend either approved specification.
+## 15 September pause handoff — current continuation entry
 
-Latest full-suite checkpoint: **621 tests pass in 579.804 s**
-(`/tmp/metor-gui-resend-regressions.log`). It includes the profile host/catalog,
-phase-aware switch, GUI-only desktop close, password-verifier correction,
-delivered-own resend, root recency, media ownership and accepted regressions.
-The newer purge milestones, receipt reconciliation and bounded contact management
-have focused passing evidence below and are undergoing another full run.
-Current mypy covers 428 source files. Boundaries and generated-document
-reproducibility pass; packaging and complete acceptance work continue.
+The owner requested a stable intermediate state and a pause because the session
+quota is nearly exhausted. Do not treat this as product completion. Resume from
+this section; older checkpoints below are evidence, not competing backlogs.
 
-The authorized native Windows GUI Razer capture/review now passes: 37,120 bytes,
-1,160 ms, actual SDK/temporary encrypted Core, no message publication or audio
-export. The test uses synthetic focused keyboard input and source-checkout code;
-it is not final installed-bundle, physical-key, AEC or full-duplex acceptance.
-Detailed profile, password and Windows evidence appears at the end of this report.
+**Estimated implementation: approximately 85%; full acceptance: approximately
+70%.** These are engineering estimates of scope, not percentages of passing
+unit tests. The desktop GUI is further along than the physical appliance path.
+Security-critical missing integration still prevents a release-ready claim.
 
-Earlier settings/history and native checkpoints below remain historical evidence;
-they do not replace the current mandatory-open inventory.
+### Preserved state
 
-Native 360 × 640 and 1024 × 768 at 150% pass held-End identity and calling Cancel
-keyboard probes. The minimum-size/150% settings editor preserves input/focus,
-rejects invalid integer input and submits its original displayed expectation.
-The activity-history native capture exposed a collapsed single-line alias height;
-the corrected layout preserves separated alias and display-time rows at 150%.
-These are synthetic native inputs and public DTOs, without microphone or peer
-transport. Current settings/history captures and environment records are retained
-alongside the lifecycle captures; full V17–V19 layout acceptance remains open.
-History native keys verify reachable pagination, retained scroll after a rebuild,
-Cancel as the initial Enter target and exactly one explicitly confirmed clear.
-Current captures: [settings editor](gui-2026-09-12/native-setting-editor-150.png)
-and [activity history](gui-2026-09-12/native-history-150.png), with matching JSON
-environment records; both use synthetic DTOs and no actual Core mutation.
-After the 594-test checkpoint, modal keyboard placement and a persistent edit
-scope footer were added. The [native touch fixture](gui-2026-09-12/native-setting-keyboard-150.png)
-types through the ordinary modal veil and keeps field/Save/Cancel reachable at
-minimum size and 150%. Existing composer-keyboard, confirmation and continued-PIN
-native probes pass after this change. Protected GUI preference unknown-response
-readback was also added afterward: all **5 settings tests pass in 25.046 s**,
-including failed-read retry without a repeated write.
-The timeout editor now has a separate [native failure fixture](gui-2026-09-12/native-timeout-editor-150.png):
-unsaved input/focus survive a snapshot, disabling lock needs a second explicit
-confirmation, and a correlated rejection preserves the open editor and value.
-Notification, profile-name, unlock-method and keyboard preferences use scoped
-rows. Current Ruff/format and mypy checks pass (410 source files).
-The current ordinary-framebuffer captures are
-[compact](gui-2026-09-12/native-live-controls-compact-150.png) and
-[wide](gui-2026-09-12/native-live-controls-wide-150.png), with matching JSON
-environment/geometry records. End is visually disabled in their restored inert
-simulator state; the separately injected native interaction probe enables the
-control and checks its captured identities without actual transport.
+- Branch `embeddedui`, HEAD `85b4610`; all resumed changes are **uncommitted**.
+  No staging, commit, release, tag, real-profile purge or host shutdown occurred.
+  [Source hashes](gui-2026-09-12/pause-source-20260915.json) identify the pause tree.
+- Both approved v1.0 inputs and their durable copies remain byte-identical;
+  hashes are in the source record. Accepted architecture/refactor baseline is
+  `0cfa122a47c879106b86de9578439df6ffc10b7c`.
+- Deleted flat `application/frontend.py`, `frontend_settings.py`, `views/root.py`
+  and `widgets/voice.py` were intentionally replaced by cohesive packages with
+  public facades. Preserve the new directories together with those deletions.
+- Penpot references were inspected earlier; historical revision restoration was
+  not used because it would mutate the design. Written v1.0 corrections and the
+  recorded access limitation remain authoritative. No design/spec edits occurred.
 
-Previous full-suite checkpoint: **568 tests passed in 352.555 s**
-(`/tmp/metor-gui-restricted-final-regressions.log`). This includes continued
-restricted media, exact cross-client call acceptance, bounded notification
-sources and the foreground-action admission fix. The preceding full run passed
-566/567 and exposed an Unlock admission race behind a background restricted
-query; this was corrected rather than weakening the existing security test.
-The new deterministic admission regression and all five real GUI security
-integration tests pass. Ruff, mypy (388 source files), boundary checks and
-generated documentation freshness/reproducibility pass at this checkpoint.
-Current root projection tests pass 3/3; real encrypted Core DROP cleanup tests
-pass 2/2 in 12.123 s. They verify direction-qualified same-ID deletion, pending
-preservation, protected unpinning, review staging survival and exact volatile
-media cleanup. Peer/message More and Privacy clear actions now use shared
-scope confirmations. LIVE fallback/close action tests pass 4/4 in 12.475 s,
-including actual IPC. Complete lifecycle/native/resource-pressure acceptance
-remains open.
+### Completed implementation in this continuation
 
-Native SDL fixtures use synthetic input/DTOs, independently of Core and hardware
-proof. Continued recording at 360 × 640 / 150% shows a non-identifying danger
-dot, accepted-time timer and release target. Native Shift+F10, right-click,
-500 ms hold, movement beyond 8 units and detached-target cancellation pass in
-`tests/gui_native_context.py`; explicit modal-to-incoming switching preserves
-Cancel safety. The Notification Center has a summary-aligned chevron and its
-menu is at most 320 units wide. Bundled SVGs now use semantic currentColor,
-including disabled tones; native center bindings avoid stale icon placement.
-The minimum-size PIN/continued overlay passes native scroll reachability checks:
-Unlock and Forgot PIN remain 48-high and above the media strip after scrolling.
-Anonymous activity updates preserve native PIN focus. These fixtures and gesture
-results are retained under `docs/audits/gui-2026-09-12/`. The test exporter now
-renders the unchanged native canvas without a negative Y transform: Kivy's
-default flipped rendering clipped offset stencil regions on this software GL
-backend. PNG row orientation is applied by the native image writer; no fixture
-widgets or reference pixels are substituted. Further comparison exposed cached
-stencil artifacts even with positive-coordinate subtree export and an offscreen
-drawable retaining its initial size. The current fixture sizes SDL before its
-first window and captures the ordinary drawn native framebuffer region directly.
-The 360 × 640 / 150% DROP capture now contains the complete header and selector.
-Older subtree PNG exports are not treated as definitive visual acceptance and
-must be refreshed before final reporting.
+Stopped-profile address generation/readback, exact target-password authorization,
+Scan QR/manual intent continuity, actual delivered-own resend entry and equivalent
+message context gestures, sample-aligned seek and real bounded PCM waveform,
+64 KiB cache block coalescing, read-only scoped purge result cover, row/selector
+arrow focus, responsive peer/contact control retention and root focus/pixel
+continuity are implemented. Operator instructions, glossary, integration map,
+platform ADR and support records were updated.
 
-The root fixture exercises 130 summaries with 64/64/2 attached native row counts,
-exact last-page navigation and page restoration. It waits for descendant layout
-work before capture. Its measured process RSS is about 460 MB after repeated
-synthetic page construction, independent of the much smaller logical payload
-budgets; this is recorded evidence, not a target-device memory acceptance claim.
-Native settings rows grow at 150% and align the trailing value with the measured
-title/help group. Safe Core descriptor editors and metadata history are implemented.
-Full GUI preference presentation, profile/power/purge flows and complete native
-responsiveness/resource-pressure testing remain unfinished.
+The last substantial change is `views/root/`: page composition, reusable rows,
+canonical menus and continuity are separate owners. Existing rows update in
+place; callbacks retain peer/delivery rather than old aliases. Native testing
+caught and corrected a Window-parent loop in selector arrow navigation and a
+reconciliation ordering error. The final renamed-row/insertion test now passes
+with actual native focus and screen coordinates. An experimental canvas-culling
+optimization and profiling instrumentation were removed; neither is part of the
+pause implementation.
 
-Windows endpoint enumeration still returns no Razer BlackShark route at this
-checkpoint. The owner's headset authorization remains valid, and the earlier
-isolated native duplex result remains recorded separately; the full GUI headset
-capture/review check has not passed and is not replaced by synthetic audio.
+### Verified evidence and exact limits
+
+- Latest full suite: **652 tests pass in 739.761 seconds**, log
+  `/tmp/metor-regression-final-20260915.log`. This completed before the final
+  retained-root native refactor; that refactor has targeted native/static checks,
+  not another claimed full-suite run.
+- Latest static gates: Ruff and formatting pass (520 files); mypy **443 source
+  files**; distribution boundaries, version registry and `git diff --check` pass.
+  Generated API/settings/compatibility documents were fresh/reproducible before
+  the GUI-only root refactor; no public DTO/settings source changed afterward.
+- Prior matrix: 43/43 minimum-size, 150% native fixtures pass. The newer 44-view
+  matrix exposed the root ordering regression; it is **not** an all-green final
+  matrix. The corrected root and related native checks are recorded separately
+  below. Rerun the complete matrix after continuation; never relabel the earlier
+  matrix as final-source evidence.
+- [20 MiB streaming](gui-2026-09-12/stream-pressure-20260915.json): maximum 64 KiB
+  public ranges, 640-byte PCM output frames, 16 MiB cache, about 17.2 MB traced
+  allocations and 48.5 MB sampled process RSS. Production worker/cache with
+  synthetic SDK/output; no actual Core transport or native audio in this probe.
+- [Native root load checkpoint](gui-2026-09-12/native-root-load-checkpoint-20260915.json):
+  24 queued inputs while 64 displayed rows change. Python update p95 about
+  5.4 ms, but all-sample native input p95 about **3.47 seconds**, including the
+  first input queued during initial native layout. This is an unresolved
+  responsiveness observation, not a performance pass. Current probe records
+  individual samples and separates subsequent inputs without hiding cold input.
+  Re-measure on the native Windows GPU and inspect cold layout/render work.
+- Canonical Linux/Windows four-flavor bundles, offline ZIP installers and both
+  UI removal orders pass at the pre-root-refactor checkpoint. Desktop and explicit
+  simulator launch from isolated installs pass on both OSes with `python -I`.
+- [Installed Windows Razer GUI](gui-2026-09-12/windows-installed-headset-20260915.json):
+  32,000 bytes / 1,000 ms captured and reviewed using an actual temporary
+  encrypted Core; no outbox publication or audio export. Input was synthetic
+  focused Space. It does not prove physical buttons, acoustics/AEC, full duplex
+  through the GUI or unplug/replug. Headset authorization persists.
+- Existing final-named `/tmp` snapshots/bundles are **stale relative to the new
+  RootPanel/RootRow and dynamic badge**. The wheel/source comparison JSON is an
+  explicitly marked earlier checkpoint. Rebuild before claiming final-source
+  installer/native acceptance. Temporary files may disappear; durable evidence
+  and reproduction scripts in this repository are the handoff basis.
+
+Final pause checks: **5/5 pass** for `root`, `root_page`, `root_refresh`,
+`responsive` and `contact_pages` at 360×640/150% against the actual pause source.
+See [native results](gui-2026-09-12/pause-native-20260915.json) and
+[verification record](gui-2026-09-12/pause-verification-20260915.json).
+No known failure remains in these targeted checks; broader gates above remain open.
+
+### Resume in this order
+
+1. Read `docs/AGENTS.md`, `docs/CONTRIBUTE.md`, both approved v1.0 inputs and this
+   handoff. Inspect the dirty tree and source hashes; preserve untracked package
+   files and evidence. No instruction authorizes dropping the current work.
+2. Finish root/native verification first: run `root`, `root_page`, `root_refresh`,
+   `root_load`, `responsive`, then all choices of `tests/gui_native_capture.py`
+   at minimum/150% and relevant wide/reference sizes. Check actual row ordering,
+   focus/pixel continuity, empty-to-populated state, badges and More targets.
+   Re-measure native cold/steady latency; do not infer responsiveness from the
+   5 ms Python update alone.
+3. Close remaining keyboard/accessibility/optical gates: complete Tab/reading
+   order, native OS screen-reader privacy, icon tooltips, packaged Unicode fallback
+   and remaining L01–L18 state permutations. `accessible_name` alone is not a
+   native accessibility bridge. Clipboard may remain disabled under v1.0.
+4. Finish full GUI duplex, native permission/device loss, OS lock/suspend/resume,
+   sustained combined media/list load and remaining unknown-result/failure cases.
+5. Obtain the actual appliance target/access. The earlier hardware question is
+   unanswered. Implement a registered display/PTT/Power/indicator adapter and
+   exclusive local host/runtime coordination, V21 prepared Power off and V22
+   physical arming/authorized initiation/safe shutdown. Pure button arbitration
+   and the read-only V22 observer are already present; they do not supply the
+   missing production bridge. Preserve accepted D01 refusals, including existing
+   conservative Core authorization. Never test destruction on owner data.
+6. Once source settles, rerun appropriate full/static/generated gates and rebuild
+   canonical bundles from clean isolated snapshots with deleted files removed.
+   Run installed consumers/installers and native probes outside checkout; refresh
+   hashes/support/report. Do not publish or declare full completion with open gates.
+
+Reproduction of a native case:
+
+```sh
+SDL_VIDEODRIVER=offscreen KIVY_WINDOW=sdl2 KIVY_CLIPBOARD=dummy \
+  .venv/bin/python tests/gui_native_capture.py --view root_refresh \
+  --width 360 --height 640 --font-scale 1.5 --output /tmp/root-refresh.png
+```
+
+Canonical packaging remains `scripts/build_release_wheelhouse.py`,
+`scripts/validate_installed_artifacts.py` and
+`scripts/validate_release_installers.py`. Explicit probes are
+`tests/gui_installed_launcher.py`, `tests/gui_native_voice.py` and
+`tests/gui_stream_pressure.py`. The last uses synthetic output; the Voice probe
+requires `--headset-confirmed` and the already approved Razer route.
+
+
+## Earlier 15 September implementation checkpoint
+
+The following checkpoint predates the final retained-root work. The pause handoff
+above controls current status and evidence scope.
+
+
+**The GUI implementation has progressed; complete functional/device acceptance remains OPEN.**
+The approved functional/layout v1.0 inputs are unchanged. This report distinguishes
+executed software/native/installed checks from outstanding appliance and platform
+acceptance. A passing regression suite is not a waiver of a mandatory GAT group.
+
+The latest complete regression run passed **652 tests in 673.615 seconds**
+(`/tmp/metor-full-purge-20260915.log`). It includes seven purge-observation tests,
+with actual scoped Core milestones from explicitly temporary encrypted data.
+Subsequent changes are native focus/scroll continuity and test/evidence updates;
+the native matrix is rerun against those changes. Ruff and formatting pass over
+source/scripts/tests; mypy passes **441 source files**. Distribution boundaries,
+version registry and generated documentation freshness/reproducibility pass.
+
+The resumed implementation adds:
+
+- Actual outgoing LIVE message More/resend entry, equivalent right-click/hold/
+  Shift+F10 gestures on text/Voice controls, real bounded PCM waveform summaries
+  and explicit sample-aligned audio seeking distinct from timeline scrolling.
+- Scan QR with truthful unavailable-camera/manual fallback preserving the
+  original Save/Open/Start intent; stopped-profile address generation and readback
+  with exact target/full-password checks and Core's existing identity-key reuse.
+- Coalesced 64 KiB encoded blocks, preserving the 16 MiB cache cap even with tiny
+  source fragments. A 20 MiB streaming probe outputs every byte with maximum
+  64 KiB reads and 640-byte frames; sampled cache peak is exactly 16 MiB,
+  Python allocation peak 17,168,341 bytes, sampled RSS 48,504,832 bytes from
+  31,162,368 bytes, and sampled queue peak 37 records (23.226 seconds).
+  This uses the production worker/cache with synthetic indexed SDK/output;
+  it is not native audio, actual Core transport or target-device memory proof.
+- Read-only V22 observation of original operation/profile/generation-qualified
+  Core milestones. Initiated/EOF/timeout/key-only stays unconfirmed; only the
+  combined safe milestone confirms destroyed access. Cleanup failure remains
+  distinct. No production purge trigger, new authorization or host shutdown is
+  added by this observer.
+- Arrow focus groups for root/contact rows and DROP/LIVE selectors; responsive
+  peer/contact reparenting preserves native inputs and PTT/timeline objects.
+  Root metadata rebuilds preserve canonical focus and actual pixel anchor,
+  including a focused peer rename and insertion before the viewport.
+
+Linux and Windows canonical GUI bundles, independent installed consumers and
+both UI uninstall orders have passing evidence. Offline ZIP installers for all
+four distributions passed on both platforms at the preceding checkpoint;
+current-source package and installed-native verification is recorded below as it
+finishes. No commit, release, tag or real-profile destruction was performed.
+The 14 September Windows Razer GUI capture/review proof remains valid at its
+recorded source checkpoint; final installed-bundle validation is separate.
+
+Current installed/native checkpoint: **43/43** native view fixtures pass at
+360×640/150%, including privacy, forms, contextual actions, responsive continuity
+and six destruction-result variants. The fresh Linux and Windows installations
+both pass ordinary desktop and explicit simulator launch with `python -I` outside
+the checkout. The installed Windows Razer GUI captures and reviews **32,000 bytes /
+1,000 ms** through an actual temporary encrypted Core, with no outbox publication
+or audio export. See [installed headset evidence](gui-2026-09-12/windows-installed-headset-20260915.json),
+[native matrix](gui-2026-09-12/native-matrix-20260915.json),
+[streaming measurements](gui-2026-09-12/stream-pressure-20260915.json) and
+[wheel/source comparisons](gui-2026-09-12/wheel-source-20260915.json).
+All nine bundled Metor wheels per platform match current source bytes; no deleted
+module remains alongside its replacement package.
+
+Current command records:
+
+```sh
+.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/ruff check src/metor scripts tests
+.venv/bin/ruff format --check src/metor scripts tests
+.venv/bin/mypy src/metor scripts
+.venv/bin/python scripts/check_boundaries.py
+.venv/bin/python scripts/versioning.py validate
+.venv/bin/python scripts/validate_generated_docs.py
+.venv/bin/python tests/gui_stream_pressure.py --result /tmp/metor-stream-pressure-20260915.json
+```
+
+Native fixtures use `SDL_VIDEODRIVER=offscreen KIVY_WINDOW=sdl2
+KIVY_CLIPBOARD=dummy .venv/bin/python tests/gui_native_capture.py --view VIEW
+--width 360 --height 640 --font-scale 1.5 --output OUTPUT.png`. The fixture records
+actual viewport/density/RSS and explicitly marks synthetic SDK/input and absent
+Core/audio. Nested native layout checks wait for frames, not a wall-clock timer
+that can expire before deferred layout on software GL. This does not alter the
+production layout or substitute reference pixels for a framebuffer.
+
+All later sections explicitly called checkpoints are historical evidence.
+Statements about missing features at those dates do not override this current
+inventory, the updated mapping tables or either approved specification.
 
 ## Baseline, authority and provenance
 
-- Branch: `embeddedui`. Starting and current HEAD:
-  `0cfa122a47c879106b86de9578439df6ffc10b7c`. Changes are in the working tree;
-  there is no ending implementation commit, release or tag.
+- Branch: `embeddedui`. Accepted Refactor 2 baseline:
+  `0cfa122a47c879106b86de9578439df6ffc10b7c`. Resumed starting/current HEAD:
+  `85b4610` (`Add comprehensive GUI security and settings tests`). Further
+  implementation changes remain in the working tree; no ending commit, release
+  or tag has been created.
 - Functional v1.0 SHA-256:
   `8907c510aeb7cf9272816e60bd1c09a2f38c31c7d340d67859163254f2c8cca7`.
 - Layout v1.0 SHA-256:
@@ -177,12 +294,12 @@ was not run. SDK/base/Terminal-only variants remain available.
 | Package | Actual status | Remaining gate |
 | --- | --- | --- |
 | WP-G0 | Baseline/spec/Penpot inspection, versions, initial gates and integration map completed | No acceptance inferred from historical audits |
-| WP-G1 | Partial: independent installed native GUI, common CLI launch, strict config, simulator, graphical SDK prompt bridge, candidate audio port | Physical adapters, canonical Windows installer and complete platform acceptance |
-| WP-G2 | Partial: generation/context identities, bounded handoff/drafts/inventory, protected preferences, Core descriptors, exact continued restriction and local text/Voice ownership | Exact unknown cleanup/fallback readback, complete cache/overload/lifecycle matrix |
-| WP-G3 | Partial: root/peer projections, contact intents/QR validation, incoming handles, shared context actions, qualified lifecycle and metadata history | Delivered-own resend, complete message gestures, large contacts and full native V/A/S/L acceptance |
-| WP-G4 | Partial: PCM capture/playback, PTT source arbitration, owned review/commit, accepted-prefix recovery, coverage gates and fallback | Real GUI headset/duplex, full seek/auto-play/large-item pressure and physical driver failure matrix |
+| WP-G1 | Partial: independent installed native GUI, common CLI launch, strict config, simulator, graphical SDK prompt bridge, candidate audio port | Physical adapters and complete platform acceptance; installed native final-source checks recorded separately |
+| WP-G2 | Partial: generation/context identities, bounded handoff/drafts/inventory, protected preferences, Core descriptors, exact continued restriction and local text/Voice ownership | Complete overload/lifecycle/native privacy matrix; exact unknown cleanup/fallback readback is implemented |
+| WP-G3 | Partial: root/peer projections, contact intents/QR validation, incoming handles, shared context actions, qualified lifecycle and metadata history | Full native V/A/S/L acceptance; resend/message gestures and bounded contact management are implemented |
+| WP-G4 | Partial: PCM capture/playback, PTT source arbitration, owned review/commit, accepted-prefix recovery, coverage gates and fallback | Full native duplex/auto-play/driver failure matrix; GUI headset review, sample-aligned seeking and bounded large-item worker probe have evidence |
 | WP-G5 | Partial: profile switch/desktop exit, lock/setup, protected policies, continued-context revocation and bounded private notifications | Physical power/purge and complete OS/multi-client acceptance |
-| WP-G6 | Partial: earlier canonical four-package build/install checks, docs migration, tokens/assets and native compact/wide/150% probes | Final-source bundles, all layout/state families, responsiveness/accessibility and native Windows/device release acceptance |
+| WP-G6 | Partial: earlier canonical four-package build/install checks, docs migration, tokens/assets and native compact/wide/150% probes | Final-source native checks, all layout/state families, responsiveness/accessibility and device acceptance |
 
 ## Executed evidence
 
@@ -294,56 +411,39 @@ partial evidence for root/text/basic failure/desktop portions only.
 
 ## Concrete unresolved integration and software work
 
-The following obligations remain open despite the implemented paths and focused
-regressions described above. Earlier checkpoint omissions have been replaced by
-this current inventory; they are not competing implementation requirements.
+The following mandatory gates remain open. Closed checkpoint omissions such as
+waveform/seek, stopped-profile address entry, native QR decode, contact paging,
+resend gesture access and canonical Windows installer feasibility are not new
+implementation backlogs.
 
-1. V20 profile catalog/forms and phase-aware profile switching are now implemented,
-   along with GUI-only V21 desktop close and full-password changes. Nine host/GUI
-   catalog tests pass (0.304 s); eight lifecycle/identity tests pass (48.701 s),
-   including a successful switch between separately encrypted Core runtimes.
-   Native profile rows and rejected rename editor have 360x640/150% evidence.
-   Appliance power, stopped-runtime address-rotation entry, all lifecycle failure
-   combinations and the complete settings/history scale matrix remain open.
-2. Native GUI headset capture/review now passes on Windows. Real duplex playback during transmission,
-   driver-loss recovery, complete timeshift/partial-playback coverage and media
-   pressure tests remain required. Accepted-prefix recovery, exact DROP review,
-   bounded playback and PTT ownership have actual Core integration evidence.
-3. Delivered-own-LIVE resend now has actual Core and native menu evidence (see
-   the 14 September resend checkpoint). Complete waveform/seek presentation and
-   selected-message gesture equivalence remain unfinished.
-   Unknown DROP deletion/clear and fallback now use exact receipt readback for
-   captured GUI identities; complete failure/pressure combinations remain open.
-4. Root LIVE canonical recency and same-count local transcript invalidation are
-   implemented; full large-list resource/latency evidence and scroll preservation
-   still need completion.
-   DROP membership/pins and 64-row native pagination are implemented.
-5. Contacts now have bounded pages, Remove selected and independent QR decode
-   evidence. Optional camera integration and the complete stale-action/scale
-   acceptance matrix remain open.
-   Save/Open/Start intent, canonical mutation guards, rename/demotion and local
-   QR generation already have implementation and focused evidence.
-6. Continued media and incoming-call privacy require the complete duplex,
-   revocation, expiry, auto-accept and physical-input matrix. Native PIN focus,
-   exact recipient handles, bounded notifications and Core revocation are
-   implemented; they do not prove all combinations or appliance behavior.
-7. V22 authorized physical purge arbitration, combined safe-destruction milestone
-   handling, registered local power and concrete device adapters remain open.
-   No ordinary desktop purge trigger or authorization bypass exists. Destructive
-   verification must use isolated temporary profiles, never owner data.
-8. Allowed clipboard export with ownership-aware cleanup, full untrusted-text
-   font fallback/accessibility, responsive state preservation and complete
-   L01–L18 optical/interaction fixtures remain open.
-9. Rebuild all four distribution bundles from final sources and repeat installed
-   consumer/co-install/removal checks. Earlier Linux/Windows launch artifacts are
-   stale relative to current changes. Canonical Windows installer and final
-   native dependency checks remain required.
-10. Full GAT/V/A/S/L evidence, p95 latency, baseline/peak RSS and bounded queue
-    occupancy under continuous media and realistic lists remain open. Current
-    native synthetic fixtures and Core regressions are separately scoped proof.
+1. A supported physical appliance must be identified and accessed. No production
+   display/PTT/Power/indicator adapter or exclusive local host/runtime shutdown
+   binding is registered. V21 physical preparation and V22 chord/arming/authorized
+   initiation/automatic safe shutdown are not complete. The tested pure button
+   arbiter and read-only milestone view do not substitute for that binding.
+   Existing Core D01 authorization/refusals remain intact. Only explicitly
+   temporary test profiles may be used for destruction validation.
+2. Full GUI receive/playback while transmitting, native permission denial,
+   unplug/replug and OS lock/suspend/resume need platform acceptance. The short
+   Razer GUI review and separate duplex port probe establish their own limited
+   paths, not the entire real audio or acoustic/headset matrix.
+3. Native OS accessibility/screen-reader privacy, complete keyboard reading/Tab
+   order, tooltip behavior and bundled Unicode fallback need verification and
+   completion. Clipboard remains deliberately disabled as allowed by v1.0;
+   enabling clipboard export is not a mandatory extra feature.
+4. Complete L01–L18/GAT permutations and optical comparison remain open. Minimum
+   150% fixtures, root/contact arrows, responsive object continuity and renamed
+   root pixel-anchor checks are implemented; they do not prove every failure,
+   held physical PTT, density/OS or privacy combination.
+5. The 20 MiB synthetic streaming probe demonstrates bounded worker allocations
+   and public read sizes. Sustained combined native media/list workload, actual
+   device peak memory and measured input latency still need platform evidence.
+6. Final-source installed native checks and durable result/hash records must be
+   completed; any failure is an open gate. Packaging success is separate from
+   full product/device acceptance.
 
-These are mandatory implementation obligations, including software work that is
-independent of missing hardware. Neither approved input has been weakened.
+These include software and verification obligations independent of hardware.
+Neither approved input has been weakened and no full completion is claimed.
 
 ## Requirement traceability
 
@@ -365,11 +465,11 @@ functional requirements without replacing their original text.
 | GUI-FLOW-01–03 | Intent picker, exact incoming handles, qualified End/Cancel/Change route | Complete expiry/auto-accept/native lifecycle matrix, G3/G5 |
 | GUI-INPUT-01–05 | Local keyboard, focused PTT, source ownership and held-release regressions | Full physical/duplex/restriction input matrix, G3/G4 |
 | GUI-VOICE-01–05 | Owner-qualified PTT/review, journals, interrupted recovery and explicit finalization retry | Native headset and complete owner-loss/pressure matrix, G2/G4 |
-| GUI-AUDIO-01–06 | Bounded incremental playback, manual priority, foreground auto-play and exact consume tests | Partial coverage, waveform, native duplex/seek/pressure matrix, G4 |
+| GUI-AUDIO-01–06 | Bounded incremental playback, manual priority, foreground auto-play and exact consume tests | Full native duplex/pressure matrix; real waveform, exact seeks and conservative coverage tests implemented, G4 |
 | GUI-MSG-01–05 | Text handoff, qualified DROP cleanup, fallback/dismissal, delivered-own resend and exact unknown-result receipt reconciliation | Full gesture/media/failure matrix, G3/G4 |
 | GUI-NOTIFY-01–05 | Bounded no-preview center, source watermarks, restricted privacy and exact call navigation | Complete pressure/staleness/privacy combination matrix, G5 |
 | GUI-LOCK-01–05 | Protected setup, same-client restriction, PIN/password, exact continued media and Core revocation | Full physical/duplex/OS-event combinations, G2/G5 |
-| GUI-CONTACT-01–04 | Saved intent flows, guarded rename/demotion/bulk removal, bounded pages and independently decoded native QR | Camera, full scale/stale-action matrix and regeneration, G3/G5 |
+| GUI-CONTACT-01–04 | Saved intent flows, guarded rename/demotion/bulk removal, bounded pages and independently decoded native QR | Camera adapter and full scale/stale-action matrix; stopped-profile generation/readback implemented, G3/G5 |
 | GUI-HISTORY-01 | Bounded summary/technical Core metadata pages, retention flags and confirmed full ledger clear; real pagination/uncertain-clear tests | Complete native failure/scale matrix, G3/G5 |
 | GUI-SET-01–04 | Protected defaults/CAS, full-strength policy auth, safe Core descriptor editor, exact receive scope and stale/unknown saves | Complete GUI preference C12 and native modal keyboard/settings matrix, G2/G5 |
 | GUI-LIFE-01–04 | Profile switch and GUI-only close implemented with typed phases and owner cleanup | Prepared physical power and complete lifecycle failure matrix, G5 |
@@ -385,27 +485,27 @@ functional requirements without replacing their original text.
 | --- | --- |
 | V01–V03 | Partial `views/entry.py`; setup/routing/recovery incomplete |
 | V04–V05 | `views/security.py` and `runtime/security`: protected setup/restriction, PIN/password and continued strip; full native/physical matrix pending |
-| V06–V09 | `views/root.py`, `views/peer/`: pins/paging, text/media and exact lifecycle actions; remaining recency/resend/coverage/pressure work |
+| V06–V09 | `views/root/`, `views/peer/`: pins/paging, text/media, recency/resend, exact lifecycle and native continuity; complete pressure/native matrix open |
 | V10 | Incoming overlay, independent privacy, exact handles and nonmodal focus behavior; full expiry/auto-accept matrix open |
-| V11–V13 | `views/contacts/`: saved intent picker, manual/QR validation, save/rename/demotion; bulk management open |
-| V14 | Open: camera/QR entry absent |
-| V15 | Local address/QR generation implemented; independent decode and address regeneration open |
+| V11–V13 | `views/contacts/`: saved intent picker, manual/QR validation, save/rename/demotion and bounded bulk management; full state matrix open |
+| V14 | Scan QR entry and intent-preserving manual fallback implemented; no supported camera adapter |
+| V15 | Local public address/QR independently decoded; stopped-profile address generation/readback implemented |
 | V16–V17 | Bounded Notification Center, protected preferences and safe Core descriptor editors implemented; full matrix open |
 | V18–V19 | Bounded activity/technical history and platform diagnostics implemented; complete native state/scale matrix open |
-| V20 | Implemented bounded catalog/forms and phase-aware switch; full scale/failure matrix and stopped-runtime rotation entry remain open |
+| V20 | Implemented bounded catalog/forms and phase-aware switch; full scale/failure matrix remains open; stopped-runtime address entry implemented |
 | V21 | Partial normal window detach; prepared exit/power absent |
-| V22 | Open: purge view/state absent |
+| V22 | Read-only scoped Core milestone view implemented/tested; physical arming/trigger/shutdown binding open |
 | V23 | Partial explicit config/display errors and bootstrap error cover |
 | A01–A04, A08, A11 | Partial route/explicit command/text submission boundaries; full eligibility/reconciliation missing |
 | A05–A07, A09–A10 | Exact accept/decline/open-call, qualified route change and ended-context close implemented; complete race matrix open |
-| A12–A22 | PTT/play/review, fallback/delete/clear and application lock implemented; delivered resend and full media acceptance open |
+| A12–A22 | PTT/play/review, fallback/delete/clear and application lock implemented; delivered resend implemented; full native media acceptance open |
 | A23 | GUI-only finalization/owner release/detach, one draft-loss confirmation and protected recovery exit choice implemented; full native failure matrix remains open |
 | A24–A25 | Open: physical shutdown/purge not bound |
 | S01–S07 | Partial loading/empty/busy/error/unknown/stale presentation; full identity and input retention not implemented |
 | S08–S09 | Partial draft/mailbox rejection and unavailable media labels; media interruption and adapter recovery absent |
 | S10–S11 | Partial authorization restriction/challenge/cooldown; complete lifecycle families pending |
 | S12 | Local LIVE text acceptance and exact-ID reconciliation tested; complete media truth pending |
-| L01–L18 | All open; four illustrative native captures do not meet the family inventory |
+| L01–L18 | Complete family acceptance open; expanded native matrix covers representative normal/privacy/failure/minimum cases |
 
 ### GAT test groups
 
@@ -415,16 +515,16 @@ Existing Core regressions are not substituted for enclosing GUI scenarios.
 | GAT IDs | Evidence and remaining acceptance |
 | --- | --- |
 | 01 | Root/Back projection, no implicit communication, native paging and lifecycle refresh checks; complete navigation/focus matrix open |
-| 02–03 | Saved search/manual QR validation and preserved Save/Open/Start intent implemented; camera and independent QR decode proof open |
+| 02–03 | Saved search/manual QR validation and preserved Save/Open/Start intent implemented; camera adapter open; independent native QR decode passes |
 | 04–06 | Exact pending handles, calling Cancel, explicit Accept/Open and stale lifecycle tests; complete simultaneous-peer matrix open |
 | 07–09 | Independent capture/playback workers and bounded foreground transcript implemented; real duplex/time-shift matrix open |
 | 10–12 | Actual Core owned capture/review/finalize/commit and native PTT ownership probes; full physical/media failure matrix open |
-| 13–16 | Selective/bulk fallback and ended-context dismissal tested; delivered-own resend and exact unknown-fallback readback open |
-| 17–19 | Public contact intents, stale rename guard and shared context actions implemented; large-list selection/remove/camera matrix open |
+| 13–16 | Selective/bulk fallback and ended-context dismissal tested; delivered-own resend and exact unknown-fallback readback implemented/tested; full native matrix open |
+| 17–19 | Public contact intents, stale rename guard and shared context actions implemented; bounded large-list selection/remove tested; camera/full native matrix open |
 | 20–23 | Core restricted continuation, policy authentication, anonymity and native PIN overlay tested; complete physical lock/feedback matrix open |
-| 24–27 | Open: full profile switch, phase-aware exit, safe power and physical purge |
+| 24–27 | Profile switch/phase-aware GUI exit implemented/tested; safe physical power and purge binding open |
 | 28–30 | Owner-loss preservation, bounded foreground text handoff and metadata history implemented; complete restart/retention/playback matrix open |
-| 31–32 | Earlier Linux installed CLI/GUI and four-wheel ownership/removal checks pass; final-source artifacts and Windows co-install/removal remain open |
+| 31–32 | Earlier Linux installed CLI/GUI and four-wheel ownership/removal checks pass; Linux/Windows co-install/removal pass; final installed native artifact evidence tracked separately |
 | 33–34 | Selection/help regressions and lazy installed GUI help checked; complete native dependency-failure permutations open |
 | 35–38 | Desktop offscreen launch, strict simulator config and scripted graphical SDK bootstrap checked; full real-profile/device/remote matrix open |
 | 39–42 | Optional route failure is explicit, simulator inert and absent output cannot consume; native adapter and complete graphical auth/loss matrix open |
@@ -435,12 +535,12 @@ Existing Core regressions are not substituted for enclosing GUI scenarios.
 | 56–60 | Restriction failure, exact continuation revocation, notification staleness/Off and anonymous-handle races tested; full simultaneous media/lock matrix open |
 | 61–62 | Protected SQLCipher metadata/CAS/migration, policy auth and stable profile identity tested; full profile-switch phase failures open |
 | 63 | Per-client detach/owner release implemented; phase-aware close UI and complete multi-client active-capture scenario open |
-| 64–66 | Open: physical Power/purge arbitration, authorized platform binding and truthful destruction milestones |
+| 64–66 | Pure physical arbiter and truthful scoped Core milestone view tested; authorized production platform binding/host power open |
 | 67 | Protected defaults, registry-derived safe Core descriptors, exact Receive Drops scope and stale/unknown saves tested; full native settings/policy matrix open |
 | 68 | Plain bounded rendering, local assets, strict QR parsing and clipboard restrictions implemented; full hostile-text/accessibility/allowed-clipboard matrix open |
 | 69–70 | Multiple-size native framebuffer, 150% editor/history and lifecycle/gesture probes; every V/A/S/L state and responsiveness/accessibility matrix still required |
-| 71–72 | Isolated authorized Windows Razer native duplex probe passed earlier; real GUI capture/review and complete physical support proof open |
-| 73 | Earlier four Linux ZIP installer/consumer checks pass; final-source rebuild and canonical Windows installer execution open |
+| 71–72 | Authorized Windows Razer duplex port probe and native GUI capture/review pass at recorded checkpoints; full acoustic/physical support matrix open |
+| 73 | Linux/Windows canonical four-ZIP installers/consumers pass; final-source native results tracked separately |
 | 74 | Runtime/map/ADR/schema/sample/support, contract migration and generated settings/API are updated; documentation must continue tracking remaining implementation |
 | 75 | Inventories map actual evidence and explicit remaining gates; complete product acceptance remains open |
 
@@ -852,3 +952,113 @@ at `/tmp/metor-gui-windows/nuget/tools/python.exe`; offline wheels are in the si
 `wheels` directory. Use inline PowerShell through WSL (logs are UTF-16), and use
 isolated source copies for builds so tests cannot clear their build directories.
 No release, commit, real-profile purge or host shutdown was performed.
+
+## Historical early native and regression checkpoints
+
+The following text preserves earlier observations only; the current status is at
+the start of this report.
+
+Latest full-suite checkpoint: **621 tests pass in 579.804 s**
+(`/tmp/metor-gui-resend-regressions.log`). It includes the profile host/catalog,
+phase-aware switch, GUI-only desktop close, password-verifier correction,
+delivered-own resend, root recency, media ownership and accepted regressions.
+The newer purge milestones, receipt reconciliation and bounded contact management
+have focused passing evidence below and are undergoing another full run.
+Current mypy covers 428 source files. Boundaries and generated-document
+reproducibility pass; packaging and complete acceptance work continue.
+
+The authorized native Windows GUI Razer capture/review now passes: 37,120 bytes,
+1,160 ms, actual SDK/temporary encrypted Core, no message publication or audio
+export. The test uses synthetic focused keyboard input and source-checkout code;
+it is not final installed-bundle, physical-key, AEC or full-duplex acceptance.
+Detailed profile, password and Windows evidence appears at the end of this report.
+
+Earlier settings/history and native checkpoints below remain historical evidence;
+they do not replace the current mandatory-open inventory.
+
+Native 360 × 640 and 1024 × 768 at 150% pass held-End identity and calling Cancel
+keyboard probes. The minimum-size/150% settings editor preserves input/focus,
+rejects invalid integer input and submits its original displayed expectation.
+The activity-history native capture exposed a collapsed single-line alias height;
+the corrected layout preserves separated alias and display-time rows at 150%.
+These are synthetic native inputs and public DTOs, without microphone or peer
+transport. Current settings/history captures and environment records are retained
+alongside the lifecycle captures; full V17–V19 layout acceptance remains open.
+History native keys verify reachable pagination, retained scroll after a rebuild,
+Cancel as the initial Enter target and exactly one explicitly confirmed clear.
+Current captures: [settings editor](gui-2026-09-12/native-setting-editor-150.png)
+and [activity history](gui-2026-09-12/native-history-150.png), with matching JSON
+environment records; both use synthetic DTOs and no actual Core mutation.
+After the 594-test checkpoint, modal keyboard placement and a persistent edit
+scope footer were added. The [native touch fixture](gui-2026-09-12/native-setting-keyboard-150.png)
+types through the ordinary modal veil and keeps field/Save/Cancel reachable at
+minimum size and 150%. Existing composer-keyboard, confirmation and continued-PIN
+native probes pass after this change. Protected GUI preference unknown-response
+readback was also added afterward: all **5 settings tests pass in 25.046 s**,
+including failed-read retry without a repeated write.
+The timeout editor now has a separate [native failure fixture](gui-2026-09-12/native-timeout-editor-150.png):
+unsaved input/focus survive a snapshot, disabling lock needs a second explicit
+confirmation, and a correlated rejection preserves the open editor and value.
+Notification, profile-name, unlock-method and keyboard preferences use scoped
+rows. Current Ruff/format and mypy checks pass (410 source files).
+The current ordinary-framebuffer captures are
+[compact](gui-2026-09-12/native-live-controls-compact-150.png) and
+[wide](gui-2026-09-12/native-live-controls-wide-150.png), with matching JSON
+environment/geometry records. End is visually disabled in their restored inert
+simulator state; the separately injected native interaction probe enables the
+control and checks its captured identities without actual transport.
+
+Previous full-suite checkpoint: **568 tests passed in 352.555 s**
+(`/tmp/metor-gui-restricted-final-regressions.log`). This includes continued
+restricted media, exact cross-client call acceptance, bounded notification
+sources and the foreground-action admission fix. The preceding full run passed
+566/567 and exposed an Unlock admission race behind a background restricted
+query; this was corrected rather than weakening the existing security test.
+The new deterministic admission regression and all five real GUI security
+integration tests pass. Ruff, mypy (388 source files), boundary checks and
+generated documentation freshness/reproducibility pass at this checkpoint.
+Current root projection tests pass 3/3; real encrypted Core DROP cleanup tests
+pass 2/2 in 12.123 s. They verify direction-qualified same-ID deletion, pending
+preservation, protected unpinning, review staging survival and exact volatile
+media cleanup. Peer/message More and Privacy clear actions now use shared
+scope confirmations. LIVE fallback/close action tests pass 4/4 in 12.475 s,
+including actual IPC. Complete lifecycle/native/resource-pressure acceptance
+remains open.
+
+Native SDL fixtures use synthetic input/DTOs, independently of Core and hardware
+proof. Continued recording at 360 × 640 / 150% shows a non-identifying danger
+dot, accepted-time timer and release target. Native Shift+F10, right-click,
+500 ms hold, movement beyond 8 units and detached-target cancellation pass in
+`tests/gui_native_context.py`; explicit modal-to-incoming switching preserves
+Cancel safety. The Notification Center has a summary-aligned chevron and its
+menu is at most 320 units wide. Bundled SVGs now use semantic currentColor,
+including disabled tones; native center bindings avoid stale icon placement.
+The minimum-size PIN/continued overlay passes native scroll reachability checks:
+Unlock and Forgot PIN remain 48-high and above the media strip after scrolling.
+Anonymous activity updates preserve native PIN focus. These fixtures and gesture
+results are retained under `docs/audits/gui-2026-09-12/`. The test exporter now
+renders the unchanged native canvas without a negative Y transform: Kivy's
+default flipped rendering clipped offset stencil regions on this software GL
+backend. PNG row orientation is applied by the native image writer; no fixture
+widgets or reference pixels are substituted. Further comparison exposed cached
+stencil artifacts even with positive-coordinate subtree export and an offscreen
+drawable retaining its initial size. The current fixture sizes SDL before its
+first window and captures the ordinary drawn native framebuffer region directly.
+The 360 × 640 / 150% DROP capture now contains the complete header and selector.
+Older subtree PNG exports are not treated as definitive visual acceptance and
+must be refreshed before final reporting.
+
+The root fixture exercises 130 summaries with 64/64/2 attached native row counts,
+exact last-page navigation and page restoration. It waits for descendant layout
+work before capture. Its measured process RSS is about 460 MB after repeated
+synthetic page construction, independent of the much smaller logical payload
+budgets; this is recorded evidence, not a target-device memory acceptance claim.
+Native settings rows grow at 150% and align the trailing value with the measured
+title/help group. Safe Core descriptor editors and metadata history are implemented.
+Full GUI preference presentation, profile/power/purge flows and complete native
+responsiveness/resource-pressure testing remain unfinished.
+
+Windows endpoint enumeration still returns no Razer BlackShark route at this
+checkpoint. The owner's headset authorization remains valid, and the earlier
+isolated native duplex result remains recorded separately; the full GUI headset
+capture/review check has not passed and is not replaced by synthetic audio.

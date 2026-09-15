@@ -46,6 +46,14 @@ def exercise_contact_pages(app: MetorApp, complete: Callable[[], None]) -> None:
     view.update()
     first = view._rows[address(0)]
     first.focus = True
+    Window.dispatch('on_key_down', 274, 81, '', [])
+    Window.dispatch('on_key_up', 274, 81)
+    assert view._rows[address(1)].focus
+    assert not app.controller.contacts.book.selected
+    assert app.controller.state.route.view == 'V12'
+    Window.dispatch('on_key_down', 273, 82, '', [])
+    Window.dispatch('on_key_up', 273, 82)
+    assert first.focus
     Window.dispatch('on_key_down', 13, 40, '\r', [])
     Window.dispatch('on_key_up', 13, 40)
     assert app.controller.contacts.book.selected == {address(0)}

@@ -171,11 +171,11 @@ class ContactListView(BoxLayout):
             action()
             self.update()
 
-        def add() -> None:
+        def add(scan: bool = False) -> None:
             """Preserves picker intent in the shared contact form.
 
             Args:
-                None
+                scan: Whether to open the camera/manual fallback with the same form intent.
             Returns:
                 None
             """
@@ -184,7 +184,8 @@ class ContactListView(BoxLayout):
                 if self.route.view == 'V12'
                 else 'live'
                 if self.route.delivery is Delivery.LIVE
-                else 'drop'
+                else 'drop',
+                scan=scan,
             )
 
         def manage() -> None:
@@ -214,6 +215,7 @@ class ContactListView(BoxLayout):
             body.add_widget(
                 Action('My QR', lambda: run(lambda: controller.navigate(Route('V15'))))
             )
+            body.add_widget(Action('Scan QR', lambda: run(lambda: add(True))))
             if self.route.view == 'V12':
                 body.add_widget(Action('Manage contacts', lambda: run(manage)))
                 body.add_widget(
@@ -348,6 +350,7 @@ class ContactListView(BoxLayout):
                     IconAction('ellipsis', 'Actions for ' + item.alias, context)
                 )
             self.rows.add_widget(row)
+        Action.group(tuple(self._rows.values()))
         self.scroll.scroll_y = scroll
         if focused is not None:
             if focused in self._rows:

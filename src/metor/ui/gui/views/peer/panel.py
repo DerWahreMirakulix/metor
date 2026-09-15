@@ -20,7 +20,7 @@ from ..actions import clear_drops, live_context_actions
 
 
 class PeerView(BoxLayout):
-    """Retains the foreground pane until its route, authorization or geometry changes."""
+    """Retains input and timeline ownership until its route or authorization changes."""
 
     def __init__(
         self, controller: GuiController, refresh: Callable[[], None], *, wide: bool
@@ -38,6 +38,7 @@ class PeerView(BoxLayout):
         self.controller, self.refresh = controller, refresh
         self.route = controller.state.route
         header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+        self.header = header
         header.add_widget(IconAction('chevron-left', 'Back', self._back))
         heading = BoxLayout(orientation='vertical')
         self.name = Label('', role='peer', wrap=False)
@@ -65,6 +66,7 @@ class PeerView(BoxLayout):
                     tone=delivery.value,
                 )
             )
+        Action.group(tuple(reversed(tabs.children)))
         self.add_widget(tabs)
         self.controls = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
         self.auto_play = Action('Auto-play: Off', self._toggle_auto)
@@ -79,6 +81,21 @@ class PeerView(BoxLayout):
         self.retry_recording: Action | None = None
         self._recovery_identity: tuple[int, str] | None = None
         self.composer = Composer(controller, self.route, refresh)
+        self.update()
+
+    def reflow(self, *, wide: bool) -> None:
+        """Moves only the responsive action group while retaining focus, drafts and PTT widgets.
+
+        Args:
+            wide: Whether the available viewport includes the desktop master pane.
+        Returns:
+            None
+        """
+        destination = self.header if wide else self.controls
+        if destination is not self._end_parent:
+            if self.end.parent is not None:
+                self.end.parent.remove_widget(self.end)
+            self._end_parent = destination
         self.update()
 
     def _menu(self) -> None:

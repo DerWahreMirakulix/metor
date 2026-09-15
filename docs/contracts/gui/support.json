@@ -10,7 +10,8 @@
     "desktop_input": "untested",
     "native_audio_devices_observed": 0,
     "headset_full_duplex": "untested",
-    "speaker_aec": "unsupported"
+    "speaker_aec": "unsupported",
+    "installed_desktop_and_simulator": "tested outside checkout with isolated interpreter; 2026-09-15"
   },
   "windows_x86_64": {
     "python_tested": "3.11.9 embeddable isolated runtime",
@@ -20,11 +21,12 @@
     "root_480x800": "tested",
     "headset_route": "Razer BlackShark V2 HS 2.4",
     "bounded_duplex_capture_playback": "tested; captured bytes discarded",
-    "gui_ptt": "tested with synthetic focused Space input, actual Razer capture/review and temporary encrypted Core; 2026-09-14",
-    "canonical_installer": "pending validation with restored full temporary runtime",
-    "coinstall_uninstall": "unverified",
+    "gui_ptt": "tested from offline-installed final-source bundle with synthetic focused Space input, actual Razer capture/review and temporary encrypted Core; 32000 bytes / 1000 ms; 2026-09-15",
+    "canonical_installer": "tested offline with official full CPython 3.11.9 NuGet runtime; 2026-09-15",
+    "coinstall_uninstall": "tested both UI removal orders; 2026-09-15",
     "speaker_aec": "unsupported",
-    "current_validation_runtime": "official CPython 3.11.9 NuGet package with pip and venv; temporary isolated installation"
+    "current_validation_runtime": "official CPython 3.11.9 NuGet package with pip and venv; temporary isolated installation",
+    "installed_desktop_and_simulator": "tested outside checkout with isolated interpreter; 2026-09-15"
   },
   "physical_adapters": [],
   "arm_pi": "untested",
@@ -32,5 +34,7 @@
     "simulator"
   ],
   "host_shutdown": "not_bound",
-  "purge": "not_bound"
+  "purge": "typed milestone observer tested; physical initiating control and host shutdown not bound",
+  "pause_checkpoint": "2026-09-15: retained root source has targeted native/static validation; installed artifacts/headset evidence predates final RootPanel/RootRow changes",
+  "full_acceptance": false
 }

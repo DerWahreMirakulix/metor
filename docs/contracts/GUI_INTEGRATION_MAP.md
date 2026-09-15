@@ -762,3 +762,99 @@ conservatively. No IPC/schema/compatibility change accompanies this extraction.
 it grants no authorization and has no registered driver or shutdown effect yet.
 The current evidence and outstanding work are recorded in the
 [14 September pause handoff](../audits/GUI_IMPLEMENTATION_2026-09-12.md#14-september-pause-and-continuation-handoff).
+
+
+### 15 September resumed implementation
+
+The earlier work is committed at `85b4610` on `embeddedui`. Own delivered LIVE
+text/Voice timeline rows now expose the existing exact-target resend menu;
+native Enter/held-repeat and source eviction checks cover that actual entry.
+Contacts now offer Scan QR while retaining save/open-DROP/start-LIVE intent
+through the unavailable-camera/manual fallback.
+
+The native Voice card now has a distinct keyboard/pointer audio-position action
+and real PCM amplitude summaries. `widgets.voice` became a cohesive package with
+card and waveform rendering behind its unchanged `VoiceCard` facade. `state.media`
+owns finite PCM envelopes (64 coarsening bins per retained source) and indexed
+chunk offsets, so replay seeking does not scan all preceding chunks. Rendering
+never downloads or consumes Voice. Unknown samples are not fabricated; source
+removal also removes its amplitude summary. These GUI-only changes add no wire,
+keyslot, DB, derivation or application-version change.
+
+Focused playback tests pass (13 tests), including actual sample peaks, bounded
+coarsening, exact seek bytes and coverage/drain failures. Native 360x640/150%
+resend/seek fixture passes with explicitly synthetic audio and no Core connection;
+it uses real native controls and exact PCM seek offsets. Evidence filenames begin
+`metor-native-resend-20260915` in the audit asset directory. This does not establish
+physical audio or complete layout acceptance.
+
+Existing `TorManager.generate_address` retains existing identity keys because
+`KeyManager.generate_keys` is intentionally create-if-missing. Functional v1.0
+GUI-CONTACT's identity rule explicitly requires Core's actual preconditions and
+effects. A new cryptographic rotation transaction is therefore not an additional
+GUI requirement. The optional public offline host operation exposes the existing
+Core behavior, with explicit full target-password verification, running/remote/
+stale-selection refusals, unchanged GUI host selection and read-only checking.
+The profile form explains identity reuse and does not promise migration of old
+conversations. Earlier shorthand referring to a mandatory new rotation transaction
+must not be treated as a competing implementation backlog.
+
+
+`FrontendAddressManagement.profile_address(FrontendProfileAddressRequest, OneUseSecretProvider)`
+is additive and optional. The request captures target, original selection and
+generate/read intent. `FrontendProfileOperationResult.onion` is an optional public
+address field with a default; existing hosts/results remain valid. The base
+`application.frontend` module was promoted to a host/settings/identity package,
+with the unchanged public host factory and class behind a thin facade. Existing
+test injection paths migrated to the host implementation. The GUI still accesses
+no profile paths, Tor or private keys. The existing Core address generator now
+cleans its own attempted Tor startup in a finally block, including failed startup;
+a running-runtime refusal does not enter that cleanup path. This small lifecycle
+correction stays in its existing cohesive owner; no broad Tor refactor is needed.
+No wire/DB/keyslot/derivation generation or application version changes.
+
+### Native continuity and bounded destruction observation
+
+`views.root` now owns both root composition and canonical focus/pixel-anchor
+continuity. Its thin facade preserves `root_view`; continuity retains keys and
+coordinates, not another private widget tree. Peer and contact views are
+reparented across the responsive breakpoint so native input/cursor, PTT binding,
+selection and scroll state survive without a communication command. Root/contact
+row and DROP/LIVE selector arrow groups move focus only; Enter activates.
+
+`runtime.purge` isolates the new status observer from the already large
+controller. The controller gains only admission/lifecycle delegation hooks.
+A first matching Core milestone immediately signals producer cancellation and
+then replaces the GUI with V22, clearing ordinary private state. A fixed-size
+metadata channel retains only the original operation/profile/generation facts;
+the existing initiating SDK connection is observed for a bounded interval.
+There is no replacement connection, unlock, status reconstruction, owner-release,
+retry, shutdown or new destruction command in this observer. A late event from
+another operation or activation cannot retarget it. Initiated/EOF is unconfirmed;
+combined safe destruction and failed file cleanup are distinct presentations.
+Seven tests pass, including actual typed SDK events from destruction of an
+explicitly temporary encrypted Core fixture. Six synthetic native V22 variants
+also pass at 360×640/150%. This is not a production physical purge binding.
+
+Context gestures on the actual message bubble, voice play control and waveform
+use the same immutable target as visible More. Right-click/hold/Shift+F10 cannot
+also play, seek or resend. Encoded cache fragments coalesce into bounded 64 KiB
+blocks while public reads remain immutable; the playback suite now has 14 tests.
+These changes add no IPC/schema/keyslot/derivation or application version bump.
+
+### Root updates under continuous metadata load
+
+The root package now separates page composition, identity-stable measured rows,
+canonical menus and continuity. Existing rows update labels/counts/pins in place;
+only inserted/departed identities allocate or remove rows. Callbacks capture peer
+and delivery, not old aliases. A native 24-update fixture exercises real queued
+arrow input while all 64 displayed rows change labels. A newly exposed selector
+ancestor-walk loop was fixed at the native Window boundary. The root/menu facade
+remains inside the GUI package; Core and IPC ownership/versioning are unchanged.
+
+This extraction was chosen because frequent root snapshot refreshes must not
+reconstruct the entire native control tree or retain stale aliases. The controller
+stays unchanged. Native row/page tests still enforce bounded membership and
+projection-only input, while the renamed-row fixture verifies actual focus and
+pixel anchoring. Platform drawing latency is measured separately from Python
+row-update time; a fast reducer alone is not a native responsiveness claim.

@@ -176,7 +176,9 @@ class IndependentCliContractTests(unittest.TestCase):
                 'metor.cli.handlers.load_frontend',
                 side_effect=FrontendLaunchError('install metor-ui-missing'),
             ),
-            patch('metor.application.frontend.start_managed_daemon_process') as start,
+            patch(
+                'metor.application.frontend.host.start_managed_daemon_process'
+            ) as start,
             patch('sys.stderr', io.StringIO()),
         ):
             status = CommandHandlers.handle_chat(

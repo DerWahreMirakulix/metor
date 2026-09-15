@@ -60,7 +60,7 @@ class ClosureFrontendTests(unittest.TestCase):
                 'fresh-secret',
             ]
             with patch(
-                'metor.application.frontend.start_managed_daemon_process',
+                'metor.application.frontend.host.start_managed_daemon_process',
                 side_effect=[False, True],
             ) as start:
                 with self.assertRaises(FrontendBootstrapError) as failed:
@@ -102,7 +102,7 @@ class ClosureFrontendTests(unittest.TestCase):
             )
             self.assertTrue(result.success)
             with patch(
-                'metor.application.frontend.start_managed_daemon_process'
+                'metor.application.frontend.host.start_managed_daemon_process'
             ) as start:
                 endpoint = host.bootstrap(Mock())
             self.assertEqual(endpoint.port, 37413)

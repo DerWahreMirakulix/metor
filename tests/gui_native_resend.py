@@ -5,6 +5,7 @@
 import argparse
 import json
 import os
+import struct
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -19,9 +20,11 @@ Config.set('graphics', 'width', '360')
 Config.set('graphics', 'height', '664')
 
 from kivy.app import App
+from kivy.base import EventLoop
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.metrics import Metrics
+from kivy.input.providers.mouse import MouseMotionEvent
 from kivy.uix.boxlayout import BoxLayout
 
 from metor.client import FrontendLaunchContext
@@ -37,6 +40,7 @@ from metor.ui.gui.runtime.transcript import TranscriptItem
 from metor.ui.gui.state import Route
 from metor.ui.gui.views.actions.messages import message_menu
 from metor.ui.gui.views.shell import Shell
+from metor.ui.gui.views.peer.timeline import Timeline
 from metor.ui.gui.widgets import Action
 from metor.ui.gui.widgets.sheet import ActionSheet
 from gui_native_render import capture_viewport
@@ -61,6 +65,7 @@ class ResendHarness(App):
             'fixture', '', epoch='epoch', profile_instance_id='instance'
         )
         self.gui.state.root_delivery = Delivery.LIVE
+        self.gui.state.route = Route('V09', 'peer', Delivery.LIVE)
         self.gui.transcript.admit(
             TranscriptItem(
                 'peer',
@@ -68,7 +73,7 @@ class ResendHarness(App):
                 MessageDirectionCode.OUT,
                 'source',
                 codec=PcmVoice.CODEC,
-                size_bytes=4,
+                size_bytes=64000,
                 finalized=True,
                 status=MessageStatusCode.DELIVERED,
             )
@@ -76,10 +81,39 @@ class ResendHarness(App):
         self.target = self.gui.playback.target(
             'peer', Delivery.LIVE, MessageDirectionCode.OUT, 'source'
         )
-        self.gui.playback.cache.append(self.target, 0, b'0000', complete=True)
+        payload = b''.join(
+            struct.pack('<h', (index % 16000) * 4 - 32000) for index in range(32000)
+        )
+        self.gui.playback.cache.append(self.target, 0, payload, complete=True)
+        self.gui.playback.audio = Mock()
+        self.gui.transcript.admit(
+            TranscriptItem(
+                'peer',
+                Delivery.LIVE,
+                MessageDirectionCode.OUT,
+                'text-source',
+                text='Retained own text',
+                finalized=True,
+                status=MessageStatusCode.READ,
+            )
+        )
+        self.timeline = Timeline(self.gui, self.gui.state.route, lambda: None)
+        self.timeline.update(active=True)
         self.completed = False
+        Clock.schedule_once(self.settle, 0)
+        root = BoxLayout()
+        root.add_widget(self.timeline)
+        return root
+
+    def settle(self, _elapsed: float) -> None:
+        """Waits a native frame after initial attachment before testing and capturing layout.
+
+        Args:
+            _elapsed: Native frame interval.
+        Returns:
+            None
+        """
         Clock.schedule_once(self.open_menu, 0.3)
-        return BoxLayout()
 
     def open_menu(self, _elapsed: float) -> None:
         """Opens the exact outgoing source's native contextual menu.
@@ -89,13 +123,67 @@ class ResendHarness(App):
         Returns:
             None
         """
-        message_menu(
-            self.gui,
-            Route('V09', 'peer', Delivery.LIVE),
-            MessageDirectionCode.OUT,
-            'source',
-            lambda: MessageStatusCode.DELIVERED,
+        for identity in ('source', 'text-source'):
+            row = self.timeline._widgets[(MessageDirectionCode.OUT, identity)]
+            assert any(
+                isinstance(widget, Action)
+                and widget.accessible_name == 'Message actions'
+                for widget in row.walk()
+            )
+        row = self.timeline._widgets[(MessageDirectionCode.OUT, 'source')]
+        with patch.object(self.gui.playback, 'play', return_value=True) as play:
+            row.seek.focus = True
+            Window.dispatch('on_key_down', 275, 79, '', [])
+            Window.dispatch('on_key_up', 275, 79)
+            Window.dispatch('on_key_down', 13, 40, '\r', [])
+            Window.dispatch('on_key_up', 13, 40)
+            play.assert_called_once_with(self.target, offset=3200)
+        assert row.seek.height >= 48
+        assert row.seek.right <= row.right and row.seek.x >= row.play.right
+        with patch.object(self.gui.playback, 'play', return_value=True) as play:
+            for control in (
+                row.seek,
+                row.play,
+                self.timeline._widgets[
+                    (MessageDirectionCode.OUT, 'text-source')
+                ]._bubble,
+            ):
+                control.focus = True
+                Window.dispatch('on_key_down', 291, 67, '', ['shift'])
+                Window.dispatch('on_key_down', 291, 67, '', ['shift'])
+                Window.dispatch('on_key_up', 291, 67)
+                assert ActionSheet.current is not None
+                assert self.action().label.text == 'Resend as Drop'
+                ActionSheet.current.dismiss(animation=False)
+            touch = MouseMotionEvent(
+                'mouse',
+                'waveform-context',
+                (
+                    row.seek.center_x / Window.width,
+                    row.seek.center_y / Window.height,
+                    'right',
+                ),
+                is_touch=True,
+            )
+            touch.scale_for_screen(Window.width, Window.height)
+            EventLoop.post_dispatch_input('begin', touch)
+            EventLoop.post_dispatch_input('end', touch)
+            assert ActionSheet.current is not None
+            ActionSheet.current.dismiss(animation=False)
+            play.assert_not_called()
+        capture_viewport(
+            self.root, self.output.with_name(self.output.stem + '-waveform.png')
         )
+        more = next(
+            widget
+            for widget in row.walk()
+            if isinstance(widget, Action)
+            and widget.accessible_name == 'Message actions'
+        )
+        more.focus = True
+        Window.dispatch('on_key_down', 13, 40, '\r', [])
+        Window.dispatch('on_key_up', 13, 40)
+        assert ActionSheet.current is not None
         Clock.schedule_once(self.activate, 0.3)
 
     def action(self) -> Action:
@@ -203,6 +291,10 @@ def main() -> None:
                 'open_menu_eviction': 'pass',
                 'received_live_no_resend': 'pass',
                 'same_count_root_invalidation': 'pass',
+                'delivered_voice_and_text_timeline_more': 'pass',
+                'native_keyboard_seek_exact_pcm_boundary': 'pass',
+                'text_play_waveform_context_keyboard': 'pass',
+                'waveform_right_click_never_plays': 'pass',
             },
             indent=2,
         )

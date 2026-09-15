@@ -373,3 +373,34 @@ GUI volatile interaction bounds: `CONTACT_SELECTION_ITEMS` (128) and
 `PLAYBACK_COVERAGE_INTERVALS` (8192 aggregate intervals, at most 1000 targets)
 bound current-runtime drained PCM coverage. Exceeding coverage limits forgets
 ranges conservatively; it never fabricates heard content or a Core Read receipt.
+
+
+`WAVEFORM_BINS` is the 64-bin maximum for one retained GUI PCM amplitude summary.
+`SEEK_FRACTION_STEP` is the 0.05 fraction used by deliberate Left/Right selection
+in the native audio-position control; Enter/Space applies the selected position.
+These are volatile presentation/input constants, not Core receipt or media-format
+parameters. `PcmEnvelope` contains real sample peaks and explicit unknown bins.
+
+
+`FrontendAddressManagement` is an optional public base host extension for offline
+address operations. `FrontendProfileAddressRequest` captures `profile`, original
+`selected_profile` and strict `generate` (default true; false checks only).
+`FrontendProfileOperationResult.onion` is optional public address metadata,
+defaulting to None. These host DTOs are not IPC credentials or rotation grants.
+The operation preserves existing identity keys according to Core semantics.
+
+### GUI purge observation and encoded cache blocks
+
+- `PurgeFacts` / `PurgeMonitor`: bounded, generation/profile/operation-qualified
+  observation of actual Core destruction milestones on the initiating SDK
+  connection. Observation grants no lifecycle authority and never initiates or
+  repeats destruction. Only `SelfDestructSafeEvent` confirms destroyed profile
+  access; disconnect, timeout and individual key/runtime milestones do not.
+- `GuiLimits.PURGE_OBSERVE_SECONDS`: 65-second maximum observation of an
+  initiated operation before displaying an unconfirmed outcome.
+- `GuiLimits.PURGE_CLEANUP_SECONDS`: five-second bounded wait for terminal
+  cleanup evidence after confirmed safe destruction. Missing cleanup evidence
+  cannot undo the positive safe milestone or fabricate complete file cleanup.
+- `GuiLimits.MEDIA_CACHE_BLOCK_BYTES`: 64 KiB coalesced encoded blocks. Small
+  input fragments do not allocate one retained Python object/index entry each.
+  Public range reads return immutable bytes within the existing total cache cap.

@@ -7,6 +7,12 @@ This is the current GUI entry point. The approved
 authority; the copies preserve the exact input bytes. This document reports
 implementation facts and does not weaken those requirements.
 
+The owner paused implementation on 15 September. See the
+[current handoff](../audits/GUI_IMPLEMENTATION_2026-09-12.md#15-september-pause-handoff--current-continuation-entry)
+for source state, exact verification checkpoints, estimates and restart steps.
+Installed-package evidence predates the final retained-root changes; those changes
+need a fresh artifact build before final-source packaging acceptance.
+
 ## Current implementation
 
 `metor-ui-gui` owns only `metor.ui.gui` and local visual assets. It depends on
@@ -30,10 +36,13 @@ Desktop close now waits for this GUI's capture finalization, requests owner
 release, detaches its client and clears volatile references. It preserves shared
 Core activity; only explicit profile switch invokes public normal exit/hard lock.
 V20 provides a bounded local catalog, exact-target create/rename/remove/default
-operations, full-password change and identity-rotation eligibility feedback.
+operations, full-password change and stopped-profile address generation/readback. Existing
+Core identity keys are reused; the GUI explains this before requesting full
+target-password authorization.
 Switch uses actual phases, independent target credentials and complete hydration;
-unknown preparation never automatically unlocks the old profile. No physical
-purge or host shutdown is bound. Peer views expose headset-qualified
+unknown preparation never automatically unlocks the old profile. V22 now observes actual Core destruction milestones through the original
+initiating SDK connection, with distinct unconfirmed, safe and cleanup-failed
+results. No physical purge trigger or host shutdown is bound. Peer views expose headset-qualified
 PTT and exact-owner DROP review. Core owner leases, allocation journaling and interrupted LIVE
 recovery are implemented and tested; GUI bootstrap registers its disposable owner.
 Bounded PCM playback, manual output priority and foreground auto-play are implemented;
@@ -99,8 +108,9 @@ python scripts/build_release_wheelhouse.py --variant gui --skip-pip-upgrade
 
 `gui` is an explicit development variant, also included in the canonical `all`
 group and CI/release validation. Installed-consumer checks cover both UI removal
-orders, and the installer validator requires all four bundles. This extends
-the existing workflow; it does not establish native Windows or product acceptance.
+orders, and the installer validator requires all four bundles. Linux and Windows canonical ZIP installers and installed consumers pass, including
+both UI uninstall orders. Final-source artifact hashes and remaining product
+acceptance are recorded separately in the acceptance report.
 
 For an already assembled native wheelhouse, the actual independent package can
 be installed without source checkout/editable paths:
@@ -117,6 +127,44 @@ launched the installed GUI. A user-authorized Razer BlackShark capture/playback
 probe passed. The native GUI also passed a short focused-key PTT/review test
 against an actual temporary encrypted Core and Razer headset. This does not prove
 physical-key input, acoustic quality, AEC, the full duplex matrix or unplug recovery.
+
+## Everyday operation
+
+Choose or create a profile on entry and complete its graphical authentication.
+In Settings → Profiles, changing the selected profile uses its own credentials;
+read the displayed draft/shared-runtime consequences before continuing. Address
+generation is available for a stopped local profile only, requires its full
+password, and reuses existing Core identity keys. After an uncertain result,
+Check address performs a read instead of repeating generation.
+
+DROP and LIVE select separate conversation projections. Selecting a tab or
+opening a conversation does not call its peer. Use Start Live explicitly; Accept
+answers the exact displayed incoming request, while Open only navigates to it.
+Use Contacts for saved identities or Scan QR; when no camera is available,
+manual entry preserves the original Save/Open/Start intent. My contact displays
+only your public address/QR. Clipboard export is disabled.
+
+Configure microphone/output and confirm the headset route in audio settings.
+PTT records only while its original pointer/key is held; release finalizes that
+turn. Losing focus stops capture and requires an actual release before another
+press. DROP recordings offer Play, Delete recording and Send Drop separately;
+recording or reviewing does not send them. Playback starts manually unless you
+explicitly enable eligible foreground Auto-play. The waveform seeks audio;
+Go live jumps to the available live edge, while the timeline's new-items control
+only changes scrolling. Unsupported audio formats/routes remain unavailable.
+
+More opens actions for the displayed item. Right-click, long press or focused
+Shift+F10 reaches the same actions. Arrow keys move focus within conversation,
+contact and DROP/LIVE groups; Enter activates. Resend is available only for your
+eligible retained LIVE content and creates a new DROP. An uncertain operation
+checks its original identity instead of silently submitting another one.
+
+Lock covers private content using Core restriction and the configured policy.
+Unlock restores current authorized facts. Closing the desktop window finalizes
+this GUI's capture, releases its disposable ownership and detaches; it preserves
+other clients' Core activity. It is not appliance Power off. Physical Power/PTT,
+purge triggering and host shutdown are not yet bound to a supported appliance.
+Simulator descriptions never gain real destructive or shutdown access.
 
 ## Contracts and evidence
 

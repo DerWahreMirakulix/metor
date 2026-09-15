@@ -374,7 +374,6 @@ class Timeline(BoxLayout):
                         partial(self._menu, row.key)
                         if self.route.delivery is Delivery.DROP
                         or row.direction is MessageDirectionCode.OUT
-                        and row.status is MessageStatusCode.PENDING
                         else None,
                     )
                 else:
@@ -386,7 +385,6 @@ class Timeline(BoxLayout):
                         partial(self._menu, row.key)
                         if self.route.delivery is Delivery.DROP
                         or row.direction is MessageDirectionCode.OUT
-                        and row.status is MessageStatusCode.PENDING
                         else None,
                     )
                 self._widgets[row.key] = widget

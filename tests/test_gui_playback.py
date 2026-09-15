@@ -2,6 +2,7 @@
 
 import base64
 import threading
+import struct
 import unittest
 from unittest.mock import Mock
 
@@ -24,6 +25,7 @@ from metor.ui.gui.platform.audio import PcmVoice
 from metor.ui.gui.runtime.playback.worker import PlaybackWorker
 from metor.ui.gui.state.mailbox import Mailbox
 from metor.ui.gui.state.media import MediaCache, PlaybackTarget
+from metor.ui.gui.state.media.envelope import PcmEnvelope
 
 
 class PlaybackTests(unittest.TestCase):
@@ -239,6 +241,66 @@ class PlaybackTests(unittest.TestCase):
         self.assertIsNone(self.cache.read(self.target, 0, 640))
         self.cache.clear()
         self.assertFalse(self.cache.append(self.target, 0, self.payload, complete=True))
+
+    def test_envelope_coarsens_real_peaks_and_indexed_seek_preserves_bytes(
+        self,
+    ) -> None:
+        """Long bounded sources retain actual amplitudes and exact random-access PCM slices."""
+        envelope = PcmEnvelope()
+        payload = struct.pack('<h', -32768) * PcmVoice.FRAME_SAMPLES
+        envelope.append(0, payload)
+        far = PcmVoice.FRAME_BYTES * GuiLimits.WAVEFORM_BINS * 4
+        envelope.append(far, struct.pack('<h', 16384))
+        stride, peaks = envelope.snapshot()
+        self.assertEqual(len(peaks), GuiLimits.WAVEFORM_BINS)
+        self.assertEqual(peaks[0], 32768)
+        self.assertEqual(peaks[far // stride], 16384)
+        self.assertIsNone(peaks[1])
+        for index in range(160):
+            self.cache.append(
+                self.target, index * len(payload), payload, complete=index == 159
+            )
+        for position in (0, 2, 639 * 2, 159 * len(payload) + 2):
+            data, size = self.cache.read(self.target, position, 16)
+            self.assertEqual(size, 160 * len(payload))
+            self.assertEqual(data, (payload * 160)[position : position + len(data)])
+        self.client.release_voice.assert_not_called()
+        self.cache.discard(self.target)
+        self.assertEqual(self.cache.envelope(self.target), (0, ()))
+
+    def test_tiny_source_fragments_have_bounded_index_and_exact_immutable_reads(
+        self,
+    ) -> None:
+        """One-sample fragments cannot amplify the replay cache into millions of objects.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        extent = GuiLimits.MEDIA_CACHE_BLOCK_BYTES + PcmVoice.SAMPLE_BYTES
+        for offset in range(0, extent, PcmVoice.SAMPLE_BYTES):
+            self.assertTrue(
+                self.cache.append(
+                    self.target, offset, b'\x01\x7f', complete=offset + 2 == extent
+                )
+            )
+        self.assertEqual(len(self.cache._items[self.target]), 2)
+        self.assertEqual(
+            self.cache._offsets[self.target], [0, GuiLimits.MEDIA_CACHE_BLOCK_BYTES]
+        )
+        for offset in (
+            0,
+            GuiLimits.MEDIA_CACHE_BLOCK_BYTES - 2,
+            GuiLimits.MEDIA_CACHE_BLOCK_BYTES,
+        ):
+            data, size = self.cache.read(
+                self.target, offset, GuiLimits.MEDIA_CACHE_BLOCK_BYTES
+            )
+            self.assertIs(type(data), bytes)
+            self.assertEqual(size, extent)
+            self.assertEqual(data, b'\x01\x7f' * (len(data) // 2))
+        self.client.release_voice.assert_not_called()
 
 
 class AutoPlaybackTests(unittest.TestCase):

@@ -1,0 +1,22 @@
+[
+  {
+    "view": "root",
+    "passed": true
+  },
+  {
+    "view": "root_page",
+    "passed": true
+  },
+  {
+    "view": "root_refresh",
+    "passed": true
+  },
+  {
+    "view": "responsive",
+    "passed": true
+  },
+  {
+    "view": "contact_pages",
+    "passed": true
+  }
+]

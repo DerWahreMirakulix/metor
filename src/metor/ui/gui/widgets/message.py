@@ -12,6 +12,7 @@ from metor.ui.gui.theme import font_path
 
 # Local Package Imports
 from .controls import Label, Panel
+from .context import ContextAction
 from .symbol import IconAction
 
 
@@ -40,13 +41,18 @@ class MessageBubble(BoxLayout):
             None
         """
         super().__init__(size_hint_y=None, **kwargs)
-        self._bubble = Panel(
-            surface='raised' if incoming else delivery + 'Surface',
-            orientation='vertical',
-            padding=(dp(16), dp(12), dp(16), dp(10)),
-            spacing=dp(4),
-            size_hint=(None, None),
+        surface = 'raised' if incoming else delivery + 'Surface'
+        self._bubble = (
+            ContextAction('Message actions', context, context, surface=surface)
+            if context is not None
+            else Panel(surface=surface)
         )
+        self._bubble.clear_widgets()
+        self._bubble._rectangle.radius = [dp(16)]
+        self._bubble.orientation = 'vertical'
+        self._bubble.padding = (dp(16), dp(12), dp(16), dp(10))
+        self._bubble.spacing = dp(4)
+        self._bubble.size_hint = (None, None)
         self._body = Label(text)
         self._metadata = Label(metadata, role='meta', tone='textSecondary')
         self._bubble.add_widget(self._body)

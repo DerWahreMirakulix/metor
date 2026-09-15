@@ -7,7 +7,6 @@ from kivy.uix.boxlayout import BoxLayout
 
 from metor.core.api import Delivery
 from metor.ui.gui.runtime import GuiController
-from metor.ui.gui.state import Route
 from metor.ui.gui.widgets import Action, Label
 from metor.ui.gui.widgets.qr import ContactQr
 from metor.ui.gui.widgets.sheet import ActionSheet, confirm
@@ -87,8 +86,15 @@ def contacts_body(
         None
     """
 
-    def go(view: str) -> None:
-        controller.navigate(Route(view))
+    def enter_manual() -> None:
+        """Keeps the scanner's original save/open/start intent and caller return route.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        controller.contacts.manual()
         refresh()
 
     route, snapshot = controller.state.route, controller.state.snapshot
@@ -106,7 +112,7 @@ def contacts_body(
         body.add_widget(
             Action(
                 'Enter contact data',
-                partial(go, 'V13'),
+                enter_manual,
             )
         )
         return

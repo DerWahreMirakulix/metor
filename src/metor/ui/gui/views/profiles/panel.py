@@ -6,6 +6,7 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 
 from metor.client import (
+    FrontendAddressManagement,
     FrontendProfileAction,
     FrontendProfileChange,
     FrontendProfileState,
@@ -110,15 +111,22 @@ def profiles_body(
             lambda: confirm(
                 controller,
                 'Generate new address',
-                'This replaces the profile’s published identity if Metor permits rotation. Contacts need the new address. Existing conversations are not promised to follow the new identity.',
+                'Generate this stopped profile’s contact address. Its existing identity is retained when present. Old conversations and contacts are not moved to another identity.',
                 controller.identity.generate_address,
             ),
-            disabled=state.busy or controller.identity.unknown,
+            disabled=state.busy
+            or controller.identity.unknown
+            or page is None
+            or any(
+                entry.profile == page.selected_profile
+                and (entry.daemon_running or entry.remote)
+                for entry in page.entries
+            ),
         )
     )
     body.add_widget(
         Label(
-            'Address generation is refused while the profile runtime is running.',
+            'Address generation is available for stopped local profiles in their Profile actions.',
             role='support',
             tone='textSecondary',
         )
@@ -242,6 +250,15 @@ def profile_menu(controller: GuiController, profile: FrontendProfileState) -> No
                     lambda: ProfileEditor(controller, 'password').show(),
                 )
             )
+        body.add_widget(
+            Action(
+                'Generate new address',
+                lambda: ProfileEditor(controller, 'address', profile.profile).show(),
+                disabled=profile.daemon_running
+                or profile.remote
+                or not isinstance(controller.context.host, FrontendAddressManagement),
+            )
+        )
         body.add_widget(
             Action(
                 'Set default',

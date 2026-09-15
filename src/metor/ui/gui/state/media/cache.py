@@ -1,6 +1,7 @@
 """Bounded volatile source retention with explicit privacy revocation."""
 
 from collections import OrderedDict
+from bisect import bisect_right
 from contextlib import contextmanager
 import threading
 from typing import Iterator
@@ -11,6 +12,7 @@ from metor.ui.gui.constants import GuiLimits
 # Local Package Imports
 from .models import PlaybackTarget
 from .coverage import PlaybackCoverage
+from .envelope import PcmEnvelope
 
 
 class MediaCache:
@@ -24,7 +26,9 @@ class MediaCache:
         Returns:
             None
         """
-        self._items: OrderedDict[PlaybackTarget, list[bytes]] = OrderedDict()
+        self._items: OrderedDict[PlaybackTarget, list[bytearray]] = OrderedDict()
+        self._offsets: dict[PlaybackTarget, list[int]] = {}
+        self._envelopes: dict[PlaybackTarget, PcmEnvelope] = {}
         self._sizes: dict[PlaybackTarget, int] = {}
         self._complete: set[PlaybackTarget] = set()
         self._discarded: OrderedDict[PlaybackTarget, None] = OrderedDict()
@@ -79,7 +83,25 @@ class MediaCache:
                 self._remove(other)
             chunks = self._items.setdefault(target, [])
             if payload:
-                chunks.append(payload)
+                view = memoryview(payload)
+                consumed = 0
+                while consumed < len(view):
+                    if (
+                        not chunks
+                        or len(chunks[-1]) == GuiLimits.MEDIA_CACHE_BLOCK_BYTES
+                    ):
+                        chunks.append(bytearray())
+                        self._offsets.setdefault(target, []).append(offset + consumed)
+                    end = min(
+                        len(view),
+                        consumed + GuiLimits.MEDIA_CACHE_BLOCK_BYTES - len(chunks[-1]),
+                    )
+                    chunks[-1].extend(view[consumed:end])
+                    consumed = end
+                envelope = self._envelopes.get(target)
+                if envelope is None:
+                    envelope = self._envelopes[target] = PcmEnvelope()
+                envelope.append(offset, payload)
             self._sizes[target] = current + len(payload)
             self._bytes += len(payload)
             self._items.move_to_end(target)
@@ -108,12 +130,12 @@ class MediaCache:
             size = self._sizes[target]
             if not 0 <= offset <= size:
                 return None
-            start = 0
-            for chunk in self._items[target]:
-                if start + len(chunk) > offset:
-                    local = offset - start
-                    return chunk[local : local + maximum], size
-                start += len(chunk)
+            if offset < size:
+                offsets = self._offsets[target]
+                index = bisect_right(offsets, offset) - 1
+                local = offset - offsets[index]
+                chunk = self._items[target][index]
+                return bytes(chunk[local : local + maximum]), size
             return b'', size
 
     def targets(self) -> tuple[PlaybackTarget, ...]:
@@ -126,6 +148,18 @@ class MediaCache:
         """
         with self._lock:
             return tuple(self._items)
+
+    def envelope(self, target: PlaybackTarget) -> tuple[int, tuple[int | None, ...]]:
+        """Returns bounded real PCM amplitude metadata without reading Core or consuming Voice.
+
+        Args:
+            target: Exact retained source identity.
+        Returns:
+            tuple: Bytes per amplitude bin and known peaks, or an empty unavailable summary.
+        """
+        with self._lock:
+            envelope = self._envelopes.get(target)
+            return envelope.snapshot() if envelope else (0, ())
 
     def complete_size(self, target: PlaybackTarget) -> int | None:
         """Reports complete retained source availability without copying encoded bytes.
@@ -193,6 +227,8 @@ class MediaCache:
         """
         self._bytes -= self._sizes.pop(target, 0)
         self._items.pop(target, None)
+        self._offsets.pop(target, None)
+        self._envelopes.pop(target, None)
         self._complete.discard(target)
         self._leases.pop(target, None)
 
@@ -276,6 +312,8 @@ class MediaCache:
         self.coverage.clear()
         with self._lock:
             self._items.clear()
+            self._offsets.clear()
+            self._envelopes.clear()
             self._sizes.clear()
             self._complete.clear()
             self._discarded.clear()

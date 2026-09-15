@@ -364,7 +364,7 @@ class FinalRemediationContractTests(unittest.TestCase):
                 side_effect=AssertionError('base terminal prompt used'),
             ),
             patch(
-                'metor.application.frontend.start_managed_daemon_process',
+                'metor.application.frontend.host.start_managed_daemon_process',
                 return_value=True,
             ),
         ):
@@ -441,7 +441,7 @@ class FinalRemediationContractTests(unittest.TestCase):
             FrontendDescriptor('fake-gui', 'tests', 'tests:fake_gui'),
             cast(FrontendEntry, fake_gui),
         )
-        with patch('metor.application.frontend.ProfileManager', profile_factory):
+        with patch('metor.application.frontend.host.ProfileManager', profile_factory):
             self.assertEqual(
                 CommandHandlers.handle_chat(
                     cast(ProfileManager, initial), loaded_frontend=loaded

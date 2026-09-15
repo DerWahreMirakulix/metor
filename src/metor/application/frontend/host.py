@@ -21,6 +21,7 @@ from metor.client import (
     FrontendProfileChange,
     valid_frontend_profile_name,
     OneUseSecretProvider,
+    FrontendProfileAddressRequest,
 )
 from metor.data import (
     ChatDaemonAutostartPolicy,
@@ -33,8 +34,9 @@ from metor.data import (
 from metor.utils import Constants, TypeCaster, ProcessManager
 
 # Local Package Imports
-from .runtime import PlaintextLockedDaemonError, start_managed_daemon_process
-from .frontend_settings import LocalFrontendSettings
+from ..runtime import PlaintextLockedDaemonError, start_managed_daemon_process
+from .settings import LocalFrontendSettings
+from .identity import profile_address
 
 
 def _resolve_autostart_policy(
@@ -364,6 +366,28 @@ class LocalFrontendHost:
         finally:
             if secret is not None:
                 secret.take()
+
+    def profile_address(
+        self, request: FrontendProfileAddressRequest, secret: OneUseSecretProvider
+    ) -> FrontendProfileOperationResult:
+        """Generates or checks a stopped local profile through its existing authenticated Core owner.
+
+        Args:
+            request: Original selection, exact target and explicit generate/read intent.
+            secret: One-use full target password; consumed on every exit path.
+        Returns:
+            FrontendProfileOperationResult: Actual Core outcome and permitted public address.
+        """
+        try:
+            request.__post_init__()
+            with self._catalog_boundary():
+                if request.selected_profile != self._profile.profile_name:
+                    return FrontendProfileOperationResult(
+                        False, 'selection_changed', request.profile
+                    )
+                return profile_address(request, secret.take())
+        finally:
+            secret.take()
 
     @contextmanager
     def _catalog_boundary(self) -> Iterator[None]:

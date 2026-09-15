@@ -20,7 +20,7 @@ class ContextAction(Action):
         self,
         text: str,
         callback: Callable[[], object],
-        context: Callable[[], object],
+        context: Callable[[], object] | None = None,
         surface: str = 'surface',
         tone: str = 'text',
         **kwargs: object,
@@ -68,7 +68,7 @@ class ContextAction(Action):
             None
         """
         self._cancel_hold()
-        if self.disabled or self.get_root_window() is None:
+        if self.context is None or self.disabled or self.get_root_window() is None:
             return
         self._context_used = True
         self._keyboard_armed = False
@@ -83,6 +83,8 @@ class ContextAction(Action):
         Returns:
             bool: Whether this target owns the gesture.
         """
+        if self.context is None:
+            return bool(super().on_touch_down(touch))
         if (
             self.disabled
             or touch.is_mouse_scrolling
@@ -158,8 +160,10 @@ class ContextAction(Action):
         Returns:
             bool: Whether this action consumed the shortcut.
         """
-        if self.focus and (
-            keycode[1] == 'menu' or (keycode[1] == 'f10' and 'shift' in modifiers)
+        if (
+            self.context is not None
+            and self.focus
+            and (keycode[1] == 'menu' or (keycode[1] == 'f10' and 'shift' in modifiers))
         ):
             if self._context_key_code is None:
                 self._context_key_code = keycode[0]

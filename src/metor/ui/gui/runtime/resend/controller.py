@@ -70,6 +70,7 @@ class ResendActions:
         controller, client = self.controller, self.controller.client
         if (
             controller.simulator
+            or controller.purge.active
             or self.current is not None
             or client is None
             or controller.state.covered

@@ -151,7 +151,8 @@ class PlaybackController:
         """
         state = self.controller.state
         if (
-            (state.covered and not automatic)
+            self.controller.purge.active
+            or (state.covered and not automatic)
             or not self._scope_allows(target)
             or self.audio is None
             or self.controller.client is None

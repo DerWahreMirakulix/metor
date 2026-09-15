@@ -208,6 +208,7 @@ class VoiceController:
         scope = self._scope()
         if (
             scope is None
+            or controller.purge.active
             or state.busy
             or controller.client is None
             or controller.voice_owner.token is None

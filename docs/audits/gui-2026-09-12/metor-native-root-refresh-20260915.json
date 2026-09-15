@@ -1,0 +1,58 @@
+{
+  "kind": "native SDL renderer, synthetic SDK DTOs",
+  "sdl_video_driver": "offscreen",
+  "python": "3.11.15",
+  "system": "Linux",
+  "machine": "x86_64",
+  "viewport": [
+    360.0,
+    640.0
+  ],
+  "window": [
+    360.0,
+    664.0
+  ],
+  "rss_bytes": 597516288,
+  "view": "root_refresh",
+  "lock_geometry": [],
+  "lock_scroll_geometry": [],
+  "notification_summary_geometry": [],
+  "peer_control_geometry": [
+    {
+      "label": "DROP",
+      "bounds": [
+        24.0,
+        504.0,
+        154.0,
+        48.0
+      ],
+      "label_bounds": [
+        36.0,
+        512.0,
+        130.0,
+        32.0
+      ]
+    },
+    {
+      "label": "LIVE",
+      "bounds": [
+        182.0,
+        504.0,
+        154.0,
+        48.0
+      ],
+      "label_bounds": [
+        194.0,
+        512.0,
+        130.0,
+        32.0
+      ]
+    }
+  ],
+  "core_integration": false,
+  "physical_input": false,
+  "native_widget_synthetic_keyboard": true,
+  "audio": false,
+  "font_scale": 1.5,
+  "text_field_geometry": []
+}

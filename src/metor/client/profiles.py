@@ -123,3 +123,47 @@ class FrontendProfileManagement(Protocol):
             FrontendProfileOperationResult: Actual creation result, without activation.
         """
         ...
+
+
+@dataclass(frozen=True)
+class FrontendProfileAddressRequest:
+    """Exact offline address intent without profile files, runtime shutdown or new rotation policy."""
+
+    profile: str
+    selected_profile: str
+    generate: bool = True
+
+    def __post_init__(self) -> None:
+        """Rejects path-like targets and ambiguous mutation flags before host access.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        if (
+            not valid_frontend_profile_name(self.profile)
+            or not valid_frontend_profile_name(self.selected_profile)
+            or type(self.generate) is not bool
+        ):
+            raise ValueError('Invalid profile address request')
+
+
+@runtime_checkable
+class FrontendAddressManagement(Protocol):
+    """Optional base-owned offline address operation with existing Core effects and full proof."""
+
+    def profile_address(
+        self,
+        request: FrontendProfileAddressRequest,
+        secret: OneUseSecretProvider,
+    ) -> FrontendProfileOperationResult:
+        """Reads or generates the exact stopped local profile's address using its actual Core owner.
+
+        Args:
+            request: Exact target, original host selection and deliberate operation.
+            secret: One-use full profile password; consumed even on refusal.
+        Returns:
+            FrontendProfileOperationResult: Actual Core result, including public address on success.
+        """
+        ...

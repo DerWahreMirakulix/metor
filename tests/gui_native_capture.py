@@ -77,8 +77,16 @@ from gui_native_lifecycle import exercise_live_controls
 from gui_native_settings import exercise_setting_editor, exercise_setting_keyboard
 from gui_native_history import configure_history, exercise_history
 from gui_native_timeout import exercise_timeout
-from gui_native_profiles import configure_profiles, exercise_profile_editor
+from gui_native_profiles import (
+    configure_profiles,
+    exercise_profile_editor,
+    exercise_profile_address,
+)
 from gui_native_contacts import configure_contact_pages, exercise_contact_pages
+from gui_native_responsive import exercise_responsive
+from gui_native_purge import configure_purge
+from gui_native_root import exercise_root_refresh
+from gui_native_load import exercise_native_load
 
 
 def exercise_keyboard(app: MetorApp) -> None:
@@ -336,16 +344,40 @@ def exercise_root_pages(app: MetorApp) -> None:
         or len(controller.state.snapshot.conversations) != 130
     ):
         return
+    selector = next(
+        widget
+        for widget in app.shell.walk()
+        if isinstance(widget, Action) and widget.focus_key == ('selector', 'DROP')
+    )
+    selector.focus = True
+    Window.dispatch('on_key_down', 275, 79, '', [])
+    Window.dispatch('on_key_up', 275, 79)
+    assert selector.focus_group[1].focus
+    assert controller.state.root_delivery is Delivery.DROP
+    assert controller.state.route.view == 'V06'
     for page, expected in ((0, 64), (1, 64), (2, 2)):
         controller.state.root_pages[Delivery.DROP] = page
         app.shell.render()
         rows = [
-            widget for widget in app.shell.walk() if isinstance(widget, ContextAction)
+            widget
+            for widget in app.shell.walk()
+            if isinstance(widget, ContextAction) and widget.context is not None
         ]
         assert len(rows) == expected, 'Root instantiated an unbounded or missing page'
         assert controller.state.route.view == 'V06'
+        first = rows[0].focus_group[0]
+        second = rows[0].focus_group[1]
+        first.focus = True
+        Window.dispatch('on_key_down', 274, 81, '', [])
+        Window.dispatch('on_key_up', 274, 81)
+        assert second.focus and controller.state.route.view == 'V06'
+        Window.dispatch('on_key_down', 273, 82, '', [])
+        Window.dispatch('on_key_up', 273, 82)
+        assert first.focus
     last = next(
-        widget for widget in app.shell.walk() if isinstance(widget, ContextAction)
+        widget
+        for widget in app.shell.walk()
+        if isinstance(widget, ContextAction) and widget.context is not None
     )
     last.dispatch('on_release')
     assert controller.state.route.view == 'V08'
@@ -374,6 +406,8 @@ def main() -> None:
         choices=(
             'root',
             'root_page',
+            'root_refresh',
+            'root_load',
             'drop',
             'live',
             'entry',
@@ -386,10 +420,12 @@ def main() -> None:
             'timeout_editor',
             'profiles',
             'profile_editor',
+            'profile_address',
             'history',
             'voice',
             'review',
             'large',
+            'responsive',
             'keyboard',
             'contacts',
             'contact_pages',
@@ -406,6 +442,12 @@ def main() -> None:
             'notifications',
             'notification_selection',
             'context_menu',
+            'purge',
+            'purge_key',
+            'purge_safe',
+            'purge_complete',
+            'purge_failed',
+            'purge_unknown',
         ),
         default='root',
     )
@@ -431,7 +473,7 @@ def main() -> None:
         ],
         live_contexts=[LiveContextEntry('Rhea', 'rhea', True, 'connected')],
     )
-    if args.view == 'root_page':
+    if args.view in {'root_page', 'root_refresh', 'root_load'}:
         controller.state.snapshot.conversations = [
             DropConversationSummaryEntry(
                 f'Peer {index:03d}', f'peer-{index}', index % 5, index % 3
@@ -478,6 +520,7 @@ def main() -> None:
                         widget
                         for widget in app.shell.walk()
                         if isinstance(widget, ContextAction)
+                        and widget.context is not None
                     ),
                     None,
                 )
@@ -496,6 +539,8 @@ def main() -> None:
 
             Clock.schedule_once(open_context, 0.5)
     confirmed_actions: list[bool] = []
+    if args.view.startswith('purge'):
+        configure_purge(controller, args.view)
 
     def show_confirmation(_elapsed: float = 0) -> None:
         confirm(
@@ -526,7 +571,15 @@ def main() -> None:
             Clock.schedule_once(
                 lambda _elapsed: contact_sheet(controller, 'rhea', app.refresh), 0.5
             )
-    if args.view in ('drop', 'live', 'voice', 'review', 'large', 'keyboard'):
+    if args.view in (
+        'drop',
+        'live',
+        'voice',
+        'review',
+        'large',
+        'keyboard',
+        'responsive',
+    ):
         delivery = Delivery.DROP if args.view in ('drop', 'review') else Delivery.LIVE
         controller.state.route = Route(
             'V08' if delivery is Delivery.DROP else 'V09', 'rhea', delivery
@@ -564,7 +617,7 @@ def main() -> None:
                     size_bytes=64000,
                 )
             )
-        if args.view == 'large':
+        if args.view in {'large', 'responsive'}:
             for number in range(160):
                 controller.transcript.admit(
                     TranscriptItem(
@@ -585,7 +638,7 @@ def main() -> None:
                 'review',
             )
             controller.voice.reviews['rhea'] = VoiceReview(binding, 32000, 1000)
-    elif args.view in {'profiles', 'profile_editor'}:
+    elif args.view in {'profiles', 'profile_editor', 'profile_address'}:
         configure_profiles(controller)
     elif args.view == 'history':
         configure_history(controller)
@@ -823,6 +876,21 @@ def main() -> None:
                 exercise_timeline(app)
                 exercise_root_pages(app)
                 native_probes_done = True
+                if args.view == 'root_load':
+                    exercise_native_load(
+                        app,
+                        lambda: Clock.schedule_once(capture, 0.3),
+                        args.output.with_suffix('.latency.json'),
+                    )
+                    return
+                if args.view == 'root_refresh':
+                    exercise_root_refresh(
+                        app, lambda: Clock.schedule_once(capture, 0.3)
+                    )
+                    return
+                if args.view == 'responsive':
+                    exercise_responsive(app, lambda: Clock.schedule_once(capture, 0.3))
+                    return
                 if args.view == 'setting_editor':
                     exercise_setting_editor(
                         app, lambda: Clock.schedule_once(capture, 0.3)
@@ -838,6 +906,11 @@ def main() -> None:
                     return
                 if args.view == 'profile_editor':
                     exercise_profile_editor(
+                        app, lambda: Clock.schedule_once(capture, 0.3)
+                    )
+                    return
+                if args.view == 'profile_address':
+                    exercise_profile_address(
                         app, lambda: Clock.schedule_once(capture, 0.3)
                     )
                     return

@@ -119,12 +119,19 @@ class ContactFlow:
             )
         )
 
-    def begin(self, intent: ContactIntent = 'save', peer: str | None = None) -> None:
+    def begin(
+        self,
+        intent: ContactIntent = 'save',
+        peer: str | None = None,
+        *,
+        scan: bool = False,
+    ) -> None:
         """Opens an explicit contact form while preserving save/open/start semantics.
 
         Args:
             intent: Labelled caller action.
             peer: Known canonical peer for promotion or rename.
+            scan: Whether the original entry requests camera/manual fallback.
         Returns:
             None
         """
@@ -139,7 +146,19 @@ class ContactFlow:
             self.alias(peer) if peer and intent == 'rename' else '',
             fixed=peer is not None,
         )
-        self.controller.navigate(Route('V13', peer))
+        self.controller.navigate(Route('V14' if scan else 'V13', peer))
+
+    def manual(self) -> None:
+        """Replaces the unavailable camera step while retaining the original caller's Back route.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        state = self.controller.state
+        if not state.covered and state.route.view == 'V14' and self.form is not None:
+            state.route = Route('V13', self.form.peer)
 
     def validate(self, raw: str) -> str | None:
         """Validates manual address or supported QR JSON using the shared public validator.

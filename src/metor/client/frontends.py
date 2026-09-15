@@ -144,6 +144,7 @@ class FrontendProfileOperationResult:
     success: bool
     code: str
     profile: str
+    onion: str | None = None
 
 
 @dataclass(frozen=True)

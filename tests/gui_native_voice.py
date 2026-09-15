@@ -156,8 +156,14 @@ def main() -> None:
                     'kind': 'native GUI synthetic-key PTT, actual headset, public SDK and temporary encrypted Core',
                     'system': platform.system(),
                     'python': platform.python_version(),
-                    'source_checkout': True,
-                    'installed_bundle': False,
+                    'source_checkout': Path(sys.modules[MetorApp.__module__].__file__)
+                    .resolve()
+                    .is_relative_to(Path(__file__).resolve().parents[1] / 'src'),
+                    'installed_bundle': 'site-packages'
+                    in Path(sys.modules[MetorApp.__module__].__file__).parts,
+                    'gui_module_path': str(
+                        Path(sys.modules[MetorApp.__module__].__file__).resolve()
+                    ),
                     'input': source.name,
                     'output': sink.name,
                     'captured_and_played_bytes': size,

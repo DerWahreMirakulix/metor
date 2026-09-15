@@ -1112,7 +1112,7 @@ class UiIpcContractTests(unittest.TestCase):
                 ),
             ) as invoke_frontend,
             patch(
-                'metor.application.frontend.start_managed_daemon_process',
+                'metor.application.frontend.host.start_managed_daemon_process',
                 return_value=True,
             ) as start_mock,
         ):
@@ -1160,7 +1160,7 @@ class UiIpcContractTests(unittest.TestCase):
             ),
             patch('metor.cli.handlers.prompt_text') as prompt_mock,
             patch(
-                'metor.application.frontend.start_managed_daemon_process',
+                'metor.application.frontend.host.start_managed_daemon_process',
                 return_value=True,
             ) as start_mock,
         ):
@@ -1209,7 +1209,7 @@ class UiIpcContractTests(unittest.TestCase):
                 ),
             ),
             patch(
-                'metor.application.frontend.start_managed_daemon_process',
+                'metor.application.frontend.host.start_managed_daemon_process',
                 return_value=True,
             ) as start_mock,
             patch('builtins.print'),
@@ -1256,7 +1256,7 @@ class UiIpcContractTests(unittest.TestCase):
                 ),
             ) as invoke_frontend,
             patch(
-                'metor.application.frontend.start_managed_daemon_process'
+                'metor.application.frontend.host.start_managed_daemon_process'
             ) as start_mock,
         ):
             status = CommandHandlers.handle_chat(
@@ -1311,7 +1311,7 @@ class UiIpcContractTests(unittest.TestCase):
                 return_value='session-secret',
             ),
             patch(
-                'metor.application.frontend.start_managed_daemon_process',
+                'metor.application.frontend.host.start_managed_daemon_process',
                 return_value=True,
             ) as start_mock,
         ):

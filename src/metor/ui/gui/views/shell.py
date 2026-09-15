@@ -17,11 +17,12 @@ from metor.ui.gui.theme import color
 
 # Local Package Imports
 from .entry import entry_view
-from .root import root_view
+from .root import root_view, RootContinuity, RootPanel
 from .peer import PeerView
 from .secondary import secondary_view
 from .contacts import ContactListView
 from .security import security_view, LockedActivity
+from .purge import purge_view
 
 
 class Shell(BoxLayout):
@@ -48,6 +49,9 @@ class Shell(BoxLayout):
         self._contacts_panel: ContactListView | None = None
         self._contacts_key: tuple[object, ...] | None = None
         self._master: BoxLayout | None = None
+        self._root_panel: RootPanel | None = None
+        self._foreground_key: tuple[object, ...] | None = None
+        self._root_context: tuple[object, ...] | None = None
         self._master_key: tuple[object, ...] | None = None
         self._detail: BoxLayout | None = None
         self._security_panel: AnchorLayout | None = None
@@ -76,6 +80,9 @@ class Shell(BoxLayout):
         Returns:
             None
         """
+        if self.controller.state.covered:
+            self._root_panel = None
+            self._root_context = None
         if self.width < dp(
             Geometry.MIN_WIDTH
         ) or self.height + self.keyboard_inset < dp(Geometry.MIN_HEIGHT):
@@ -97,7 +104,34 @@ class Shell(BoxLayout):
                     widget.update()
         prompt = self.controller.interactions.prompt
         wide = self.width >= dp(Geometry.BREAKPOINT)
+        root_context = (
+            state.generation,
+            state.root_delivery,
+            state.root_pages.get(state.root_delivery, 0),
+        )
+        root_continuity = (
+            RootContinuity(self._root_panel)
+            if self._root_panel is not None and self._root_context == root_context
+            else None
+        )
         peer_key = (state.generation, state.route, wide)
+        if (
+            not state.covered
+            and prompt is None
+            and state.route.view in {'V06', 'V07'}
+            and peer_key == self._foreground_key
+            and self._root_context == root_context
+            and self._root_panel is not None
+            and self._root_panel.get_root_window() is not None
+        ):
+            master_key = self._root_key()
+            if master_key != self._master_key:
+                self._root_panel.update()
+                if root_continuity is not None:
+                    root_continuity.restore(self._root_panel, self.controller)
+                self._master_key = master_key
+            return
+
         if (
             not state.covered
             and prompt is None
@@ -109,7 +143,7 @@ class Shell(BoxLayout):
             master_key = self._root_key()
             if wide and master_key != self._master_key and self._master is not None:
                 self.remove_widget(self._master)
-                self._master = self._root()
+                self._master = self._root(root_continuity)
                 self._master.size_hint_x = None
                 self._master.width = dp(Geometry.MASTER)
                 self.add_widget(self._master, index=len(self.children))
@@ -126,7 +160,7 @@ class Shell(BoxLayout):
             master_key = self._root_key()
             if wide and master_key != self._master_key and self._master is not None:
                 self.remove_widget(self._master)
-                self._master = self._root()
+                self._master = self._root(root_continuity)
                 self._master.size_hint_x = None
                 self._master.width = dp(Geometry.MASTER)
                 self.add_widget(self._master, index=len(self.children))
@@ -156,6 +190,7 @@ class Shell(BoxLayout):
                 self.controller.core_settings.revision,
                 self.controller.history.revision,
                 self.controller.profiles.revision,
+                (self.controller.purge.title, self.controller.purge.detail),
                 id(self.controller.voice.routes.endpoints),
                 self.controller.voice.routes.scanned,
                 self.controller.voice.headset_confirmed,
@@ -166,12 +201,32 @@ class Shell(BoxLayout):
             self._private_render_key = key
         else:
             self._private_render_key = None
+        self._foreground_key = peer_key
         contact_search_focused = bool(
             self._contacts_panel is not None
             and self._contacts_panel.search.focus
             and self._contacts_panel.route == state.route
             and not state.covered
         )
+        retained_peer = (
+            self._peer_panel
+            if not state.covered
+            and prompt is None
+            and self._peer_key is not None
+            and self._peer_key[:2] == peer_key[:2]
+            else None
+        )
+        retained_contacts = (
+            self._contacts_panel
+            if not state.covered
+            and prompt is None
+            and self._contacts_key is not None
+            and self._contacts_key[:2] == peer_key[:2]
+            else None
+        )
+        for retained in (retained_peer, retained_contacts):
+            if retained is not None and retained.parent is not None:
+                retained.parent.remove_widget(retained)
         self.clear_widgets()
         self._peer_key = None
         self._peer_panel = None
@@ -183,6 +238,9 @@ class Shell(BoxLayout):
         if self.controller.interactions.prompt is not None:
             self.add_widget(entry_view(self.controller, self.refresh))
             return
+        if state.route.view == 'V22' and self.controller.purge.active:
+            self.add_widget(purge_view(self.controller))
+            return
         if state.route.view in ('V04', 'V05'):
             self._security_panel = security_view(self.controller, self.refresh)
             self.add_widget(self._security_panel)
@@ -193,7 +251,8 @@ class Shell(BoxLayout):
         wide = self.width >= dp(Geometry.BREAKPOINT)
         root = state.route.view in ('V06', 'V07')
         if wide or root:
-            master = self._root()
+            master = self._root(root_continuity)
+            self._master_key = self._root_key()
             if wide:
                 self._master = master
                 self._master_key = self._root_key()
@@ -221,10 +280,18 @@ class Shell(BoxLayout):
                 panel.add_widget(Label('Choose a conversation', tone='textSecondary'))
             elif state.route.view in ('V08', 'V09'):
                 self._peer_key = peer_key
-                self._peer_panel = PeerView(self.controller, self.refresh, wide=wide)
+                self._peer_panel = retained_peer or PeerView(
+                    self.controller, self.refresh, wide=wide
+                )
+                if retained_peer is not None:
+                    retained_peer.reflow(wide=wide)
                 panel.add_widget(self._peer_panel)
             else:
-                secondary = secondary_view(self.controller, self.refresh)
+                secondary = retained_contacts or secondary_view(
+                    self.controller, self.refresh
+                )
+                if retained_contacts is not None:
+                    retained_contacts.update()
                 panel.add_widget(secondary)
                 if isinstance(secondary, ContactListView):
                     self._contacts_panel = secondary
@@ -334,12 +401,29 @@ class Shell(BoxLayout):
             tuple(conversation_rows(self.controller, state.root_delivery)),
         )
 
-    def _root(self) -> BoxLayout:
+    def _root(self, continuity: RootContinuity | None = None) -> BoxLayout:
         """Builds a bounded root page without replacing an existing wide peer pane.
 
         Args:
-            None
+            continuity: State captured before native parent detachment.
         Returns:
             BoxLayout: Current DROP/LIVE root composition.
         """
-        return root_view(self.controller, self._go, self._tab, self.refresh)
+        state = self.controller.state
+        context = (
+            state.generation,
+            state.root_delivery,
+            state.root_pages.get(state.root_delivery, 0),
+        )
+        if self._root_panel is not None and self._root_context == context:
+            if self._root_panel.parent is not None:
+                self._root_panel.parent.remove_widget(self._root_panel)
+            self._root_panel.update()
+        else:
+            self._root_panel = root_view(
+                self.controller, self._go, self._tab, self.refresh
+            )
+        self._root_context = context
+        if continuity is not None:
+            continuity.restore(self._root_panel, self.controller)
+        return self._root_panel

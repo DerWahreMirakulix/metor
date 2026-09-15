@@ -51,6 +51,7 @@ from .calls import IncomingCalls
 from .profiles import ProfileCatalog, ProfileTransition, ProfileIdentity
 from .resend import ResendActions
 from .receipts import ReceiptReconciliation
+from .purge import PurgeMonitor
 
 
 class GuiController:
@@ -105,6 +106,7 @@ class GuiController:
         self.identity = ProfileIdentity(self)
         self.resend = ResendActions(self)
         self.receipts = ReceiptReconciliation(self)
+        self.purge = PurgeMonitor(self)
 
     def submit(
         self,
@@ -123,6 +125,8 @@ class GuiController:
             bool: Whether this exact operation was admitted.
         """
         with self._guard:
+            if self.purge.active:
+                return False
             if (
                 not background
                 and not self.state.busy
@@ -190,7 +194,7 @@ class GuiController:
         Returns:
             bool: Whether activation was admitted.
         """
-        return self.activation.open_profile()
+        return False if self.purge.active else self.activation.open_profile()
 
     def adopt_client(self, client: MetorClient, generation: int) -> bool:
         """Installs a completed bootstrap only into its still-current activation.
@@ -216,7 +220,11 @@ class GuiController:
         Returns:
             bool: Whether creation was admitted.
         """
-        return self.activation.create_profile(name, password)
+        return (
+            False
+            if self.purge.active
+            else self.activation.create_profile(name, password)
+        )
 
     def navigate(self, route: Route) -> None:
         """Opens a projection without a communication-changing command.
@@ -322,7 +330,9 @@ class GuiController:
         Returns:
             bool: Whether the presentation changed.
         """
-        changed = False
+        changed = self.purge.poll()
+        if self.purge.active:
+            return changed
         initially_covered = self.state.covered
         for _ in range(GuiLimits.PAGE_ITEMS):
             update = self.mailbox.take()
@@ -331,6 +341,13 @@ class GuiController:
             if update.generation != self.state.generation:
                 continue
             changed = True
+            if update.event is not None and self.purge.observe(
+                update.generation, update.event
+            ):
+                self.purge.poll()
+                if self.purge.active:
+                    return True
+                continue
             if self.lifecycle.install(update):
                 continue
             if update.event is not None:
@@ -554,15 +571,22 @@ class GuiController:
         purging: bool = False,
         *,
         preserve_interactions: Interactions | None = None,
+        preserve_purge: bool = False,
     ) -> None:
         """Detaches this GUI without global hard lock, profile exit or host power.
 
         Args:
             purging: Accepted purge preempts normal producer finalization.
             preserve_interactions: Fully authenticated replacement's independent bridge.
+            preserve_purge: Keeps only an accepted destruction's separate read-only observer.
         Returns:
             None
         """
+        if preserve_purge and not (purging and self.purge.active):
+            raise ValueError('Only accepted destruction can retain its observer')
+        if not preserve_purge:
+            self.purge.dispose()
+            self.purge = PurgeMonitor(self)
         with self._guard:
             self.lifecycle.cancel()
             self.resend.clear()

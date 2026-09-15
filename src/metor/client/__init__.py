@@ -39,6 +39,8 @@ from metor.client.lifecycle import (
 )
 from metor.client.stream import BufferedIpcEventReader
 from metor.client.profiles import (
+    FrontendAddressManagement,
+    FrontendProfileAddressRequest,
     FrontendProfileAction,
     FrontendProfileCatalog,
     FrontendProfileChange,
@@ -72,6 +74,8 @@ from metor.client.frontends import (
 
 __all__ = [
     'FrontendProfileAction',
+    'FrontendAddressManagement',
+    'FrontendProfileAddressRequest',
     'FrontendProfileCatalog',
     'FrontendProfileChange',
     'FrontendProfileManagement',

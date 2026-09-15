@@ -11,7 +11,7 @@ from kivy.properties import StringProperty
 from metor.ui.gui.theme import ASSET_ROOT, color
 
 # Local Package Imports
-from .controls import Action
+from .context import ContextAction
 
 
 class Symbol(Widget):
@@ -67,7 +67,7 @@ class Symbol(Widget):
         self._translate.y = self.center_y - dp(12)
 
 
-class IconAction(Action):
+class IconAction(ContextAction):
     """48-unit ordinary action with a vector and separate safe semantic name."""
 
     def __init__(
@@ -78,6 +78,7 @@ class IconAction(Action):
         surface: str = 'raised',
         tone: str = 'text',
         badge: bool = False,
+        context: Callable[[], object] | None = None,
         **kwargs: object,
     ) -> None:
         """Creates a fixed icon target without an emoji/font dependency.
@@ -89,6 +90,7 @@ class IconAction(Action):
             surface: Named action surface color.
             tone: Named text and vector color.
             badge: Whether a content-free unseen-activity dot is attached.
+            context: Optional equivalent message-context gesture, separate from primary release.
             kwargs: Native layout properties.
         Returns:
             None
@@ -96,6 +98,7 @@ class IconAction(Action):
         super().__init__(
             label,
             callback,
+            context=context,
             surface=surface,
             tone=tone,
             size_hint_x=None,
@@ -108,12 +111,26 @@ class IconAction(Action):
         self.add_widget(self.symbol)
         self.bind(disabled=self._symbol_state)
         self._symbol_state()
-        if badge:
+        self._badge_color: Color | None = None
+        self.set_badge(badge)
+
+    def set_badge(self, visible: bool) -> None:
+        """Updates an attached content-free activity dot without recreating its action.
+
+        Args:
+            visible: Whether authorized unseen activity is present.
+        Returns:
+            None
+        """
+        if self._badge_color is None:
+            if not visible:
+                return
             with self.canvas.after:
-                Color(*color('drop'))
+                self._badge_color = Color(*color('drop'))
                 self._badge = Ellipse(size=(dp(8), dp(8)))
             self.bind(pos=self._badge_position, size=self._badge_position)
             self._badge_position()
+        self._badge_color.a = 1 if visible else 0
 
     def _symbol_state(self, *_args: object) -> None:
         """Keeps icon eligibility feedback consistent with its action label.

@@ -10,8 +10,9 @@ from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state.media import PlaybackTarget
 
 # Local Package Imports
-from .controls import Action, Label, Panel
-from .symbol import IconAction, Symbol
+from ..controls import Action, Label, Panel
+from ..symbol import IconAction, Symbol
+from .waveform import WaveformSeek
 
 
 class VoiceCard(Panel):
@@ -40,14 +41,16 @@ class VoiceCard(Panel):
         self.controller, self.target, self.refresh = controller, target, refresh
         self._available = 0
         self._finalized = False
-        self.play = IconAction('play', 'Play voice message', self._play)
+        self.play = IconAction(
+            'play', 'Play voice message', self._play, context=context
+        )
         self._playing = False
         self.add_widget(self.play)
         self.body = BoxLayout(orientation='vertical', spacing=dp(4), size_hint_y=None)
-        self.title = Label('Voice message', role='support')
-        self.metadata = Label('', role='caption', tone='textSecondary')
-        self.body.add_widget(self.title)
-        self.body.add_widget(self.metadata)
+        self.seek = WaveformSeek(self._seek, context)
+        self.title = self.seek.hint
+        self.metadata = self.seek.metadata
+        self.body.add_widget(self.seek)
         self.body.bind(minimum_height=self.body.setter('height'), height=self._measure)
         self.add_widget(self.body)
         if context is not None:
@@ -100,6 +103,19 @@ class VoiceCard(Panel):
         self.controller.playback.play(self.target, offset=position)
         self.refresh()
 
+    def _seek(self, fraction: float) -> None:
+        """Starts only at a supported PCM checkpoint within the current retained extent.
+
+        Args:
+            fraction: Deliberately selected audio position from zero to one.
+        Returns:
+            None
+        """
+        position = int(self._available * min(1.0, max(0.0, fraction)))
+        position -= position % PcmVoice.SAMPLE_BYTES
+        self.controller.playback.play(self.target, offset=position)
+        self.refresh()
+
     def update(
         self, size: int, finalized: bool, codec: str | None, status: str
     ) -> None:
@@ -136,18 +152,25 @@ class VoiceCard(Panel):
             else 0
         )
         elapsed = PcmVoice.duration_ms(position) / PcmVoice.MILLISECONDS
+        envelope = playback.cache.envelope(self.target)
+        self.seek.disabled = self.play.disabled or size <= 0 or not envelope[1]
         self.title.text = (
             'Audio unavailable'
             if self.play.disabled or state == 'unavailable'
             else 'Buffering…'
             if state == 'buffering'
-            else 'Voice message'
+            else 'Played; confirmation unavailable'
+            if state == 'played_unconfirmed'
+            else ''
+            if envelope[1]
+            else 'Play to load waveform'
         )
         self.metadata.text = (
             f'{elapsed:.1f} / {duration:.1f} s · {status}'
             if finalized
             else f'{elapsed:.1f} s / … · {status}'
         )
+        self.seek.set_source(size, position, envelope)
         if not finalized:
             if self.edge.parent is None:
                 self.add_widget(self.edge)

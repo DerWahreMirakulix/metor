@@ -108,7 +108,8 @@ class ProfileActivation:
             Returns:
                 None
             """
-            controller.mailbox.put(Update(generation, 'event', event))
+            if not controller.purge.observe(generation, event):
+                controller.mailbox.put(Update(generation, 'event', event))
 
         def on_disconnect() -> None:
             """Marks loss only for this captured candidate activation.
@@ -118,7 +119,10 @@ class ProfileActivation:
             Returns:
                 None
             """
-            controller.mailbox.put(Update(generation, 'lost', status='Connection lost'))
+            if not controller.purge.lost(generation):
+                controller.mailbox.put(
+                    Update(generation, 'lost', status='Connection lost')
+                )
 
         return MetorClient(
             result.port,

@@ -43,8 +43,10 @@ Native Windows capture/playback on the user-approved Razer BlackShark V2 HS
 startup also passed. The 2026-09-14 native GUI test additionally captured/reviewed 37,120 bytes
 (1.16 seconds) using focused synthetic Space input, actual Razer I/O, the public
 SDK and a temporary encrypted Core. No outbox message or audio export occurred.
-Headset acoustics, complete duplex/unplug behavior, the canonical Windows
-installer and physical appliance integration remain explicit gates.
+Canonical Windows and Linux offline ZIP installers and both UI removal orders
+passed on 15 September. Headset acoustics, complete duplex/unplug behavior and
+physical appliance integration remain explicit gates. Current-source artifact
+fingerprints are recorded in the acceptance report.
 
 ## Resource and safety constraints
 
@@ -74,3 +76,25 @@ repository-pinned GUI dependencies were installed successfully, and exact
 Windows wheels were also collected for offline validation. Python documents
 NuGet installations for build/CI use in its
 [Windows deployment guide](https://docs.python.org/3.11/using/windows.html#the-nuget-org-packages).
+
+### Final-source installed checkpoint, 15 September
+
+Offline-installed desktop and simulator startup pass on Linux x86_64 and Windows
+x86_64 with `python -I`, outside the checkout. The Windows installed GUI additionally
+passes actual Razer capture and review through temporary encrypted Core data:
+32,000 PCM bytes / 1,000 ms, no outbox publication or audio export. The test uses
+synthetic focused Space input. Its module path resolves to the isolated virtual
+environment's site-packages. Both platforms' nine bundled Metor wheels were
+compared byte-for-byte against current source files, with zero mismatches.
+
+The separate 20 MiB production-worker stress probe uses synthetic indexed SDK
+ranges and counting output: 64 KiB maximum public read, 640-byte output frames,
+16 MiB cache peak, 17,168,341-byte Python allocation peak and 48,504,832-byte
+sampled RSS from a 31,162,368-byte baseline. Its sampled dispatch queue peak is
+37 records. It completes in 23.226 seconds under tracemalloc. These are measured
+Linux process values, not appliance limits or native audio acceptance.
+
+The owner paused after further retained-root/badge changes. The installed
+checkpoint above predates those changes; it is not final-source package proof
+for the pause tree. Current tests, known latency observations and precise
+continuation steps are in the acceptance report's 15 September pause handoff.

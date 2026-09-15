@@ -14,10 +14,16 @@ from metor.client import (
     FrontendProfileChange,
     FrontendProfileCreateRequest,
     FrontendProfileManagement,
+    FrontendAddressManagement,
+    FrontendProfileAddressRequest,
+    FrontendProfileOperationResult,
     OneUseSecretProvider,
 )
 from metor.data import ProfileManager, Settings, SettingKey
 from metor.utils import Constants
+from metor.core.key import KeyManager
+from metor.core.tor import TorManager
+from metor.core.api import EventType, JsonValue
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
 from metor.ui.gui.state.mailbox import Update
@@ -116,6 +122,98 @@ class ProfileHostTests(unittest.TestCase):
                 for entry in self.host.profile_catalog().entries
             )
         )
+
+    def test_offline_address_uses_full_proof_core_effects_and_original_selection(
+        self,
+    ) -> None:
+        """Actual protected keys survive address generation; only the external Tor launch is injected."""
+        self.assertIsInstance(self.host, FrontendAddressManagement)
+        password = 'offline-profile-password'
+        created = self.host.create_profile_entry(
+            FrontendProfileCreateRequest('offline'), OneUseSecretProvider(password)
+        )
+        self.assertTrue(created.success)
+        pm = ProfileManager('offline')
+        manager = KeyManager(pm, password)
+        manager.generate_keys()
+        original = manager.get_metor_key()
+        manager.clear_sensitive_state()
+        request = FrontendProfileAddressRequest('offline', 'active')
+        wrong = OneUseSecretProvider('wrong')
+        with patch.object(TorManager, '_launch_process') as launch:
+            refused = self.host.profile_address(request, wrong)
+            self.assertEqual(refused.code, 'invalid_password')
+            launch.assert_not_called()
+        self.assertIsNone(wrong.take())
+
+        def launch(
+            tor: TorManager,
+        ) -> tuple[bool, EventType | None, dict[str, JsonValue]]:
+            """Supplies an explicit external-process fixture while keeping Core key handling real.
+
+            Args:
+                tor: Actual Core Tor owner used by the host operation.
+            Returns:
+                tuple: Successful synthetic process-launch result.
+            """
+            tor.onion = 'a' * 56
+            (pm.paths.get_hidden_service_dir() / Constants.HOSTNAME_FILE).write_text(
+                tor.onion + '.onion'
+            )
+            return True, None, {}
+
+        with patch.object(TorManager, '_launch_process', launch):
+            result = self.host.profile_address(request, OneUseSecretProvider(password))
+        self.assertTrue(result.success, result.code)
+        self.assertEqual(result.onion, 'a' * 56)
+        self.assertEqual(self.host.profile_state().profile, 'active')
+        self.assertFalse(
+            (pm.paths.get_hidden_service_dir() / Constants.TOR_SECRET_KEY).exists()
+        )
+        verifier = KeyManager(pm, password)
+        self.assertEqual(verifier.get_metor_key(), original)
+        verifier.clear_sensitive_state()
+        with patch.object(TorManager, '_launch_process') as launch:
+            checked = self.host.profile_address(
+                FrontendProfileAddressRequest('offline', 'active', False),
+                OneUseSecretProvider(password),
+            )
+            launch.assert_not_called()
+        self.assertEqual(checked.onion, result.onion)
+        stale = OneUseSecretProvider(password)
+        result = self.host.profile_address(
+            FrontendProfileAddressRequest('offline', 'default'), stale
+        )
+        self.assertEqual(result.code, 'selection_changed')
+        self.assertIsNone(stale.take())
+
+    def test_offline_address_failed_launch_cleans_runtime_export_and_running_refuses(
+        self,
+    ) -> None:
+        """Core cleans its own failed generation attempt without stopping a running profile."""
+        password = 'offline-profile-password'
+        self.host.create_profile_entry(
+            FrontendProfileCreateRequest('offline'), OneUseSecretProvider(password)
+        )
+        pm = ProfileManager('offline')
+        request = FrontendProfileAddressRequest('offline', 'active')
+        with patch.object(
+            TorManager,
+            '_launch_process',
+            return_value=(False, EventType.TOR_START_FAILED, {}),
+        ):
+            result = self.host.profile_address(request, OneUseSecretProvider(password))
+        self.assertFalse(result.success)
+        self.assertFalse(
+            (pm.paths.get_hidden_service_dir() / Constants.TOR_SECRET_KEY).exists()
+        )
+        with (
+            patch.object(ProfileManager, 'is_daemon_running', return_value=True),
+            patch.object(TorManager, 'stop') as stop,
+        ):
+            result = self.host.profile_address(request, OneUseSecretProvider(password))
+        self.assertEqual(result.code, 'address_cant_generate_running')
+        stop.assert_not_called()
 
     def test_default_rename_preserves_reference_without_overwriting_a_newer_default(
         self,
@@ -351,3 +449,42 @@ class GuiProfileCatalogTests(unittest.TestCase):
             )
         )
         self.assertIsNone(self.gui.profiles.page)
+
+    def test_unknown_offline_address_allows_only_exact_readback_and_lock_hides_result(
+        self,
+    ) -> None:
+        """A lost host outcome cannot repeat generation or leak a profile label onto the lock cover."""
+        host = self.host_tests.host
+        with patch.object(
+            host, 'profile_address', side_effect=OSError('Lost host result')
+        ) as operation:
+            self.assertTrue(
+                self.gui.identity.offline_address('standby', 'active', 'one-use')
+            )
+            self.settle()
+            self.assertTrue(self.gui.identity.unknown)
+            self.assertFalse(
+                self.gui.identity.offline_address('standby', 'active', 'one-use')
+            )
+            self.assertFalse(
+                self.gui.identity.offline_address(
+                    'default', 'active', 'one-use', generate=False
+                )
+            )
+            operation.assert_called_once()
+        result = FrontendProfileOperationResult(
+            True, 'address_current', 'standby', 'a' * 56
+        )
+        with patch.object(host, 'profile_address', return_value=result) as operation:
+            self.assertTrue(
+                self.gui.identity.offline_address(
+                    'standby', 'active', 'one-use', generate=False
+                )
+            )
+            self.gui.state.covered = True
+            self.gui.state.route = Route('V05')
+            self.gui.state.status = 'Locked'
+            self.settle()
+        self.assertFalse(operation.call_args.args[0].generate)
+        self.assertFalse(self.gui.identity.unknown)
+        self.assertEqual(self.gui.state.status, 'Locked')

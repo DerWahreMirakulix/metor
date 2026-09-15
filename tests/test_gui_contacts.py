@@ -207,6 +207,32 @@ class ContactIntentTests(unittest.TestCase):
         self.assertEqual(self.gui.command.call_count, 1)
         self.assertEqual(self.gui.state.route.view, 'V11')
 
+    def test_scanner_manual_fallback_keeps_intent_and_returns_to_caller(self) -> None:
+        """The camera fallback adds no intermediate Back loop or implicit communication.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        for intent, route in (
+            ('save', Route('V12')),
+            ('drop', Route('V11', delivery=Delivery.DROP)),
+            ('live', Route('V11', delivery=Delivery.LIVE)),
+        ):
+            gui = GuiController(FrontendLaunchContext('fixture', Mock()))
+            self.addCleanup(gui.close)
+            gui.state.covered = False
+            gui.state.route = route
+            gui.contacts.begin(intent, scan=True)
+            self.assertEqual(gui.state.route.view, 'V14')
+            gui.contacts.manual()
+            self.assertEqual(gui.state.route.view, 'V13')
+            self.assertEqual(gui.contacts.form.intent, intent)
+            gui.back()
+            self.assertEqual(gui.state.route, route)
+            self.assertIsNone(gui.client)
+
 
 if __name__ == '__main__':
     unittest.main()

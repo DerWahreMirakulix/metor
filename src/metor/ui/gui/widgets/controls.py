@@ -10,6 +10,7 @@ from kivy.uix.behaviors import ButtonBehavior, FocusBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label as KivyLabel
 from kivy.uix.textinput import TextInput
+from kivy.uix.scrollview import ScrollView
 from kivy.input.motionevent import MotionEvent
 
 from metor.ui.gui.theme import TYPE, color, font_path
@@ -159,6 +160,8 @@ class Action(FocusBehavior, ButtonBehavior, Panel):
         self._tone = tone
         self._hovered = False
         self._keyboard_armed = False
+        self.focus_group: tuple[Action, ...] = ()
+        self.focus_key: tuple[str, ...] = ()
         self._rectangle.radius = [dp(12)]
         self.is_focusable = True
         self._activate: Callable[[], object] = callback
@@ -253,6 +256,34 @@ class Action(FocusBehavior, ButtonBehavior, Panel):
         Returns:
             bool: Whether activation input was handled.
         """
+        if (
+            self.focus
+            and not self.disabled
+            and not modifiers
+            and keycode[1] in {'left', 'right', 'up', 'down'}
+            and self.focus_group
+        ):
+            choices = [
+                item
+                for item in self.focus_group
+                if not item.disabled
+                and item.is_focusable
+                and item.get_root_window() is not None
+            ]
+            if self in choices:
+                delta = -1 if keycode[1] in {'left', 'up'} else 1
+                selected = choices[
+                    max(0, min(len(choices) - 1, choices.index(self) + delta))
+                ]
+                self._keyboard_armed = False
+                selected.focus = True
+                parent = selected.parent
+                while parent is not None and parent is not Window:
+                    if isinstance(parent, ScrollView):
+                        parent.scroll_to(selected, animate=False)
+                        break
+                    parent = parent.parent
+            return True
         if keycode[1] in ('spacebar', 'enter') and self.focus and not self.disabled:
             self._keyboard_armed = True
             self.state = 'down'
@@ -275,6 +306,18 @@ class Action(FocusBehavior, ButtonBehavior, Panel):
                 self._activate()
             return True
         return bool(super().keyboard_on_key_up(window, keycode))
+
+    @staticmethod
+    def group(actions: tuple['Action', ...]) -> None:
+        """Defines a bounded selector/list's arrow order without activating a choice or trapping Tab.
+
+        Args:
+            actions: Native controls in meaningful visual order, supplied by the bounded view.
+        Returns:
+            None
+        """
+        for action in actions:
+            action.focus_group = actions
 
 
 class KeyboardOwner(Protocol):

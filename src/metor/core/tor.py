@@ -611,10 +611,12 @@ class TorManager:
                 {'profile': self._pm.profile_name},
             )
 
-        success, event_type, params = self.start()
-        if not success:
-            return False, event_type or EventType.TOR_START_FAILED, params
-        self.stop()
+        try:
+            success, event_type, params = self.start()
+            if not success:
+                return False, event_type or EventType.TOR_START_FAILED, params
+        finally:
+            self.stop()
 
         return (
             True,

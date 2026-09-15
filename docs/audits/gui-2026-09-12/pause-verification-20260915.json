@@ -1,0 +1,43 @@
+{
+  "date": "2026-09-15",
+  "full_suite": {
+    "tests": 652,
+    "passed": true,
+    "seconds": 739.761,
+    "scope": "Before final retained-root native changes",
+    "log_sha256": "b229172b13af894bbfd1473c46ce6c07026d85ca2e47a00d8c84ee4f9cc196ed"
+  },
+  "current_source_static": {
+    "ruff": "pass",
+    "format": "pass; 520 files",
+    "mypy": "pass; 443 source files",
+    "boundaries": "pass",
+    "version_registry": "pass",
+    "git_diff_check": "pass"
+  },
+  "current_native": [
+    {
+      "view": "root",
+      "passed": true
+    },
+    {
+      "view": "root_page",
+      "passed": true
+    },
+    {
+      "view": "root_refresh",
+      "passed": true
+    },
+    {
+      "view": "responsive",
+      "passed": true
+    },
+    {
+      "view": "contact_pages",
+      "passed": true
+    }
+  ],
+  "full_product_acceptance": false,
+  "installed_artifacts_match_pause_source": false,
+  "reason": "Retained RootPanel/RootRow and dynamic badge changes require fresh GUI bundles."
+}
