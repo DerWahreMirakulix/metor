@@ -59,6 +59,7 @@
     "hardware_status_adapter": "typed consumer tested with cached spy; no production driver registered",
     "actuator_adapters": "typed V21/V22 orchestration tested with spies; no production driver registered"
   },
+  "device_lifecycle_implementation_commit": "b581144fd4f16ba4f0bcf14b1dd08e4c822b620f",
   "arm_pi": "untested",
   "simulator_description_adapters": [
     "simulator"

@@ -176,6 +176,14 @@ application, launcher, IPC, storage or cryptographic generation was bumped.
 
 ### Typed device lifecycle continuation
 
+The implementation is committed as
+`b581144fd4f16ba4f0bcf14b1dd08e4c822b620f` (`Complete typed device lifecycle
+integration`), starting from `3c584e104d39939cbff1e077c3b330f5a9463569`.
+The machine-readable [verification record](gui-2026-09-12/device-lifecycle-verification-20260920.json)
+contains the commands, environments, results, corrected failed attempts and
+remaining limitations. This subsequent evidence update changes documentation
+only.
+
 `PlatformBindings` now composes one bounded adapter identity with separate
 hardware-status, input, indicator, haptic and shutdown ports. It is an additive
 field on `FrontendLaunchContext`; it does not combine those ports or route them
@@ -264,6 +272,13 @@ during TX, permission/device loss, OS lock/suspend/resume and sustained combined
 native load still require completion and evidence. The current passing package
 and native checkpoints above do not close these gates. No full-GUI completion,
 release, physical-appliance or acoustic/AEC claim is made.
+
+At this checkpoint, implementation scope is estimated at **approximately 90%**
+and complete cross-platform/product acceptance at **approximately 78%**. The
+remaining percentage is concentrated in concrete appliance drivers and physical
+evidence, complete assistive/keyboard/optical permutations, OS session lifecycle
+and sustained combined native media/load validation; passing unit tests are not
+used as a substitute for those evidence classes.
 
 ## 15 September pause handoff — current continuation entry
 

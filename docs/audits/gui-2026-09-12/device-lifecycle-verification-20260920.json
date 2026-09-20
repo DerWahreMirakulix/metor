@@ -1,0 +1,92 @@
+{
+  "date": "2026-09-20",
+  "scope": "frontend-independent typed platform bindings and GUI V21/V22 orchestration",
+  "accepted_refactor": "0cfa122a47c879106b86de9578439df6ffc10b7c",
+  "starting_commit": "3c584e104d39939cbff1e077c3b330f5a9463569",
+  "implementation_commit": "b581144fd4f16ba4f0bcf14b1dd08e4c822b620f",
+  "approved_inputs": {
+    "METOR_GUI_SPEC.md": "8907c510aeb7cf9272816e60bd1c09a2f38c31c7d340d67859163254f2c8cca7",
+    "METOR_GUI_LAYOUT_SPEC.md": "3202019b3fd3e7aef472d281006cdb35c1caf073dbaaf2ee75bf691eeaadf5b0"
+  },
+  "verification": {
+    "full_regression": {
+      "command": "PYTHONPATH=tests .venv/bin/python -m unittest discover -s tests -v",
+      "result": "pass",
+      "tests": 673,
+      "seconds": 647.716,
+      "log": "/tmp/metor-regression-device-lifecycle-final2.log"
+    },
+    "targeted_lifecycle_core": {
+      "command": "PYTHONPATH=tests .venv/bin/python -m unittest -v test_gui_device_lifecycle test_gui_purge_observation test_gui_lifecycle test_gui_security",
+      "result": "pass",
+      "tests": 31,
+      "seconds": 109.611,
+      "log": "/tmp/metor-device-lifecycle-targeted-final.log"
+    },
+    "static": {
+      "ruff_files": 546,
+      "format_files": 546,
+      "mypy_source_files": 462,
+      "boundaries": "pass",
+      "generated_docs_fresh_and_reproducible": true,
+      "diff_whitespace": "pass"
+    },
+    "native_linux_matrix": {
+      "result": "pass",
+      "passed": 46,
+      "failed": 0,
+      "viewport": [360, 640],
+      "font_scale": 1.5,
+      "includes": ["V21 Power menu", "V22 physical-chord progress"],
+      "directory": "/tmp/metor-native-device-lifecycle-final"
+    },
+    "linux_packages": {
+      "python": "3.11.15",
+      "four_bundles": "pass",
+      "isolated_consumers_and_uninstall_orders": "pass",
+      "four_offline_zip_installers": "pass",
+      "installed_desktop_launch": "pass",
+      "installed_simulator_launch": "pass",
+      "source_matched_metor_wheels": 9,
+      "source_mismatches": 0,
+      "directory": "/tmp/metor-gui-lifecycle-bundles-final"
+    },
+    "windows_packages": {
+      "python": "3.11.9 official NuGet isolated runtime",
+      "four_bundles": "pass",
+      "isolated_consumers_and_uninstall_orders": "pass",
+      "four_offline_zip_installers": "pass",
+      "installed_desktop_launch": "pass",
+      "installed_simulator_launch": "pass",
+      "source_matched_metor_wheels": 9,
+      "source_mismatches": 0,
+      "directory": "%TEMP%\\metor-gui-lifecycle-bundles-final"
+    },
+    "windows_headset": {
+      "result": "pass",
+      "route": "Razer BlackShark V2 HS 2.4 MME input/output",
+      "installed_bundle": true,
+      "captured_and_played_bytes": 30720,
+      "encoded_duration_ms": 960,
+      "elapsed_seconds": 2.609,
+      "rss_bytes": 151285760,
+      "canonical_result": "unsent owned DROP draft; no outbox publication",
+      "physical_input": false,
+      "audio_exported": false,
+      "aec_or_acoustic_quality_verified": false
+    }
+  },
+  "corrected_attempts": [
+    "The first complete regression process ended without a terminal result and was not counted; the final complete rerun passed.",
+    "The first isolated Linux consumer run was sandbox-denied local socket creation; the permitted rerun passed.",
+    "The first native V22 fixture rejected an unsupported Label keyword; the corrected surface passed the complete 46-view rerun.",
+    "The first current Windows headset fixture observed playback before its worker started; terminal-state synchronization was corrected and the rerun passed."
+  ],
+  "limitations": [
+    "No production physical adapter ID or driver is registered.",
+    "No real GPIO, appliance display, physical Power/PTT, host power-off or owner-profile purge was executed.",
+    "Headset input was synthetic and does not prove acoustic quality, speaker AEC or the complete duplex/unplug matrix.",
+    "Complete screen-reader, keyboard, optical, OS lock/suspend/resume and sustained combined-load acceptance remain open."
+  ],
+  "full_gui_acceptance": false
+}
