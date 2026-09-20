@@ -35,7 +35,7 @@ class HapticPattern(str, Enum):
 
 
 class IndicatorPort(Protocol):
-    """Controls an optional indicator without receiving profile or message data."""
+    """Controls an optional indicator through nonblocking semantic requests."""
 
     def set_state(self, state: IndicatorState) -> PlatformActionResult:
         """Requests one privacy-filtered semantic indicator state.
@@ -43,13 +43,13 @@ class IndicatorPort(Protocol):
         Args:
             state: Permitted content-free indication.
         Returns:
-            PlatformActionResult: Explicit local request outcome.
+            PlatformActionResult: Immediate local admission outcome.
         """
         ...
 
 
 class HapticsPort(Protocol):
-    """Controls optional haptics independently of notifications and status reads."""
+    """Controls optional haptics through nonblocking finite requests."""
 
     def pulse(self, pattern: HapticPattern) -> PlatformActionResult:
         """Requests one permitted finite feedback pattern.
@@ -57,7 +57,7 @@ class HapticsPort(Protocol):
         Args:
             pattern: Semantic pattern, never an arbitrary command or timing payload.
         Returns:
-            PlatformActionResult: Explicit local request outcome.
+            PlatformActionResult: Immediate local admission outcome.
         """
         ...
 

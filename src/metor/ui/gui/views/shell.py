@@ -23,6 +23,7 @@ from .secondary import secondary_view
 from .contacts import ContactListView
 from .security import security_view, LockedActivity
 from .purge import purge_view
+from .device import device_view
 
 
 class Shell(BoxLayout):
@@ -192,6 +193,13 @@ class Shell(BoxLayout):
                 self.controller.history.revision,
                 self.controller.profiles.revision,
                 (self.controller.purge.title, self.controller.purge.detail),
+                (
+                    self.controller.device.phase,
+                    self.controller.device.title,
+                    self.controller.device.detail,
+                    self.controller.device.progress,
+                    self.controller.device.battery_status,
+                ),
                 id(self.controller.voice.routes.endpoints),
                 self.controller.voice.routes.scanned,
                 self.controller.voice.headset_confirmed,
@@ -241,6 +249,9 @@ class Shell(BoxLayout):
             return
         if state.route.view == 'V22' and self.controller.purge.active:
             self.add_widget(purge_view(self.controller))
+            return
+        if state.route.view in {'V21', 'V22'} and self.controller.device.active:
+            self.add_widget(device_view(self.controller, self.refresh))
             return
         if state.route.view in ('V04', 'V05'):
             self._security_panel = security_view(self.controller, self.refresh)

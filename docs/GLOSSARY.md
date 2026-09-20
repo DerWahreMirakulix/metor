@@ -423,3 +423,4 @@ IPC payloads, settings keys or a combined notification hook.
 | `HapticsPort` / `HapticPattern` | Optional finite capture-admitted, capture-rejected or purge-arming feedback requests. |
 | `ShutdownPort` | Separate privileged local actuator used only after lifecycle authorization and host preparation. |
 | `PlatformActionResult` | Accepted, unavailable, denied, failed or unknown local action outcome. Accepted does not prove completed shutdown or authorize Core destruction. |
+| `PlatformBindings` | One validated adapter identity and separately typed status, input, optional indicator, haptic and shutdown ports injected through `FrontendLaunchContext`; composition does not merge authority, and device configuration gates each optional action port. |

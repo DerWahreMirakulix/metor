@@ -64,6 +64,7 @@ from metor.core.api import (
 )
 from metor.ui.gui.app import MetorApp
 from metor.ui.gui.platform import DeviceConfiguration
+from metor.ui.gui.runtime.device import DevicePhase
 from metor.ui.gui.state import Route
 from metor.ui.gui.widgets import Action, SecretInput, TextField
 from metor.ui.gui.widgets.keyboard import KeyboardKey
@@ -444,6 +445,8 @@ def main() -> None:
             'notifications',
             'notification_selection',
             'context_menu',
+            'device_power',
+            'device_purge',
             'purge',
             'purge_key',
             'purge_safe',
@@ -543,6 +546,21 @@ def main() -> None:
     confirmed_actions: list[bool] = []
     if args.view.startswith('purge'):
         configure_purge(controller, args.view)
+    if args.view == 'device_power':
+        controller.device.phase = DevicePhase.POWER_MENU
+        controller.device.title = 'Power off'
+        controller.device.detail = (
+            'Prepare local state before powering off this device?'
+        )
+        controller.state.covered = True
+        controller.state.route = Route('V21')
+    elif args.view == 'device_purge':
+        controller.device.phase = DevicePhase.PURGE_ARMING
+        controller.device.title = 'Hold both buttons'
+        controller.device.detail = 'Keep holding Power and PTT'
+        controller.device.progress = 0.6
+        controller.state.covered = True
+        controller.state.route = Route('V22')
 
     def show_confirmation(_elapsed: float = 0) -> None:
         confirm(
@@ -867,6 +885,8 @@ def main() -> None:
             'continued_pin',
             'locked_notice',
             'context_menu',
+            'device_power',
+            'device_purge',
         }:
             pass
         elif args.view != 'keyboard':

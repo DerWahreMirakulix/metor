@@ -6,6 +6,7 @@ import time
 from typing import TYPE_CHECKING
 
 from metor.client import MetorClient, valid_frontend_profile_name
+from metor.client.platform import PlatformActionResult
 from metor.core.api import (
     IpcEvent,
     SelfDestructInitiatedEvent,
@@ -36,6 +37,7 @@ class PurgeFacts:
     completed: bool = False
     failed: bool = False
     lost: bool = False
+    transport_lost: bool = False
 
 
 class PurgeMonitor:
@@ -62,6 +64,7 @@ class PurgeMonitor:
         self._disposed = False
         self.title = ''
         self.detail = ''
+        self._shutdown_result: PlatformActionResult | None = None
 
     @property
     def active(self) -> bool:
@@ -149,7 +152,11 @@ class PurgeMonitor:
             elif isinstance(event, SelfDestructRuntimeReleasedEvent):
                 facts = replace(facts, runtime_released=True)
             elif isinstance(event, SelfDestructSafeEvent):
-                facts = replace(facts, safe_at=facts.safe_at or time.monotonic())
+                facts = replace(
+                    facts,
+                    safe_at=facts.safe_at or time.monotonic(),
+                    lost=False if not (facts.completed or facts.failed) else facts.lost,
+                )
             elif isinstance(event, SelfDestructCompletedEvent):
                 facts = replace(facts, completed=True)
             elif isinstance(event, SelfDestructCleanupFailedEvent):
@@ -170,8 +177,12 @@ class PurgeMonitor:
         with self._lock:
             if self._facts is None or self._disposed:
                 return False
-            if generation == self._facts.generation and not self._facts.lost:
-                self._facts = replace(self._facts, lost=True)
+            if generation == self._facts.generation and not self._facts.transport_lost:
+                self._facts = replace(
+                    self._facts,
+                    lost=self._facts.safe_at is None,
+                    transport_lost=True,
+                )
                 self._revision += 1
             return True
 
@@ -211,7 +222,11 @@ class PurgeMonitor:
         if facts.safe_at is not None:
             self.title = 'Profile access destroyed'
             self.detail = (
-                'File cleanup is incomplete.'
+                'Powering off.'
+                if self._shutdown_result is PlatformActionResult.ACCEPTED
+                else 'Power off request failed. Keep the device powered.'
+                if self._shutdown_result is not None
+                else 'File cleanup is incomplete.'
                 if facts.failed
                 else 'File cleanup completed.'
                 if facts.completed
@@ -235,6 +250,46 @@ class PurgeMonitor:
         if terminal:
             self._detach()
         return changed
+
+    @property
+    def shutdown_ready(self) -> bool:
+        """Reports exact-operation safety plus terminal cleanup knowledge or bounded loss.
+
+        Args:
+            None
+        Returns:
+            bool: Whether local shutdown may now be requested once.
+        """
+        with self._lock:
+            facts = self._facts
+            return bool(
+                facts is not None
+                and facts.safe_at is not None
+                and (facts.completed or facts.failed or facts.lost)
+                and self._shutdown_result is None
+            )
+
+    def record_shutdown(self, result: PlatformActionResult) -> None:
+        """Records actuator admission separately from destruction safety.
+
+        Args:
+            result: Typed local shutdown request outcome.
+        Returns:
+            None
+        """
+        if not isinstance(result, PlatformActionResult):
+            raise ValueError('Invalid shutdown result')
+        with self._lock:
+            facts = self._facts
+            if (
+                facts is None
+                or facts.safe_at is None
+                or not (facts.completed or facts.failed or facts.lost)
+                or self._shutdown_result is not None
+            ):
+                return
+            self._shutdown_result = result
+            self._revision += 1
 
     def _detach(self) -> None:
         """Releases only the observed IPC client after a terminal outcome or bounded wait.

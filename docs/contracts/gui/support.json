@@ -28,7 +28,7 @@
     "root_480x800": "tested",
     "headset_route": "Razer BlackShark V2 HS 2.4",
     "bounded_duplex_capture_playback": "tested; captured bytes discarded",
-    "gui_ptt": "tested from final presentation installed packages with synthetic focused Space input, actual Razer capture/review and temporary encrypted Core; 32000 bytes / 1000 ms; 2026-09-20",
+    "gui_ptt": "tested from current lifecycle installed packages with synthetic focused Space input, actual Razer capture/review and temporary encrypted Core; 30720 bytes / 960 ms; 2026-09-20",
     "canonical_installer": "tested offline with official full CPython 3.11.9 NuGet runtime; 2026-09-15",
     "coinstall_uninstall": "tested both UI removal orders; 2026-09-15",
     "speaker_aec": "unsupported",
@@ -50,18 +50,22 @@
       "capture",
       "playback",
       "audio_routes",
-      "button_arbitration"
+      "button_arbitration",
+      "cached_hardware_status",
+      "physical_input_subscription",
+      "device_lifecycle"
     ],
-    "hardware_status_adapter": "not_bound",
-    "actuator_adapters": "not_bound"
+    "composition": "PlatformBindings injected through FrontendLaunchContext; strict device adapter ID must match and optional action tables gate each port",
+    "hardware_status_adapter": "typed consumer tested with cached spy; no production driver registered",
+    "actuator_adapters": "typed V21/V22 orchestration tested with spies; no production driver registered"
   },
   "arm_pi": "untested",
   "simulator_description_adapters": [
     "simulator"
   ],
-  "host_shutdown": "not_bound",
-  "purge": "typed milestone observer tested; physical initiating control and host shutdown not bound",
+  "host_shutdown": "typed fixed-port request occurs only after local single-runtime checks plus Core preparation, or exact safe purge terminal state; the port owns atomic exclusive-host enforcement; no OS adapter registered or real shutdown tested",
+  "purge": "bounded physical-input composition, scoped grant, exact initiation and safe-terminal shutdown gating tested; no production hardware driver or real destruction/shutdown tested",
   "pause_checkpoint": "2026-09-15: retained root source has targeted native/static validation; installed artifacts/headset evidence predates final RootPanel/RootRow changes",
-  "current_checkpoint": "2026-09-20: platform contracts, packaged fallback fonts, pointer tooltips and native accessibility bridge; 662-test regression checkpoint and 44 native fixtures pass; latest accessibility admission tests 4/4; final Linux/Windows GUI bundles, offline installers, installed desktop/simulator lifecycle and native UIA/AT-SPI probes pass; full acceptance remains open",
+  "current_checkpoint": "2026-09-20: 673-test regression, 31-test targeted lifecycle/Core run, 46/46 native matrix including V21/V22, current-source Linux/Windows bundles, isolated consumers, offline installers, installed desktop/simulator launch and installed Windows Razer capture/review pass; no production physical adapter or full acceptance claim",
   "full_acceptance": false
 }

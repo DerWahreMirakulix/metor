@@ -6,6 +6,7 @@ from pathlib import Path
 import stat
 import tomllib
 
+from metor.client.platform import PlatformBindings
 from metor.ui.gui.constants import Geometry, GuiLimits
 
 
@@ -23,6 +24,9 @@ class DeviceConfiguration:
     scale: float = 1.0
     rotation_deg: int = 0
     touch: bool = False
+    indicator: bool = False
+    haptics: bool = False
+    power: bool = False
     source: str | None = None
 
     @property
@@ -38,6 +42,27 @@ class DeviceConfiguration:
         if self.rotation_deg in (90, 270):
             width, height = height, width
         return width / self.scale, height / self.scale
+
+    def activate_platform(
+        self, platform: PlatformBindings | None
+    ) -> PlatformBindings | None:
+        """Limits injected optional ports to capabilities declared by this file.
+
+        Args:
+            platform: Prevalidated deployment ports matching the parsed adapter ID.
+        Returns:
+            PlatformBindings | None: Configuration-filtered ports for the GUI.
+        """
+        if self.mode != 'device' or platform is None:
+            return None
+        return PlatformBindings(
+            platform.adapter_id,
+            platform.inputs,
+            platform.shutdown if self.power else None,
+            status=platform.status,
+            indicator=platform.indicator if self.indicator else None,
+            haptics=platform.haptics if self.haptics else None,
+        )
 
 
 def _table(value: object, allowed: set[str], name: str) -> dict[str, object]:
@@ -71,17 +96,30 @@ def _integer(value: object, minimum: int, maximum: int, name: str) -> int:
     return value
 
 
-def read_configuration(path: str | None, simulator: bool) -> DeviceConfiguration:
+def read_configuration(
+    path: str | None,
+    simulator: bool,
+    platform: PlatformBindings | None = None,
+) -> DeviceConfiguration:
     """Resolves explicit mode and validates before host work or driver creation.
 
     Args:
         path: Absolute requested file, or no file for desktop defaults.
         simulator: Explicit simulator flag; never inferred from a file.
+        platform: Prevalidated physical ports supplied by the deployment owner.
     Returns:
         DeviceConfiguration: Safe description; physical support fails closed.
     """
     if path is None:
+        if platform is not None:
+            raise DeviceConfigurationError(
+                'Physical platform bindings require an explicit device configuration.'
+            )
         return DeviceConfiguration(mode='simulator' if simulator else 'desktop')
+    if simulator and platform is not None:
+        raise DeviceConfigurationError(
+            'Simulator cannot activate physical platform bindings.'
+        )
     if not path.strip():
         raise DeviceConfigurationError('Device configuration path must not be empty')
     location = Path(path)
@@ -142,8 +180,13 @@ def read_configuration(path: str | None, simulator: bool) -> DeviceConfiguration
         },
         'input',
     )
+    expected_adapter = (
+        'simulator'
+        if simulator
+        else (platform.adapter_id if platform is not None else None)
+    )
     for table in (display, inputs):
-        if table.get('adapter') != 'simulator':
+        if table.get('adapter') != expected_adapter:
             raise DeviceConfigurationError('Unsupported device adapter')
     for key in ('ptt_binding', 'power_binding'):
         if inputs.get(key) != {'ptt_binding': 'ptt', 'power_binding': 'power'}[key]:
@@ -164,11 +207,24 @@ def read_configuration(path: str | None, simulator: bool) -> DeviceConfiguration
         raise DeviceConfigurationError('display.scale: unsupported range')
     if 'output' in display:
         raise DeviceConfigurationError('display.output: unsupported simulator output')
+    optional_ports = {
+        'indicator': platform.indicator if platform is not None else None,
+        'haptics': platform.haptics if platform is not None else None,
+        'power': platform.shutdown if platform is not None else None,
+    }
+    enabled_ports: dict[str, bool] = {}
     for key in ('audio', 'camera', 'indicator', 'haptics', 'power'):
+        enabled_ports[key] = False
         if key in tables:
             optional = _table(tables[key], {'adapter'}, key)
-            if optional.get('adapter') != 'none':
+            supported = (
+                expected_adapter
+                if key in optional_ports and optional_ports[key] is not None
+                else 'none'
+            )
+            if optional.get('adapter') != supported:
                 raise DeviceConfigurationError(f'{key}: unsupported adapter')
+            enabled_ports[key] = optional.get('adapter') == expected_adapter
     if 'clipboard' in tables:
         clipboard = _table(tables['clipboard'], {'policy'}, 'clipboard')
         if clipboard.get('policy') != 'disabled':
@@ -186,6 +242,9 @@ def read_configuration(path: str | None, simulator: bool) -> DeviceConfiguration
         rotation_deg=rotation,
         scale=float(scale),
         touch=touch,
+        indicator=enabled_ports['indicator'],
+        haptics=enabled_ports['haptics'],
+        power=enabled_ports['power'],
         source=str(location),
     )
     width, height = config.logical_size
@@ -193,8 +252,8 @@ def read_configuration(path: str | None, simulator: bool) -> DeviceConfiguration
         raise DeviceConfigurationError(
             'Display requires at least 360 × 640 logical units'
         )
-    if not simulator:
+    if not simulator and platform is None:
         raise DeviceConfigurationError(
-            'Physical device adapters are not installed. Simulator requires --simulator.'
+            'Physical device adapter is not installed. Simulator requires --simulator.'
         )
     return config

@@ -8,6 +8,8 @@ from importlib import metadata
 import threading
 from typing import Optional, Protocol, cast
 
+from .platform import PlatformBindings
+
 
 FRONTEND_ENTRY_POINT_GROUP: str = 'metor.ui_frontends'
 FRONTEND_LAUNCH_CONTRACT_VERSION: int = 2
@@ -272,6 +274,9 @@ class FrontendLaunchContext:
         host (FrontendHost): Deferred base-distribution bootstrap service.
         start_daemon (bool | None): Invocation-specific daemon autostart override.
         contract_version (int): Public frontend launch-contract generation.
+        device_config (str | None): Explicit device configuration path.
+        simulator (bool): Whether isolated simulator mode was requested.
+        platform (PlatformBindings | None): Prevalidated local platform ports.
 
     Returns:
         None
@@ -283,6 +288,7 @@ class FrontendLaunchContext:
     contract_version: int = FRONTEND_LAUNCH_CONTRACT_VERSION
     device_config: str | None = None
     simulator: bool = False
+    platform: PlatformBindings | None = None
 
 
 class FrontendEntry(Protocol):

@@ -1,5 +1,6 @@
 """Lazy GUI entry point; validation precedes toolkit, host and driver work."""
 
+from dataclasses import replace
 import os
 import sys
 
@@ -21,7 +22,9 @@ class GuiEntry:
             int: Native application status or safe startup failure.
         """
         try:
-            configuration = read_configuration(context.device_config, context.simulator)
+            configuration = read_configuration(
+                context.device_config, context.simulator, context.platform
+            )
         except DeviceConfigurationError as exc:
             sys.stderr.write(f'{exc}\n')
             return 2
@@ -44,7 +47,10 @@ class GuiEntry:
             return 2
         from metor.ui.gui.app import MetorApp
 
-        app = MetorApp(context, configuration)
+        active_context = replace(
+            context, platform=configuration.activate_platform(context.platform)
+        )
+        app = MetorApp(active_context, configuration)
         app.run()
         return app.exit_status
 

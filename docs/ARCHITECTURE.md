@@ -359,6 +359,29 @@ local shutdown still requires authorized deployment binding, confirmed Core
 preparation and exclusive host/runtime coordination. Simulator composition must
 not receive real destructive or shutdown adapters.
 
+`PlatformBindings` composes those independent ports for one validated adapter ID
+without merging their authority. A deployment injects it through the public
+`FrontendLaunchContext`; strict device TOML must name the same adapter before the
+GUI subscribes. Optional indicator, haptic and shutdown ports are exposed only
+when their matching TOML tables name that adapter; omission disables the
+capability. The GUI reads cached status separately, drains ordered inputs on the
+UI thread, and sends actuator requests off that thread. Before normal power it
+also rejects a remote selection or another running local profile. The shutdown
+port is the privileged deployment boundary and must close the remaining race by
+enforcing local privilege plus exclusive runtime ownership; the GUI first proves
+the current local-profile binding and required Core lifecycle milestone. No
+binding means physical mode fails closed, and simulator mode rejects a binding.
+
+Normal appliance power and emergency purge remain different transactions.
+Normal power requires explicit V21 confirmation followed by capture/owner
+finalization and `PrepareProfileExit`. V22 asks Core for exactly one operation
+only after the continuous physical chord and, while restricted, the immutable
+`device_lifecycle` grant. `SelfDestructInitiated`, EOF and
+`SelfDestructSafe` without a terminal cleanup result do not invoke shutdown. A
+safe operation whose cleanup result is lost uses the bounded cleanup wait before
+one shutdown request. Adapter acceptance remains distinct from completed OS
+power-off.
+
 Streaming `CapturePort` and `OutputPort` also live in this SDK package and are
 used by the GUI's existing production workers. They preserve independent duplex
 ownership. The native PortAudio implementation and PCM codec remain in the GUI

@@ -30,6 +30,8 @@ class GuiLimits:
     PLAYBACK_QUEUE: int = 64
     AUDIO_ENDPOINTS: int = 128
     HELD_KEYS: int = 256
+    HARDWARE_INPUT_RECORDS: int = 64
+    HARDWARE_STATUS_SECONDS: float = 1.0
     MESSAGE_ID_BYTES: int = 16
     TEXT_CONTEXTS: int = 32
     TEXT_BYTES: int = 256 * 1024

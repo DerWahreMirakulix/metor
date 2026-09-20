@@ -92,6 +92,12 @@ def settings_body(controller: GuiController, refresh: Callable[[], None]) -> Box
         )
     )
     body.add_widget(Label('Device', role='peer'))
+    if controller.device.battery_status:
+        body.add_widget(
+            Label(
+                controller.device.battery_status, role='support', tone='textSecondary'
+            )
+        )
     core_settings_group(controller, body, 'Device')
     body.add_widget(audio_routes_body(controller, refresh))
     body.add_widget(
@@ -110,6 +116,8 @@ def settings_body(controller: GuiController, refresh: Callable[[], None]) -> Box
         refresh()
 
     body.add_widget(Action('Lock Metor', lock))
+    if controller.device.power_available:
+        body.add_widget(Action('Power off', controller.device.open_power_menu))
 
     def manage() -> None:
         """Opens protected lock-method management.

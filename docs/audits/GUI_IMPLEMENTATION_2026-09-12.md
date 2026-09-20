@@ -174,11 +174,90 @@ whitespace pass. Generated documentation is fresh/reproducible. Both approved
 inputs and their durable copies retain the original SHA-256 values. No
 application, launcher, IPC, storage or cryptographic generation was bumped.
 
+### Typed device lifecycle continuation
+
+`PlatformBindings` now composes one bounded adapter identity with separate
+hardware-status, input, indicator, haptic and shutdown ports. It is an additive
+field on `FrontendLaunchContext`; it does not combine those ports or route them
+through notifications. Physical configuration must name the injected adapter ID.
+Missing/mismatched bindings fail closed, and simulator mode rejects physical
+bindings. Optional indicator, haptic and shutdown ports are activated only when
+their own configuration tables name that ID; omission disables the capability.
+No production driver ID has been registered.
+
+The GUI subscribes only after configuration validation, retains at most 64
+complete input samples, and drains them on the UI thread through the existing
+Power/PTT arbiter. Gaps, overflow, duplicate sequence values and initially held
+controls cancel safely and require observed release. Cached battery status uses
+its independent freshness contract. Indicator/haptic requests remain optional,
+content-free actions; none of these facts or events grants Core authority.
+
+V21 now opens only from long Power or the supported-device Settings action. An
+explicit Power off finalizes this GUI's capture and staging owner, revalidates a
+local non-remote host selection, refuses another running local profile, confirms
+`PrepareProfileExit`, disconnects, and then calls the fixed shutdown port on a
+worker. The port retains atomic deployment privilege and exclusive-runtime
+enforcement across the remaining race. Failed or unknown preparation never
+reaches the actuator. A confirmed preparation with failed actuation may retry
+only the actuator and remains covered.
+
+V22 now connects the five-second continuous chord to one exact
+`SelfDestructCommand`. A covered client requires Core's returned
+`device_lifecycle` grant; hardware never supplies authentication and the existing
+`self_destruct_requires_unlock` restriction remains authoritative. Initiated,
+EOF, key destruction, runtime release, Completed without combined Safe, and Safe
+without a terminal cleanup outcome cannot request shutdown. Combined Safe plus
+Completed/CleanupFailed permits one request. If terminal reporting is lost after
+Safe, the existing five-second cleanup wait expires before that request. The
+same wait applies if an already queued Safe milestone is installed after EOF;
+the earlier EOF is not reused as terminal cleanup. The
+privileged shutdown port remains responsible for deployment-local permission and
+exclusive runtime ownership; its Accepted result is not proof that the OS powered
+off.
+
+Ten deterministic device tests pass. The combined targeted run of device,
+purge observation, profile lifecycle and security tests passes **31 tests in
+109.611 seconds** with local IPC enabled
+(`/tmp/metor-device-lifecycle-targeted-final.log`). It includes an actual temporary
+encrypted Core purge driven from the physical-chord integration through exact
+safe/terminal milestones into a shutdown spy. It performs no owner-profile purge,
+OS shutdown or hardware GPIO action.
+
+Current-source static gates pass: Ruff across **546 files**, format verification
+across **546 files**, mypy across **462 source files**, distribution/frontend
+boundaries, generated-document freshness/reproducibility and whitespace checks.
+The expanded current-source native matrix passes **46/46** SDL offscreen fixtures
+at **360 × 640 / 150%** (`/tmp/metor-native-device-lifecycle-final`), including
+the new V21 Power menu and V22 physical-chord progress surfaces. The first V22
+fixture rejected an unsupported Kivy `Label` keyword; the corrected visible and
+accessible progress copy passed the rerun and complete matrix. These fixtures
+use synthetic DTOs and input and do not establish physical-device support.
+
+The final complete regression run passes **673 tests in 647.716 seconds** with
+local IPC enabled (`/tmp/metor-regression-device-lifecycle-final2.log`). Four
+current-source bundles build on Linux and Windows. On both systems, isolated
+installed-consumer/co-install/uninstall checks and all four native offline ZIP
+installers pass. All nine Metor wheels per system match the current `src/` bytes
+with zero mismatches. The freshly installed GUI wheel starts and stops through
+the real common CLI outside the checkout in desktop and simulator mode on Linux
+and Windows. Linux artifacts are under
+`/tmp/metor-gui-lifecycle-bundles-final`; Windows artifacts are under the local
+temporary `metor-gui-lifecycle-bundles-final` directory.
+
+The authorized Razer BlackShark V2 HS 2.4 route passes again from the freshly
+installed Windows GUI wheel: **30,720 bytes / 960 ms**, 2.609 seconds and
+151,285,760-byte sampled RSS, using synthetic focused PTT, actual capture and
+playback, public SDK and an isolated temporary encrypted Core. The first attempt
+exposed a fixture-only early observation of playback before its worker started;
+the fixture now waits for an actual terminal playback state. The passing result
+retains an unsent owned DROP draft, creates no outbox publication and exports no
+audio. It remains neither physical-button nor acoustic/AEC evidence.
+
 ### Outstanding completion gates after that checkpoint
 
 This continuation does **not** yet close the GUI assignment. The public platform
-contracts do not by themselves implement registered physical drivers, the V21
-prepared-power flow or V22 authorized initiation/host coordination. Native
+contracts and generic V21/V22 orchestration do not provide a registered production
+physical driver, real OS shutdown or physical-appliance evidence. Native
 screen-reader coverage across all views and remaining keyboard/optical
 permutations are still open. Full GUI duplex receive/playback
 during TX, permission/device loss, OS lock/suspend/resume and sustained combined
@@ -658,8 +737,8 @@ functional requirements without replacing their original text.
 | GUI-CONTACT-01–04 | Saved intent flows, guarded rename/demotion/bulk removal, bounded pages and independently decoded native QR | Camera adapter and full scale/stale-action matrix; stopped-profile generation/readback implemented, G3/G5 |
 | GUI-HISTORY-01 | Bounded summary/technical Core metadata pages, retention flags and confirmed full ledger clear; real pagination/uncertain-clear tests | Complete native failure/scale matrix, G3/G5 |
 | GUI-SET-01–04 | Protected defaults/CAS, full-strength policy auth, safe Core descriptor editor, exact receive scope and stale/unknown saves | Complete GUI preference C12 and native modal keyboard/settings matrix, G2/G5 |
-| GUI-LIFE-01–04 | Profile switch and GUI-only close implemented with typed phases and owner cleanup | Prepared physical power and complete lifecycle failure matrix, G5 |
-| GUI-PURGE-01–03 | Existing authorization preserved; actual Core scoped runtime-release/combined-safe reports tested | Physical binding, chord arbitration and GUI power integration, G2/G5 |
+| GUI-LIFE-01–04 | Profile switch, GUI-only close and injected V21 prepared-power orchestration implemented with typed phases and owner cleanup | Production physical adapter/OS shutdown and complete lifecycle failure matrix, G5 |
+| GUI-PURGE-01–03 | Existing authorization preserved; exact physical-chord initiation, actual Core scoped safe/terminal reports and one gated injected shutdown request tested | Production physical adapter/destruction-status recovery and appliance evidence, G2/G5 |
 | GUI-SAFE-01–03 | Local assets/plain labels; credential/composer export disabled | Complete clipboard/accessibility/rendering and status semantics, G3/G6 |
 | GUI-PLAT-01–06 | ADR, parser, candidate native port, support manifest/RSS samples | Physical adapters, duplex acoustics, latency/buffer stress/indicators, G1/G4 |
 | GUI-DESIGN-01–04 | Approved copied packet, Penpot inspection, four native fixtures | Complete layout/state/asset/accessibility realization, G6 |
@@ -679,14 +758,14 @@ functional requirements without replacing their original text.
 | V16–V17 | Bounded Notification Center, protected preferences and safe Core descriptor editors implemented; full matrix open |
 | V18–V19 | Bounded activity/technical history and platform diagnostics implemented; complete native state/scale matrix open |
 | V20 | Implemented bounded catalog/forms and phase-aware switch; full scale/failure matrix remains open; stopped-runtime address entry implemented |
-| V21 | Partial normal window detach; prepared exit/power absent |
-| V22 | Read-only scoped Core milestone view implemented/tested; physical arming/trigger/shutdown binding open |
+| V21 | Desktop detach plus injected-device explicit menu, Core preparation and typed shutdown outcome implemented; real OS adapter/evidence open |
+| V22 | Five-second chord, scoped initiation, exact Core milestones and safe-terminal shutdown gating implemented; real physical adapter/evidence open |
 | V23 | Partial explicit config/display errors and bootstrap error cover |
 | A01–A04, A08, A11 | Partial route/explicit command/text submission boundaries; full eligibility/reconciliation missing |
 | A05–A07, A09–A10 | Exact accept/decline/open-call, qualified route change and ended-context close implemented; complete race matrix open |
 | A12–A22 | PTT/play/review, fallback/delete/clear and application lock implemented; delivered resend implemented; full native media acceptance open |
 | A23 | GUI-only finalization/owner release/detach, one draft-loss confirmation and protected recovery exit choice implemented; full native failure matrix remains open |
-| A24–A25 | Open: physical shutdown/purge not bound |
+| A24–A25 | Generic typed binding and full software gating implemented; production physical adapter and actual OS/destructive validation open |
 | S01–S07 | Partial loading/empty/busy/error/unknown/stale presentation; full identity and input retention not implemented |
 | S08–S09 | Partial draft/mailbox rejection and unavailable media labels; media interruption and adapter recovery absent |
 | S10–S11 | Partial authorization restriction/challenge/cooldown; complete lifecycle families pending |

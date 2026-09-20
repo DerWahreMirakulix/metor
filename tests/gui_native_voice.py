@@ -141,6 +141,7 @@ def main() -> None:
             elif (
                 phase == 'playback'
                 and gui.playback.progress is not None
+                and gui.playback.progress.state != 'playing'
                 and not gui.playback.running
             ):
                 assert gui.playback.progress.state == 'complete', (

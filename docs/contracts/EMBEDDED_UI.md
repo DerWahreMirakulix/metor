@@ -37,6 +37,17 @@ notification hook. See the canonical
 These local contracts neither add IPC authority nor make an untested adapter a
 supported appliance.
 
+`PlatformBindings` is the frontend-neutral composition object. It keeps status,
+input and each actuator as separate ports and carries one bounded registered ID.
+An appliance owner may inject it through `FrontendLaunchContext`; the GUI accepts
+physical mode only when strict configuration names the same ID. Simulator mode
+rejects all physical bindings. Optional actuator ports remain unavailable unless
+their matching configuration tables explicitly select that ID. Before normal
+power the GUI rejects remote ownership and another running local profile. A
+shutdown port must atomically enforce its own local privilege and exclusive
+host/runtime ownership and is called only after the GUI has confirmed the
+appropriate Core lifecycle boundary.
+
 Opening a view is never a network action. A frontend must issue explicit typed
 commands for connect, reconnect, fallback, accept, reject, disconnect, consume,
 or dismiss behavior.

@@ -334,6 +334,7 @@ class SecurityController:
                 live_while_locked=requested is not None,
                 accept_while_locked=self._policy.accept_live_locked,
                 notification_privacy=self._policy.notifications_locked,
+                device_lifecycle=controller.device.enabled,
             )
             if controller.submit(
                 'security:restrict',

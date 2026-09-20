@@ -47,9 +47,19 @@ operations, full-password change and stopped-profile address generation/readback
 Core identity keys are reused; the GUI explains this before requesting full
 target-password authorization.
 Switch uses actual phases, independent target credentials and complete hydration;
-unknown preparation never automatically unlocks the old profile. V22 now observes actual Core destruction milestones through the original
-initiating SDK connection, with distinct unconfirmed, safe and cleanup-failed
-results. No physical purge trigger or host shutdown is bound. Peer views expose headset-qualified
+unknown preparation never automatically unlocks the old profile. Injected
+`PlatformBindings` now connect bounded hardware status, ordered Power/PTT input
+and separate actuator ports to V21/V22. Normal Power off finalizes this GUI's
+capture/owner, rejects another active local runtime, confirms
+`PrepareProfileExit`, disconnects, then invokes the fixed shutdown port. Optional
+actuators are filtered by their explicit device-configuration tables. The
+five-second physical chord requests exactly one authorized
+purge; locked use requires Core's prior-authenticated `device_lifecycle` grant.
+V22 observes actual Core destruction milestones through the original initiating
+SDK connection, with distinct unconfirmed, safe and cleanup-failed results.
+Shutdown follows only combined safe plus terminal cleanup, or the specified
+bounded wait after safe when terminal reporting is lost. No production physical
+adapter or actual OS shutdown is registered or claimed. Peer views expose headset-qualified
 PTT and exact-owner DROP review. Core owner leases, allocation journaling and interrupted LIVE
 recovery are implemented and tested; GUI bootstrap registers its disposable owner.
 Bounded PCM playback, manual output priority and foreground auto-play are implemented;

@@ -114,6 +114,7 @@ class MetorApp(App):
             focus=self._focus,
         )
         Clock.schedule_interval(self._poll, GuiLimits.UI_TICK_SECONDS)
+        self.controller.device.start()
         self.refresh()
         return root
 
@@ -335,6 +336,7 @@ class MetorApp(App):
         if self.input_dock is not None:
             self.input_dock.hide()
         TextField.keyboard_owner = None
+        self.controller.device.close()
         Window.unbind(
             on_request_close=self._close,
             on_keyboard=self._keyboard,

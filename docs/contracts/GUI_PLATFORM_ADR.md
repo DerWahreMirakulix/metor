@@ -4,15 +4,15 @@ Status: vertical-slice validation in progress; no finished-platform claim.
 Inputs: functional/layout v1.0. Integration gaps are tracked in
 [GUI_INTEGRATION_MAP.md](GUI_INTEGRATION_MAP.md).
 
-Current verification (20 September): 657 regression tests, 44 minimum-size/150%
-native SDL fixtures, fresh Linux bundles/consumers/installers and installed
-desktop/simulator launch pass. Fresh Windows installed launch and actual Razer
-capture/review also pass (33,280 bytes / 1,040 ms). On the RTX 4060 host, the
+Current verification (20 September): 673 regression tests, 46 minimum-size/150%
+native SDL fixtures, fresh Linux and Windows bundles/consumers/installers and
+installed desktop/simulator launch pass. Fresh Windows installed launch and
+actual Razer capture/review also pass (30,720 bytes / 960 ms). On the RTX 4060 host, the
 64-row synthetic input load from a local Windows installation measures 297 ms
 first input and 71.8 ms subsequent p95; the WSL UNC installation measures about
 1.26 seconds subsequent p95. Deployment location is part of the measurement.
-Native screen-reader, complete duplex/failure and authorized device-lifecycle
-integration remain separate open gates; see the dated acceptance report.
+Native screen-reader permutations, complete duplex/failure and physical adapter
+acceptance remain separate open gates; see the dated acceptance report.
 
 ## Rendering and deployment
 
@@ -120,9 +120,29 @@ The SDK now owns `metor.client.platform`; active GUI capture/playback workers
 consume its audio contracts. Physical button arbitration accepts its ordered
 `ButtonSample` observations and cancels on sequence loss, duplicate delivery or
 initially held controls. Status freshness and typed actuator outcomes are
-separate from notifications. No board selection is required to implement these
-contracts; actual adapter support and lifecycle integration still need separate
-implementation and verification.
+separate from notifications. `PlatformBindings` now composes these independent
+ports under one validated ID and is injected through `FrontendLaunchContext`.
+Physical configuration must name that exact ID; no binding fails closed and
+simulator rejects a binding. Optional action ports are activated only when their
+own configuration tables select that ID; table omission disables the capability.
+Cached battery status is read independently from input and actuation.
+
+The GUI drains a bounded complete-sample queue on its UI thread. V21 requires an
+explicit Power off action, finishes local capture/owner state, confirms
+that the selected runtime is local and no other local profile is running,
+confirms `PrepareProfileExit`, disconnects, and only then calls the fixed shutdown
+port on a worker. The port still owns atomic deployment privilege and exclusive
+runtime coordination. V22 retains continuous-chord/release arbitration, requests one exact
+Core operation, and requires a restricted `device_lifecycle` grant when covered.
+Shutdown is never requested from Initiated, EOF, key destruction, runtime release
+or Safe alone. It requires combined Safe plus a terminal cleanup result, or the
+five-second cleanup wait after Safe when transport/terminal reporting is lost.
+If an already queued Safe milestone is installed after EOF, that prior EOF is
+cleared as a terminal fact and the same five-second cleanup wait still applies.
+The privileged port remains responsible for deployment-local authority and
+exclusive runtime ownership. No board selection is required for this generic
+integration; actual driver/OS shutdown and physical appliance evidence remain
+separate gates.
 
 The older unshipped `metor.ui.embedded.platform` prototype is historical and is
 not the new public platform boundary. In particular, its combined battery/power

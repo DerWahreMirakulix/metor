@@ -52,6 +52,7 @@ from .profiles import ProfileCatalog, ProfileTransition, ProfileIdentity
 from .resend import ResendActions
 from .receipts import ReceiptReconciliation
 from .purge import PurgeMonitor
+from .device import DeviceLifecycle
 
 
 class GuiController:
@@ -107,6 +108,7 @@ class GuiController:
         self.resend = ResendActions(self)
         self.receipts = ReceiptReconciliation(self)
         self.purge = PurgeMonitor(self)
+        self.device = DeviceLifecycle(self, context.platform)
 
     def submit(
         self,
@@ -331,6 +333,7 @@ class GuiController:
             bool: Whether the presentation changed.
         """
         changed = self.purge.poll()
+        changed = self.device.poll() or changed
         if self.purge.active:
             return changed
         initially_covered = self.state.covered
@@ -347,6 +350,8 @@ class GuiController:
                 self.purge.poll()
                 if self.purge.active:
                     return True
+                continue
+            if self.device.install(update):
                 continue
             if self.lifecycle.install(update):
                 continue

@@ -24,7 +24,7 @@ and `interrupted_voice_recovery`.
 
 | Requirement | Public boundary / owner | Baseline availability and failure contract | Evidence target |
 | --- | --- | --- | --- |
-| Owner platform clarification / PLAT | `metor.client.platform`; SDK-owned local contracts | Frontend-independent typed hardware status, ordered input, streaming audio and controlling-action ports are separate. Expired facts become unknown; input gaps cancel held actions; actuator outcomes do not grant Core authority. GUI audio consumers and physical arbitration use the contracts; registered actuator/status drivers remain unbound. | `test_platform_contracts`, `test_gui_audio`, `test_gui_buttons`, `test_gui_playback`; 20 September report |
+| Owner platform clarification / PLAT | `metor.client.platform`; SDK-owned local contracts | Frontend-independent typed hardware status, ordered input, streaming audio and controlling-action ports are separate. `PlatformBindings` composes one validated ID without merging authority; the launch context injects it. Optional actuator ports require their matching config table. Expired facts become unknown; input gaps cancel held actions; actuator outcomes do not grant Core authority. GUI audio, cached status, input and lifecycle consumers use the contracts; no production physical driver is registered. | `test_platform_contracts`, `test_gui_device_lifecycle`, `test_gui_audio`, `test_gui_buttons`, `test_gui_playback`; 20 September report |
 | ARCH-01–04, START-01–03, BOOT | `metor.client.FrontendHost`, `FrontendInteractions`, `FrontendLaunchContext`; base host implementation | Deferred bootstrap, list/select/create exist; typed bootstrap rejection. Optional device_config and simulator launch fields are now added with defaults. | GAT-31–42 |
 | API-02 stable profile identity | `RuntimeSnapshotEvent.profile_instance_id`, `GuiPreferencesEvent.profile_instance_id`; Core storage | Schema 4 persists an opaque instance ID. Rename/database move preserves it; recreated storage gets a new identity. | `test_gui_metadata`, GAT-24, 61, 62 |
 | API-03 snapshot | `MetorClient.register_live_consumer`, `runtime_snapshot`; Core `RuntimeSnapshotEvent` | Epoch/revision and explicit unavailable event exist. Snapshot does not supersede media or operation results. | GAT-42–45 |
@@ -35,8 +35,8 @@ and `interrupted_voice_recovery`.
 | ACT-03–10 | Connect/Accept/Reject/Disconnect/Retunnel, Fallback, DismissLiveContext; Core | Explicit operations exist. Snapshot now projects exact recipient pending handles, accepted call continuity and LIVE context generations. Shared fallback/dismiss GUI and qualified End/Cancel/Change route are implemented; complete native lifecycle acceptance remains open. | GAT-03–06, 13–16, 57, 60 |
 | LOCK-01–05 | RestrictClient/ReauthorizeClient/ConfigureQuickUnlock; Core | Per-session restriction and anonymous handles exist. Full-strength configuration and generation revocation need enclosing-path verification. | GAT-20–23, 56–60 |
 | CONTACT / HISTORY | Contact DTOs, `validate_contact_qr`, history DTOs; SDK/Core | Public contact validation and mutations exist; GUI must preserve intent and invalidate stale labels. | GAT-02, 03, 17–19, 68 |
-| LIFE-01–04 | `ProfileRuntimeCoordinator`; host/Core | Phase-aware switch and prepare-exit exist. Window close only detaches; producer ownership must first be resolved. | GAT-24–26, 62–64 |
-| PURGE-01–03 | SelfDestruct events; Core/platform | Baseline still enforces `daemon.self_destruct_requires_unlock` in addition to prior-authenticated restricted lifecycle capability. GUI must obey it, never change the setting as a bypass. KeyDestroyed alone lacks an explicit combined runtime-release power-safe guarantee. | GAT-27, 65, 66 |
+| LIFE-01–04 | `ProfileRuntimeCoordinator`, `runtime.device.PowerFlow`; host/Core/platform | Phase-aware switch exists and desktop close only detaches. Injected-device V21 finalizes its owner, rejects remote or competing active local runtimes, confirms local `PrepareProfileExit`, disconnects, then requests the fixed shutdown port. Unconfirmed preparation never reaches the actuator, and the port retains atomic exclusive-host enforcement. | `test_gui_lifecycle`, `test_gui_device_lifecycle`; GAT-24–26, 62–64 |
+| PURGE-01–03 | SelfDestruct events; Core plus `runtime.device` | Restricted use requires the prior-authenticated `device_lifecycle` grant and still obeys `self_destruct_requires_unlock`; hardware supplies no proof. Exact operation/profile milestones drive V22. Only combined Safe plus terminal cleanup, or the bounded post-Safe cleanup wait, permits one configured shutdown request. Initiated/EOF/individual milestones do not; a queued Safe installed after EOF starts the bounded cleanup wait rather than inheriting EOF as terminal. | `test_gui_purge`, `test_gui_purge_observation`, `test_gui_device_lifecycle`; GAT-27, 65, 66 |
 
 ## Ownership and compatibility
 
@@ -609,7 +609,12 @@ precise confirmation. The GUI remains responsive during finalization and owner
 release. The 65-second capture-wait ceiling permits the five-second local drain
 plus up to four default 15-second SDK waits. Expiry is unconfirmed preservation,
 never success; only the advertised protected owner-loss contract enables the
-explicit Exit anyway choice. Appliance power is still separate and unimplemented.
+explicit Exit anyway choice. Injected appliance power is implemented separately
+in `runtime.device`:
+V21 confirms Core preparation before the fixed shutdown port. Desktop exit keeps
+the semantics above. A second active local profile refuses preparation, and the
+configured shutdown port retains atomic exclusive-host enforcement. Production
+driver and physical appliance proof remain open.
 
 Password change uses `ChangePasswordCommand` with the actual full current
 password, replacement and local confirmation. Masked fields clear at admission;
@@ -760,8 +765,9 @@ cache and bounded drained-output coverage have separate responsibilities. Covera
 is volatile, target/activation-qualified and independent of source byte eviction;
 only successful output drain adds ranges. Fragment pressure loses knowledge
 conservatively. No IPC/schema/compatibility change accompanies this extraction.
-`platform.buttons` owns deterministic physical state/timing arbitration only;
-it grants no authorization and has no registered driver or shutdown effect yet.
+At this historical checkpoint, `platform.buttons` owned deterministic physical
+state/timing arbitration only; it granted no authorization and had no registered
+driver or shutdown effect.
 The current evidence and outstanding work are recorded in the
 [14 September pause handoff](../audits/GUI_IMPLEMENTATION_2026-09-12.md#14-september-pause-and-continuation-handoff).
 

@@ -9,6 +9,7 @@ from .actions import (
     ShutdownPort,
 )
 from .audio import AudioCapabilities, AudioEndpoint, CapturePort, OutputPort
+from .bindings import PlatformBindings
 from .inputs import ButtonSample, HardwareInputPort, InputSubscription
 from .status import (
     BatteryStatus,
@@ -34,5 +35,6 @@ __all__ = [
     'InputSubscription',
     'OutputPort',
     'PlatformActionResult',
+    'PlatformBindings',
     'ShutdownPort',
 ]

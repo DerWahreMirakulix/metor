@@ -5,12 +5,17 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
-from metor.client import FrontendLaunchContext, MetorClient, build_session_auth_proof
+from metor.client import (
+    FrontendLaunchContext,
+    FrontendProfileState,
+    MetorClient,
+    build_session_auth_proof,
+)
+from metor.client.platform import ButtonSample, PlatformActionResult, PlatformBindings
 from metor.core.api import (
     Delivery,
     IpcEvent,
     RuntimeSnapshotEvent,
-    SelfDestructCommand,
     SelfDestructInitiatedEvent,
     SelfDestructKeyDestroyedEvent,
     SelfDestructRuntimeReleasedEvent,
@@ -216,7 +221,7 @@ class PurgeObservationCoreTests(unittest.TestCase):
     """Checks GUI observation against one actual, explicitly isolated encrypted Core destruction."""
 
     def test_exact_gui_operation_observes_actual_safe_completion(self) -> None:
-        """Public SDK callbacks survive GUI privacy teardown and no host shutdown is invoked.
+        """The physical chord reaches exact Core safety before one shutdown-port request.
 
         Args:
             None
@@ -226,7 +231,16 @@ class PurgeObservationCoreTests(unittest.TestCase):
         fixture = support.GuiProducerTests()
         fixture.setUp()
         self.addCleanup(fixture.doCleanups)
-        gui = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        host = Mock()
+        host.profile_state.return_value = FrontendProfileState(
+            'voice-owned', True, False, True
+        )
+        shutdown = Mock()
+        shutdown.request_shutdown.return_value = PlatformActionResult.ACCEPTED
+        bindings = PlatformBindings('fixture', Mock(), shutdown)
+        gui = GuiController(
+            FrontendLaunchContext('voice-owned', host, platform=bindings)
+        )
         self.addCleanup(gui.close)
         generation = gui.state.generation
         terminal = threading.Event()
@@ -263,20 +277,32 @@ class PurgeObservationCoreTests(unittest.TestCase):
         gui.state.covered = False
         keyslot = fixture.pm.paths.get_keyslot_file()
         self.assertTrue(keyslot.exists())
-        self.assertTrue(
-            gui.command(
-                'A25-test', SelfDestructCommand('c' * 32), SelfDestructInitiatedEvent
-            )
-        )
+        now = time.monotonic()
+        for sample in (
+            ButtonSample(0, now, False, False),
+            ButtonSample(1, now + 1, True, True),
+            ButtonSample(2, now + 1 + GuiLimits.PURGE_SECONDS, True, True),
+        ):
+            gui.device.receive(sample)
+            gui.device.poll()
         deadline = time.monotonic() + 20
-        while not terminal.is_set() and time.monotonic() < deadline:
+        while (
+            not terminal.is_set() or not shutdown.request_shutdown.called
+        ) and time.monotonic() < deadline:
             gui.poll()
             terminal.wait(0.01)
         self.assertTrue(terminal.is_set())
+        self.assertTrue(shutdown.request_shutdown.called)
+        shutdown_worker = gui.device._purge_shutdown_worker
+        self.assertIsNotNone(shutdown_worker)
+        assert shutdown_worker is not None
+        shutdown_worker.join(3)
+        gui.poll()
         gui.poll()
         self.assertFalse(keyslot.exists())
         self.assertEqual(gui.state.route, Route('V22'))
         self.assertEqual(gui.purge.title, 'Profile access destroyed')
-        self.assertEqual(gui.purge.detail, 'File cleanup completed.')
+        self.assertEqual(gui.purge.detail, 'Powering off.')
+        shutdown.request_shutdown.assert_called_once_with()
         self.assertIsNone(gui.client)
-        self.assertEqual(gui.context.host.mock_calls, [])
+        host.profile_state.assert_called_once_with()
