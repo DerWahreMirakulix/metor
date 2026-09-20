@@ -90,6 +90,55 @@ class CoordinatorPhaseTests(unittest.TestCase):
         factory.assert_not_called()
 
 
+class NativeLifecycleTests(unittest.TestCase):
+    """Checks toolkit-independent focus and suspend orchestration."""
+
+    def setUp(self) -> None:
+        """Creates an inert GUI controller with observable lifecycle collaborators.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self.gui = GuiController(FrontendLaunchContext('lifecycle', Mock()))
+        self.addCleanup(self.gui.close)
+        self.gui.inputs = Mock()
+        self.gui.voice = Mock()
+        self.gui.playback = Mock()
+        self.gui.playback.auto.focused = True
+        self.gui.security = Mock()
+
+    def test_native_departure_revokes_input_and_both_audio_directions(self) -> None:
+        """Focus loss cannot retain a held PTT owner or active local media.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self.gui.native_departure()
+        self.gui.inputs.focus_lost.assert_called_once_with()
+        self.gui.voice.depart.assert_called_once_with()
+        self.gui.playback.stop.assert_called_once_with()
+        self.gui.security.lock.assert_not_called()
+
+    def test_suspend_adds_privacy_cover_without_synthesizing_resume_input(self) -> None:
+        """Suspend disables auto-play and locks after the lost-input barrier.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self.gui.suspend()
+        self.assertFalse(self.gui.playback.auto.focused)
+        self.gui.inputs.focus_lost.assert_called_once_with()
+        self.gui.voice.depart.assert_called_once_with()
+        self.gui.playback.stop.assert_called_once_with()
+        self.gui.security.lock.assert_called_once_with()
+
+
 class GuiLifecycleCoreTests(unittest.TestCase):
     """Uses real SDK/IPC, encrypted storage and inert local peer sockets; no hardware or Tor."""
 

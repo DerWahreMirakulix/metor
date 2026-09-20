@@ -377,6 +377,25 @@ class AutoPlaybackTests(unittest.TestCase):
         self.auto.poll()
         self.gui.playback.play.assert_not_called()
 
+    def test_incoming_output_remains_eligible_during_local_capture(self) -> None:
+        """A held local PTT worker never imposes a half-duplex output gate.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self.gui.voice.worker = Mock()
+        self.gui.voice.worker.done.is_set.return_value = False
+        self.gui.playback.play = Mock(return_value=True)
+        self.start('duplex')
+        self.assertEqual(len(self.auto.queue), 1)
+        self.auto.poll()
+        self.gui.playback.play.assert_called_once()
+        target = self.gui.playback.play.call_args.args[0]
+        self.assertEqual(target.msg_id, 'duplex')
+        self.assertTrue(self.gui.playback.play.call_args.kwargs['automatic'])
+
 
 if __name__ == '__main__':
     unittest.main()

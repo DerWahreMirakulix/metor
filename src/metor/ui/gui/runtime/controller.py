@@ -110,6 +110,30 @@ class GuiController:
         self.purge = PurgeMonitor(self)
         self.device = DeviceLifecycle(self, context.platform)
 
+    def native_departure(self) -> None:
+        """Revokes focus-owned input and media without changing authorization.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self.inputs.focus_lost()
+        self.voice.depart()
+        self.playback.stop()
+
+    def suspend(self) -> None:
+        """Covers private state and keeps input revoked until fresh native events.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self.playback.auto.focused = False
+        self.native_departure()
+        self.security.lock()
+
     def submit(
         self,
         operation: str,

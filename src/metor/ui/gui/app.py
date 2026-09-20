@@ -290,11 +290,19 @@ class MetorApp(App):
         if self.accessibility is not None:
             self.accessibility.native.focus(focused)
         if not focused:
-            PointerTooltip.clear_all()
-            self.controller.inputs.focus_lost()
-            self.controller.voice.depart()
-            self.controller.playback.stop()
-            self.refresh()
+            self._native_departure()
+
+    def _native_departure(self) -> None:
+        """Revokes focus-owned interaction and media on focus or session departure.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        PointerTooltip.clear_all()
+        self.controller.native_departure()
+        self.refresh()
 
     def on_pause(self) -> bool:
         """Covers and safely stops capture on supported native suspend notifications.
@@ -304,9 +312,22 @@ class MetorApp(App):
         Returns:
             bool: True retains the application behind its authorization cover.
         """
-        self.controller.voice.depart()
-        self.controller.security.lock()
+        if self.accessibility is not None:
+            self.accessibility.native.focus(False)
+        PointerTooltip.clear_all()
+        self.controller.suspend()
+        self.refresh()
         return True
+
+    def on_resume(self) -> None:
+        """Repaints the retained privacy cover without restoring input or authorization.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self.refresh()
 
     def _close(self, *_args: object, **_kwargs: object) -> bool:
         """Keeps the window responsive until this GUI's local finalization and detach finish.
