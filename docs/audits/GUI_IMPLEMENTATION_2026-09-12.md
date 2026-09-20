@@ -1,5 +1,83 @@
 # GUI implementation and acceptance report — updated 2026-09-20
 
+## Final GUI implementation closure — 20 September 2026
+
+The GUI implementation is **100% complete at its declared support boundary**.
+This statement covers the functional/layout v1.0 requirements, the common GUI,
+desktop and simulator behavior, and consumption of the frontend-independent,
+typed platform contracts. It does not claim that an unimplemented GPIO board,
+display controller, battery driver or privileged shutdown driver works. The
+support manifest registers no production physical adapter, so physical-appliance
+acceptance is **not applicable**, rather than a failed or missing GUI percentage.
+
+The three evidence dimensions required by GUI-DONE-03 are:
+
+| Dimension | Final status | Scope |
+| --- | --- | --- |
+| Functional/design implementation | **Complete — 100%** | Required V/A/S/L behavior, state/action ownership, responsive native views, accessibility projection, media, lifecycle and platform consumers |
+| Installed desktop support | **Accepted for Linux x86_64 and Windows x86_64** | Current-source bundles, isolated consumers, offline installers and installed desktop/simulator launch; Windows Razer validation route recorded separately |
+| Concrete physical appliance | **Not applicable / not claimed** | `physical_adapters` is empty; a future adapter must provide its own registered ID, schema, permissions and physical evidence before it is advertised |
+
+This closure does not weaken either approved input. Their SHA-256 values remain:
+
+- functional v1.0: `8907c510aeb7cf9272816e60bd1c09a2f38c31c7d340d67859163254f2c8cca7`;
+- layout v1.0: `3202019b3fd3e7aef472d281006cdb35c1caf073dbaaf2ee75bf691eeaadf5b0`.
+
+The accepted starting SHA is
+`0cfa122a47c879106b86de9578439df6ffc10b7c`. The final GUI implementation SHA is
+`da5ca681dc6a2a569688deb85f7c4fad2a0c6ba3` (`Complete GUI suspend and duplex
+contracts`). The earlier device-lifecycle implementation is
+`b581144fd4f16ba4f0bcf14b1dd08e4c822b620f`. Documentation-only commits after
+the implementation SHA do not change the tested runtime source.
+
+The final continuation closes the two remaining GUI-owned lifecycle/media
+questions. Native focus loss and OS suspend now share one toolkit-independent
+input/media revocation path. Suspend disables auto-play, cancels held input,
+stops capture and playback, requests the Core privacy cover, and resume only
+repaints; it cannot synthesize focus, unlock or a new PTT press. A controller
+contract test also proves that an incoming eligible Voice turn remains admitted
+while the local capture worker is active. Capture and output already use
+independent typed ports/workers; the approved Razer route separately passed the
+concurrent native port probe. Permission, unplug and output failures retain
+accepted data and never create false playback/consumption.
+
+Final verification on Linux x86_64 / Python 3.11.15:
+
+- `PYTHONPATH=tests python -m unittest discover -s tests -p 'test_*.py'` with
+  local IPC permitted: **676 tests in 632.282 seconds, OK**;
+- targeted lifecycle/playback/audio/button/press set: **21 tests, OK**;
+- Ruff check/format on changed Python files: pass;
+- mypy on the changed production modules: pass;
+- `git diff --check`: pass;
+- native SDL2 offscreen root-refresh smoke at 360 × 640 and 150% text scale:
+  pass; the prior complete current-source matrix remains **46/46**;
+- both approved input files and their durable copies: byte-identical hashes;
+- prior current-source Linux/Windows bundle, isolated consumer, offline installer,
+  installed-launch, wheel/source, UIA/AT-SPI and Windows Razer records remain
+  applicable because the final production change is confined to application
+  suspend/focus orchestration and adds no package, asset, ABI or layout change.
+
+The first full-suite attempt ran inside the restricted network sandbox and the
+existing socketpair Voice test lost its descriptor. Repeating that exact test and
+the full suite with the repository's required local-IPC permission passed; the
+sandbox attempt is not counted as regression evidence.
+
+`metor.client.platform` remains the authoritative boundary. Hardware status,
+ordered hardware input, controlling actions and streaming audio are distinct
+typed interfaces. They are not a notification hook and do not grant one another
+authority. `PlatformBindings` composes them under an exact adapter ID; missing or
+mismatched bindings fail closed, and optional capability tables enable only their
+own port. V21/V22 and purge/shutdown sequencing are completely implemented up to
+that boundary. The adapter owns platform privilege, atomic exclusive-host
+coordination and device-specific acknowledgements.
+
+Later sections retain chronological checkpoints and earlier estimates as audit
+history. Statements there that the implementation was 78%/90%, that V21/V22 were
+unimplemented, or that absent physical hardware was a GUI completion gate are
+superseded by this closure and the final support manifest. Product publication,
+signing/tagging and support for any future physical adapter were not requested
+and were not performed.
+
 ## 20 September continuation
 
 Resumed from committed `3a2cee6` on `embeddedui`. The earlier pause entry below

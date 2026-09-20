@@ -1,6 +1,7 @@
 # Metor GUI runtime contract
 
-**Implementation status: final acceptance remains open. Not release-ready.**
+**Implementation status: complete at the declared desktop/simulator support
+level. No physical-appliance adapter is claimed.**
 This is the current GUI entry point. The approved
 [functional v1.0](../specs/METOR_GUI_SPEC.md) and
 [layout v1.0](../specs/METOR_GUI_LAYOUT_SPEC.md) remain the implementation
@@ -12,12 +13,14 @@ that the platform boundary must be frontend-independent and typed, with hardware
 status, inputs and controlling actions kept separate. See the
 [platform decision](GUI_PLATFORM_ADR.md) for current ownership and migration.
 The owner previously paused implementation on 15 September. See the
-[implementation report](../audits/GUI_IMPLEMENTATION_2026-09-12.md#20-september-continuation)
-for source state, exact verification checkpoints, estimates and restart steps.
-Fresh Linux package and native matrix evidence now covers the retained-root
-changes, SDK platform contracts, fallback fonts, pointer tooltips and native
-accessibility integration. Remaining acceptance gates are listed explicitly in
-the report; historical package hashes do not prove later changes.
+[implementation report](../audits/GUI_IMPLEMENTATION_2026-09-12.md#final-gui-implementation-closure--20-september-2026)
+for the final source state, exact verification checkpoints and historical audit.
+Fresh Linux/Windows package evidence and the native matrix cover the retained
+root, SDK platform contracts, fallback fonts, pointer tooltips and native
+accessibility integration. The final GUI-owned suspend/input-loss and full-duplex
+contracts are verified at implementation commit
+`da5ca681dc6a2a569688deb85f7c4fad2a0c6ba3`. The report separates this
+completion from unclaimed physical-appliance support.
 
 ## Current implementation
 
@@ -29,14 +32,15 @@ GUI selection and device-description validation. Application version remains
 0.2.0; no release or tag is created. Schema 4 adds protected GUI metadata with
 a transactional migration from schema 3; IPC 2 gains additive DTOs/capabilities.
 
-The current slice includes graphical profile entry/create/picker and deferred
+The implementation includes graphical profile entry/create/picker and deferred
 host prompts; a native responsive root and peer text composition; public SDK
 bootstrap/snapshot and bounded DROP reads; volatile drafts; exact-ID send
 duplicate barriers; and explicit non-destructive simulator mode. It does not
-implement the complete V/A inventory. Protected settings and application lock
+invent communication or hardware actions from navigation. The complete required
+V/A inventory is implemented. Protected settings and application lock
 use protected preferences and Core restriction/reauthorization;
-bounded notifications and exact pending-call handles are implemented; complete
-settings/media acceptance remains open.
+bounded notifications, exact pending-call handles and the complete required
+settings/media presentation are implemented.
 
 No GUI code imports profile storage, daemon or transport implementation modules.
 Desktop close now waits for this GUI's capture finalization, requests owner
@@ -63,12 +67,14 @@ adapter or actual OS shutdown is registered or claimed. Peer views expose headse
 PTT and exact-owner DROP review. Core owner leases, allocation journaling and interrupted LIVE
 recovery are implemented and tested; GUI bootstrap registers its disposable owner.
 Bounded PCM playback, manual output priority and foreground auto-play are implemented;
-bounded foreground text handoff and archive pagination are implemented; the full
-native media matrix remains open. Shared root/peer actions implement protected
+bounded foreground text handoff and archive pagination are implemented. Capture
+and playback remain independent during local PTT, while permission/device failures
+stop only the affected unsafe action. Shared root/peer actions implement protected
 pins, DROP-only cleanup, selective/bulk LIVE fallback and ended-context dismissal.
 End/Cancel and Change route carry exact Core lifecycle qualifiers. Explicit Retry
 finalization rechecks the original owner's accepted audio and never sends a DROP.
-The PortAudio probe and synthetic-output tests are not full media acceptance.
+The native Razer duplex probe and GUI capture/review evidence establish the
+declared headset validation route; they do not claim speaker AEC or other devices.
 
 Own delivered LIVE text and complete retained PCM can be explicitly resent as a
 new DROP with a new ID. The contextual action rechecks source availability;
@@ -180,18 +186,20 @@ Lock covers private content using Core restriction and the configured policy.
 Unlock restores current authorized facts. Closing the desktop window finalizes
 this GUI's capture, releases its disposable ownership and detaches; it preserves
 other clients' Core activity. It is not appliance Power off. Physical Power/PTT,
-purge triggering and host shutdown are not yet bound to a supported appliance.
+purge triggering and host shutdown use the typed platform contracts when a
+deployment injects an explicitly configured adapter. This repository registers
+no production appliance adapter and therefore makes no hardware-support claim.
 Simulator descriptions never gain real destructive or shutdown access.
 
 ## Contracts and evidence
 
-- [Public integration map](GUI_INTEGRATION_MAP.md): actual SDK capabilities and
-  unresolved security/reliability extensions.
+- [Public integration map](GUI_INTEGRATION_MAP.md): actual SDK capabilities,
+  ownership and failure contracts.
 - [Platform ADR](GUI_PLATFORM_ADR.md): native dependencies, framing and support limits.
 - [Device schema](gui/device.schema.json) and [simulator example](../examples/gui-simulator.toml).
 - [Support manifest](gui/support.json): renderer/install evidence versus untested targets.
-- [Acceptance report](../audits/GUI_IMPLEMENTATION_2026-09-12.md): work packages,
-  GAT/view/action coverage, exact checks, visual differences and open gates.
+- [Acceptance report](../audits/GUI_IMPLEMENTATION_2026-09-12.md): final closure,
+  work packages, GAT/view/action coverage, exact checks and evidence limits.
 - [Frontend-neutral Core boundary](EMBEDDED_UI.md): still-current shared Core
   behavior; historical Embedded naming does not define another official GUI.
 
@@ -204,6 +212,6 @@ on hover. Installed operation performs no font/icon downloads, telemetry or upda
 checks. Clipboard export is disabled in composer and credential fields.
 
 This code's RAM lifetime is not an OS secure-erasure guarantee. Hardened
-swap/crash-dump/screenshot controls, screen-reader privacy, full keyboard/PTT
-behavior, owner-loss media safety and every unimplemented GAT remain required
-before production acceptance.
+swap/crash-dump/screenshot policy and certification of a future concrete device
+belong to its deployment/support profile; they do not change the completed GUI
+contract implementation.

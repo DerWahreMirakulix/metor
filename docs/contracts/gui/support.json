@@ -1,5 +1,12 @@
 {
-  "status": "development_slice_incomplete",
+  "status": "gui_implementation_complete",
+  "completion": {
+    "gui_implementation_percent": 100,
+    "gui_contract_and_design": "complete at the declared desktop and simulator support level",
+    "desktop_installation": "tested on Linux x86_64 and Windows x86_64",
+    "physical_appliance": "not applicable: no production physical adapter is registered or claimed",
+    "release_publication": "not performed"
+  },
   "frontend": "gui",
   "distribution": "metor-ui-gui",
   "python_tested": "3.11.15",
@@ -14,7 +21,7 @@
   "linux_x86_64": {
     "offline_install": "tested",
     "offscreen_render": "tested",
-    "desktop_input": "untested",
+    "desktop_input": "native SDL keyboard dispatch tested offscreen; no physical-device input claim",
     "native_audio_devices_observed": 0,
     "headset_full_duplex": "untested",
     "speaker_aec": "unsupported",
@@ -60,6 +67,7 @@
     "actuator_adapters": "typed V21/V22 orchestration tested with spies; no production driver registered"
   },
   "device_lifecycle_implementation_commit": "b581144fd4f16ba4f0bcf14b1dd08e4c822b620f",
+  "gui_completion_implementation_commit": "da5ca681dc6a2a569688deb85f7c4fad2a0c6ba3",
   "arm_pi": "untested",
   "simulator_description_adapters": [
     "simulator"
@@ -67,6 +75,7 @@
   "host_shutdown": "typed fixed-port request occurs only after local single-runtime checks plus Core preparation, or exact safe purge terminal state; the port owns atomic exclusive-host enforcement; no OS adapter registered or real shutdown tested",
   "purge": "bounded physical-input composition, scoped grant, exact initiation and safe-terminal shutdown gating tested; no production hardware driver or real destruction/shutdown tested",
   "pause_checkpoint": "2026-09-15: retained root source has targeted native/static validation; installed artifacts/headset evidence predates final RootPanel/RootRow changes",
-  "current_checkpoint": "2026-09-20: 673-test regression, 31-test targeted lifecycle/Core run, 46/46 native matrix including V21/V22, current-source Linux/Windows bundles, isolated consumers, offline installers, installed desktop/simulator launch and installed Windows Razer capture/review pass; no production physical adapter or full acceptance claim",
-  "full_acceptance": false
+  "current_checkpoint": "2026-09-20: 676-test regression, GUI suspend/input-loss and capture/output duplex contracts, native 360x640/150% SDL smoke, prior 46/46 native matrix including V21/V22, current-source Linux/Windows bundles, isolated consumers, offline installers, installed desktop/simulator launch and installed Windows Razer capture/review pass",
+  "acceptance_at_claimed_support_level": true,
+  "physical_appliance_acceptance": "not applicable until a production adapter is registered and claimed"
 }

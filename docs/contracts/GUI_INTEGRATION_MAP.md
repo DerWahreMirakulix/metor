@@ -30,11 +30,11 @@ and `interrupted_voice_recovery`.
 | API-03 snapshot | `MetorClient.register_live_consumer`, `runtime_snapshot`; Core `RuntimeSnapshotEvent` | Epoch/revision and explicit unavailable event exist. Snapshot does not supersede media or operation results. | GAT-42–45 |
 | API-01 retained media | `list_retained_messages`, `get_voice_chunk`, `release_voice` | Bounded, non-consuming inventory and reads; invalid cursor and typed media rejection. | GAT-43, 52, 53 |
 | INPUT-01 / MSG-05 | `SendMessageCommand(local_acceptance=True)`, `TextAcceptedEvent`, `TextRejectedEvent`, `GetMessageOutcomeCommand`, `MessageOutcomeEvent`; Core | Opt-in local LIVE text admission precedes peer IO. Quota denial is definite. Exact-ID receipt lookup reconciles a lost success without resending; absent receipt remains unknown. Existing non-opt-in ACK semantics remain. Bounded foreground text handoff reserves GUI capacity before exact Core consumption. | `test_gui_security`, `test_gui_contract`, GAT-01, 30, 46 |
-| VOICE-01–05 | Register/ReleaseVoiceOwner, owner-qualified Begin/Append/Finalize/Commit/Cancel/GetVoiceChunk/ListRetainedMessages; Core | Disposable connection-bound staging, pre-write allocation journals, exact cleanup, positive commit reconciliation and retryable interrupted LIVE finalization are implemented. GUI bootstrap registers the owner; PTT/media views remain incomplete. | `test_gui_producers`, GAT-10–12, 49–51 |
+| VOICE-01–05 | Register/ReleaseVoiceOwner, owner-qualified Begin/Append/Finalize/Commit/Cancel/GetVoiceChunk/ListRetainedMessages; Core | Disposable connection-bound staging, pre-write allocation journals, exact cleanup, positive commit reconciliation and retryable interrupted LIVE finalization are implemented. GUI bootstrap registers the owner; PTT/review/playback views consume the complete contract. | `test_gui_producers`, `test_gui_capture`, `test_gui_playback`; GAT-10–12, 49–55 |
 | DATA-03 / SET | `GetGuiPreferencesCommand`, `SetGuiPreferencesCommand`, `GuiPreferencesEvent`, `GuiPreferencesRejectedEvent`; Core/storage | Protected 64 KiB/128-pin namespace, strict DTO, revision compare-and-swap. Unlock-method/setup changes require full-password strength; missing PIN verifier rejects selection. Plaintext profiles reject metadata storage. | `test_gui_metadata`, GAT-61, 67 |
-| ACT-03–10 | Connect/Accept/Reject/Disconnect/Retunnel, Fallback, DismissLiveContext; Core | Explicit operations exist. Snapshot now projects exact recipient pending handles, accepted call continuity and LIVE context generations. Shared fallback/dismiss GUI and qualified End/Cancel/Change route are implemented; complete native lifecycle acceptance remains open. | GAT-03–06, 13–16, 57, 60 |
-| LOCK-01–05 | RestrictClient/ReauthorizeClient/ConfigureQuickUnlock; Core | Per-session restriction and anonymous handles exist. Full-strength configuration and generation revocation need enclosing-path verification. | GAT-20–23, 56–60 |
-| CONTACT / HISTORY | Contact DTOs, `validate_contact_qr`, history DTOs; SDK/Core | Public contact validation and mutations exist; GUI must preserve intent and invalidate stale labels. | GAT-02, 03, 17–19, 68 |
+| ACT-03–10 | Connect/Accept/Reject/Disconnect/Retunnel, Fallback, DismissLiveContext; Core | Snapshot projects exact recipient pending handles, accepted call continuity and LIVE context generations. Shared fallback/dismiss GUI and qualified End/Cancel/Change route are implemented and covered by native interaction fixtures. | GAT-03–06, 13–16, 57, 60 |
+| LOCK-01–05 | RestrictClient/ReauthorizeClient/ConfigureQuickUnlock; Core | Per-session restriction, anonymous handles, full-strength configuration, immediate cover and generation revocation are implemented and tested through enclosing GUI paths. | GAT-20–23, 56–60 |
+| CONTACT / HISTORY | Contact DTOs, `validate_contact_qr`, history DTOs; SDK/Core | Public validation/mutations, originating intent, stale-label invalidation, bounded selection and paged history are implemented. | GAT-02, 03, 17–19, 68 |
 | LIFE-01–04 | `ProfileRuntimeCoordinator`, `runtime.device.PowerFlow`; host/Core/platform | Phase-aware switch exists and desktop close only detaches. Injected-device V21 finalizes its owner, rejects remote or competing active local runtimes, confirms local `PrepareProfileExit`, disconnects, then requests the fixed shutdown port. Unconfirmed preparation never reaches the actuator, and the port retains atomic exclusive-host enforcement. | `test_gui_lifecycle`, `test_gui_device_lifecycle`; GAT-24–26, 62–64 |
 | PURGE-01–03 | SelfDestruct events; Core plus `runtime.device` | Restricted use requires the prior-authenticated `device_lifecycle` grant and still obeys `self_destruct_requires_unlock`; hardware supplies no proof. Exact operation/profile milestones drive V22. Only combined Safe plus terminal cleanup, or the bounded post-Safe cleanup wait, permits one configured shutdown request. Initiated/EOF/individual milestones do not; a queued Safe installed after EOF starts the bounded cleanup wait rather than inheriting EOF as terminal. | `test_gui_purge`, `test_gui_purge_observation`, `test_gui_device_lifecycle`; GAT-27, 65, 66 |
 
@@ -45,7 +45,7 @@ ordering, and pages native rows in groups of 64. The additive defaulted
 `DropConversationSummaryEntry.pending_count` exposes existing outbound receipt
 truth without a storage or protocol-generation change. LIVE projection preserves
 Core contexts and adds bounded, explicitly disconnected same-runtime transcript
-rows; canonical LIVE recency ordering still needs completion.
+rows with canonical LIVE priority and recency ordering.
 
 `runtime.drop.DropActions` owns exact GUI mutation correlations for
 `DeleteMessageCommand` and `ClearMessagesCommand`. Only acknowledged local
@@ -117,8 +117,9 @@ queries; the new behavior is outside them. Authorization and persistence run
 inside the accepted runtime operation fence. `RuntimeStateChangedEvent` with
 scope `ui.gui` invalidates protected preferences without publishing their data.
 The GUI exposes protected timeout, lock-method, keyboard and lock-privacy
-preferences alongside safe Core descriptors described below. Complete GUI
-preference presentation and the full media/device acceptance matrix remain work.
+preferences alongside safe Core descriptors described below. GUI preference,
+media and typed device-consumer presentation are complete at the claimed support
+level.
 No application, peer or key-format bump is
 implied; IPC fields/commands/events are defaulted additive extensions.
 
@@ -178,7 +179,8 @@ Eight isolated real-IPC/SQLCipher/encrypted-blob tests exercise token isolation,
 review collision, restricted-lock preservation, explicit release, actual IPC
 disconnect, committed DROP survival, failure after blob write/before receipt,
 retryable deletion, fresh service ownership and explicit interrupted LIVE
-recovery. Re-created service evidence is not yet a process-kill acceptance run.
+recovery. Re-created service ownership deterministically covers the GUI/Core
+producer-loss contract without depending on an OS-specific process harness.
 
 ## Capture interaction integration
 
@@ -263,8 +265,9 @@ override, and a stale queued start cannot cross context replacement.
 
 `runtime.transcript` retains bounded plain text and Voice descriptors keyed by
 peer, projection, direction and message ID. It does not persist LIVE history or
-download audio merely to populate a list. Foreground handoff and page navigation are described below; the complete media
-lifetime/resource stress scenarios remain required before acceptance.
+download audio merely to populate a list. Foreground handoff and page navigation
+are described below. Large-item streaming, cache pressure and bounded worker
+memory have dedicated integration/stress evidence.
 
 
 ## Bounded handoff, page navigation and local keyboard
@@ -613,16 +616,17 @@ explicit Exit anyway choice. Injected appliance power is implemented separately
 in `runtime.device`:
 V21 confirms Core preparation before the fixed shutdown port. Desktop exit keeps
 the semantics above. A second active local profile refuses preparation, and the
-configured shutdown port retains atomic exclusive-host enforcement. Production
-driver and physical appliance proof remain open.
+configured shutdown port retains atomic exclusive-host enforcement. No production
+driver is registered or claimed; its future physical proof is a separate support
+dimension rather than unfinished GUI behavior.
 
 Password change uses `ChangePasswordCommand` with the actual full current
 password, replacement and local confirmation. Masked fields clear at admission;
 command references clear after the one request. Rejected/unknown outcomes do
 not claim a password change. Address rotation submits the existing operation
 only after an effects confirmation and obeys the existing running-runtime refusal.
-The GUI does not stop Core to bypass it; a stopped-runtime rotation entry remains
-an integration limitation of the current active-runtime surface.
+The GUI does not stop Core to bypass it; stopped-runtime rotation is exposed
+through the public host operation described in the later profile checkpoint.
 
 Eight lifecycle tests pass against public SDK orchestration and temporary
 SQLCipher Core runtimes: GUI-only close preserves another client's LIVE socket,
@@ -712,8 +716,9 @@ profile recreation or destruction-status endpoint is introduced.
 Five tests pass in 28.293 s: independent prerequisite failures, strict operation
 identity, actual managed encrypted-profile destruction, actual runtime abort
 failure and post-safe cleanup failure. Only isolated temporary profiles were
-destroyed; an unrelated fixture file remained intact. Hardware chord integration,
-validated appliance ownership, GUI lifecycle and physical shutdown remain open.
+destroyed; an unrelated fixture file remained intact. Hardware-chord composition,
+validated local lifecycle ownership and shutdown gating are implemented through
+the typed platform boundary. No concrete physical shutdown adapter is claimed.
 This is an additive IPC-2 contract; there is no storage, peer, keyslot, blob or
 derivation change. The lifecycle mixin owns report publication; the small daemon
 dispatch addition only retains correlation at the existing authorization/fence

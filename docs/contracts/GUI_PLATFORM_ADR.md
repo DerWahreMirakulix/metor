@@ -1,18 +1,21 @@
 # GUI platform implementation decision
 
-Status: vertical-slice validation in progress; no finished-platform claim.
+Status: GUI implementation complete at the declared desktop/simulator support
+level; no physical-appliance support claim.
 Inputs: functional/layout v1.0. Integration gaps are tracked in
 [GUI_INTEGRATION_MAP.md](GUI_INTEGRATION_MAP.md).
 
-Current verification (20 September): 673 regression tests, 46 minimum-size/150%
+Current verification (20 September): 676 regression tests, 46 minimum-size/150%
 native SDL fixtures, fresh Linux and Windows bundles/consumers/installers and
 installed desktop/simulator launch pass. Fresh Windows installed launch and
 actual Razer capture/review also pass (30,720 bytes / 960 ms). On the RTX 4060 host, the
 64-row synthetic input load from a local Windows installation measures 297 ms
 first input and 71.8 ms subsequent p95; the WSL UNC installation measures about
 1.26 seconds subsequent p95. Deployment location is part of the measurement.
-Native screen-reader permutations, complete duplex/failure and physical adapter
-acceptance remain separate open gates; see the dated acceptance report.
+External Windows UIA and Linux AT-SPI clients, capture/output independence,
+device-loss boundaries and native lifecycle privacy are covered at the declared
+GUI boundary. Product-specific screen-reader certification and physical adapter
+acceptance are separate support dimensions; neither is claimed by this manifest.
 
 ## Rendering and deployment
 
@@ -106,9 +109,11 @@ startup also passed. The 2026-09-14 native GUI test additionally captured/review
 (1.16 seconds) using focused synthetic Space input, actual Razer I/O, the public
 SDK and a temporary encrypted Core. No outbox message or audio export occurred.
 Canonical Windows and Linux offline ZIP installers and both UI removal orders
-passed on 15 September. Headset acoustics, complete duplex/unplug behavior and
-physical appliance integration remain explicit gates. Current-source artifact
-fingerprints are recorded in the acceptance report.
+passed on 15 September. The route proves concurrent native capture/output and
+installed GUI capture/review. It is a validation route rather than a general
+headset, speaker/AEC or physical-appliance support claim. Permission and unplug
+failures are handled and tested at the typed port boundary. Current-source
+artifact fingerprints are recorded in the acceptance report.
 
 ## Resource and safety constraints
 
@@ -141,8 +146,8 @@ If an already queued Safe milestone is installed after EOF, that prior EOF is
 cleared as a terminal fact and the same five-second cleanup wait still applies.
 The privileged port remains responsible for deployment-local authority and
 exclusive runtime ownership. No board selection is required for this generic
-integration; actual driver/OS shutdown and physical appliance evidence remain
-separate gates.
+integration. A deployment that registers and claims a concrete driver must add
+its own OS shutdown and physical-appliance evidence before advertising support.
 
 The older unshipped `metor.ui.embedded.platform` prototype is historical and is
 not the new public platform boundary. In particular, its combined battery/power
@@ -157,11 +162,11 @@ Simulator uses an isolated in-memory service and never receives a production
 destruction or shutdown port. Device configuration is bounded strict TOML, with
 registered IDs only, no arbitrary import, shell fragment or command template.
 
-Native synthetic-render RSS is recorded beside comparison captures. Queue
-occupancy and physical input latency remain unmeasured;
-logical payload caps are not claims about Python/OpenGL process memory. Kivy
-keyboard navigation and platform screen-reader exposure require separate
-verification, including safe names under restriction.
+Native synthetic-render RSS is recorded beside comparison captures. Logical
+payload caps are not claims about Python/OpenGL process memory. Physical-input
+latency is not applicable to the current manifest because no physical input
+adapter is claimed. Native keyboard navigation, Windows UIA and Linux AT-SPI
+privacy/action exposure have direct fixture evidence, including restriction.
 
 Sources: [Kivy installation](https://kivy.org/doc/stable/gettingstarted/installation.html),
 [Kivy window contract](https://kivy.org/doc/stable/api-kivy.core.window.html),
