@@ -1,22 +1,29 @@
 # Metor GUI runtime contract
 
-**Implementation status: incomplete development vertical slice. Not release-ready.**
+**Implementation status: final acceptance remains open. Not release-ready.**
 This is the current GUI entry point. The approved
 [functional v1.0](../specs/METOR_GUI_SPEC.md) and
 [layout v1.0](../specs/METOR_GUI_LAYOUT_SPEC.md) remain the implementation
 authority; the copies preserve the exact input bytes. This document reports
 implementation facts and does not weaken those requirements.
 
-The owner paused implementation on 15 September. See the
-[current handoff](../audits/GUI_IMPLEMENTATION_2026-09-12.md#15-september-pause-handoff--current-continuation-entry)
+Implementation resumed from commit `3a2cee6` on 20 September. The owner clarified
+that the platform boundary must be frontend-independent and typed, with hardware
+status, inputs and controlling actions kept separate. See the
+[platform decision](GUI_PLATFORM_ADR.md) for current ownership and migration.
+The owner previously paused implementation on 15 September. See the
+[implementation report](../audits/GUI_IMPLEMENTATION_2026-09-12.md#20-september-continuation)
 for source state, exact verification checkpoints, estimates and restart steps.
-Installed-package evidence predates the final retained-root changes; those changes
-need a fresh artifact build before final-source packaging acceptance.
+Fresh Linux package and native matrix evidence now covers the retained-root
+changes, SDK platform contracts, fallback fonts, pointer tooltips and native
+accessibility integration. Remaining acceptance gates are listed explicitly in
+the report; historical package hashes do not prove later changes.
 
 ## Current implementation
 
 `metor-ui-gui` owns only `metor.ui.gui` and local visual assets. It depends on
-matching `metor`/`metor-sdk`, Kivy 2.3.1, sounddevice 0.5.3 and qrcode 8.2.
+matching `metor`/`metor-sdk`, Kivy 2.3.1, sounddevice 0.5.3, qrcode 8.2 and
+AccessKit 0.7.0.
 It does not depend on Terminal. The launcher imports Kivy only after explicit
 GUI selection and device-description validation. Application version remains
 0.2.0; no release or tag is created. Schema 4 adds protected GUI metadata with
@@ -180,7 +187,10 @@ Simulator descriptions never gain real destructive or shutdown access.
 
 Assets and their license/revision/SHA-256 records live in
 `src/metor/ui/gui/assets/manifest.json`. Native captures use synthetic identities
-only. Installed operation performs no font/icon downloads, telemetry or update
+only. Extra glyph coverage uses packaged DejaVu Sans regular/bold with its license;
+unsupported glyphs remain replacement characters without changing stored text.
+Icon-only actions also expose pointer tooltips; touch operation does not depend
+on hover. Installed operation performs no font/icon downloads, telemetry or update
 checks. Clipboard export is disabled in composer and credential fields.
 
 This code's RAM lifetime is not an OS secure-erasure guarantee. Hardened

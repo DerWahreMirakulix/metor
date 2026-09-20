@@ -1,0 +1,18 @@
+{
+  "kind": "native GUI synthetic-key PTT, actual headset, public SDK and temporary encrypted Core",
+  "system": "Windows",
+  "python": "3.11.9",
+  "source_checkout": false,
+  "installed_bundle": true,
+  "gui_module_path": "\\\\wsl.localhost\\Ubuntu\\tmp\\metor-windows-20260920\\runtime\\tools\\Lib\\site-packages\\metor\\ui\\gui\\app.py",
+  "input": "Mikrofon (Razer BlackShark V2 H · MME",
+  "output": "Lautsprecher (Razer BlackShark  · MME",
+  "captured_and_played_bytes": 33280,
+  "encoded_duration_ms": 1040,
+  "elapsed_seconds": 3.609000000025844,
+  "canonical_result": "unsent owned DROP draft; no outbox publication",
+  "physical_input": false,
+  "microphone_audio_exported": false,
+  "aec_or_acoustic_quality_verified": false,
+  "rss_bytes": 148828160
+}

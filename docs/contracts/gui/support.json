@@ -4,6 +4,13 @@
   "distribution": "metor-ui-gui",
   "python_tested": "3.11.15",
   "renderer": "Kivy 2.3.1 / SDL2 / OpenGL",
+  "accessibility": {
+    "bridge": "AccessKit 0.7.0; GUI-owned bounded projection and synchronous privacy fence",
+    "windows_uia": "native external-client label, invocation, normal text replacement and retained-node revocation checks pass; 2026-09-20",
+    "linux_atspi": "installed-wheel external-client label, invocation, editor focus and retained-node revocation checks pass on isolated D-Bus; 2026-09-20",
+    "linux_programmatic_text_replacement": "AT-SPI EditableText.SetTextContents not exposed by the pinned adapter in the fixture; focused keyboard input remains available",
+    "complete_screen_reader_certification": false
+  },
   "linux_x86_64": {
     "offline_install": "tested",
     "offscreen_render": "tested",
@@ -11,24 +18,43 @@
     "native_audio_devices_observed": 0,
     "headset_full_duplex": "untested",
     "speaker_aec": "unsupported",
-    "installed_desktop_and_simulator": "tested outside checkout with isolated interpreter; 2026-09-15"
+    "installed_desktop_and_simulator": "tested outside checkout with isolated interpreter; 2026-09-20"
   },
   "windows_x86_64": {
-    "python_tested": "3.11.9 embeddable isolated runtime",
+    "python_tested": "3.11.9 NuGet isolated runtime",
     "os_build": "10.0.26200.9445",
     "native_dependency_imports": "tested",
     "native_sdl_window": "tested",
     "root_480x800": "tested",
     "headset_route": "Razer BlackShark V2 HS 2.4",
     "bounded_duplex_capture_playback": "tested; captured bytes discarded",
-    "gui_ptt": "tested from offline-installed final-source bundle with synthetic focused Space input, actual Razer capture/review and temporary encrypted Core; 32000 bytes / 1000 ms; 2026-09-15",
+    "gui_ptt": "tested from final presentation installed packages with synthetic focused Space input, actual Razer capture/review and temporary encrypted Core; 32000 bytes / 1000 ms; 2026-09-20",
     "canonical_installer": "tested offline with official full CPython 3.11.9 NuGet runtime; 2026-09-15",
     "coinstall_uninstall": "tested both UI removal orders; 2026-09-15",
     "speaker_aec": "unsupported",
     "current_validation_runtime": "official CPython 3.11.9 NuGet package with pip and venv; temporary isolated installation",
-    "installed_desktop_and_simulator": "tested outside checkout with isolated interpreter; 2026-09-15"
+    "installed_desktop_and_simulator": "tested outside checkout with isolated interpreter; 2026-09-20",
+    "local_install_root_load": "RTX 4060; 24 synthetic queued inputs, 64 changing rows; first input 297 ms, subsequent p95 71.8 ms; excludes native audio and physical input"
   },
   "physical_adapters": [],
+  "platform_contracts": {
+    "owner": "metor-sdk / metor.client.platform",
+    "frontend_independent": true,
+    "separate_interfaces": [
+      "hardware_status",
+      "hardware_inputs",
+      "controlling_actions",
+      "streaming_audio"
+    ],
+    "active_gui_consumers": [
+      "capture",
+      "playback",
+      "audio_routes",
+      "button_arbitration"
+    ],
+    "hardware_status_adapter": "not_bound",
+    "actuator_adapters": "not_bound"
+  },
   "arm_pi": "untested",
   "simulator_description_adapters": [
     "simulator"
@@ -36,5 +62,6 @@
   "host_shutdown": "not_bound",
   "purge": "typed milestone observer tested; physical initiating control and host shutdown not bound",
   "pause_checkpoint": "2026-09-15: retained root source has targeted native/static validation; installed artifacts/headset evidence predates final RootPanel/RootRow changes",
+  "current_checkpoint": "2026-09-20: platform contracts, packaged fallback fonts, pointer tooltips and native accessibility bridge; 662-test regression checkpoint and 44 native fixtures pass; latest accessibility admission tests 4/4; final Linux/Windows GUI bundles, offline installers, installed desktop/simulator lifecycle and native UIA/AT-SPI probes pass; full acceptance remains open",
   "full_acceptance": false
 }

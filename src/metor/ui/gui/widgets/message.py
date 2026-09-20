@@ -99,9 +99,13 @@ class MessageBubble(BoxLayout):
         Returns:
             None
         """
-        measured = CoreLabel(text=text, font_name=font_path(), font_size=sp(15))
+        measured = CoreLabel(
+            text=text, font_name=font_path(text=text), font_size=sp(15)
+        )
         measured.refresh()
-        meta = CoreLabel(text=metadata, font_name=font_path(500), font_size=sp(11))
+        meta = CoreLabel(
+            text=metadata, font_name=font_path(500, metadata), font_size=sp(11)
+        )
         meta.refresh()
         self._natural_width = max(measured.texture.size[0], meta.texture.size[0]) + dp(
             32

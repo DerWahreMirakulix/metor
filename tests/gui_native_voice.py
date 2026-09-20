@@ -16,6 +16,8 @@ import time
 from unittest.mock import Mock
 
 os.environ['KIVY_NO_ARGS'] = '1'
+if os.name == 'nt':
+    os.environ['KCFG_GRAPHICS_WINDOW_STATE'] = 'hidden'
 os.environ['KIVY_NO_FILELOG'] = '1'
 os.environ['KIVY_NO_CONFIG'] = '1'
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))

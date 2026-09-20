@@ -24,6 +24,7 @@ and `interrupted_voice_recovery`.
 
 | Requirement | Public boundary / owner | Baseline availability and failure contract | Evidence target |
 | --- | --- | --- | --- |
+| Owner platform clarification / PLAT | `metor.client.platform`; SDK-owned local contracts | Frontend-independent typed hardware status, ordered input, streaming audio and controlling-action ports are separate. Expired facts become unknown; input gaps cancel held actions; actuator outcomes do not grant Core authority. GUI audio consumers and physical arbitration use the contracts; registered actuator/status drivers remain unbound. | `test_platform_contracts`, `test_gui_audio`, `test_gui_buttons`, `test_gui_playback`; 20 September report |
 | ARCH-01–04, START-01–03, BOOT | `metor.client.FrontendHost`, `FrontendInteractions`, `FrontendLaunchContext`; base host implementation | Deferred bootstrap, list/select/create exist; typed bootstrap rejection. Optional device_config and simulator launch fields are now added with defaults. | GAT-31–42 |
 | API-02 stable profile identity | `RuntimeSnapshotEvent.profile_instance_id`, `GuiPreferencesEvent.profile_instance_id`; Core storage | Schema 4 persists an opaque instance ID. Rename/database move preserves it; recreated storage gets a new identity. | `test_gui_metadata`, GAT-24, 61, 62 |
 | API-03 snapshot | `MetorClient.register_live_consumer`, `runtime_snapshot`; Core `RuntimeSnapshotEvent` | Epoch/revision and explicit unavailable event exist. Snapshot does not supersede media or operation results. | GAT-42–45 |
@@ -83,7 +84,8 @@ settings regression retains the concurrent change and its conflict explanation.
 
 The GUI owns only `metor.ui.gui`; SDK and base remain frontend-neutral, and the
 Terminal wheel remains independent. Toolkit widgets, presentation models and
-platform ports form separate cohesive GUI subpackages. No GUI import of base
+native adapter implementations form separate cohesive GUI subpackages. Public
+local platform contracts are SDK-owned in `metor.client.platform`. No GUI import of base
 profile/storage/runtime implementations is permitted. Narrow public extensions
 must be classified individually; this task does not automatically bump any
 compatibility generation or application version.
@@ -858,3 +860,26 @@ stays unchanged. Native row/page tests still enforce bounded membership and
 projection-only input, while the renamed-row fixture verifies actual focus and
 pixel anchoring. Platform drawing latency is measured separately from Python
 row-update time; a fast reducer alone is not a native responsiveness claim.
+
+### Native accessibility and presentation ownership
+
+The GUI owns `accessibility/{model,projection,native,bridge}`. AccessKit 0.7.0
+implements native UIA/AT-SPI exposure; no Core/SDK message DTO, authorization,
+launcher generation or storage axis changes. Its cross-thread boundary carries
+immutable visible metadata and bounded requests, never Kivy widgets or profile
+handles. The synchronous `GuiState.covered` fence clears native nodes, tooltips
+and pending actions before the local cover assignment returns. Native requests
+revalidate the current exact control on the UI thread. PTT cannot become a Click;
+passwords supply no value/count; ordinary editor replacement is finite.
+
+Native external clients verify reading, ordinary invocation and retained-node
+revocation on Windows and Linux, with Windows normal-value replacement and Linux
+editor focus. Full screen-reader product/navigation certification is separate;
+the pinned Linux adapter does not expose the tested AT-SPI EditableText interface.
+The adapter choice, startup/DPI order and isolated D-Bus test recipe are in the
+[platform ADR](GUI_PLATFORM_ADR.md#native-accessibility-ownership).
+
+Packaged DejaVu fallback selection and pointer tooltips remain GUI presentation
+owners. They preserve canonical text and public action identity, add no remote
+asset lookup and retain no private text in a process-wide lookup cache. Exact
+license/coverage/icon bytes are checked against the packaged asset manifest.

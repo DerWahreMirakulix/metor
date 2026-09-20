@@ -79,7 +79,7 @@ module = [
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["kivy", "kivy.*", "sounddevice", "qrcode", "qrcode.*"]
+module = ["kivy", "kivy.*", "sounddevice", "qrcode", "qrcode.*", "accesskit", "accesskit.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

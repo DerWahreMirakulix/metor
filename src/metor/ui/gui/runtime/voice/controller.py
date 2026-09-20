@@ -5,6 +5,7 @@ import json
 import secrets
 from typing import TYPE_CHECKING
 
+from metor.client.platform import CapturePort
 from metor.core.api import (
     Delivery,
     MessageDirectionCode,
@@ -19,7 +20,7 @@ from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.state.mailbox import Update
 
 # Local Package Imports
-from .capture import CapturePort, CaptureWorker
+from .capture import CaptureWorker
 from .press import CaptureBinding, PressMachine, PressPhase, PressSource
 from .review import ReviewActions
 from .recovery import CaptureRecovery

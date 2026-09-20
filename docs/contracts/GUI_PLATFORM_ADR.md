@@ -4,12 +4,35 @@ Status: vertical-slice validation in progress; no finished-platform claim.
 Inputs: functional/layout v1.0. Integration gaps are tracked in
 [GUI_INTEGRATION_MAP.md](GUI_INTEGRATION_MAP.md).
 
+Current verification (20 September): 657 regression tests, 44 minimum-size/150%
+native SDL fixtures, fresh Linux bundles/consumers/installers and installed
+desktop/simulator launch pass. Fresh Windows installed launch and actual Razer
+capture/review also pass (33,280 bytes / 1,040 ms). On the RTX 4060 host, the
+64-row synthetic input load from a local Windows installation measures 297 ms
+first input and 71.8 ms subsequent p95; the WSL UNC installation measures about
+1.26 seconds subsequent p95. Deployment location is part of the measurement.
+Native screen-reader, complete duplex/failure and authorized device-lifecycle
+integration remain separate open gates; see the dated acceptance report.
+
 ## Rendering and deployment
 
 Use Kivy 2.3.1 with a small native Metor widget kit, SDL2 window/input/text,
 OpenGL rendering, bundled Inter Tight upright 400/500/600/700, and local Lucide
 symbols. No browser, webview, hosted asset service or runtime asset acquisition.
 Kivy is MIT; Inter Tight is OFL; Lucide has ISC/Feather MIT notices.
+
+Extra glyph coverage uses bundled DejaVu Sans 2.37 regular and actual bold,
+including its redistribution notice. A packaged Inter Tight coverage map selects
+the fallback for display labels and ordinary editors without caching user text.
+Masked credentials retain a fixed font. Unsupported glyphs remain visible
+replacement glyphs; no canonical character is deleted and complete Unicode
+shaping/coverage is not claimed. Actual-font measurement uses the same selection
+as rendering. The asset manifest and regression test pin every shipped asset.
+
+Icon actions provide bounded pointer tooltips after a 600 ms hover dwell. Hints
+use the existing accessible action name, do not activate or focus the target,
+and are cancelled on departure, modal presentation, focus loss and privacy cover.
+They draw inside the owning root canvas rather than an independent OS overlay.
 
 Python 3.11 is the repository's native CI baseline. Linux x86-64 and Windows
 x86-64 desktop are required targets; native execution evidence is separate per
@@ -22,6 +45,45 @@ use a 360 master and 1 divider. Device geometry is rotated before dividing by
 scale; unsupported usable rectangles fail before driver/host activation.
 Kivy density is applied once. Widgets measure wrapped text; screenshot scaling
 cannot replace native text-scale or keyboard checks.
+
+## Native accessibility ownership
+
+The GUI-only `accessibility` package binds AccessKit 0.7.0 (MIT/Apache-2.0) to
+Windows UI Automation and Linux AT-SPI. It owns a bounded immutable projection,
+weak widget identities, a finite cross-thread action queue, native adapters and
+presentation lifecycle binding. It does not change SDK/Core authorization or
+store another message inventory. No compatibility axis changes are required.
+See the [upstream adapter design](https://github.com/AccessKit/accesskit) and
+[Python bindings](https://github.com/AccessKit/accesskit-python).
+
+The `GuiState.covered` setter synchronously revokes native nodes, tooltip text
+and pending assistive actions before returning. Covered Core presentation changes
+also revoke the old native tree before deferred repaint; ordinary updates retain
+control identities and focus. Only the foreground
+root/modal and visible clipped controls are projected. Password fields expose
+neither value nor count; ordinary fields support focus and bounded replacement.
+PTT exposes focus but never a synthetic Click/hold. Actions execute on the GUI
+thread after exact target, context, visibility and enabled-state checks.
+
+Windows registration precedes the HWND's first visible frame. Kivy 2.3.1 queries
+the active window's DPI during hidden initialization, so the bridge refreshes
+its density using `GetDpiForWindow` for the actual owned HWND before constructing
+controls. Native fixture entry points follow the same hidden-window sequence.
+On exit, private projections are revoked immediately, but the Windows subclass
+is released only after Kivy stops its subsequently installed input providers.
+Removing it earlier lets those providers restore an already freed WndProc;
+the installed launcher check exposed this ordering error and verifies the fix.
+Linux registration requires a session D-Bus; no bus means unavailable native
+accessibility, not simulated platform support.
+
+Separate external OS clients verify labels, ordinary button invocation and
+retained-element revocation before repaint on both systems. Windows additionally
+verifies ordinary `ValuePattern.SetValue`; Linux verifies native editor focus.
+The pinned AT-SPI adapter does not expose `EditableText.SetTextContents` in this
+fixture; native focused keyboard editing remains the input path. These tests do
+not certify every screen-reader product, reading/navigation permutation or
+desktop environment. Linux probes must run with `GSETTINGS_BACKEND=memory`
+**before** `dbus-run-session`, so activation uses only transient settings.
 
 ## Audio decision and acceptance limits
 
@@ -49,6 +111,24 @@ physical appliance integration remain explicit gates. Current-source artifact
 fingerprints are recorded in the acceptance report.
 
 ## Resource and safety constraints
+
+The owner clarified the hardware boundary on 20 September: use
+**frontend-independent, typed platform contracts**, with separate hardware
+status, input and controlling-action interfaces. The canonical ownership
+decision is in [ARCHITECTURE.md](../ARCHITECTURE.md#frontend-independent-typed-platform-contracts).
+The SDK now owns `metor.client.platform`; active GUI capture/playback workers
+consume its audio contracts. Physical button arbitration accepts its ordered
+`ButtonSample` observations and cancels on sequence loss, duplicate delivery or
+initially held controls. Status freshness and typed actuator outcomes are
+separate from notifications. No board selection is required to implement these
+contracts; actual adapter support and lifecycle integration still need separate
+implementation and verification.
+
+The older unshipped `metor.ui.embedded.platform` prototype is historical and is
+not the new public platform boundary. In particular, its combined battery/power
+port and whole-blob audio model must not be used for the active GUI. Existing
+historical regression fixtures are retained; active GUI callers migrate together
+to the SDK surface, without compatibility aliases for the former GUI-local types.
 
 Use functional section 20's finite queue/cache/draft budgets as named constants.
 Workers return generation-tagged typed updates; no socket reader renders widgets.

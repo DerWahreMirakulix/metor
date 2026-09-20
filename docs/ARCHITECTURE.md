@@ -332,6 +332,41 @@ Use this document when you need to answer one of these questions:
 
 ## Core System Boundaries
 
+### Frontend-independent, typed platform contracts
+
+`metor.client.platform` is the SDK-owned public boundary for local platform
+contracts. It imports no frontend, toolkit, native driver, database or host
+implementation. Concrete adapters own OS/device access; clients own presentation
+and interaction; Core retains communication and lifecycle authorization.
+
+Keep three interfaces separate:
+
+- **Hardware status** is read-only cached observation. Battery charge, charging
+  and external power can independently be unknown. Observations carry monotonic
+  validity intervals; expired values are not current facts.
+- **Inputs** are ordered physical observations with subscription ownership,
+  sequence numbers, complete button levels and explicit loss. Missing events,
+  initial held controls and discontinuities cannot create an admitted press or
+  a continuously held purge chord.
+- **Controlling actions** use capability-specific actuator ports and typed
+  outcomes. Indicators and haptics receive only finite, privacy-filtered semantic
+  requests. Shutdown is a separate privileged port; its acceptance is neither
+  Core preparation nor proof of completed power-off.
+
+These are not a single notification hook. Notification delivery remains a
+separate privacy-filtered product concern. Hardware input grants no permission;
+local shutdown still requires authorized deployment binding, confirmed Core
+preparation and exclusive host/runtime coordination. Simulator composition must
+not receive real destructive or shutdown adapters.
+
+Streaming `CapturePort` and `OutputPort` also live in this SDK package and are
+used by the GUI's existing production workers. They preserve independent duplex
+ownership. The native PortAudio implementation and PCM codec remain in the GUI
+distribution. New hardware contracts do not declare any untested board supported.
+
+This is an additive local SDK surface, with no IPC, launcher, persistence or
+cryptographic format change. Existing compatibility generations remain unchanged.
+
 1. The UI owns presentation and interaction state only.
    It may hold transient presentation state such as focus or scroll position, but it must not own Tor, database, or cryptographic lifecycle.
 

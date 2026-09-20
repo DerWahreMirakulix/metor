@@ -10,13 +10,14 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 
 from metor.client import FrontendLaunchContext
+from metor.ui.gui.accessibility import AccessibilityBridge
 from metor.ui.gui.constants import Geometry, GuiLimits
 from metor.ui.gui.platform import DeviceConfiguration
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.runtime.voice import PressSource
 from metor.ui.gui.theme import color
 from metor.ui.gui.views import Shell
-from metor.ui.gui.widgets import Label
+from metor.ui.gui.widgets import Label, PointerTooltip
 from metor.ui.gui.widgets import TextField
 from metor.ui.gui.widgets.sheet import ActionSheet
 from metor.ui.gui.views.input import InputDock
@@ -54,6 +55,7 @@ class MetorApp(App):
         self.call_overlay: CallOverlay | None = None
         self.continued_overlay: ContinuedOverlay | None = None
         self._prompt_identity: object = None
+        self.accessibility: AccessibilityBridge | None = None
         self._render_trigger = Clock.create_trigger(self._render, 0)
 
     def build(self) -> BoxLayout:
@@ -65,6 +67,11 @@ class MetorApp(App):
             BoxLayout: Native application root.
         """
         Config.set('kivy', 'exit_on_escape', '0')
+        self.accessibility = AccessibilityBridge(
+            self.controller.state,
+            self.controller.security.activity,
+            simulator=self.controller.simulator,
+        )
         Window.clearcolor = color('background')
         width, height = self.configuration.logical_size
         Window.size = (dp(width), dp(height))
@@ -145,6 +152,8 @@ class MetorApp(App):
                 self.continued_overlay.safe_bottom if self.continued_overlay else 0
             )
             self.call_overlay.render()
+        if self.accessibility is not None and self.root is not None:
+            self.accessibility.rendered(self.root)
 
     def _poll(self, _elapsed: float) -> None:
         """Drains bounded SDK work while retaining responsive native input.
@@ -155,6 +164,10 @@ class MetorApp(App):
             None
         """
         changed = self.controller.poll()
+        if changed and self.controller.state.covered and self.accessibility is not None:
+            self.accessibility.revoke()
+        if self.accessibility is not None:
+            self.accessibility.poll()
         if self.controller.lifecycle.exit_ready:
             self.stop()
             return
@@ -273,7 +286,10 @@ class MetorApp(App):
             None
         """
         self.controller.playback.auto.focused = focused
+        if self.accessibility is not None:
+            self.accessibility.native.focus(focused)
         if not focused:
+            PointerTooltip.clear_all()
             self.controller.inputs.focus_lost()
             self.controller.voice.depart()
             self.controller.playback.stop()
@@ -312,6 +328,10 @@ class MetorApp(App):
         Returns:
             None
         """
+        PointerTooltip.clear_all()
+        if self.accessibility is not None:
+            self.accessibility.close()
+            self.accessibility = None
         if self.input_dock is not None:
             self.input_dock.hide()
         TextField.keyboard_owner = None

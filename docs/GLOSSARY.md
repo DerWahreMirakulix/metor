@@ -404,3 +404,22 @@ The operation preserves existing identity keys according to Core semantics.
 - `GuiLimits.MEDIA_CACHE_BLOCK_BYTES`: 64 KiB coalesced encoded blocks. Small
   input fragments do not allocate one retained Python object/index entry each.
   Public range reads return immutable bytes within the existing total cache cap.
+
+### Frontend-independent platform contracts
+
+`metor.client.platform` owns typed local interfaces in the SDK. These are not
+IPC payloads, settings keys or a combined notification hook.
+
+| Term | Meaning |
+| --- | --- |
+| `HardwareStatusPort` / `HardwareStatus` | Nonblocking cached hardware observations with monotonic `observed_at` and exclusive `valid_until` bounds. |
+| `BatteryStatus` | Optional `charge_fraction` in [0, 1], `charging` and `external_power` facts. Unknown is distinct from empty, disconnected or not charging. |
+| `HardwareAvailability` | Unknown, available, unavailable, permission-denied or failed observation; only available observations carry current facts. |
+| `HardwareInputPort` / `InputSubscription` | Ordered physical observation delivery with explicit subscription ownership and close. |
+| `ButtonSample` | One sequence-qualified, timestamped complete PTT/Power observation with a validity flag; neither a semantic action nor an authorization grant. |
+| `CapturePort` / `OutputPort` | Separate bounded streaming audio interfaces; stopping one direction does not stop the other. |
+| `AudioCapabilities` / `AudioEndpoint` | Observed native directions and route metadata; no acoustic/AEC proof follows from enumeration. |
+| `IndicatorPort` / `IndicatorState` | Content-free, privacy-filtered indicator requests with finite semantic states. |
+| `HapticsPort` / `HapticPattern` | Optional finite capture-admitted, capture-rejected or purge-arming feedback requests. |
+| `ShutdownPort` | Separate privileged local actuator used only after lifecycle authorization and host preparation. |
+| `PlatformActionResult` | Accepted, unavailable, denied, failed or unknown local action outcome. Accepted does not prove completed shutdown or authorize Core destruction. |

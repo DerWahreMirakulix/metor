@@ -3,7 +3,9 @@
 from collections.abc import Callable
 from dataclasses import replace
 import json
+import os
 from pathlib import Path
+import platform
 import statistics
 import threading
 import time
@@ -112,7 +114,12 @@ def exercise_native_load(
                     'root_render_max_ms': max(render_times),
                     'rss_samples_bytes': rss,
                     'passed_identity_and_no_navigation_checks': True,
-                    'scope': 'Linux x86_64 SDL offscreen; excludes native audio and physical device latency',
+                    'system': platform.system(),
+                    'machine': platform.machine(),
+                    'sdl_video_driver': os.environ.get(
+                        'SDL_VIDEODRIVER', 'native-default'
+                    ),
+                    'scope': 'Synthetic native input; excludes native audio and physical device latency',
                 },
                 indent=2,
             )

@@ -32,6 +32,18 @@ class EndpointOption(SpinnerOption):
             markup=False,
         )
         super().__init__(**kwargs)
+        self.bind(text=self._font_coverage)
+        self._font_coverage()
+
+    def _font_coverage(self, *_args: object) -> None:
+        """Uses the packaged fallback for native endpoint names when needed.
+
+        Args:
+            _args: Native label change.
+        Returns:
+            None
+        """
+        self.font_name = font_path(text=self.text)
 
 
 def audio_routes_body(
@@ -105,7 +117,7 @@ def audio_routes_body(
             option_cls=EndpointOption,
             size_hint_y=None,
             height=dp(48),
-            font_name=font_path(),
+            font_name=font_path(text=current),
             font_size=sp(14),
             color=color('text'),
             background_normal='',
@@ -132,6 +144,8 @@ def audio_routes_body(
                 None
             """
             if value in mapping:
+                if isinstance(_widget, Spinner):
+                    _widget.font_name = font_path(text=value)
                 if inputs:
                     routes.input = mapping[value]
                 else:

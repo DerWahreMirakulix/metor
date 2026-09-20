@@ -12,6 +12,7 @@ from metor.ui.gui.theme import ASSET_ROOT, color
 
 # Local Package Imports
 from .context import ContextAction
+from .tooltip import PointerTooltip
 
 
 class Symbol(Widget):
@@ -113,6 +114,20 @@ class IconAction(ContextAction):
         self._symbol_state()
         self._badge_color: Color | None = None
         self.set_badge(badge)
+        self.tooltip = PointerTooltip(self)
+
+    def _pointer(self, _window: object, position: tuple[float, float]) -> None:
+        """Updates hover feedback and the pointer-only hint for this exact action.
+
+        Args:
+            _window: Native pointer event source.
+            position: Pointer position in window coordinates.
+        Returns:
+            None
+        """
+        super()._pointer(_window, position)
+        if hasattr(self, 'tooltip'):
+            self.tooltip.hover(self._hovered)
 
     def set_badge(self, visible: bool) -> None:
         """Updates an attached content-free activity dot without recreating its action.

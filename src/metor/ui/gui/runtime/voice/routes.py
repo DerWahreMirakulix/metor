@@ -3,7 +3,8 @@
 from typing import TYPE_CHECKING
 
 from metor.core.api import IpcEvent
-from metor.ui.gui.platform.audio import AudioEndpoint, HeadsetAudio
+from metor.client.platform import AudioEndpoint
+from metor.ui.gui.platform.audio import HeadsetAudio
 from metor.ui.gui.state.mailbox import Update
 
 if TYPE_CHECKING:

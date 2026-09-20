@@ -1,5 +1,6 @@
 """Presentation routes and volatile drafts; authoritative facts remain SDK DTOs."""
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from metor.core.api import Delivery, RuntimeSnapshotEvent, GuiPreferencesEvent
@@ -29,10 +30,37 @@ class GuiState:
     snapshot: RuntimeSnapshotEvent | None = None
     preferences: GuiPreferencesEvent | None = None
     capabilities: frozenset[str] = frozenset()
-    covered: bool = True
+    _covered: bool = field(default=True, init=False, repr=False)
+    privacy_fence: Callable[[], None] | None = field(
+        default=None, repr=False, compare=False
+    )
     busy: bool = False
     status: str = ''
     drafts: dict[tuple[str, Delivery], str] = field(default_factory=dict)
+
+    @property
+    def covered(self) -> bool:
+        """Reports the local privacy barrier independently of pending Core acknowledgment.
+
+        Args:
+            None
+        Returns:
+            bool: Whether normal presentation and actions are prohibited.
+        """
+        return self._covered
+
+    @covered.setter
+    def covered(self, value: bool) -> None:
+        """Revokes detached presentation synchronously when normal content is covered.
+
+        Args:
+            value: Local privacy state; Core remains the authorization authority.
+        Returns:
+            None
+        """
+        self._covered = value
+        if value and self.privacy_fence is not None:
+            self.privacy_fence()
 
     def navigate(self, route: Route) -> None:
         """Changes only presentation; callers perform input finalization first.

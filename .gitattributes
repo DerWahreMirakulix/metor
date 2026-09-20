@@ -3,3 +3,8 @@
 /docs/generated/SETTINGS.md text eol=lf
 /docs/generated/api.schema.json text eol=lf
 /docs/generated/compatibility.json text eol=lf
+
+# Packaged asset fingerprints require identical bytes on every checkout platform.
+/src/metor/ui/gui/assets/** -text
+# Preserve the upstream redistribution notice, including its original whitespace.
+/src/metor/ui/gui/assets/fonts/DejaVu-LICENSE.txt -whitespace

@@ -29,6 +29,14 @@ This integration contract does not approve or replace GUI/layout specifications.
 - The platform layer owns capture/playback, echo cancellation, display, hardware
   input, LEDs, haptics, camera, and physical power control.
 
+Frontend-independent, typed local platform contracts live in
+`metor.client.platform`. Hardware status, ordered input observations and
+capability-specific controlling actions are separate interfaces, not a shared
+notification hook. See the canonical
+[platform ownership decision](../ARCHITECTURE.md#frontend-independent-typed-platform-contracts).
+These local contracts neither add IPC authority nor make an untested adapter a
+supported appliance.
+
 Opening a view is never a network action. A frontend must issue explicit typed
 commands for connect, reconnect, fallback, accept, reject, disconnect, consume,
 or dismiss behavior.

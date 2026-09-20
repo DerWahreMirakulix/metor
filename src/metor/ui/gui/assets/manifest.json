@@ -1,7 +1,8 @@
 {
   "revisions": {
     "google/fonts": "809e4d8b8d7e9364a914909bb777679606c178b8",
-    "lucide-icons/lucide": "f12b0de177fbc2a6795e99be065887e72b237123"
+    "lucide-icons/lucide": "f12b0de177fbc2a6795e99be065887e72b237123",
+    "dejavu-fonts": "2.37 (Ubuntu fonts-dejavu-core)"
   },
   "assets": [
     {
@@ -216,178 +217,198 @@
     },
     {
       "path": "icons/users-native.svg",
-      "source": "icons/users.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "97a627de7ab72e756718271a97b44d29b988adaf6296e1eaa93b1e4e022e11ff"
+      "source": "icons/users.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "410b7483fb70f7f9caf4ac1c6145af4e86b272aabfd6b4c4b341a79b7fa46fc1"
     },
     {
       "path": "icons/lock-native.svg",
-      "source": "icons/lock.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "af40103e9517e4a0fd9d6cd82911a384bbb6ba754cceeca92da0c9984c9f9045"
+      "source": "icons/lock.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "6dc94d5b613c41c4418aca40e540f3285b6de5567f072468f5e1208f65c9e7bb"
     },
     {
       "path": "icons/pin-native.svg",
-      "source": "icons/pin.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "b6be86bdfba6644b82ab506f9bdf97f842cc319f82c4d4ff98d25e3a3f7bb3e3"
+      "source": "icons/pin.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "cca8279eb145bcf9e3e39b88fdfb4129f30a2467c22b24c077c9238fb74a5d03"
     },
     {
       "path": "icons/volume-2-native.svg",
-      "source": "icons/volume-2.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "1016b902a86c201d5b6c24ebfe7cfa4964110c00fd88e9e6db87dc799d43d912"
+      "source": "icons/volume-2.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "794a77700d1bfa33238bfc8c35239a0f0973371d4dadcc470a7dc4e00af212ea"
     },
     {
       "path": "icons/refresh-cw-native.svg",
-      "source": "icons/refresh-cw.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "33c1f9ae61f4507fe51dfc575670a798ec3823db7aeb80163a2832e245a4a3b6"
+      "source": "icons/refresh-cw.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "5bcecf2ffc510f5019a8a96c388bb06f2944186d2e7df3a4219689d382a4fed9"
     },
     {
       "path": "icons/volume-x-native.svg",
-      "source": "icons/volume-x.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "8e55ae712bbbde24d21bc53fe52328d8b99c70f28a54275fe053efe1ae396b26"
+      "source": "icons/volume-x.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "d9894cc5282dfd2ef726be6d1202467472e32760a7bb8c1b8a95d988a656d00d"
     },
     {
       "path": "icons/trash-2-native.svg",
-      "source": "icons/trash-2.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "fd95e774b0e9ec752c1a4b4081bf34b1425ce127ac85cf711b8d10d5decd2358"
+      "source": "icons/trash-2.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "4a9b40f0c62d2ab7b190bb5d366041bcb37c12cea8d853941082107710995417"
     },
     {
       "path": "icons/info-native.svg",
-      "source": "icons/info.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "d8379f0b6e18579885ee89dcc380ab4b004953a563e5734c28dcf0794c32adbe"
+      "source": "icons/info.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "0c9c65e965d1574ef0a3c4c91fc9a6155aaac466879c4e2c804824db46a6434f"
     },
     {
       "path": "icons/keyboard-native.svg",
-      "source": "icons/keyboard.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "4f3831b4b2b9b1669f740efd6569e02ba78ef1521249779c058784d31b085747"
+      "source": "icons/keyboard.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "eab08723bd1be761bcb11d87befabfc6f8877efa896b70e471be78dfa63b6b66"
     },
     {
       "path": "icons/key-round-native.svg",
-      "source": "icons/key-round.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "ed9ce59a474be5778db75d112b908b10c460b90ea8ca9a62d3f9d28122bc5e35"
+      "source": "icons/key-round.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "ca870f0416425bf3c20144c383c392a368aa39b3ea9b8334f0019ad9db3ad247"
     },
     {
       "path": "icons/history-native.svg",
-      "source": "icons/history.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "9d96112ea071ec39ce2668083a72ae795a0b8d0027a6869fa30e9998b20c4b12"
+      "source": "icons/history.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "764221dc19a865c35e9445ae2537dbd1cd73bbae592401e47e3559504e8294df"
     },
     {
       "path": "icons/pause-native.svg",
-      "source": "icons/pause.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "2e6df983c8dd16bfd3c5e5a9478ae2978871cbbaa74cd6468758343674f57304"
+      "source": "icons/pause.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "d5961d68844dda0104f398bfcaee7c0770ee5789dca8543907ad8747de582690"
     },
     {
       "path": "icons/triangle-alert-native.svg",
-      "source": "icons/triangle-alert.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "75a872ee05bbe4607ff73afb1854a18c6406f6e1e855a2943b3006e00a6a2448"
+      "source": "icons/triangle-alert.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "1ef9a66965c056e66dbb7e9e8fa32893accc84c25fad800afd08eb8270839454"
     },
     {
       "path": "icons/square-native.svg",
-      "source": "icons/square.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "548c24c5aa699ff3e9566770943df45f99c352a31b3f9dc939763b93ec3a70dd"
+      "source": "icons/square.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "c437f9cd472a55572d678c9612d57cf2f8d9c18dd847a731fc346bd827ed20db"
     },
     {
       "path": "icons/chevron-left-native.svg",
-      "source": "icons/chevron-left.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "cdc14f7766b624e482f11628af375f0ad7ec89931b64a773defd6561ca819ddb"
+      "source": "icons/chevron-left.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "b288bbfd8d1b7451d1dfcd4a7ea27b3d45b8a12c0881fca9ccfc5f637e99e587"
     },
     {
       "path": "icons/search-native.svg",
-      "source": "icons/search.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "88d542cc6ef0f86474b12101aa3fcc781d0b04f452f169720a88baf8f472d454"
+      "source": "icons/search.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "52cfdde0d0d7103c5af0ad5ba8ac3fea55cb7d35d525f1fa59fbe66c0681bf27"
     },
     {
       "path": "icons/user-round-native.svg",
-      "source": "icons/user-round.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "3353bda3ccab31a16927bf5d68887b2cb43af559849e1502f7af5d537632cdc7"
+      "source": "icons/user-round.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "2d250c2c916db7b49afc6744ab792005eee858d269c9460945324a0a18f11e8c"
     },
     {
       "path": "icons/mic-native.svg",
-      "source": "icons/mic.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "345a8c173fe72d362f50b33280b0d7165a2888c1b93a749908c2c4836a13e1c4"
+      "source": "icons/mic.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "0f3561f40c9f51ecd67588de2bd3d58413327d916eb65890d9dad841688e83e6"
     },
     {
       "path": "icons/power-native.svg",
-      "source": "icons/power.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "02fe924aad13ca4b0d77f90750113482942eb9be31ed8e48d29853aaf478cba6"
+      "source": "icons/power.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "614b950ffc4b1d7874a6f2f84ddf89d64c34168c60740a77e6dc65551ac5b065"
     },
     {
       "path": "icons/x-native.svg",
-      "source": "icons/x.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "bf5361bcae9a1273561e7de110a79f72e0e60a3de8b0e50412d1c7f979760f0c"
+      "source": "icons/x.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "d72f939b36bcbd8778f72dc352a3c0d5a26f91804d5d3843852b9952b5065c06"
     },
     {
       "path": "icons/qr-code-native.svg",
-      "source": "icons/qr-code.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "5a76721b81924716615b16c67351c2329050449dec15fe4333258edcefe17d1c"
+      "source": "icons/qr-code.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "63e218ee1919cfdaef13da625dbb374333cb80350e5553b1b4a9c03552f09b62"
     },
     {
       "path": "icons/chevron-right-native.svg",
-      "source": "icons/chevron-right.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "73022a2c88285ff9c6e3ee2b45359e6b3e5ff43f625bf2b9ce663dcfcf3d009f"
+      "source": "icons/chevron-right.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "671cc8f5c37c05f825de021985fd6e1beb1792284e363ae56dd796b0a26c74b2"
     },
     {
       "path": "icons/bell-native.svg",
-      "source": "icons/bell.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "1ca73170e98b1daab195a8559863d105e2cc613734c75857d6817f2adf7d9abb"
+      "source": "icons/bell.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "99cddfc689eff28a5aef852322f02c83a2f02de143b065b3e3dc10e53853cb2e"
     },
     {
       "path": "icons/copy-native.svg",
-      "source": "icons/copy.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "17810aa1b9d040dbca83d5dafd6a5792d84bce28cb55a096805d518f5ec4eec9"
+      "source": "icons/copy.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "8cfe84ec5ce742daf6cca7509c18fb9d1bf53653cbe2dd9834c0c7980601e1c3"
     },
     {
       "path": "icons/rotate-cw-native.svg",
-      "source": "icons/rotate-cw.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "1ec0d4442a6943c915a0c5884ecc1b817b03f5118d85afd99bdf127fd0bf3383"
+      "source": "icons/rotate-cw.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "287cfd4bc69654067836226088b987f021a2fd80be878849b52dc554cb550263"
     },
     {
       "path": "icons/check-native.svg",
-      "source": "icons/check.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "1389d45aa0c810342cddd5292119fb6c21f0d001fe69ecb492349ecb9768ca96"
+      "source": "icons/check.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "e423f2981efba50cc42a9cd78c054d106aa514f5ae6a9ce5ab85f77a4d10b3f7"
     },
     {
       "path": "icons/mic-off-native.svg",
-      "source": "icons/mic-off.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "9a49eff115096bbaec8ea5e6fb14d18e08e19138b2273da4fff8d8561608d8c3"
+      "source": "icons/mic-off.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "249e221ba45a18c016476e13db93794ea4b6d9c54aae26feb1050aae7ba08fca"
     },
     {
       "path": "icons/log-out-native.svg",
-      "source": "icons/log-out.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "05ecd645faaa57c2f8a426a75a416e9e7336866ad111fc50bf3061c1fc9cddd6"
+      "source": "icons/log-out.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "71f74b99ac5f788484e6faa7ea7b9d4f67c396f9643b97e20bf6b0aa69219588"
     },
     {
       "path": "icons/square-check-native.svg",
-      "source": "icons/square-check.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "9aefe0cae73f643bc8ce025904149225640bebe280a80352f04e6c695fb454ac"
+      "source": "icons/square-check.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "80784f00ec560155ee9d7850a0669869286309701d9fe5097b69aaa655f0de5c"
     },
     {
       "path": "icons/camera-native.svg",
-      "source": "icons/camera.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "4a3a3336bc4d360cce14a42c58404ba5d3ad6577f07647b7834e0c16097a41fb"
+      "source": "icons/camera.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "adb6b8620d9ff085ac4eff4cff2ff5cdddb79c3eeb08eaaeae17d5a8d9aff1c4"
     },
     {
       "path": "icons/settings-native.svg",
-      "source": "icons/settings.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "c79e839358a335d874f7a33cb4fa8cfa377af05ab7e2730b4ee125159a094e29"
+      "source": "icons/settings.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "dd1e7dd8348f392d574aa56f25421f69b6fc7ffe0142fa4d005db5076fb17bcf"
     },
     {
       "path": "icons/plus-native.svg",
-      "source": "icons/plus.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "c30e55160eb4493e9c77874ff64d8da444bd1a5f14f41c30640ed428ec90319c"
+      "source": "icons/plus.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "68542b00e85e2defb08480d66bb887dca1795d6509b03da1ebe53fb7fb58146a"
     },
     {
       "path": "icons/play-native.svg",
-      "source": "icons/play.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "a3b1ca8b7a8aece03d43223e822d13a7dac8d3e34d7a12b3cb5d5067ae9f8eed"
+      "source": "icons/play.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "18d6881588ef3a004fddbe5f53810b068ec91d922cb491c269bd59413cc23659"
     },
     {
       "path": "icons/send-native.svg",
-      "source": "icons/send.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "967c73c6a43cdb46ea71cf9dd4d6fdb6c7bf76da72b13a45d8eaae97c1b52f09"
+      "source": "icons/send.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "587d5b34f4facf8871e5318bde47b3a04cca9259744b807377cc1c62cc777c0b"
     },
     {
       "path": "icons/ellipsis-native.svg",
-      "source": "icons/ellipsis.svg; explicit inherited stroke/fill, layout v1.0 1.75 stroke",
-      "sha256": "2913f890cc28e15699319a8b9b8916e8f48f6289815711d8a1ae8594aaf8e226"
+      "source": "icons/ellipsis.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "5559566fd44866b67036d70af8ac92921401e0e9bd35e328f81583ce81e25072"
+    },
+    {
+      "path": "fonts/DejaVuSans.ttf",
+      "source": "DejaVu Fonts 2.37 from Ubuntu fonts-dejavu-core; https://dejavu-fonts.github.io/",
+      "sha256": "690243adfefe0ce154b547db6205794bd30ac4277275179517a90994f4980648"
+    },
+    {
+      "path": "fonts/DejaVuSans-Bold.ttf",
+      "source": "DejaVu Fonts 2.37 from Ubuntu fonts-dejavu-core; https://dejavu-fonts.github.io/",
+      "sha256": "d1c3ff99f1e1ce1827a33efd4dad81f40babda06bff9e43bd7591c86662a287b"
+    },
+    {
+      "path": "fonts/DejaVu-LICENSE.txt",
+      "source": "DejaVu Fonts 2.37 from Ubuntu fonts-dejavu-core; https://dejavu-fonts.github.io/",
+      "sha256": "63d3ba759d12804c5b31a9d5940d855c1820d1f5999e6b0872eb1c7ff045fbc9"
+    },
+    {
+      "path": "fonts/InterTight-coverage.json",
+      "source": "Codepoint ranges extracted from the identical cmaps of packaged InterTight 400/500/600/700 using fontTools 4.59.2",
+      "sha256": "d812ae8f0f62ffd98b9c8cf864414a696cc89331ec7bc4124db0da97f460ebb2"
     }
   ]
 }

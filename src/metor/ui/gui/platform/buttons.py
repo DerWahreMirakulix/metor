@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 import math
 
+from metor.client.platform import ButtonSample
 from metor.ui.gui.constants import GuiLimits
 
 
@@ -48,6 +49,33 @@ class PhysicalButtons:
         self._consumed = False
         self._triggered = False
         self._last_time = 0.0
+        self._sequence: int | None = None
+
+    def observe(self, observation: ButtonSample) -> ButtonResult:
+        """Consumes ordered adapter observations without bridging missing input edges.
+
+        Args:
+            observation: Complete sample from this arbiter's one input subscription.
+        Returns:
+            ButtonResult: Safe cancellation on loss; duplicates cannot advance arming.
+        """
+        previous = self._sequence
+        if previous is not None and observation.sequence <= previous:
+            return self.lost()
+        self._sequence = observation.sequence
+        if (
+            not observation.valid
+            or previous is None
+            and (observation.ptt or observation.power)
+            or previous is not None
+            and observation.sequence != previous + 1
+        ):
+            return self.lost()
+        return self.sample(
+            ptt=observation.ptt,
+            power=observation.power,
+            now=observation.observed_at,
+        )
 
     def sample(self, *, ptt: bool, power: bool, now: float) -> ButtonResult:
         """Processes one fresh adapter snapshot, including repeats and poll ticks.

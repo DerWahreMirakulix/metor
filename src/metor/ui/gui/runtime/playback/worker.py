@@ -2,22 +2,15 @@
 
 import base64
 import threading
-from typing import Protocol
 
 from metor.client import MetorClient
+from metor.client.platform import OutputPort
 from metor.core.api import MessageDirectionCode, VoiceReleasedEvent
 from metor.shared import Constants
 from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.platform.audio import PcmVoice
 from metor.ui.gui.state.mailbox import Mailbox, Update
 from metor.ui.gui.state.media import MediaCache, PlaybackProgress, PlaybackTarget
-
-
-class OutputPort(Protocol):
-    """Native output operations isolated from microphone ownership."""
-
-    def play_frame(self, frame: bytes, *, headset_confirmed: bool) -> None: ...
-    def stop_output(self) -> None: ...
 
 
 class PlaybackWorker:

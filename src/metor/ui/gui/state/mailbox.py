@@ -8,7 +8,7 @@ import threading
 from metor.core.api import IpcEvent
 from metor.client import FrontendProfileCatalog, FrontendProfileOperationResult
 from metor.ui.gui.constants import GuiLimits
-from metor.ui.gui.platform.audio import AudioEndpoint
+from metor.client.platform import AudioEndpoint
 
 # Local Package Imports
 from .media import PlaybackProgress

@@ -1,10 +1,10 @@
 """Bounded PortAudio headset ports and the explicitly named PCM Voice codec."""
 
 from collections import deque
-from dataclasses import dataclass
 import threading
 from typing import Protocol
 
+from metor.client.platform import AudioCapabilities, AudioEndpoint
 from metor.ui.gui.constants import GuiLimits
 
 
@@ -72,25 +72,6 @@ class AudioStream(Protocol):
     def stop(self) -> None: ...
     def close(self) -> None: ...
     def write(self, data: bytes) -> bool: ...
-
-
-@dataclass(frozen=True)
-class AudioCapabilities:
-    """Truthful native availability; device enumeration is not acoustic proof."""
-
-    input_available: bool
-    output_available: bool
-    speaker_aec: bool = False
-
-
-@dataclass(frozen=True)
-class AudioEndpoint:
-    """Bounded native route descriptor, independent of an opened audio stream."""
-
-    index: int
-    name: str
-    input_available: bool
-    output_available: bool
 
 
 class HeadsetAudio:

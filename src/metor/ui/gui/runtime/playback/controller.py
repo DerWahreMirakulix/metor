@@ -2,13 +2,14 @@
 
 from typing import TYPE_CHECKING
 
+from metor.client.platform import OutputPort
 from metor.core.api import Delivery, MessageDirectionCode, VoiceIncomingStartedEvent
 from metor.ui.gui.platform.audio import HeadsetAudio, PcmVoice
 from metor.ui.gui.state.mailbox import Update
 from metor.ui.gui.state.media import MediaCache, PlaybackProgress, PlaybackTarget
 
 # Local Package Imports
-from .worker import OutputPort, PlaybackWorker
+from .worker import PlaybackWorker
 from .eligibility import AutoPlayback
 
 if TYPE_CHECKING:

@@ -20,6 +20,8 @@ from typing import cast
 from unittest.mock import patch
 
 os.environ['KIVY_NO_ARGS'] = '1'
+if os.name == 'nt':
+    os.environ['KCFG_GRAPHICS_WINDOW_STATE'] = 'hidden'
 os.environ['KIVY_NO_FILELOG'] = '1'
 os.environ['KIVY_NO_CONFIG'] = '1'
 os.environ['MESA_SHADER_CACHE_DISABLE'] = 'true'

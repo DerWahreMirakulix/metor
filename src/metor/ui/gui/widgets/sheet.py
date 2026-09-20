@@ -18,6 +18,7 @@ from metor.ui.gui.theme import color, font_path
 # Local Package Imports
 from .controls import Action, Label, Panel
 from .symbol import IconAction
+from .tooltip import PointerTooltip
 
 
 class ActionSheet(ModalView):
@@ -139,7 +140,7 @@ class ActionSheet(ModalView):
         if self.primary:
             for text in ('Cancel', self.primary[0]):
                 label = TextMeasure(
-                    text=text, font_name=font_path(600), font_size=sp(14)
+                    text=text, font_name=font_path(600, text), font_size=sp(14)
                 )
                 label.refresh()
                 needed += label.texture.size[0]
@@ -209,6 +210,7 @@ class ActionSheet(ModalView):
         Returns:
             None
         """
+        PointerTooltip.clear_all()
         if ActionSheet.current is not None:
             ActionSheet.current.dismiss(animation=False)
         if not self.controller.state.covered:

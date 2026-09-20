@@ -1,5 +1,7 @@
 """Native visual tokens and bundled asset lookup for layout v1.0."""
 
+from functools import lru_cache
+import json
 from pathlib import Path
 
 
@@ -58,15 +60,39 @@ def color(name: str) -> tuple[float, float, float, float]:
     )
 
 
-def font_path(weight: int = 400) -> str:
+@lru_cache(maxsize=1)
+def _primary_glyphs() -> frozenset[int]:
+    """Loads fixed packaged font coverage without retaining any displayed text.
+
+    Args:
+        None
+    Returns:
+        frozenset[int]: Codepoints covered by all four packaged primary weights.
+    """
+    path = ASSET_ROOT / 'fonts' / 'InterTight-coverage.json'
+    ranges: list[list[int]] = json.loads(path.read_text(encoding='utf-8'))
+    return frozenset(value for start, end in ranges for value in range(start, end + 1))
+
+
+def font_path(weight: int = 400, text: str = '') -> str:
     """Requires the packaged production font instead of silently substituting.
 
     Args:
         weight: Packaged upright weight.
+        text: Display text used only for glyph selection; never cached or altered.
     Returns:
         str: Local font file for the native text renderer.
     """
-    path = ASSET_ROOT / 'fonts' / f'InterTight-{weight}.ttf'
+    primary = _primary_glyphs()
+    fallback = any(
+        ord(character) >= 32 and ord(character) not in primary for character in text
+    )
+    name = (
+        ('DejaVuSans-Bold.ttf' if weight >= 600 else 'DejaVuSans.ttf')
+        if fallback
+        else f'InterTight-{weight}.ttf'
+    )
+    path = ASSET_ROOT / 'fonts' / name
     if not path.is_file():
         raise RuntimeError('Metor font assets are missing; reinstall metor-ui-gui')
     return str(path)

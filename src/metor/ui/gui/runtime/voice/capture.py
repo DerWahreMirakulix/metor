@@ -3,9 +3,9 @@
 import base64
 import threading
 import time
-from typing import Protocol
 
 from metor.client import MetorClient, MetorRequestRejectedError
+from metor.client.platform import CapturePort
 from metor.core.api import (
     Delivery,
     IpcEvent,
@@ -23,18 +23,6 @@ from metor.ui.gui.state.media import MediaCache, PlaybackTarget
 
 # Local Package Imports
 from .press import CaptureBinding
-
-
-class CapturePort(Protocol):
-    """Input-only audio boundary; stopping input never stops duplex playback."""
-
-    failed: bool
-
-    def start_capture(self, *, headset_confirmed: bool) -> None: ...
-    def stop_capture(self) -> None: ...
-    def interrupt_capture(self) -> None: ...
-    def take_frame(self) -> bytes | None: ...
-    def discard_capture(self) -> None: ...
 
 
 class CaptureWorker:

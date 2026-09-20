@@ -12,7 +12,7 @@ from metor.core.api import Delivery
 from metor.ui.gui.constants import Geometry
 from metor.ui.gui.runtime import GuiController, conversation_rows
 from metor.ui.gui.state import Route
-from metor.ui.gui.widgets import Label
+from metor.ui.gui.widgets import Label, PointerTooltip
 from metor.ui.gui.theme import color
 
 # Local Package Imports
@@ -80,6 +80,7 @@ class Shell(BoxLayout):
         Returns:
             None
         """
+        PointerTooltip.clear_all()
         if self.controller.state.covered:
             self._root_panel = None
             self._root_context = None

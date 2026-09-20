@@ -1,4 +1,183 @@
-# GUI implementation and acceptance report — updated 2026-09-15
+# GUI implementation and acceptance report — updated 2026-09-20
+
+## 20 September continuation
+
+Resumed from committed `3a2cee6` on `embeddedui`. The earlier pause entry below
+describes its historical tree before that commit; its statement that the work
+was uncommitted is not the current Git state.
+
+The owner explicitly requires “frontend-unabhängige, typisierte
+Plattformverträge”: **frontend-independent, typed platform contracts**.
+Hardware status, inputs and controlling actions must remain separate and must
+not be combined into a notification hook. A specific board is not a prerequisite
+for implementing that general boundary; support for an actual board remains a
+separate evidence dimension. The approved v1.0 input files are unchanged.
+
+### Implemented ownership and migration
+
+`metor.client.platform` now owns public local contracts in the SDK distribution.
+The package has separate `status`, `inputs`, `actions` and `audio` owners and a
+thin facade. It imports no frontend, toolkit or native driver. Existing GUI
+capture/playback workers and route/mailbox consumers migrate together to SDK
+`CapturePort`, `OutputPort`, `AudioEndpoint` and `AudioCapabilities`. The native
+PortAudio implementation and bounded PCM codec remain GUI-owned. No compatibility
+aliases retain the old GUI-local contract definitions.
+
+Battery facts distinguish unknown/unavailable/permission-denied/failed states and
+carry an explicit monotonic validity interval. Expired or discontinuous readings
+return unknown. `ButtonSample` carries complete PTT/Power levels and an ordered
+sequence; the existing physical arbiter now accepts it directly and cancels on
+loss, duplicates or initial held controls. A release is required before rearming.
+Actuator contracts expose finite indicator/haptic semantics and explicit action
+outcomes. Shutdown is a separate privileged port, not a status method or input
+permission. Core authorization and exclusive host/runtime preparation remain
+mandatory prerequisites for a real shutdown binding.
+
+This cohesive SDK package makes the contracts reusable by other frontends
+without importing GUI implementation. Existing IPC/launcher/storage/crypto axes
+are unchanged: these are additive local interfaces, not new wire messages or
+persistent data. The historical unshipped Embedded prototype and its regression
+fixtures remain historical; they are not the active GUI adapter API.
+
+### Verification results
+
+The following results identify the platform-contract checkpoint. Subsequent
+Unicode-fallback and pointer-tooltip work has now advanced the worktree. Its
+native checks and final rebuilt artifacts must be recorded separately; these
+earlier package hashes are not evidence for the new font/tooltip files.
+
+- Five new contract tests plus existing audio/button/playback tests: **27 pass**.
+- Ruff and formatting pass across **526 files**; mypy passes **448 source files**.
+- Distribution boundaries and version registry pass. Generated documentation is
+  fresh and reproducible; no generated files changed.
+- **44/44** native SDL offscreen fixtures pass at **360 × 640 / 150%** against
+  the migrated source, including the previously unresolved complete root matrix.
+  See the [matrix record](gui-2026-09-12/native-matrix-20260920.json) and
+  [root refresh capture](gui-2026-09-12/root-refresh-20260920.png).
+- Latest Linux offscreen load measurement: first queued input **4278.8 ms**,
+  subsequent input p95 **38.1 ms**, Python root update p95 **3.87 ms**. The cold
+  delay remains unresolved; fixture success is not performance acceptance.
+- All four Linux bundles build from an isolated source snapshot. Installed SDK,
+  co-install/uninstall and native offline ZIP installer checks pass. Actual
+  installed desktop and simulator launch pass outside the checkout with `-I`.
+  All nine Metor wheels in those bundles match current source bytes:
+  [wheel/source record](gui-2026-09-12/wheel-source-20260920.json).
+- The restricted regression attempt stalled in the existing IPC writer test and
+  was interrupted. The fresh complete run with local sockets permitted passes:
+  **657 tests in 660.190 seconds**, `/tmp/metor-regression-native-20260920.log`.
+  The interrupted attempt is not a regression pass.
+- The former temporary Windows runtime was absent. Official CPython 3.11.9 NuGet
+  was restored under `/tmp`. Installed desktop and simulator startup pass outside
+  the checkout. The actual approved Razer route passes capture/review again:
+  **33,280 bytes / 1,040 ms**, 3.609 seconds, 148,828,160-byte sampled RSS,
+  temporary encrypted Core, no outbox publication or audio export. This is
+  synthetic focused input, not acoustic or full-duplex acceptance. See the
+  [headset record](gui-2026-09-12/windows-installed-headset-20260920.json).
+  All four canonical Windows bundles, isolated installed consumers and offline
+  ZIP installers also pass at this checkpoint. The nine Metor wheel source
+  comparisons have zero mismatches:
+  [Windows wheel/source record](gui-2026-09-12/wheel-source-windows-20260920.json).
+- On the RTX 4060 Windows host, placing the installed runtime on the local
+  Windows filesystem yields **297 ms** first input and **71.8 ms** subsequent
+  input p95, versus approximately **1.26 s** subsequent input p95 from the WSL
+  UNC installation. The local run samples about 344.6 MB RSS. These are 24
+  synthetic queued inputs during 64-row metadata changes, not physical PTT or
+  simultaneous audio latency. See the
+  [local Windows measurement](gui-2026-09-12/native-root-load-windows-local-20260920.json).
+  The native probe now records actual OS/architecture/SDL mode instead of a
+  hardcoded Linux scope label. Its measurement algorithm is unchanged.
+
+### Subsequent presentation and accessibility checkpoint
+
+Bundled DejaVu Sans 2.37 regular/bold and its license now provide explicit
+fallback coverage. Packaged font coverage selects actual fonts for rendering and
+measurement without altering canonical Unicode or caching user text. Password
+fields retain a fixed font. The asset-integrity test also corrected stale
+manifest hashes for 35 existing normalized Lucide SVGs after verifying their
+derivation; no icon bytes or approved specifications were changed.
+Git attributes preserve fingerprinted asset bytes across checkout platforms and
+retain the upstream license notice's original whitespace.
+
+Icon controls now provide cancellable, bounded pointer tooltips. The native
+`gui_native_presentation.py` fixture checks fallback textures, unchanged field
+contents, fixed credential font, visible nonactivating hints and privacy cleanup.
+Its [native screenshot](gui-2026-09-12/tooltip-fallback-20260920.png) uses only
+synthetic identities.
+
+AccessKit 0.7.0 now supplies GUI-owned Windows UIA and Linux AT-SPI integration.
+The immutable tree/action queue, weak native-widget projection and platform
+adapter are separate owners under `gui/accessibility`. A synchronous GUI privacy
+fence removes native nodes and queued actions before the cover assignment
+returns, independently of the next rendered frame. Four deterministic tests
+cover revocation, secret rejection, invalid geometry, action eligibility and
+bounded ordinary editor replacement.
+
+External native clients now pass `gui_native_accessibility.py` on both OSes:
+actual label discovery, ordinary button invocation, no exposed password value,
+and rejection of a retained private element after cover but before repaint.
+Windows additionally passes normal field replacement through UIA; Linux passes
+native editor focus. The pinned Linux adapter lacks the probed AT-SPI
+`EditableText.SetTextContents` interface; no programmatic AT-SPI edit pass is
+claimed. These are synthetic fixture checks, not full screen-reader certification.
+Use `GSETTINGS_BACKEND=memory dbus-run-session` for isolated Linux repetition.
+
+The first Windows attempt identified the requirement to register before initial
+window visibility; the hidden Kivy window also needed its own HWND DPI refreshed.
+Native action testing caught an unhashable foreign enum mapping, which was fixed
+before the passing reruns. Failed attempts are not acceptance evidence.
+
+The first rebuilt installed Windows launcher also exposed a native teardown
+ordering error: Kivy's later input subclasses could restore AccessKit's handler
+after its state had been freed. Privacy revocation remains synchronous; actual
+adapter disposal now follows the event loop's input-provider stop notification.
+The corrected real Windows launcher, including teardown, passes from the rebuilt
+installed wheel. Ordinary unlocked metadata updates preserve native identities;
+covered updates revoke before deferred paint. The native simulator window name
+also explicitly identifies Simulator, without profile/peer data.
+
+The complete regression run passes **662 tests in 655.405 seconds**
+(`/tmp/metor-regression-accessibility-20260920.log`). It covers the platform,
+font and first three pure accessibility-state tests; the fourth bounded-editor
+case passes in the later 4/4 targeted run. Subsequent native projection/action
+adjustments have the separate native checks above. The rerun of all **44** native
+fixtures at 360×640/150% passes (`/tmp/metor-native-accessibility-20260920`).
+All four canonical bundles and isolated SDK/consumer/typing/co-install/uninstall
+checks pass on both OSes. After the final GUI corrections, both GUI bundles were
+rebuilt and their native offline ZIP installers passed again. Installed desktop
+and simulator start/stop pass on both OSes with `-I` outside the checkout. The
+final installed OS accessibility probes pass, including native password
+value/length checks and retained-element revocation before repaint.
+
+The final Windows run uses the local Windows CPython runtime rather than WSL UNC
+for installed execution. The approved Razer capture/review passes again:
+**32,000 bytes / 1,000 ms**, 2.719 seconds, 151,715,840-byte sampled RSS, temporary
+encrypted Core, no outbox publication or exported audio. Synthetic focused input
+does not prove physical buttons, complete GUI duplex or acoustic/AEC quality.
+
+Each OS's nine Metor wheels match the final packaged source bytes with zero
+mismatches. Durable evidence:
+
+- [Presentation/accessibility validation](gui-2026-09-12/presentation-accessibility-20260920.json).
+- [Linux final presentation wheel fingerprints](gui-2026-09-12/wheel-source-presentation-linux-20260920.json).
+- [Windows final presentation wheel fingerprints](gui-2026-09-12/wheel-source-presentation-windows-20260920.json).
+
+Final static checks: Ruff and formatting across **537 files**, mypy across
+**454 source files**, distribution boundaries, version registry and diff
+whitespace pass. Generated documentation is fresh/reproducible. Both approved
+inputs and their durable copies retain the original SHA-256 values. No
+application, launcher, IPC, storage or cryptographic generation was bumped.
+
+### Outstanding completion gates after that checkpoint
+
+This continuation does **not** yet close the GUI assignment. The public platform
+contracts do not by themselves implement registered physical drivers, the V21
+prepared-power flow or V22 authorized initiation/host coordination. Native
+screen-reader coverage across all views and remaining keyboard/optical
+permutations are still open. Full GUI duplex receive/playback
+during TX, permission/device loss, OS lock/suspend/resume and sustained combined
+native load still require completion and evidence. The current passing package
+and native checkpoints above do not close these gates. No full-GUI completion,
+release, physical-appliance or acoustic/AEC claim is made.
 
 ## 15 September pause handoff — current continuation entry
 

@@ -74,7 +74,7 @@ class Label(KivyLabel):
         size, line, weight = TYPE[role]
         super().__init__(
             text=text,
-            font_name=font_path(weight),
+            font_name=font_path(weight, text),
             font_size=sp(size),
             color=color(tone),
             markup=False,
@@ -84,6 +84,8 @@ class Label(KivyLabel):
             **kwargs,
         )
         self._line_height: float = dp(line)
+        self._font_weight = weight
+        self.bind(text=self._font_coverage)
         self.height = self._line_height
         if wrap:
             self.bind(
@@ -94,6 +96,16 @@ class Label(KivyLabel):
             self.shorten = True
             self.shorten_from = 'right'
             self.bind(size=self._single)
+
+    def _font_coverage(self, *_args: object) -> None:
+        """Selects a packaged fallback without changing text or caching its contents.
+
+        Args:
+            _args: Native text change.
+        Returns:
+            None
+        """
+        self.font_name = font_path(self._font_weight, self.text)
 
     def _measure(self, *_args: object) -> None:
         """Measures width-constrained body text including unbroken runs.
@@ -347,6 +359,8 @@ class TextField(TextInput):
         kwargs.setdefault('cursor_color', color('focus'))
         kwargs.setdefault('padding', (dp(16), dp(14)))
         super().__init__(**kwargs)
+        self.bind(text=self._font_coverage)
+        self._font_coverage()
         self.local_keyboard_visible = False
         self.input_purpose = 'password' if self.password else 'text'
         # Icon controls depend on Action in this module and load after it exists.
@@ -366,6 +380,16 @@ class TextField(TextInput):
             readonly=self._keyboard_bounds,
         )
         self._keyboard_bounds()
+
+    def _font_coverage(self, *_args: object) -> None:
+        """Keeps accepted Unicode editable while masked credentials use a fixed font.
+
+        Args:
+            _args: Native text change.
+        Returns:
+            None
+        """
+        self.font_name = font_path(text='' if self.password else self.text)
 
     def _keyboard_bounds(self, *_args: object) -> None:
         """Reserves a fixed trailing key target without overlapping editable text.

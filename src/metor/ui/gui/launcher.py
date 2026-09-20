@@ -29,6 +29,9 @@ class GuiEntry:
         os.environ['KIVY_NO_FILELOG'] = '1'
         os.environ['KIVY_NO_CONFIG'] = '1'
         os.environ['KIVY_NO_CONSOLELOG'] = '1'
+        # UI Automation registration must precede the HWND's first visible frame.
+        if sys.platform == 'win32':
+            os.environ['KCFG_GRAPHICS_WINDOW_STATE'] = 'hidden'
         if (
             sys.platform.startswith('linux')
             and not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))

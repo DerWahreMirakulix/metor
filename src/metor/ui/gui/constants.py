@@ -43,6 +43,12 @@ class GuiLimits:
     POWER_SECONDS: float = 2.0
     PURGE_SECONDS: float = 5.0
     LONG_PRESS_SECONDS: float = 0.5
+    TOOLTIP_SECONDS: float = 0.6
+    ACCESSIBILITY_NODES: int = 4096
+    ACCESSIBILITY_BYTES: int = 2 * 1024 * 1024
+    ACCESSIBILITY_ACTIONS: int = 64
+    ACCESSIBILITY_POLL_SECONDS: float = 0.1
+    WINDOWS_REFERENCE_DPI: float = 96.0
     LONG_PRESS_TRAVEL: float = 8.0
     CAPS_SECONDS: float = 0.3
     UI_TICK_SECONDS: float = 1 / 60
@@ -83,6 +89,7 @@ class Geometry:
     COMPACT_MAX: int = 560
     WIDE_MAX: int = 800
     FORM_MAX: int = 400
+    TOOLTIP_MAX: int = 280
     BUBBLE_MAX: int = 520
     BUBBLE_MIN: int = 128
     BUBBLE_RATIO: float = 0.85

@@ -19,5 +19,6 @@ setup(
         'Kivy==2.3.1',
         'sounddevice==0.5.3',
         'qrcode==8.2',
+        'accesskit==0.7.0',
     ]
 )

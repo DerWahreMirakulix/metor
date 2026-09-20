@@ -13,6 +13,8 @@ import tempfile
 import time
 
 os.environ['KIVY_NO_ARGS'] = '1'
+if os.name == 'nt':
+    os.environ['KCFG_GRAPHICS_WINDOW_STATE'] = 'hidden'
 os.environ['KIVY_NO_FILELOG'] = '1'
 os.environ['KIVY_NO_CONSOLELOG'] = '1'
 os.environ['KIVY_NO_CONFIG'] = '1'
