@@ -6,6 +6,13 @@ Resumed from committed `3a2cee6` on `embeddedui`. The earlier pause entry below
 describes its historical tree before that commit; its statement that the work
 was uncommitted is not the current Git state.
 
+The implementation checkpoint is committed as
+`eea54f18858e68f5dfa7bfa2800ce86f0807c0b4` (`Add typed platform contracts and
+native GUI accessibility`). The evidence was collected before that commit;
+the final wheel/source records identify its packaged source bytes. The subsequent
+evidence-bookkeeping commit changes documentation only. This checkpoint does
+not close the outstanding completion gates below and is not a release.
+
 The owner explicitly requires “frontend-unabhängige, typisierte
 Plattformverträge”: **frontend-independent, typed platform contracts**.
 Hardware status, inputs and controlling actions must remain separate and must

@@ -2,7 +2,7 @@
   "date": "2026-09-20",
   "checkpoint": "presentation and accessibility; final input-provider teardown order, stable normal-update identities and explicit simulator title",
   "base_commit": "3a2cee625ffe52113fcc5dc18ad69d04a3de9f0a",
-  "ending_state": "uncommitted implementation worktree",
+  "ending_state": "verified before commit; implementation committed as eea54f18858e68f5dfa7bfa2800ce86f0807c0b4",
   "source_tree_digest": "79843d1cc5fbeae50bbb88fd8c1da6078c0bea6308b72c2ccdbb8d453f2b1a95",
   "source_file_count": 523,
   "source_digest_recipe": "sorted src paths; relative UTF-8 path, NUL, raw SHA-256 of file bytes; exclude __pycache__ and egg-info",
