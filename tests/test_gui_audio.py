@@ -1,8 +1,10 @@
 """PCM framing and native-port safety tests; mock streams do not prove acoustics."""
 
 import struct
+import sys
+from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from metor.ui.gui.platform.audio import HeadsetAudio, PcmVoice
 
@@ -44,6 +46,43 @@ class AudioPortTests(unittest.TestCase):
         output.close.assert_called_once()
         self.assertIsNone(audio._capture)
         self.assertIsNone(audio._output)
+
+    def test_capture_permission_denial_does_not_claim_or_stop_output(self) -> None:
+        """A denied microphone leaves independent output ownership untouched."""
+        denied = Mock(side_effect=PermissionError('microphone denied'))
+        sounddevice = SimpleNamespace(RawInputStream=denied)
+        audio = HeadsetAudio()
+        output = Mock()
+        output.write.return_value = False
+        audio._output = output
+
+        with (
+            patch.dict(sys.modules, {'sounddevice': sounddevice}),
+            self.assertRaises(PermissionError),
+        ):
+            audio.start_capture(headset_confirmed=True)
+
+        self.assertIsNone(audio._capture)
+        self.assertIs(audio._output, output)
+        output.stop.assert_not_called()
+
+    def test_output_permission_denial_does_not_claim_or_stop_capture(self) -> None:
+        """A denied speaker leaves the active microphone owner untouched."""
+        denied = Mock(side_effect=PermissionError('speaker denied'))
+        sounddevice = SimpleNamespace(RawOutputStream=denied)
+        audio = HeadsetAudio()
+        capture = Mock()
+        audio._capture = capture
+
+        with (
+            patch.dict(sys.modules, {'sounddevice': sounddevice}),
+            self.assertRaises(PermissionError),
+        ):
+            audio.play_frame(b'\x00\x01' * 320, headset_confirmed=True)
+
+        self.assertIsNone(audio._output)
+        self.assertIs(audio._capture, capture)
+        capture.stop.assert_not_called()
 
 
 if __name__ == '__main__':

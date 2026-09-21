@@ -62,7 +62,8 @@ ownership map. Counts sum to 763; no path is unclassified.
 | A12      | verified | Producer recovery correlation ordering and regression coverage; this worklog                                  | A12 gates below      | Complete                                                                    |
 | A13      | verified | `src/metor/ui/gui/platform/{configuration,configuration_security}.py`, `tests/test_device_configuration_security.py`, this worklog | A13 gates below | Complete |
 | A14      | verified | `src/metor/ui/gui/{app.py,platform/lifecycle.py,runtime/controller.py}`, `packaging/gui/setup.py`, `requirements/gui.lock`, `tests/{test_gui_os_lifecycle.py,gui_native_lifecycle.py,test_gui_lifecycle.py}`, `docs/contracts/{GUI_PLATFORM_ADR.md,gui/support.json}`, this worklog | A14 gates below | Complete |
-| A15–A25 | open     | None                                                                                                            | Not run              | A15: prove simultaneous complete GUI media path                             |
+| A15      | verified | `tests/{test_gui_capture.py,test_gui_audio.py,gui_native_voice.py}`, `docs/contracts/{GUI_PLATFORM_ADR.md,gui/support.json}`, this worklog | A15 gates below | Complete |
+| A16–A25 | open     | None                                                                                                            | Not run              | A16: bound optional notifications and socket rejection                      |
 
 ## A00 verification
 
@@ -644,5 +645,56 @@ application version.
 | `python -m ruff format --check` for all A14 source, packaging, and test paths | PASS |
 | `python -m mypy src/metor/ui/gui/platform/lifecycle.py src/metor/ui/gui/app.py src/metor/ui/gui/runtime/controller.py tests/gui_native_lifecycle.py` | PASS; strict project configuration |
 | `python -m json.tool docs/contracts/gui/support.json` | PASS; support manifest remains valid JSON |
+| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
+| `git diff --check` | PASS |
+
+## A15 verification
+
+A new deterministic integration keeps a real `VoiceController` and
+`CaptureWorker` recording through the public SDK into a temporary encrypted
+Core while the real `PlaybackController` and `PlaybackWorker` read and play a
+different finalized PCM source from that same SDK/Core activation. Only the
+audio endpoints are controlled test ports. The output port blocks at its actual
+frame boundary and observes the capture worker still running, so this is an
+ordering proof rather than a mock of `play()` eligibility.
+
+While both media workers are active, the production mailbox/controller drains
+updates and a text draft remains editable. On completion the new recording is
+still an unsent `draft`; the played outgoing source remains `pending`; playback
+does not fabricate Delivered, Read, Safe, consume, or outbox-removal outcomes.
+The captured owner, profile instance, epoch, peer, message ID, and activation
+generation remain immutable through the overlap.
+
+The broader matrix retains cache/queue bounds, accepted-prefix recovery,
+cancel/abort, focus/suspend, device cleanup, permission denial, lost key-up, and
+profile-switch barriers. The 20 MiB production-worker pressure run used 64 KiB
+maximum SDK reads, 640-byte frames, a 16 MiB cache peak, and a sampled 42-record
+mailbox peak without overload.
+
+The existing explicitly authorized Razer native probe now seeds a synthetic
+pending PCM source in temporary Core, plays it through the production GUI
+controller during actual HeadsetAudio capture, observes capture ownership at
+the real output write, then still plays the captured review. It exports no
+microphone bytes. Native Windows/Kivy/audio hardware is unavailable here, so
+that updated scenario is a required rerun rather than a claimed pass; the prior
+native simultaneous port result remains scoped to its exact Razer route. No
+speaker AEC, arbitrary-headset, Linux-headset, or appliance claim is made.
+
+No production semantics changed in A15; this closes an evidence gap with
+integration/native probes and permission regressions. No protocol, persistence,
+compatibility, or application version changes are required.
+
+| Command | Result |
+| ------- | ------ |
+| Pre-change review of `test_gui_playback.py` and native evidence | GAP CONFIRMED; only mocked controller eligibility plus separate port/sequential native proofs existed |
+| `PYTHONPATH=tests python -m unittest test_gui_capture.CaptureIntegrationTests.test_full_gui_capture_and_sent_playback_overlap_over_real_sdk -v` outside the socket sandbox | PASS; actual production controllers/workers, SDK, IPC, SQLCipher/blob Core, concurrent controlled ports and truthful states |
+| `PYTHONPATH=tests python -m unittest test_gui_capture test_gui_playback test_gui_producers test_gui_press test_gui_audio test_gui_lifecycle test_gui_profiles -q` outside the socket sandbox | PASS; full A15 capture/playback/recovery/input/device/profile matrix |
+| `python tests/gui_stream_pressure.py --result /tmp/metor-a15-stream-pressure.json` | PASS; 20 MiB output, 16 MiB cache peak, 64 KiB read, 640-byte frame, 42-record sampled queue peak, no overload |
+| `python -m unittest tests.test_gui_audio -v` | PASS; 5 framing, inert-open, cleanup, microphone-permission and speaker-permission tests |
+| `PYTHONPATH=tests python -m mypy tests/gui_native_voice.py` | PASS; updated concrete-route native probe is structurally typed |
+| Updated installed Windows Razer GUI full-duplex probe | NOT RUN; native Windows/Kivy/Razer route unavailable in current WSL environment |
+| `python -m ruff check tests/test_gui_capture.py tests/test_gui_audio.py tests/gui_native_voice.py` | PASS |
+| `python -m ruff format --check tests/test_gui_capture.py tests/test_gui_audio.py tests/gui_native_voice.py` | PASS |
+| `python -m json.tool docs/contracts/gui/support.json` | PASS; claims remain explicit and machine-readable |
 | `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
 | `git diff --check` | PASS |

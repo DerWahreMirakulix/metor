@@ -7,6 +7,7 @@ are real. No audio is exported. This is not physical-key, AEC or acoustic-qualit
 # ruff: noqa: E402
 
 import argparse
+from collections.abc import Callable
 import json
 import os
 from pathlib import Path
@@ -27,9 +28,10 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 import psutil
 
-import test_gui_producers as support
+import test_gui_producers as support  # type: ignore[import-untyped]
 from metor.client import FrontendLaunchContext
-from metor.core.api import Delivery
+from metor.client.platform import OutputPort
+from metor.core.api import Delivery, MessageDirectionCode
 from metor.data.message import MessageDirection
 from metor.ui.gui.app import MetorApp
 from metor.ui.gui.platform import DeviceConfiguration
@@ -41,6 +43,25 @@ from metor.ui.gui.views.peer import PeerView
 RECORD_SECONDS: float = 1.0
 PROBE_DEADLINE_SECONDS: float = 40.0
 POLL_SECONDS: float = 0.05
+
+
+class ObservedNativeOutput:
+    """Delegates every byte to the real device while recording capture overlap."""
+
+    def __init__(self, output: OutputPort, capture_running: Callable[[], bool]) -> None:
+        """Bind the selected production output and a read-only capture predicate."""
+        self.output = output
+        self.capture_running = capture_running
+        self.overlap = False
+
+    def play_frame(self, frame: bytes, *, headset_confirmed: bool) -> None:
+        """Observe worker concurrency immediately before the real PortAudio write."""
+        self.overlap = self.overlap or bool(self.capture_running())
+        self.output.play_frame(frame, headset_confirmed=headset_confirmed)
+
+    def stop_output(self) -> None:
+        """Delegate the real drain/close boundary unchanged."""
+        self.output.stop_output()
 
 
 def main() -> None:
@@ -87,6 +108,24 @@ def main() -> None:
             HeadsetAudio(source.index, sink.index), headset_confirmed=True
         )
         gui.playback.configure(sink.index)
+        native_output = gui.playback.audio
+        assert native_output is not None
+        observed_output = ObservedNativeOutput(native_output, lambda: gui.voice.running)
+        gui.playback.audio = observed_output
+        fixture.capture('native-duplex-source')
+        fixture.client.finalize_voice(
+            'native-duplex-source', 20, owner_token=fixture.owner
+        )
+        fixture.client.commit_voice(
+            fixture.onion, 'native-duplex-source', owner_token=fixture.owner
+        )
+        duplex_target = gui.playback.target(
+            fixture.onion,
+            Delivery.DROP,
+            MessageDirectionCode.OUT,
+            'native-duplex-source',
+        )
+        assert duplex_target is not None
         started = time.monotonic()
         phase = 'entry'
         recording_at = 0.0
@@ -124,6 +163,18 @@ def main() -> None:
                 phase = 'starting'
             elif phase == 'starting' and gui.voice.press.phase.value == 'recording':
                 recording_at = time.monotonic()
+                assert gui.playback.play(duplex_target)
+                phase = 'duplex'
+            elif (
+                phase == 'duplex'
+                and gui.playback.progress is not None
+                and not gui.playback.running
+            ):
+                assert observed_output.overlap, (
+                    'Native playback did not overlap active capture'
+                )
+                assert gui.playback.progress.state == 'complete'
+                assert gui.playback.progress.position == PcmVoice.FRAME_BYTES
                 phase = 'recording'
             elif (
                 phase == 'recording'
@@ -152,27 +203,30 @@ def main() -> None:
                     fixture.onion, identity, MessageDirection.OUT
                 )
                 assert record is not None and record.status == 'draft'
-                assert fixture.messages.get_pending_outbox() == []
+                pending = fixture.messages.get_pending_outbox()
+                assert [row[4] for row in pending] == ['native-duplex-source']
                 args.result.parent.mkdir(parents=True, exist_ok=True)
                 app.shell.export_to_png(str(args.result.with_suffix('.png')))
+                module_file = sys.modules[MetorApp.__module__].__file__
+                assert module_file is not None
+                module_path = Path(module_file).resolve()
                 evidence = {
                     'kind': 'native GUI synthetic-key PTT, actual headset, public SDK and temporary encrypted Core',
                     'system': platform.system(),
                     'python': platform.python_version(),
-                    'source_checkout': Path(sys.modules[MetorApp.__module__].__file__)
-                    .resolve()
-                    .is_relative_to(Path(__file__).resolve().parents[1] / 'src'),
-                    'installed_bundle': 'site-packages'
-                    in Path(sys.modules[MetorApp.__module__].__file__).parts,
-                    'gui_module_path': str(
-                        Path(sys.modules[MetorApp.__module__].__file__).resolve()
+                    'source_checkout': module_path.is_relative_to(
+                        Path(__file__).resolve().parents[1] / 'src'
                     ),
+                    'installed_bundle': 'site-packages' in module_path.parts,
+                    'gui_module_path': str(module_path),
                     'input': source.name,
                     'output': sink.name,
                     'captured_and_played_bytes': size,
+                    'simultaneous_sdk_playback_bytes': PcmVoice.FRAME_BYTES,
+                    'simultaneous_capture_output_observed': observed_output.overlap,
                     'encoded_duration_ms': PcmVoice.duration_ms(size),
                     'elapsed_seconds': time.monotonic() - started,
-                    'canonical_result': 'unsent owned DROP draft; no outbox publication',
+                    'canonical_result': 'unsent owned DROP draft plus one synthetic pending duplex source; no captured-audio publication',
                     'physical_input': False,
                     'microphone_audio_exported': False,
                     'aec_or_acoustic_quality_verified': False,

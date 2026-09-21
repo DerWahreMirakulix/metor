@@ -46,6 +46,7 @@
     "headset_route": "Razer BlackShark V2 HS 2.4",
     "bounded_duplex_capture_playback": "tested; captured bytes discarded",
     "gui_ptt": "tested from current lifecycle installed packages with synthetic focused Space input, actual Razer capture/review and temporary encrypted Core; 30720 bytes / 960 ms; 2026-09-20",
+    "current_source_full_gui_duplex_probe": "implemented with synthetic Core-backed playback during actual Razer capture plus captured-review playback; native rerun unavailable in the current WSL environment",
     "canonical_installer": "tested offline with official full CPython 3.11.9 NuGet runtime; 2026-09-15",
     "coinstall_uninstall": "tested both UI removal orders; 2026-09-15",
     "speaker_aec": "unsupported",
@@ -54,6 +55,13 @@
     "local_install_root_load": "RTX 4060; 24 synthetic queued inputs, 64 changing rows; first input 297 ms, subsequent p95 71.8 ms; excludes native audio and physical input"
   },
   "physical_adapters": [],
+  "software_media_integration": {
+    "full_gui_path": "production capture and playback controllers/workers overlap through one authenticated SDK client and temporary encrypted Core; controlled audio ports only",
+    "concurrent_ui_state": "text draft and bounded mailbox/controller polling remain usable during overlap",
+    "truthful_outcomes": "captured media remains draft and the playback source remains pending; no Delivered, Read or Safe state is inferred",
+    "pressure": "20 MiB production playback probe passes with 16 MiB cache cap, 64 KiB reads and bounded mailbox",
+    "native_scope": "prior exact Razer headset port duplex passed; updated full-GUI native duplex route requires rerun; no AEC, arbitrary-headset or appliance claim"
+  },
   "platform_contracts": {
     "owner": "metor-sdk / metor.client.platform",
     "frontend_independent": true,
@@ -85,7 +93,7 @@
   "host_shutdown": "typed fixed-port request occurs only after local single-runtime checks plus Core preparation, or exact safe purge terminal state; the port owns atomic exclusive-host enforcement; no OS adapter registered or real shutdown tested",
   "purge": "bounded physical-input composition, scoped grant, exact initiation and safe-terminal shutdown gating tested; no production hardware driver or real destruction/shutdown tested",
   "pause_checkpoint": "2026-09-15: retained root source has targeted native/static validation; installed artifacts/headset evidence predates final RootPanel/RootRow changes",
-  "current_checkpoint": "2026-09-20: 676-test regression, GUI suspend/input-loss and capture/output duplex contracts, native 360x640/150% SDL smoke, prior 46/46 native matrix including V21/V22, current-source Linux/Windows bundles, isolated consumers, offline installers, installed desktop/simulator launch and installed Windows Razer capture/review pass",
+  "current_checkpoint": "2026-09-21: real Linux session-D-Bus lifecycle delivery and software full-GUI capture/playback overlap through SDK/encrypted Core pass; native Windows lifecycle and updated full-GUI Razer duplex reruns remain unavailable; earlier installed/bundle/native evidence retains its recorded source scope",
   "acceptance_at_claimed_support_level": true,
   "physical_appliance_acceptance": "not applicable until a production adapter is registered and claimed"
 }

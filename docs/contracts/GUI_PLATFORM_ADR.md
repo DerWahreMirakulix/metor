@@ -146,6 +146,24 @@ headset, speaker/AEC or physical-appliance support claim. Permission and unplug
 failures are handled and tested at the typed port boundary. Current-source
 artifact fingerprints are recorded in the acceptance report.
 
+The current software integration additionally overlaps the production
+`VoiceController`/`CaptureWorker` and `PlaybackController`/`PlaybackWorker`
+through one authenticated public SDK client and a temporary encrypted Core.
+Only deterministic audio ports replace PortAudio: capture remains active while
+a finalized pending PCM source is read through Core and played, a text draft and
+bounded mailbox updates remain responsive, and resulting Voice states remain
+exactly `draft` and `pending` rather than fabricated Delivered/Read outcomes.
+The 20 MiB production playback stress remains within the 16 MiB cache and
+bounded mailbox limits.
+
+The native Razer GUI probe now also requests a synthetic Core-backed playback
+during actual headset capture and observes overlap at the real PortAudio write,
+then retains its existing captured-review playback and no-export checks. That
+updated native scenario is not runnable on this WSL host and is therefore a
+pending native rerun, not a new pass. The earlier native simultaneous port probe
+remains evidence for that exact selected route only; neither result establishes
+speaker AEC, arbitrary-headset behavior, or appliance support.
+
 ## Resource and safety constraints
 
 The owner clarified the hardware boundary on 20 September: use

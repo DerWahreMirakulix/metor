@@ -31,6 +31,8 @@ class FiniteMicrophone:
         self.failed = False
         self.opened = False
         self.stopped = False
+        self.opened_event = threading.Event()
+        self.frame_event = threading.Event()
         self.on_empty: Callable[[], None] = lambda: None
 
     def start_capture(self, *, headset_confirmed: bool) -> None:
@@ -38,6 +40,7 @@ class FiniteMicrophone:
         if not headset_confirmed:
             raise RuntimeError('Unconfirmed route')
         self.opened = True
+        self.opened_event.set()
 
     def stop_capture(self) -> None:
         """Stops only this test input."""
@@ -50,13 +53,42 @@ class FiniteMicrophone:
     def take_frame(self) -> bytes | None:
         """Returns each complete frame once, then releases the initiating press."""
         if self.frames:
-            return self.frames.popleft()
+            frame = self.frames.popleft()
+            self.frame_event.set()
+            return frame
         self.on_empty()
         return None
 
     def discard_capture(self) -> None:
         """Clears any unaccepted synthetic microphone bytes."""
         self.frames.clear()
+
+
+class ConcurrentOutput:
+    """Controlled complete output that observes, but never replaces, capture work."""
+
+    def __init__(self, capture_running: Callable[[], bool]) -> None:
+        """Create a blocked output boundary for deterministic overlap assertions."""
+        self.capture_running = capture_running
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.frames: list[bytes] = []
+        self.capture_was_running = False
+        self.stopped = False
+
+    def play_frame(self, frame: bytes, *, headset_confirmed: bool) -> None:
+        """Retain one complete frame while the GUI thread remains usable."""
+        if not headset_confirmed:
+            raise RuntimeError('Unconfirmed route')
+        self.capture_was_running = self.capture_running()
+        self.frames.append(frame)
+        self.entered.set()
+        if not self.release.wait(3):
+            raise RuntimeError('Controlled output release timed out')
+
+    def stop_output(self) -> None:
+        """Record independent output cleanup without touching capture."""
+        self.stopped = True
 
 
 class CaptureIntegrationTests(unittest.TestCase):
@@ -190,6 +222,81 @@ class CaptureIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(record.status, 'draft')
         self.assertEqual(self.h.messages.get_pending_outbox(), [])
+
+    def test_full_gui_capture_and_sent_playback_overlap_over_real_sdk(self) -> None:
+        """Production controllers/workers remain full-duplex through SDK/Core IO."""
+        payload = b'\x00\x01' * 320
+        self.h.capture('duplex-source')
+        self.h.client.finalize_voice('duplex-source', 20, owner_token=self.h.owner)
+        self.h.client.commit_voice(
+            self.h.onion, 'duplex-source', owner_token=self.h.owner
+        )
+        controller = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        self.addCleanup(controller.close)
+        controller.client = self.h.client
+        controller.state.snapshot = self.h.client.runtime_snapshot()
+        controller.state.capabilities = frozenset(self.h.client.init_event.capabilities)
+        controller.voice_owner.token = self.h.owner
+        controller.state.covered = False
+        controller.state.route = Route('V08', self.h.onion, Delivery.DROP)
+
+        microphone = FiniteMicrophone([payload])
+        self.assertTrue(controller.voice.configure(microphone, headset_confirmed=True))
+        self.assertTrue(controller.voice.down(PressSource.PHYSICAL))
+        capture_binding = controller.voice.press.binding
+        self.assertIsNotNone(capture_binding)
+        assert capture_binding is not None
+        self.assertTrue(microphone.opened_event.wait(3))
+        self.assertTrue(microphone.frame_event.wait(3))
+
+        output = ConcurrentOutput(lambda: controller.voice.running)
+        controller.playback.audio = output
+        target = controller.playback.target(
+            self.h.onion,
+            Delivery.DROP,
+            MessageDirectionCode.OUT,
+            'duplex-source',
+        )
+        self.assertIsNotNone(target)
+        assert target is not None
+        self.assertTrue(controller.playback.play(target))
+        self.assertTrue(output.entered.wait(3))
+        self.assertTrue(output.capture_was_running)
+
+        controller.state.set_draft(
+            self.h.onion, Delivery.DROP, 'Typing remains responsive'
+        )
+        controller.poll()
+        self.assertEqual(
+            controller.state.drafts[(self.h.onion, Delivery.DROP)],
+            'Typing remains responsive',
+        )
+        self.assertTrue(controller.voice.running)
+        self.assertTrue(controller.playback.running)
+
+        output.release.set()
+        assert controller.playback.worker is not None
+        self.assertTrue(controller.playback.worker.done.wait(5))
+        controller.poll()
+        self.assertEqual(b''.join(output.frames), payload)
+        self.assertTrue(output.stopped)
+
+        controller.voice.up(PressSource.PHYSICAL)
+        assert controller.voice.worker is not None
+        self.assertTrue(controller.voice.worker.done.wait(10))
+        controller.poll()
+        recorded = self.h.messages.get_voice_payload(
+            self.h.onion, capture_binding.msg_id, MessageDirection.OUT
+        )
+        source = self.h.messages.get_voice_payload(
+            self.h.onion, 'duplex-source', MessageDirection.OUT
+        )
+        self.assertEqual(recorded.status, 'draft')
+        self.assertEqual(source.status, 'pending')
+        self.assertEqual(
+            [row[4] for row in self.h.messages.get_pending_outbox()],
+            ['duplex-source'],
+        )
 
     def test_lost_append_response_reconciles_without_repeating_the_frame(self) -> None:
         """A committed append with lost response is finalized from exact retained state."""
