@@ -1,0 +1,78 @@
+# Final closure worklog
+
+This is the single resumable worklog for closure packages A00–A25. Historical
+reports remain evidence and are not competing implementation backlogs.
+
+## Baseline
+
+- Starting SHA: `bb7ae07b5f83f8cae9ac8f38c35f9a9a757a43d7`
+- Starting branch/worktree: `embeddedui`, tracking `origin/embeddedui`, clean
+- Environment: WSL2 Linux x86_64, kernel 6.18.33.2, Python 3.11.4 at
+  `/home/yoda/miniconda3/bin/python`, Node 24.18.0, npm 11.16.0
+- Unavailable baseline environments: native Windows and Python 3.12/3.13
+- Unavailable design evidence: no Penpot connector is installed in this
+  environment; the pinned revision therefore remains an explicit native visual
+  evidence gap rather than an inferred result
+- Version registry: application 0.2.0; IPC 2 (minimum 2); peer 3 (minimum 3);
+  DB 4 (minimum 3); keyslot/blob 1; profile-key/blob-object derivation 1;
+  frontend launch contract 2
+- Distributions: `metor-sdk`, `metor`, `metor-ui-terminal`, `metor-ui-gui`
+- Active frontend entry points: `terminal`, `gui`
+- Tracked inventory: 763 files, including 549 Python files
+- Functional specification SHA-256:
+  `8907c510aeb7cf9272816e60bd1c09a2f38c31c7d340d67859163254f2c8cca7`
+- Layout specification SHA-256:
+  `3202019b3fd3e7aef472d281006cdb35c1caf073dbaaf2ee75bf691eeaadf5b0`
+- The two checked-in `docs/.temp/` copies match those hashes. They remain
+  historical evidence until package A21 updates active references and removes
+  the duplicates.
+
+Every tracked file is assigned by the following complete, precedence-ordered
+ownership map. Counts sum to 763; no path is unclassified.
+
+| Class                   | Paths                                                                                                  | Count |
+| ----------------------- | ------------------------------------------------------------------------------------------------------ | ----: |
+| Test                    | `tests/**`                                                                                             |    84 |
+| UI                      | `src/metor/ui/**`                                                                                      |   256 |
+| SDK                     | `src/metor/{versioning,client,shared}/**`, `src/metor/core/{api,auth}/**`                              |    67 |
+| Runtime                 | Remaining `src/**`                                                                                     |   208 |
+| Generated reference     | `docs/generated/**`                                                                                    |     4 |
+| Immutable specification | The two canonical GUI specifications in `docs/specs/`                                                  |     2 |
+| Historical evidence     | `docs/audits/**`, `docs/.temp/**`                                                                      |    83 |
+| Active documentation    | Remaining `docs/**`, `README.md`, `AGENTS.md`, `LICENSE`                                               |    16 |
+| Build/Release           | `packaging/**`, `scripts/**`, `requirements/**`, repository/CI/editor configuration and build metadata |    43 |
+
+## Package status
+
+| Package | State    | Changed files                          | Verification         | Next step                                                                              |
+| ------- | -------- | -------------------------------------- | -------------------- | -------------------------------------------------------------------------------------- |
+| A00     | verified | `docs/audits/FINAL_CLOSURE_WORKLOG.md` | Baseline gates below | A01: write lower-level SQL close failure regressions, then correct release propagation |
+| A01     | open     | None                                   | Not run              | Inspect the current SQL/release lifecycle and its direct tests                         |
+| A02–A25 | open     | None                                   | Not run              | Follow the mandated package order, including A10b                                      |
+
+## A00 verification
+
+Commands were run from the starting SHA on 21 September 2026. The first full
+suite and installed-artifact attempts ran inside a socket-restricted sandbox and
+produced artificial socket failures; they are environment diagnostics, not
+repository failures. Both were rerun with local socket access, and only the
+reruns are acceptance results.
+
+| Command                                                                                                                      | Result                                                                           |
+| ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `python -m ruff check src/metor/ scripts/ tests/`                                                                            | PASS                                                                             |
+| `python -m ruff format --check src/metor/ scripts/ tests/`                                                                   | PASS; 546 files already formatted                                                |
+| `python -m mypy src scripts/`                                                                                                | PASS; 462 source files                                                           |
+| `python scripts/check_boundaries.py`                                                                                         | PASS                                                                             |
+| `python scripts/versioning.py validate`                                                                                      | PASS                                                                             |
+| `python scripts/validate_generated_docs.py`                                                                                  | PASS; fresh and reproducible                                                     |
+| `python -m unittest discover -s tests -p 'test_*.py'`                                                                        | PASS outside the socket sandbox; 676 tests in 625.610 seconds                    |
+| Four `python -m pip wheel --no-deps --no-build-isolation ...` builds followed by `python scripts/validate_wheel_versions.py` | PASS; all four distributions report 0.2.0                                        |
+| `python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir <temporary>`                       | PASS with network access; four Linux x86_64 CPython 3.11 bundles                 |
+| `python scripts/validate_installed_artifacts.py <temporary-bundle-root>`                                                     | PASS outside the socket sandbox; isolated SDK/base/UI and both UI-removal orders |
+| `python scripts/validate_release_installers.py <temporary-bundle-root>`                                                      | PASS; all four native offline ZIP installers                                     |
+
+No native Windows, Python 3.13, Penpot, real desktop session, real audio route,
+or physical-device gate was executed in A00. Those are recorded environment or
+later-package gates, not passes. The repository worktree was clean again after
+all generators and tests.
