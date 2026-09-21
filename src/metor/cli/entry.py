@@ -44,6 +44,10 @@ def run_cli(argv: List[str]) -> int:
     if args.command == 'chat' and getattr(args, 'chat_help', False):
         print(Help.show_chat_launcher_help())
         return 0
+    if args.command == 'chat' and extra:
+        sys.stderr.write('Unexpected chat arguments.\n')
+        print(Help.show_chat_launcher_help())
+        return 2
     if args.command == 'chat' and getattr(args, 'list_uis', False):
         return CommandHandlers.handle_list_frontends()
     if args.command in ('-h', '--help', 'help') or (

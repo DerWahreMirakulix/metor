@@ -3,7 +3,9 @@
 # ruff: noqa: E402
 
 import io
+import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -97,6 +99,89 @@ class IndependentCliContractTests(unittest.TestCase):
         self.assertIsNone(args.ui)
         self.assertEqual(args.subcommand, 'alice')
         self.assertEqual(extra, ['--ui', 'literal'])
+
+    def test_chat_value_options_and_unexpected_tokens_are_lossless(self) -> None:
+        """Separated/equal values parse equally and unknown chat tokens survive."""
+        for argv in (
+            ['chat', '--ui', 'gui'],
+            ['chat', '--ui=gui'],
+        ):
+            with self.subTest(argv=argv):
+                args, extra = CliParser.parse(argv)
+                self.assertEqual(args.ui, 'gui')
+                self.assertEqual(extra, [])
+
+        for argv in (
+            ['chat', '--device-config', '/tmp/device.toml'],
+            ['chat', '--device-config=/tmp/device.toml'],
+        ):
+            with self.subTest(argv=argv):
+                args, extra = CliParser.parse(argv)
+                self.assertEqual(args.device_config, '/tmp/device.toml')
+                self.assertEqual(extra, [])
+
+        args, extra = CliParser.parse(
+            ['chat', '--ui', 'gui', '--simulator', '-p', 'portable']
+        )
+        self.assertEqual(args.profile, 'portable')
+        self.assertTrue(args.simulator)
+        self.assertEqual(extra, [])
+
+        args, extra = CliParser.parse(['chat', 'unexpected'])
+        self.assertEqual(args.subcommand, 'unexpected')
+        self.assertEqual(extra, ['unexpected'])
+
+    def test_send_payload_preserves_ui_like_tokens_in_order(self) -> None:
+        """Frontend-looking tokens remain literal free text outside chat."""
+        args, extra = CliParser.parse(
+            ['send', 'alice', 'before', '--ui', 'gui', 'after']
+        )
+        self.assertEqual(args.command, 'send')
+        self.assertEqual(args.subcommand, 'alice')
+        self.assertEqual(extra, ['before', '--ui', 'gui', 'after'])
+
+    def test_chat_parser_matrix_runs_in_a_fresh_interpreter(self) -> None:
+        """A fresh supported interpreter observes the same lossless token boundary."""
+        script = (
+            'import json; from metor.cli.parser import CliParser; '
+            "cases=[['chat','--ui','gui'],"
+            "['chat','--device-config','/tmp/device.toml'],"
+            "['chat','unexpected']]; out=[]; "
+            '[(lambda parsed: out.append([vars(parsed[0]), parsed[1]]))'
+            '(CliParser.parse(case)) for case in cases]; print(json.dumps(out))'
+        )
+        environment = dict(os.environ)
+        environment['PYTHONPATH'] = str(Path(__file__).resolve().parents[1] / 'src')
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        parsed = json.loads(result.stdout)
+        self.assertEqual(parsed[0][0]['ui'], 'gui')
+        self.assertEqual(parsed[1][0]['device_config'], '/tmp/device.toml')
+        self.assertEqual(parsed[2][1], ['unexpected'])
+
+    def test_unexpected_chat_argument_reports_usage_without_loading_ui(self) -> None:
+        """Invalid chat operands fail explicitly before frontend discovery."""
+        output = io.StringIO()
+        errors = io.StringIO()
+        with (
+            patch('metor.cli.entry.initialize_runtime_environment'),
+            patch(
+                'metor.cli.entry.ProfileManager',
+                side_effect=AssertionError('profile side effect'),
+            ),
+            patch('metor.cli.entry.load_frontend') as load_frontend_mock,
+            patch('sys.stdout', output),
+            patch('sys.stderr', errors),
+        ):
+            self.assertEqual(run_cli(['chat', 'unexpected']), 2)
+        load_frontend_mock.assert_not_called()
+        self.assertIn('metor chat', output.getvalue())
+        self.assertIn('Unexpected chat arguments', errors.getvalue())
 
     def test_version_is_profile_and_frontend_independent(self) -> None:
         output = io.StringIO()

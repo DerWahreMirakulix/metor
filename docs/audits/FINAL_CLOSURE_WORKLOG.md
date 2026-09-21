@@ -56,7 +56,8 @@ ownership map. Counts sum to 763; no path is unclassified.
 | A07     | verified | `src/metor/{utils/process.py,data/profile/manager.py,application/runtime/maintenance.py,application/frontend/host.py,core/tor.py}`, `tests/test_application_runtime_contract.py`, this worklog | A07 gates below | Complete |
 | A08     | verified | `src/metor/core/api/{base.py,events/shared.py,events/entries.py}`, `tests/test_ipc_type_validation.py`, this worklog | A08 gates below | Complete |
 | A09     | verified | `scripts/{generate_api_docs.py,release/compatibility.py}`, `docs/generated/{API.md,api.schema.json,compatibility.json}`, `tests/test_api_generation_contract.py`, this worklog | A09 gates below | Complete |
-| A10–A25 | open     | None                                                                                                            | Not run              | A10: repair CLI argument loss                                                |
+| A10     | verified | `src/metor/cli/{parser,entry}.py`, `tests/test_refactor2_cli_contract.py`, this worklog | A10 gates below | Complete |
+| A10b–A25 | open    | None                                                                                                            | Not run              | A10b: render untrusted terminal text safely and verbatim                     |
 
 ## A00 verification
 
@@ -373,5 +374,40 @@ remains below the exceptional 800-line ceiling and introduces no new subsystem.
 | `python -m ruff check scripts/generate_api_docs.py scripts/release/compatibility.py tests/test_api_generation_contract.py` | PASS |
 | `python -m ruff format --check scripts/generate_api_docs.py scripts/release/compatibility.py tests/test_api_generation_contract.py` | PASS; 3 files already formatted |
 | `python -m mypy scripts/generate_api_docs.py scripts/release/compatibility.py` | PASS; 2 source files |
+| `python scripts/check_boundaries.py` | PASS |
+| `git diff --check` | PASS |
+
+## A10 verification
+
+The outer parser now recognizes only global options and preserves every other
+token in order. The first remaining token establishes the actual command
+boundary; ordinary commands receive their subcommand and free-form remainder,
+while `chat` reparses exactly the tokens after that boundary. This removes the
+optional-positional/unknown-option interaction that lost values across Python
+argparse versions. Both separated and equals forms work for frontend and device
+options, global profile selection remains valid before or after `chat`, and
+`--ui`-looking tokens in `send` text remain literal message data.
+
+Unknown `chat` operands survive parsing and are rejected before environment,
+profile, frontend, device, or daemon initialization. The CLI emits an explicit
+`Unexpected chat arguments.` diagnostic, displays launcher usage, and exits 2.
+Help, version, and UI inventory retain their pre-profile fast paths.
+
+The current Python 3.11.4 interpreter was exercised in fresh subprocesses.
+Python 3.13 is not installed in this environment, so its native matrix remains
+an explicit environment gap rather than a claimed pass. The parser no longer
+depends on the positional `parse_known_args()` behavior that differed there.
+No CLI spelling, launcher contract, wire/storage format, compatibility axis, or
+application version changed.
+
+| Command | Result |
+| ------- | ------ |
+| Four focused parser/entry regressions before implementation | EXPECTED FAIL; `chat unexpected` was dropped and proceeded into frontend launch, including in a fresh process |
+| Focused pre-initialization invalid-argument regression before entry fix | EXPECTED FAIL; profile construction occurred before invalid chat operands were reported |
+| `python -m unittest -v test_refactor2_cli_contract test_gui_contract test_ui_ipc_contract` | PASS; 59 tests in 4.725 seconds |
+| Fresh `python -m metor` subprocess matrix for `--help`, `help`, both chat-help forms, both version forms, and `chat --list-uis` | PASS; 7 processes, all exit 0 without profile/daemon/toolkit requirements |
+| `python -m ruff check src/metor/cli/parser.py src/metor/cli/entry.py tests/test_refactor2_cli_contract.py` | PASS |
+| `python -m ruff format --check src/metor/cli/parser.py src/metor/cli/entry.py tests/test_refactor2_cli_contract.py` | PASS; 3 files already formatted |
+| `python -m mypy src/metor/cli/parser.py src/metor/cli/entry.py` | PASS; 2 source files |
 | `python scripts/check_boundaries.py` | PASS |
 | `git diff --check` | PASS |

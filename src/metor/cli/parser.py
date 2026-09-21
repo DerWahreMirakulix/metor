@@ -47,14 +47,12 @@ class CliParser:
             help=argparse.SUPPRESS,
         )
         parser.add_argument('--version', action='store_true')
-        parser.add_argument('command', nargs='?', default='quickstart')
-        parser.add_argument('subcommand', nargs='?')
-        parser.add_argument('extra', nargs='*')
-
         args: argparse.Namespace
-        unknown: List[str]
-        args, unknown = parser.parse_known_args(argv)
-        args.extra.extend(unknown)
+        command_tokens: List[str]
+        args, command_tokens = parser.parse_known_args(argv)
+        args.command = command_tokens[0] if command_tokens else 'quickstart'
+        args.subcommand = command_tokens[1] if len(command_tokens) > 1 else None
+        args.extra = command_tokens[2:]
 
         args.ui = None
         args.list_uis = False
@@ -79,7 +77,7 @@ class CliParser:
             chat_parser.add_argument(
                 '-h', '--help', dest='chat_help', action='store_true'
             )
-            chat_args, chat_unknown = chat_parser.parse_known_args(args.extra)
+            chat_args, chat_unknown = chat_parser.parse_known_args(command_tokens[1:])
             args.ui = chat_args.ui
             args.list_uis = chat_args.list_uis
             args.chat_help = chat_args.chat_help
