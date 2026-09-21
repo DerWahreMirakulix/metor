@@ -457,7 +457,7 @@ class LocalFrontendHost:
         if (
             confirmed_start
             and started_pid is not None
-            and not ProcessManager.is_pid_running(started_pid)
+            and ProcessManager.is_pid_running(started_pid) is False
         ):
             self._started_processes.pop(profile.profile_name, None)
             confirmed_start = False

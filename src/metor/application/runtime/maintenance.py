@@ -49,7 +49,7 @@ def _read_runtime_state_file(file_path: Path) -> Optional[int]:
     try:
         with file_path.open('r') as handle:
             raw_value: str = handle.read().strip()
-        return int(raw_value)
+        return int(raw_value.split(':', 1)[0])
     except (OSError, ValueError):
         return None
 
@@ -98,7 +98,13 @@ def _clear_stale_runtime_state(
     daemon_port_file: Path = profile_manager.paths.get_daemon_port_file()
 
     if snapshot.daemon_pid is not None:
-        if ProcessManager.is_pid_running(snapshot.daemon_pid):
+        if (
+            ProcessManager.is_managed_process_running(
+                daemon_pid_file,
+                snapshot.profile_name,
+            )
+            is not False
+        ):
             return False
 
         profile_manager.clear_daemon_port(

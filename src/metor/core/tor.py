@@ -19,7 +19,13 @@ from typing import Tuple, Optional, Dict, Callable
 from metor.core.api import EventType, JsonValue, RuntimeErrorCode
 from metor.data import SettingKey
 from metor.data.profile import ProfileManager
-from metor.utils import Constants, clean_onion, secure_shred_file, ensure_onion_format
+from metor.utils import (
+    Constants,
+    ProcessManager,
+    clean_onion,
+    ensure_onion_format,
+    secure_shred_file,
+)
 
 # Local Package Imports
 from metor.core.key import KeyManager
@@ -355,7 +361,12 @@ class TorManager:
 
                 pid_file: Path = data_dir / 'tor.pid'
                 with pid_file.open('w') as f:
-                    f.write(str(self._tm_proc.pid))
+                    f.write(
+                        ProcessManager.process_identity_payload(
+                            self._tm_proc.pid,
+                            self._pm.profile_name,
+                        )
+                    )
 
                 break
             except OSError as e:

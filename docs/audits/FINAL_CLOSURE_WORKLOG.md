@@ -53,7 +53,8 @@ ownership map. Counts sum to 763; no path is unclassified.
 | A04     | verified | `src/metor/shared/security.py`, `tests/test_security_contract.py`, this worklog                                 | A04 gates below      | Complete                                                                   |
 | A05     | verified | `src/metor/utils/lock.py`, `tests/test_lock_contract.py`, this worklog                                          | A05 gates below      | Complete                                                                   |
 | A06     | verified | `src/metor/data/profile/{support,paths,manager,catalog,lifecycle}.py`, `src/metor/data/profile/migration/{journal,orchestrator}.py`, `tests/test_profile_path_security.py`, this worklog | A06 gates below | Complete |
-| A07–A25 | open     | None                                                                                                            | Not run              | A07: constrain process cleanup to verified ownership                       |
+| A07     | verified | `src/metor/{utils/process.py,data/profile/manager.py,application/runtime/maintenance.py,application/frontend/host.py,core/tor.py}`, `tests/test_application_runtime_contract.py`, this worklog | A07 gates below | Complete |
+| A08–A25 | open     | None                                                                                                            | Not run              | A08: complete recursive IPC type validation                                |
 
 ## A00 verification
 
@@ -248,3 +249,38 @@ this environment. No compatibility version changes are required.
 | `python -m mypy src/metor/data/profile`                                                                                                         | PASS; 14 source files                                                      |
 | `python scripts/check_boundaries.py`                                                                                                            | PASS                                                                       |
 | `git diff --check`                                                                                                                              | PASS                                                                       |
+
+## A07 verification
+
+New daemon and Tor PID metadata binds the PID to its process creation time and
+exact public profile. PID-only legacy state remains readable for ordinary status
+checks but is insufficient to authorize termination. Cleanup now requires a
+matching process lifetime, current OS account, profile metadata, and exact
+supported command shape. Unknown ownership, `AccessDenied`, PID reuse, malformed
+metadata, and profile mismatch preserve both process and state while emitting a
+diagnostic.
+
+Daemon recognition covers the canonical `metor daemon`, the installed
+`metor-daemon` headless entry, and the actual internal
+`python -m metor.daemon_main ... daemon` launch without substring matching.
+Foreign scripts and lookalike executables are rejected. Tor additionally requires
+the exact profile-owned `DataDirectory` and `HiddenServiceDir`. Profile discovery
+does not follow symlink or Windows-reparse directory aliases. Force discovery can
+only act on an exact command with an explicit known profile.
+
+Linux ownership paths were executed. Windows username matching and
+`AccessDenied` are covered structurally; native Windows execution remains
+unavailable and is not claimed. Runtime PID metadata is ephemeral and its legacy
+read path is retained, so no wire, storage, launcher, or application version bump
+is required.
+
+| Command                                                                                                                                                                                                       | Result                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Three focused ownership regressions before implementation                                                                                                                                                      | EXPECTED FAIL; 11 errors exposed missing profile arguments, lifetime metadata, and OS-owner validation |
+| `python -m unittest test_application_runtime_contract test_tor_path_resolution test_daemon_lock_lifecycle test_gui_profiles`                                                                                  | PASS; 36 tests in 0.738 seconds with local IPC socket access         |
+| `python -m unittest -v test_application_runtime_contract test_tor_path_resolution test_platform_contracts` plus three focused daemon-entrypoint release tests                                                 | PASS; 29 tests in 0.166 seconds                                      |
+| `python -m ruff check src/metor/utils/process.py src/metor/data/profile/manager.py src/metor/application/runtime/maintenance.py src/metor/application/frontend/host.py src/metor/core/tor.py tests/test_application_runtime_contract.py` | PASS                                                                 |
+| `python -m ruff format --check src/metor/utils/process.py src/metor/data/profile/manager.py src/metor/application/runtime/maintenance.py src/metor/application/frontend/host.py src/metor/core/tor.py tests/test_application_runtime_contract.py` | PASS; 6 files already formatted                                     |
+| `python -m mypy src/metor/utils/process.py src/metor/data/profile/manager.py src/metor/application/runtime/maintenance.py src/metor/application/frontend/host.py src/metor/core/tor.py`                      | PASS; 5 source files                                                 |
+| `python scripts/check_boundaries.py`                                                                                                                                                                           | PASS                                                                 |
+| `git diff --check`                                                                                                                                                                                             | PASS                                                                 |

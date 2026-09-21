@@ -39,7 +39,7 @@ class ProfileManager:
         try:
             with file_path.open('r') as f:
                 raw_value: str = f.read().strip()
-            return int(raw_value)
+            return int(raw_value.split(':', 1)[0])
         except (OSError, ValueError):
             return None
 
@@ -257,7 +257,7 @@ class ProfileManager:
 
         if pid is not None:
             with self.paths.get_daemon_pid_file().open('w') as f:
-                f.write(str(pid))
+                f.write(ProcessManager.process_identity_payload(pid, self.profile_name))
             self.paths.get_daemon_pid_file().chmod(0o600)
 
         with self.paths.get_daemon_port_file().open('w') as f:
@@ -293,7 +293,14 @@ class ProfileManager:
             return self.get_static_port()
 
         daemon_pid: Optional[int] = self.get_daemon_pid()
-        if daemon_pid is not None and not ProcessManager.is_pid_running(daemon_pid):
+        if (
+            daemon_pid is not None
+            and ProcessManager.is_managed_process_running(
+                self.paths.get_daemon_pid_file(),
+                self.profile_name,
+            )
+            is False
+        ):
             self.clear_daemon_port(expected_pid=daemon_pid)
             return None
 
