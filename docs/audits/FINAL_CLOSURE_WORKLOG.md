@@ -50,7 +50,8 @@ ownership map. Counts sum to 763; no path is unclassified.
 | A01     | verified | `src/metor/data/sql/manager.py`, `tests/test_gui_purge.py`, this worklog                                        | A01 gates below      | Complete                                                                   |
 | A02     | verified | `src/metor/core/tor.py`, `tests/test_tor_path_resolution.py`, `tests/test_closure_integration.py`, this worklog | A02 gates below      | Complete                                                                   |
 | A03     | verified | `src/metor/utils/{constants,security}.py`, `tests/test_security_contract.py`, this worklog                      | A03 gates below      | Complete                                                                   |
-| A04–A25 | open     | None                                                                                                            | Not run              | A04: correct byte-length clearing for typed memory views                   |
+| A04     | verified | `src/metor/shared/security.py`, `tests/test_security_contract.py`, this worklog                                 | A04 gates below      | Complete                                                                   |
+| A05–A25 | open     | None                                                                                                            | Not run              | A05: make lock acquisition rollback complete and monotonic                 |
 
 ## A00 verification
 
@@ -158,3 +159,27 @@ keyslot, blob, derivation, launcher, or application version changes are required
 | `python -m mypy src/metor/utils/security.py src/metor/core/profile_keys.py src/metor/core/tor.py src/metor/core/profile_destruction.py src/metor/core/daemon/managed/engine/lifecycle.py src/metor/data/profile/lifecycle.py src/metor/data/profile/migration src/metor/data/sql/runtime_mirror.py` | PASS; 11 source files                                                    |
 | `python scripts/check_boundaries.py`                                                                                                                                                                                                                | PASS                                                                    |
 | `git diff --check`                                                                                                                                                                                                                                  | PASS                                                                    |
+
+## A04 verification
+
+`secure_clear_buffer()` now rejects read-only views with `TypeError` and
+non-C-contiguous views with `BufferError`, leaving both unchanged. A mutable
+C-contiguous view is cast to bytes and cleared using that byte view's full
+`nbytes`, so typed views no longer confuse element count with byte count.
+Bytearrays, empty views, and repeated clearing retain their existing successful
+contract.
+
+The helper remains in the host-free shared/SDK package. This is best-effort
+clearing of the caller-owned mutable view only; it does not claim to remove
+immutable Python copies or independently owned native buffers. No compatibility
+version changes are required.
+
+| Command                                                                                                                                                                                                                                                                | Result                                                                    |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Three focused `secure_clear_buffer` regressions before implementation                                                                                                                                                                                                   | EXPECTED FAIL; typed view raised `ValueError` and strided view had no explicit `BufferError` contract |
+| `python -m unittest -v test_security_contract test_session_auth_contract test_profile_storage_security test_data_persistence_contract test_closure_architecture`                                                                                                       | PASS; 87 tests in 34.664 seconds with local IPC socket access             |
+| `python -m ruff check src/metor/shared/security.py tests/test_security_contract.py`                                                                                                                                                                                     | PASS                                                                      |
+| `python -m ruff format --check src/metor/shared/security.py tests/test_security_contract.py`                                                                                                                                                                            | PASS; 2 files already formatted                                           |
+| `python -m mypy src/metor/shared/security.py src/metor/core/key.py src/metor/core/auth src/metor/core/daemon/managed/local_auth.py src/metor/data/blob/store.py src/metor/data/sql/manager.py src/metor/core/profile_keys.py`                                              | PASS; 9 source files                                                       |
+| `python scripts/check_boundaries.py`                                                                                                                                                                                                                                    | PASS                                                                      |
+| `git diff --check`                                                                                                                                                                                                                                                      | PASS                                                                      |

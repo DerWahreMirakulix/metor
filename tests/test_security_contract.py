@@ -7,6 +7,7 @@ import secrets
 import stat
 import sys
 import unittest
+from array import array
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -15,6 +16,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.utils import Constants
+from metor.shared.security import secure_clear_buffer
 from metor.utils.security import secure_remove_path, secure_shred_file
 
 
@@ -22,6 +24,66 @@ class SecurityContractTests(unittest.TestCase):
     """
     Covers security contract regression scenarios.
     """
+
+    def test_secure_clear_buffer_clears_bytearray_and_repeated_empty_views(
+        self,
+    ) -> None:
+        """Mutable byte buffers support complete and idempotent clearing.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        secret = bytearray(b'secret')
+        secure_clear_buffer(secret)
+        secure_clear_buffer(secret)
+        self.assertEqual(secret, bytearray(len(secret)))
+
+        empty = memoryview(bytearray())
+        secure_clear_buffer(empty)
+        secure_clear_buffer(empty)
+        self.assertEqual(empty.nbytes, 0)
+
+    def test_secure_clear_buffer_clears_complete_typed_view(self) -> None:
+        """Every byte in a contiguous typed memory view is overwritten.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        values = array('I', [0xFFFFFFFF, 0xAAAAAAAA])
+        view = memoryview(values)
+        self.assertEqual(len(view), 2)
+        self.assertEqual(view.nbytes, values.itemsize * 2)
+
+        secure_clear_buffer(view)
+        secure_clear_buffer(view)
+
+        self.assertEqual(values.tobytes(), bytes(view.nbytes))
+
+    def test_secure_clear_buffer_rejects_unsafe_views_without_mutation(self) -> None:
+        """Readonly and strided views report failure and retain their bytes.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        readonly = memoryview(b'secret')
+        with self.assertRaisesRegex(TypeError, 'read-only'):
+            secure_clear_buffer(readonly)
+        self.assertEqual(readonly.tobytes(), b'secret')
+
+        owner = bytearray(b'01234567')
+        non_contiguous = memoryview(owner)[::2]
+        with self.assertRaisesRegex(BufferError, 'contiguous'):
+            secure_clear_buffer(non_contiguous)
+        self.assertEqual(owner, bytearray(b'01234567'))
 
     def test_secure_shred_file_raises_when_overwrite_fails(self) -> None:
         """
