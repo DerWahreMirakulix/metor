@@ -64,7 +64,8 @@ ownership map. Counts sum to 763; no path is unclassified.
 | A14      | verified | `src/metor/ui/gui/{app.py,platform/lifecycle.py,runtime/controller.py}`, `packaging/gui/setup.py`, `requirements/gui.lock`, `tests/{test_gui_os_lifecycle.py,gui_native_lifecycle.py,test_gui_lifecycle.py}`, `docs/contracts/{GUI_PLATFORM_ADR.md,gui/support.json}`, this worklog | A14 gates below | Complete |
 | A15      | verified | `tests/{test_gui_capture.py,test_gui_audio.py,gui_native_voice.py}`, `docs/contracts/{GUI_PLATFORM_ADR.md,gui/support.json}`, this worklog | A15 gates below | Complete |
 | A16      | verified | `src/metor/core/daemon/managed/{notify/notification.py,notify/sinks.py,ipc.py,engine/daemon.py}`, `tests/{test_notification_delivery.py,test_gui_capture.py}`, this worklog | A16 gates below | Complete |
-| A17–A25 | open     | None                                                                                                            | Not run              | A17: remove historical embedded preparation code                            |
+| A17      | verified | Removed `src/metor/ui/embedded/**` and `tests/test_embedded_contract.py`; `tests/{test_ui_boundaries.py,test_contact_qr.py}`, this worklog | A17 gates below | Complete |
+| A18–A25 | open     | None                                                                                                            | Not run              | A18: continue final closure sequence                                         |
 
 ## A00 verification
 
@@ -744,4 +745,41 @@ compatibility generation, or application version.
 | `python -m ruff check` for all A16 source/test files | PASS |
 | `python -m ruff format --check` for all A16 source/test files | PASS |
 | `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
+| `git diff --check` | PASS |
+
+## A17 verification
+
+The five-file historical `metor.ui.embedded` production namespace and its
+dedicated legacy contract test are removed rather than redirected. No active
+source, test, registration, packaging path, or installation path imports or
+names that namespace. The architecture regression now recognizes exactly the
+two shipped source packages, `metor.ui.terminal` and `metor.ui.gui`, and checks
+that neither imports the other.
+
+The removed prototype's combined battery/power, audio-blob, settings, clock,
+revision-gate, fixture, and privacy-logger abstractions were not copied into a
+new compatibility layer. Current platform input and lifecycle requirements
+remain exercised through the GUI platform ports and SDK/Core contracts. The
+one still-current requirement that lost direct automated coverage was the
+frontend-neutral contact QR parser used by the GUI; a focused client-contract
+test now pins malformed input, unknown fields, unsupported versions, and a
+normalized valid version-one identity without retaining any embedded test
+double.
+
+Historical mentions in immutable specifications and audit evidence remain.
+The active frontend-neutral documentation still named `EMBEDDED_UI.md` and is
+deliberately left for the A21 documentation move required by the closure
+sequence. This removal changes no current IPC DTO, persistence schema,
+compatibility generation, launcher, or application version.
+
+| Command | Result |
+| ------- | ------ |
+| Pre-change import and reference inventory across the five embedded files, legacy test, boundary tests, active client/platform code, and GUI ADR | PASS; namespace was self-contained except for its dedicated test and boundary assertion |
+| `PYTHONPATH=tests python -m unittest tests.test_contact_qr tests.test_ui_boundaries tests.test_platform_contracts tests.test_gui_device_lifecycle tests.test_gui_contacts tests.test_gui_contract -q` outside the socket sandbox | PASS; 58 current QR, boundary, platform, lifecycle, contact, and GUI contract tests |
+| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
+| Active source/test/packaging search for `metor.ui.embedded`, `ui/embedded`, the legacy test, and prototype-only names | PASS; no active reference, registration, or install path remains |
+| Source-package inventory below `src/metor/ui` | PASS; only `gui` and `terminal` contain production package initializers |
+| `ruff check tests/test_contact_qr.py tests/test_ui_boundaries.py` | PASS |
+| `ruff format --check tests/test_contact_qr.py tests/test_ui_boundaries.py` | PASS |
+| `mypy tests/test_contact_qr.py tests/test_ui_boundaries.py` | PASS after adding an explicit existing text-content narrowing assertion |
 | `git diff --check` | PASS |

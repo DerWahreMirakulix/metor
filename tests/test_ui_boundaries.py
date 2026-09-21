@@ -20,6 +20,7 @@ from metor.core.api import (
     MessagesDataEvent,
     ProfileOperationCode,
     ProfileOperationResultEvent,
+    TextContent,
 )
 from metor.ui.terminal import UIPresenter
 
@@ -28,7 +29,7 @@ REPO_ROOT: Path = Path(__file__).resolve().parents[1]
 UI_ROOT: Path = REPO_ROOT / 'src' / 'metor' / 'ui'
 CLIENT_ROOT: Path = REPO_ROOT / 'src' / 'metor' / 'client'
 TERMINAL_ROOT: Path = UI_ROOT / 'terminal'
-EMBEDDED_ROOT: Path = UI_ROOT / 'embedded'
+GUI_ROOT: Path = UI_ROOT / 'gui'
 APPLICATION_ROOT: Path = REPO_ROOT / 'src' / 'metor' / 'application'
 LOWER_LAYER_ROOTS: tuple[Path, ...] = (
     REPO_ROOT / 'src' / 'metor' / 'core',
@@ -223,7 +224,7 @@ class UiBoundaryTests(unittest.TestCase):
         self.assertEqual(violations, [])
 
     def test_frontends_do_not_import_each_other(self) -> None:
-        """Verifies terminal and embedded packages remain independent consumers.
+        """Verifies the two active frontend packages remain independent consumers.
 
         Args:
             None
@@ -234,18 +235,27 @@ class UiBoundaryTests(unittest.TestCase):
         terminal_violations = _collect_import_violations(
             TERMINAL_ROOT,
             lambda line: (
-                line.startswith('from metor.ui.embedded')
-                or line.startswith('import metor.ui.embedded')
+                line.startswith('from metor.ui.gui')
+                or line.startswith('import metor.ui.gui')
             ),
         )
-        embedded_violations = _collect_import_violations(
-            EMBEDDED_ROOT,
+        gui_violations = _collect_import_violations(
+            GUI_ROOT,
             lambda line: (
                 line.startswith('from metor.ui.terminal')
                 or line.startswith('import metor.ui.terminal')
             ),
         )
-        self.assertEqual(terminal_violations + embedded_violations, [])
+        self.assertEqual(terminal_violations + gui_violations, [])
+
+    def test_only_terminal_and_gui_frontend_source_packages_exist(self) -> None:
+        """Rejects revival of an unregistered third production frontend namespace."""
+        packages = sorted(
+            path.name
+            for path in UI_ROOT.iterdir()
+            if path.is_dir() and (path / '__init__.py').is_file()
+        )
+        self.assertEqual(packages, ['gui', 'terminal'])
 
     def test_client_layer_does_not_import_ui_data_or_application(self) -> None:
         """
@@ -433,6 +443,8 @@ class UiBoundaryTests(unittest.TestCase):
         self.assertIs(message.direction, MessageDirectionCode.OUT)
         self.assertIs(message.status, MessageStatusCode.DELIVERED)
         self.assertIs(message.delivery, Delivery.DROP)
+        self.assertIsInstance(message.content, TextContent)
+        assert isinstance(message.content, TextContent)
         self.assertEqual(message.content.text, 'hello')
 
         rendered: str = UIPresenter.format_messages(event)
