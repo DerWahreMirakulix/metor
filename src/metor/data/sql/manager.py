@@ -92,20 +92,22 @@ class SqlManager:
         Args:
             db_path (str | Path): The database path whose connection should be closed.
 
+        Raises:
+            Exception: If the pooled connection cannot be closed. Pool ownership is
+                retained so the caller can report or retry the failed release.
+
         Returns:
             None
         """
         path_str: str = str(Path(db_path).absolute())
-        with cls._pool_lock:
-            conn = cls._connections.pop(path_str, None)
-            cls._metadata_repositories.pop(path_str, None)
-            cls._producer_repositories.pop(path_str, None)
-
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
+        with cls._db_lock:
+            with cls._pool_lock:
+                conn = cls._connections.get(path_str)
+                if conn is not None:
+                    conn.close()
+                    cls._connections.pop(path_str, None)
+                cls._metadata_repositories.pop(path_str, None)
+                cls._producer_repositories.pop(path_str, None)
 
     @classmethod
     def export_database_copy(

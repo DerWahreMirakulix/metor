@@ -3,6 +3,7 @@
 import threading
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 import test_gui_producers as support
@@ -23,6 +24,76 @@ from metor.data.sql import SqlManager
 
 class CombinedDestructionTests(unittest.TestCase):
     """Checks every prerequisite independently without any real storage destruction."""
+
+    def test_database_close_failure_retains_pool_state_for_truthful_retry(
+        self,
+    ) -> None:
+        """A lower connection failure blocks safe milestones and remains retryable.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        root = Path(self.enterContext(TemporaryDirectory()))
+        db_path = root / 'profile.db'
+        path_key = str(db_path)
+        connection = Mock()
+        connection.close.side_effect = [OSError('injected close failure'), None]
+        metadata = Mock()
+        producers = Mock()
+        pm = Mock()
+        pm.paths.get_db_file.return_value = db_path
+        pm.paths.get_config_dir.return_value = root
+        protector = Mock()
+        events: list[str] = []
+        failures: list[tuple[str, bool]] = []
+
+        with (
+            patch.dict(SqlManager._connections, {path_key: connection}),
+            patch.dict(SqlManager._metadata_repositories, {path_key: metadata}),
+            patch.dict(SqlManager._producer_repositories, {path_key: producers}),
+        ):
+            with self.assertRaisesRegex(OSError, 'injected close failure'):
+                destroy_profile_storage(
+                    pm,
+                    prepare_runtime=lambda: events.append('runtime'),
+                    clear_runtime_keys=lambda: events.append('memory'),
+                    protector=protector,
+                    cleanup=lambda _path: events.append('cleanup'),
+                    runtime_released_callback=lambda: events.append('runtime_released'),
+                    safe_callback=lambda: events.append('safe'),
+                    failure_callback=lambda phase, destroyed: failures.append(
+                        (phase, destroyed)
+                    ),
+                )
+
+            self.assertIs(SqlManager._connections[path_key], connection)
+            self.assertIs(SqlManager._metadata_repositories[path_key], metadata)
+            self.assertIs(SqlManager._producer_repositories[path_key], producers)
+            self.assertNotIn('runtime_released', events)
+            self.assertNotIn('safe', events)
+            self.assertEqual(failures, [('database_close', True)])
+            self.assertIn('memory', events)
+            self.assertIn('cleanup', events)
+
+            result = destroy_profile_storage(
+                pm,
+                prepare_runtime=lambda: None,
+                clear_runtime_keys=lambda: None,
+                protector=protector,
+                cleanup=lambda _path: None,
+            )
+
+            self.assertTrue(result.database_closed)
+            self.assertNotIn(path_key, SqlManager._connections)
+            self.assertNotIn(path_key, SqlManager._metadata_repositories)
+            self.assertNotIn(path_key, SqlManager._producer_repositories)
+            self.assertEqual(connection.close.call_count, 2)
+
+            SqlManager.close_connection(db_path)
+            self.assertEqual(connection.close.call_count, 2)
 
     def test_safe_milestone_requires_all_runtime_and_key_successes(self) -> None:
         """Key removal despite an earlier failure cannot authorize a device power cut.

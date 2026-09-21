@@ -44,11 +44,12 @@ ownership map. Counts sum to 763; no path is unclassified.
 
 ## Package status
 
-| Package | State    | Changed files                          | Verification         | Next step                                                                              |
-| ------- | -------- | -------------------------------------- | -------------------- | -------------------------------------------------------------------------------------- |
-| A00     | verified | `docs/audits/FINAL_CLOSURE_WORKLOG.md` | Baseline gates below | A01: write lower-level SQL close failure regressions, then correct release propagation |
-| A01     | open     | None                                   | Not run              | Inspect the current SQL/release lifecycle and its direct tests                         |
-| A02–A25 | open     | None                                   | Not run              | Follow the mandated package order, including A10b                                      |
+| Package | State    | Changed files                                                            | Verification         | Next step                                                                                   |
+| ------- | -------- | ------------------------------------------------------------------------ | -------------------- | ------------------------------------------------------------------------------------------- |
+| A00     | verified | `docs/audits/FINAL_CLOSURE_WORKLOG.md`                                   | Baseline gates below | Complete                                                                                    |
+| A01     | verified | `src/metor/data/sql/manager.py`, `tests/test_gui_purge.py`, this worklog | A01 gates below      | A02: test Tor termination, bounded wait, retained ownership, and runtime-key cleanup errors |
+| A02     | open     | None                                                                     | Not run              | Inspect current Tor stop/release behavior and direct callers                                |
+| A03–A25 | open     | None                                                                     | Not run              | Follow the mandated package order, including A10b                                           |
 
 ## A00 verification
 
@@ -76,3 +77,28 @@ No native Windows, Python 3.13, Penpot, real desktop session, real audio route,
 or physical-device gate was executed in A00. Those are recorded environment or
 later-package gates, not passes. The repository worktree was clean again after
 all generators and tests.
+
+## A01 verification
+
+`SqlManager.close_connection()` now serializes against active database work and
+does not discard pooled connection or repository ownership until the underlying
+connection confirms close. A lower close exception propagates to the existing
+release/destruction coordinators, which continue independent key and cleanup
+steps but suppress runtime-released, Safe, and successful profile-exit outcomes.
+The retained pool state permits a later release attempt. An already absent
+connection remains an idempotent success.
+
+No wire, database-schema, keyslot, blob, derivation, launcher, or application
+version changes are required: this corrects error reporting and retry state for
+the current runtime contract.
+
+| Command                                                                                                                                                                                                                                                                                                     | Result                                                               |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Focused lower-close destruction regression before implementation                                                                                                                                                                                                                                            | EXPECTED FAIL; the injected `connection.close()` error was swallowed |
+| `python -m unittest -v test_gui_purge test_daemon_lock_lifecycle test_final_remediation_contract.FinalRemediationContractTests.test_destruction_attempts_disk_key_after_every_preparation_failure test_closure_integration.ClosureDaemonTests.test_release_failure_attempts_all_resources_and_retries_stop` | PASS; 10 tests in 29.123 seconds with local IPC socket access        |
+| `python -m unittest -v test_data_persistence_contract test_gui_metadata test_profile_storage_security test_gui_lifecycle`                                                                                                                                                                                   | PASS; 71 tests in 79.621 seconds with local IPC socket access        |
+| Focused lower-close destruction regression after implementation                                                                                                                                                                                                                                             | PASS; retry succeeds and a third close is idempotent                 |
+| `python -m ruff check src/metor/data/sql/manager.py tests/test_gui_purge.py`                                                                                                                                                                                                                                | PASS                                                                 |
+| `python -m ruff format --check src/metor/data/sql/manager.py tests/test_gui_purge.py`                                                                                                                                                                                                                       | PASS                                                                 |
+| `python -m mypy src/metor/data/sql/manager.py src/metor/core/profile_destruction.py src/metor/core/daemon/managed/engine/release.py src/metor/core/daemon/managed/engine/lifecycle.py`                                                                                                                      | PASS; 4 source files                                                 |
+| `git diff --check`                                                                                                                                                                                                                                                                                          | PASS                                                                 |
