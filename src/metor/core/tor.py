@@ -166,25 +166,43 @@ class TorManager:
 
     def _terminate_process(self) -> None:
         """
-        Terminates the tracked Tor process if it is still running.
+        Terminates the tracked Tor process and confirms its bounded exit.
 
         Args:
             None
 
+        Raises:
+            RuntimeError: If neither terminate nor kill produces a confirmed exit.
+
         Returns:
             None
         """
-        if self._tm_proc:
-            try:
-                self._tm_proc.terminate()
-                self._tm_proc.wait(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
-            except Exception:
-                try:
-                    self._tm_proc.kill()
-                except Exception:
-                    pass
-            finally:
+        process = self._tm_proc
+        if process is None:
+            return
+        if process.poll() is not None:
+            self._tm_proc = None
+            return
+
+        try:
+            process.terminate()
+            process.wait(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
+        except Exception:
+            if process.poll() is not None:
                 self._tm_proc = None
+                return
+            try:
+                process.kill()
+                process.wait(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
+            except Exception as exc:
+                if process.poll() is not None:
+                    self._tm_proc = None
+                    return
+                raise RuntimeError(
+                    'Tor process termination could not be confirmed.'
+                ) from exc
+
+        self._tm_proc = None
 
     def _is_process_running(self) -> bool:
         """
@@ -435,6 +453,9 @@ class TorManager:
         Args:
             None
 
+        Raises:
+            OSError: If an existing exported key cannot be securely removed.
+
         Returns:
             None
         """
@@ -447,6 +468,7 @@ class TorManager:
                     TorManager._log_callback('Failed to shred Tor runtime key.')
                 except Exception:
                     pass
+            raise
 
     def start(self) -> Tuple[bool, Optional[EventType], Dict[str, JsonValue]]:
         """
@@ -479,12 +501,32 @@ class TorManager:
         Args:
             None
 
+        Raises:
+            Exception: If process termination or required runtime-key cleanup fails.
+
         Returns:
             None
         """
         with self._process_lock:
-            self._terminate_process()
-            self._shred_runtime_keys()
+            process_error: Optional[Exception] = None
+            key_error: Optional[Exception] = None
+            try:
+                self._terminate_process()
+            except Exception as exc:
+                process_error = exc
+            try:
+                self._shred_runtime_keys()
+            except Exception as exc:
+                key_error = exc
+
+            if process_error is not None and key_error is not None:
+                raise RuntimeError(
+                    'Tor process termination and runtime-key cleanup both failed.'
+                ) from process_error
+            if process_error is not None:
+                raise process_error
+            if key_error is not None:
+                raise key_error
 
     def ensure_proxy_ready(
         self,

@@ -439,6 +439,24 @@ class ClosureDaemonTests(unittest.TestCase):
         daemon.stop()
         self.assertTrue(daemon._stop_completed)
 
+    def test_tor_release_failure_blocks_prepared_exit_and_retains_runtime(
+        self,
+    ) -> None:
+        """A02: the real release coordinator cannot turn Tor failure into Safe."""
+        daemon = self.daemon()
+        client = self.client(daemon)
+        tor = daemon._tm
+        self.assertIsNotNone(tor)
+        with patch.object(tor, 'stop', side_effect=OSError('Tor stop failed')):
+            with self.assertRaises(MetorRequestRejectedError):
+                client.prepare_profile_exit()
+
+        self.assertEqual(daemon._last_runtime_release.failed, ('tor_exports',))
+        self.assertEqual(daemon._lifecycle, DaemonLifecycle.LOCKING)
+        self.assertIs(daemon._tm, tor)
+        daemon.stop()
+        self.assertTrue(daemon._stop_completed)
+
     def test_external_stop_waits_for_domain_before_claiming_release(self) -> None:
         """F06: external stop cannot invert dispatch's domain/release order."""
         daemon = self.daemon()

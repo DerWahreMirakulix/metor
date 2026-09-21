@@ -44,12 +44,13 @@ ownership map. Counts sum to 763; no path is unclassified.
 
 ## Package status
 
-| Package | State    | Changed files                                                            | Verification         | Next step                                                                                   |
-| ------- | -------- | ------------------------------------------------------------------------ | -------------------- | ------------------------------------------------------------------------------------------- |
-| A00     | verified | `docs/audits/FINAL_CLOSURE_WORKLOG.md`                                   | Baseline gates below | Complete                                                                                    |
-| A01     | verified | `src/metor/data/sql/manager.py`, `tests/test_gui_purge.py`, this worklog | A01 gates below      | A02: test Tor termination, bounded wait, retained ownership, and runtime-key cleanup errors |
-| A02     | open     | None                                                                     | Not run              | Inspect current Tor stop/release behavior and direct callers                                |
-| A03–A25 | open     | None                                                                     | Not run              | Follow the mandated package order, including A10b                                           |
+| Package | State    | Changed files                                                                                                   | Verification         | Next step                                                                  |
+| ------- | -------- | --------------------------------------------------------------------------------------------------------------- | -------------------- | -------------------------------------------------------------------------- |
+| A00     | verified | `docs/audits/FINAL_CLOSURE_WORKLOG.md`                                                                          | Baseline gates below | Complete                                                                   |
+| A01     | verified | `src/metor/data/sql/manager.py`, `tests/test_gui_purge.py`, this worklog                                        | A01 gates below      | Complete                                                                   |
+| A02     | verified | `src/metor/core/tor.py`, `tests/test_tor_path_resolution.py`, `tests/test_closure_integration.py`, this worklog | A02 gates below      | A03: bound secure cleanup and reject unsafe link/partial-write cases       |
+| A03     | open     | None                                                                                                            | Not run              | Inspect every secure-file cleanup caller and supported filesystem behavior |
+| A04–A25 | open     | None                                                                                                            | Not run              | Follow the mandated package order, including A10b                          |
 
 ## A00 verification
 
@@ -102,3 +103,28 @@ the current runtime contract.
 | `python -m ruff format --check src/metor/data/sql/manager.py tests/test_gui_purge.py`                                                                                                                                                                                                                       | PASS                                                                 |
 | `python -m mypy src/metor/data/sql/manager.py src/metor/core/profile_destruction.py src/metor/core/daemon/managed/engine/release.py src/metor/core/daemon/managed/engine/lifecycle.py`                                                                                                                      | PASS; 4 source files                                                 |
 | `git diff --check`                                                                                                                                                                                                                                                                                          | PASS                                                                 |
+
+## A02 verification
+
+Tor process ownership is now released only after an already-ended poll or a
+successful bounded wait. A terminate error or timeout falls through to kill and
+a second bounded wait. Unconfirmed exit retains the process reference and raises
+to the caller. Runtime-key cleanup is attempted independently, missing files are
+idempotent, and access/removal failures propagate into the existing release
+coordinator. Consequently, failed Tor release leaves the daemon in `LOCKING`,
+retains runtime owners for retry, and cannot emit a prepared-exit or Safe result.
+
+`src/metor/core/tor.py` is above the 500-line review threshold, but the modified
+behavior remains its existing cohesive responsibility: lifecycle of one Tor
+process and that process's exported plaintext key. Extracting these two atomic
+release steps would fragment ownership without reducing unrelated behavior. No
+new subsystem or compatibility axis is introduced.
+
+| Command                                                                                                                                                                                                                                                                                | Result                                                                     |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `python -m unittest -v test_tor_path_resolution.TorLifecycleTests` before implementation                                                                                                                                                                                               | EXPECTED FAIL; 5 of 6 tests exposed swallowed/unconfirmed release outcomes |
+| `python -m unittest -v test_tor_path_resolution test_closure_integration.ClosureDaemonTests.test_tor_release_failure_blocks_prepared_exit_and_retains_runtime test_closure_integration.ClosureDaemonTests.test_release_failure_attempts_all_resources_and_retries_stop test_gui_purge` | PASS; 19 tests in 25.260 seconds with local IPC socket access              |
+| `python -m ruff check src/metor/core/tor.py tests/test_tor_path_resolution.py tests/test_closure_integration.py`                                                                                                                                                                       | PASS                                                                       |
+| `python -m ruff format --check src/metor/core/tor.py tests/test_tor_path_resolution.py tests/test_closure_integration.py`                                                                                                                                                              | PASS                                                                       |
+| `python -m mypy src/metor/core/tor.py src/metor/core/daemon/managed/engine/release.py src/metor/core/daemon/managed/engine/lifecycle.py`                                                                                                                                               | PASS; 3 source files                                                       |
+| `git diff --check`                                                                                                                                                                                                                                                                     | PASS                                                                       |
