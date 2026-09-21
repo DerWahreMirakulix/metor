@@ -67,7 +67,10 @@ def migrate_profile_security(
     if not safe_name:
         return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
 
-    pm = ProfileManager(safe_name)
+    try:
+        pm = ProfileManager(safe_name)
+    except ValueError:
+        return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
     if not pm.exists():
         return ProfileOperationResult(
             False, ProfileOperationType.PROFILE_NOT_FOUND, {'profile': safe_name}
@@ -138,7 +141,7 @@ def migrate_profile_security(
         secure_remove_path(backup_path)
         shutil.copytree(pm.paths.get_config_dir(), staged_path, symlinks=True)
 
-        staged_pm = ProfileManager(staged_path.name)
+        staged_pm = ProfileManager.for_migration_staging(safe_name, staged_path)
         staged_db_path = staged_pm.paths.get_db_file()
         _migration_checkpoint('before_target_db_creation')
         secure_shred_file(staged_db_path)

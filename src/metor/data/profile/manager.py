@@ -54,13 +54,34 @@ class ProfileManager:
             None
         """
         self.profile_name: str = (
-            profile_name if profile_name else self.load_default_profile()
+            profile_name if profile_name is not None else self.load_default_profile()
         )
         self.paths: Paths = Paths(self.profile_name)
         self.config: Config = Config(self.paths)
         from metor.data.profile.lifecycle import recover_profile_security_migration
 
         recover_profile_security_migration(self.profile_name)
+
+    @classmethod
+    def for_migration_staging(
+        cls,
+        source_profile_name: str,
+        staged_path: Path,
+    ) -> 'ProfileManager':
+        """Creates an internal manager for one verified transaction generation.
+
+        Args:
+            source_profile_name (str): Valid public source profile identity.
+            staged_path (Path): Exact internal migration staging path.
+
+        Returns:
+            ProfileManager: Manager bound only to the staged generation.
+        """
+        instance = cls.__new__(cls)
+        instance.paths = Paths.for_migration_staging(source_profile_name, staged_path)
+        instance.profile_name = instance.paths.profile_name
+        instance.config = Config(instance.paths)
+        return instance
 
     def validate_integrity(self) -> None:
         """

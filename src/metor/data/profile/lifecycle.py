@@ -13,6 +13,7 @@ from metor.data.profile.models import (
     ProfileOperationType,
     ProfileSecurityMode,
 )
+from metor.data.profile.paths import Paths
 from metor.data.profile.support import normalize_profile_name
 
 
@@ -69,7 +70,10 @@ def add_profile_folder(
             {'profile': safe_name},
         )
 
-    target_dir = Constants.DATA / safe_name
+    try:
+        target_dir = Paths(safe_name).base_dir
+    except ValueError:
+        return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
     if target_dir.exists():
         return ProfileOperationResult(
             False, ProfileOperationType.PROFILE_EXISTS, {'profile': safe_name}
@@ -181,7 +185,10 @@ def remove_profile_folder(
     safe_name = normalize_profile_name(name)
     if not safe_name:
         return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
-    target_dir = Constants.DATA / safe_name
+    try:
+        target_dir = Paths(safe_name).base_dir
+    except ValueError:
+        return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
     if active == safe_name:
         return ProfileOperationResult(
             False, ProfileOperationType.CANNOT_REMOVE_ACTIVE, {}
@@ -223,8 +230,13 @@ def rename_profile_folder(old_name: str, new_name: str) -> ProfileOperationResul
 
     safe_old = normalize_profile_name(old_name)
     safe_new = normalize_profile_name(new_name)
-    old_dir = Constants.DATA / safe_old
-    new_dir = Constants.DATA / safe_new
+    if not safe_old or not safe_new:
+        return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
+    try:
+        old_dir = Paths(safe_old).base_dir
+        new_dir = Paths(safe_new).base_dir
+    except ValueError:
+        return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
     if not old_dir.exists():
         return ProfileOperationResult(
             False, ProfileOperationType.PROFILE_NOT_FOUND, {'profile': safe_old}
@@ -266,7 +278,10 @@ def clear_profile_db(
     safe_name = normalize_profile_name(name)
     if not safe_name:
         return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
-    pm = ProfileManager(safe_name)
+    try:
+        pm = ProfileManager(safe_name)
+    except ValueError:
+        return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
     if not pm.exists():
         return ProfileOperationResult(
             False, ProfileOperationType.PROFILE_NOT_FOUND, {'profile': safe_name}
@@ -316,11 +331,11 @@ def purge_all_profile_data() -> None:
         None
     """
     from metor.core.profile_destruction import destroy_profile_storage
+    from metor.data.profile.catalog import get_all_profiles
     from metor.data.profile.manager import ProfileManager
 
     if not Constants.DATA.exists():
         return
-    for entry in tuple(Constants.DATA.iterdir()):
-        if entry.is_dir():
-            destroy_profile_storage(ProfileManager(entry.name))
+    for profile_name in get_all_profiles():
+        destroy_profile_storage(ProfileManager(profile_name))
     secure_remove_path(Constants.DATA)

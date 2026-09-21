@@ -12,7 +12,12 @@ from metor.data.profile.models import (
     ProfileOperationType,
     ProfileSummary,
 )
-from metor.data.profile.support import normalize_profile_name
+from metor.data.profile.paths import Paths
+from metor.data.profile.support import (
+    is_valid_profile_name,
+    normalize_profile_name,
+    validate_profile_directory,
+)
 
 
 def load_default_profile() -> str:
@@ -42,7 +47,12 @@ def set_default_profile(profile_name: str) -> ProfileOperationResult:
     if not safe_name:
         return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
 
-    if not (Constants.DATA / safe_name).exists():
+    try:
+        profile_path = Paths(safe_name)
+    except ValueError:
+        return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
+
+    if not profile_path.exists():
         return ProfileOperationResult(
             False,
             ProfileOperationType.PROFILE_NOT_FOUND,
@@ -75,11 +85,16 @@ def get_all_profiles() -> List[str]:
         Constants.HIDDEN_SERVICE_DIR,
         Constants.TOR_DATA_DIR,
     }
-    return sorted(
-        d.name
-        for d in data_dir.iterdir()
-        if d.is_dir() and d.name not in ignored_folders and not d.name.startswith('.')
-    )
+    profiles: list[str] = []
+    for entry in data_dir.iterdir():
+        if entry.name in ignored_folders or not is_valid_profile_name(entry.name):
+            continue
+        try:
+            validate_profile_directory(entry)
+        except ValueError:
+            continue
+        profiles.append(entry.name)
+    return sorted(profiles)
 
 
 def get_profile_summaries(

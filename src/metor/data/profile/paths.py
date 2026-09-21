@@ -8,6 +8,12 @@ from pathlib import Path
 
 from metor.utils import Constants
 
+# Local Package Imports
+from metor.data.profile.support import (
+    require_profile_name,
+    validate_profile_directory,
+)
+
 
 class Paths:
     """Handles all filesystem path resolutions for a specific profile using pathlib."""
@@ -22,8 +28,39 @@ class Paths:
         Returns:
             None
         """
-        self.profile_name: str = profile_name
+        self.profile_name = require_profile_name(profile_name)
         self.base_dir: Path = Constants.DATA / self.profile_name
+        validate_profile_directory(self.base_dir)
+
+    @classmethod
+    def for_migration_staging(
+        cls,
+        source_profile_name: str,
+        staged_path: Path,
+    ) -> 'Paths':
+        """Builds paths for the one exact internal security-migration generation.
+
+        Args:
+            source_profile_name (str): Valid public source profile identity.
+            staged_path (Path): Expected transaction staging directory.
+
+        Returns:
+            Paths: Resolver bound to the verified internal directory.
+
+        Raises:
+            ValueError: If the staging path is not the source's exact transaction
+                child under the configured data root.
+        """
+        safe_name = require_profile_name(source_profile_name)
+        expected = Constants.DATA / f'.{safe_name}.security-migration.staged'
+        if staged_path != expected:
+            raise ValueError('Invalid profile migration staging path.')
+        validate_profile_directory(staged_path)
+
+        instance = cls.__new__(cls)
+        instance.profile_name = staged_path.name
+        instance.base_dir = staged_path
+        return instance
 
     def exists(self) -> bool:
         """

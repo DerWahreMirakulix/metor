@@ -52,7 +52,8 @@ ownership map. Counts sum to 763; no path is unclassified.
 | A03     | verified | `src/metor/utils/{constants,security}.py`, `tests/test_security_contract.py`, this worklog                      | A03 gates below      | Complete                                                                   |
 | A04     | verified | `src/metor/shared/security.py`, `tests/test_security_contract.py`, this worklog                                 | A04 gates below      | Complete                                                                   |
 | A05     | verified | `src/metor/utils/lock.py`, `tests/test_lock_contract.py`, this worklog                                          | A05 gates below      | Complete                                                                   |
-| A06–A25 | open     | None                                                                                                            | Not run              | A06: separate public profile names from internal staging paths             |
+| A06     | verified | `src/metor/data/profile/{support,paths,manager,catalog,lifecycle}.py`, `src/metor/data/profile/migration/{journal,orchestrator}.py`, `tests/test_profile_path_security.py`, this worklog | A06 gates below | Complete |
+| A07–A25 | open     | None                                                                                                            | Not run              | A07: constrain process cleanup to verified ownership                       |
 
 ## A00 verification
 
@@ -214,3 +215,36 @@ required.
 | `python -m mypy src/metor/utils/lock.py src/metor/data/settings.py src/metor/data/profile/config/config.py`                                                  | PASS; 3 source files                                                            |
 | `python scripts/check_boundaries.py`                                                                                                                         | PASS                                                                            |
 | `git diff --check`                                                                                                                                           | PASS                                                                            |
+
+## A06 verification
+
+Public profile identities now retain the existing exact semantic contract:
+one to 255 Unicode alphanumeric, dash, or underscore characters. Invalid names
+are rejected rather than stripped into a different identity. `Paths` enforces
+that contract before recovery or profile I/O and rejects an existing root that
+is a symbolic link, Windows reparse point, or non-directory. Catalog discovery
+uses the same rules and never follows path aliases.
+
+Security migration now uses an explicit internal factory bound to the exact
+`.<profile>.security-migration.staged` child beneath `Constants.DATA`; ordinary
+`ProfileManager` construction cannot opt out of public validation. Invalid
+absolute paths, traversal, both separator forms, empty/dotted/overlong names,
+and link roots cannot select another profile. Global purge enumerates validated
+public profiles before its existing bounded recursive cleanup, so transaction
+artifacts and aliases are not misclassified as public identities.
+
+Existing encrypted/plaintext migrations, password rewrap, pre-commit abort,
+post-commit recovery, and GUI/CLI profile operations remain green. Native
+Windows reparse behavior is structurally covered but not executed on Windows in
+this environment. No compatibility version changes are required.
+
+| Command                                                                                                                                         | Result                                                                     |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `python -m unittest -v test_profile_path_security` before implementation                                                                        | EXPECTED FAIL; strict public validators and explicit staging factory did not exist |
+| `python -m unittest -v test_profile_path_security test_profile_storage_security test_gui_profiles test_application_runtime_contract test_settings_contract` | PASS; 87 tests in 11.581 seconds with local IPC socket access             |
+| `python -m unittest test_gui_purge test_profile_storage_security.ProfileStorageSecurityTests.test_profile_destruction_is_idempotent_when_files_are_missing` | PASS; 7 tests in 24.971 seconds with local IPC socket access              |
+| `python -m ruff check src/metor/data/profile tests/test_profile_path_security.py`                                                               | PASS                                                                       |
+| `python -m ruff format --check src/metor/data/profile tests/test_profile_path_security.py`                                                      | PASS; 15 files already formatted                                           |
+| `python -m mypy src/metor/data/profile`                                                                                                         | PASS; 14 source files                                                      |
+| `python scripts/check_boundaries.py`                                                                                                            | PASS                                                                       |
+| `git diff --check`                                                                                                                              | PASS                                                                       |

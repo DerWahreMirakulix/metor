@@ -11,7 +11,7 @@ from metor.data import SqlManager
 from metor.utils import Constants, secure_remove_path
 
 # Local Package Imports
-from metor.data.profile.support import normalize_profile_name
+from metor.data.profile.support import normalize_profile_name, require_profile_name
 
 MIGRATION_PREPARED = 'prepared'
 MIGRATION_COMMITTED = 'committed'
@@ -39,7 +39,8 @@ def migration_paths(profile_name: str) -> tuple[Path, Path, Path]:
     Returns:
         tuple[Path, Path, Path]: Journal, staged target, and source-backup paths.
     """
-    prefix = f'.{profile_name}.security-migration'
+    safe_name = require_profile_name(profile_name)
+    prefix = f'.{safe_name}.security-migration'
     return (
         Constants.DATA / f'{prefix}.json',
         Constants.DATA / f'{prefix}.staged',
@@ -203,7 +204,7 @@ def recover_staged_profile_migration(
     """
     safe_name = normalize_profile_name(profile_name)
     if not safe_name:
-        return
+        raise ValueError('Invalid public profile name for migration recovery.')
     journal_path, staged_path, backup_path = migration_paths(safe_name)
     if not journal_path.exists():
         return
