@@ -1,10 +1,13 @@
 """Application-layer helpers for managed local daemon startup and logging."""
 
 import os
+import shutil
 import subprocess
 import sys
 import time
-from typing import Callable, Optional
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Optional, TextIO
 
 from metor.core.daemon.managed import (
     CorruptedDaemonStorageError,
@@ -22,14 +25,38 @@ from metor.utils import Constants
 RuntimeLogCallback = Callable[[str], None]
 _default_sql_log_callback: Optional[RuntimeLogCallback] = None
 _default_tor_log_callback: Optional[RuntimeLogCallback] = None
+MAX_STARTUP_SECRET_BYTES = 4096
+
+
+class DaemonProfileMissingError(ValueError):
+    """Raised when daemon startup targets a profile that does not exist."""
+
+
+class RemoteDaemonProfileError(ValueError):
+    """Raised when local daemon startup targets a remote-only profile."""
+
+
+@dataclass(frozen=True)
+class DaemonStartPreparation:
+    """Validated facts required by interactive and detached startup adapters."""
+
+    already_running: bool
+    encrypted: bool
+    session_auth_required: bool
+
 
 __all__ = [
     'CorruptedDaemonStorageError',
+    'DaemonProfileMissingError',
+    'DaemonStartPreparation',
     'DaemonStatus',
     'InvalidDaemonPasswordError',
     'PlaintextLockedDaemonError',
+    'RemoteDaemonProfileError',
     'RuntimeStatusCallback',
     'configure_daemon_runtime_logging',
+    'read_startup_secret',
+    'prepare_managed_daemon_start',
     'run_managed_daemon',
     'start_managed_daemon_process',
 ]
@@ -71,10 +98,18 @@ def _build_daemon_launch_command(
     Returns:
         list[str]: The detached child-process argv.
     """
+    executable_name: str = 'metor.exe' if os.name == 'nt' else 'metor'
+    sibling_entry: Path = Path(sys.executable).with_name(executable_name)
+    resolved_entry: Optional[str]
+    if sibling_entry.is_file():
+        resolved_entry = str(sibling_entry)
+    else:
+        resolved_entry = shutil.which(executable_name)
+    if resolved_entry is None:
+        raise FileNotFoundError('The public metor executable is not installed.')
+
     command: list[str] = [
-        sys.executable,
-        '-m',
-        'metor.daemon_main',
+        resolved_entry,
         '-p',
         pm.profile_name,
     ]
@@ -82,8 +117,67 @@ def _build_daemon_launch_command(
         command.append('--locked')
     if startup_session_auth_stdin:
         command.append('--startup-session-auth-stdin')
+    command.append('--daemon-child')
     command.append('daemon')
     return command
+
+
+def read_startup_secret(stream: TextIO) -> Optional[str]:
+    """Reads one bounded startup secret from the existing stdin pipe."""
+    line: str = stream.readline(MAX_STARTUP_SECRET_BYTES + 2)
+    if line == '':
+        return None
+    secret: str = line.rstrip('\r\n')
+    if len(secret.encode('utf-8')) > MAX_STARTUP_SECRET_BYTES:
+        raise ValueError('Startup session-auth secret is too long.')
+    if not secret:
+        return None
+    return secret
+
+
+def prepare_managed_daemon_start(
+    pm: ProfileManager,
+    *,
+    start_locked: bool,
+) -> DaemonStartPreparation:
+    """Validates one daemon start and returns its credential requirements."""
+    if not pm.exists():
+        raise DaemonProfileMissingError(f"Profile '{pm.profile_name}' does not exist.")
+    Settings.validate_integrity()
+    pm.validate_integrity()
+    if pm.is_remote():
+        raise RemoteDaemonProfileError('Cannot start a daemon on a remote profile!')
+
+    already_running: bool = pm.is_daemon_running()
+    plaintext: bool = pm.uses_plaintext_storage()
+    if start_locked and plaintext:
+        raise PlaintextLockedDaemonError()
+    return DaemonStartPreparation(
+        already_running=already_running,
+        encrypted=pm.uses_encrypted_storage(),
+        session_auth_required=(
+            not start_locked
+            and plaintext
+            and pm.config.get_bool(SettingKey.REQUIRE_LOCAL_AUTH)
+        ),
+    )
+
+
+def _stop_failed_daemon_process(process: subprocess.Popen[bytes]) -> None:
+    """Best-effort bounded cleanup for a child whose startup did not complete."""
+    if process.poll() is not None:
+        return
+    try:
+        process.terminate()
+        process.wait(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+            process.wait(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
+        except (OSError, subprocess.SubprocessError):
+            return
+    except (OSError, subprocess.SubprocessError):
+        return
 
 
 def _build_daemon_start_timeout(pm: ProfileManager) -> float:
@@ -122,25 +216,31 @@ def start_managed_daemon_process(
     Returns:
         bool: True when the managed daemon published a reachable IPC port.
     """
-    Settings.validate_integrity()
-    pm.validate_integrity()
-
-    if pm.is_remote():
+    preparation: DaemonStartPreparation = prepare_managed_daemon_start(
+        pm,
+        start_locked=start_locked,
+    )
+    if preparation.already_running:
+        return True
+    if preparation.session_auth_required and session_auth_password is None:
         return False
 
-    if start_locked and pm.uses_plaintext_storage():
-        raise PlaintextLockedDaemonError()
-
-    if pm.is_daemon_running():
-        return True
+    secret_payload: Optional[bytes] = None
+    if session_auth_password is not None:
+        if '\n' in session_auth_password or '\r' in session_auth_password:
+            raise ValueError('Startup session-auth secret must be one line.')
+        encoded_secret: bytes = session_auth_password.encode('utf-8')
+        if len(encoded_secret) > MAX_STARTUP_SECRET_BYTES:
+            raise ValueError('Startup session-auth secret is too long.')
+        secret_payload = encoded_secret + b'\n'
 
     command: list[str] = _build_daemon_launch_command(
         pm,
         start_locked=start_locked,
-        startup_session_auth_stdin=session_auth_password is not None,
+        startup_session_auth_stdin=secret_payload is not None,
     )
     stdin_target: int = (
-        subprocess.PIPE if session_auth_password is not None else subprocess.DEVNULL
+        subprocess.PIPE if secret_payload is not None else subprocess.DEVNULL
     )
 
     with open(os.devnull, 'wb') as sink:
@@ -167,29 +267,49 @@ def start_managed_daemon_process(
                 start_new_session=True,
             )
 
-    if session_auth_password is not None:
+    if secret_payload is not None:
         if process.stdin is None:
+            _stop_failed_daemon_process(process)
             return False
+        secret_write_failed: bool = False
         try:
-            process.stdin.write(f'{session_auth_password}\n'.encode('utf-8'))
+            written = process.stdin.write(secret_payload)
+            if written is None or written != len(secret_payload):
+                raise OSError('Incomplete startup secret write.')
             process.stdin.flush()
         except OSError:
-            return False
+            secret_write_failed = True
+        except BaseException:
+            _stop_failed_daemon_process(process)
+            raise
         finally:
-            process.stdin.close()
-
-    deadline: float = time.monotonic() + _build_daemon_start_timeout(pm)
-    while time.monotonic() < deadline:
-        daemon_port: Optional[int] = pm.get_daemon_port()
-        if daemon_port is not None:
-            return True
-
-        if process.poll() is not None:
+            try:
+                process.stdin.close()
+            except OSError:
+                secret_write_failed = True
+        if secret_write_failed:
+            _stop_failed_daemon_process(process)
             return False
 
-        time.sleep(Constants.LOCK_SLEEP_SEC)
+    try:
+        deadline: float = time.monotonic() + _build_daemon_start_timeout(pm)
+        while time.monotonic() < deadline:
+            daemon_port: Optional[int] = pm.get_daemon_port()
+            if daemon_port is not None:
+                return True
 
-    return pm.get_daemon_port() is not None
+            if process.poll() is not None:
+                return False
+
+            time.sleep(Constants.LOCK_SLEEP_SEC)
+
+        ready: bool = pm.get_daemon_port() is not None
+    except BaseException:
+        _stop_failed_daemon_process(process)
+        raise
+    if not ready:
+        _stop_failed_daemon_process(process)
+    return ready
 
 
 def run_managed_daemon(
@@ -200,6 +320,7 @@ def run_managed_daemon(
     status_callback: Optional[RuntimeStatusCallback] = None,
     sql_log_callback: Optional[RuntimeLogCallback] = None,
     tor_log_callback: Optional[RuntimeLogCallback] = None,
+    preparation: Optional[DaemonStartPreparation] = None,
 ) -> None:
     """
     Builds and runs one managed daemon instance for the active profile.
@@ -221,8 +342,16 @@ def run_managed_daemon(
     Returns:
         None
     """
-    Settings.validate_integrity()
-    pm.validate_integrity()
+    prepared: DaemonStartPreparation = preparation or prepare_managed_daemon_start(
+        pm,
+        start_locked=start_locked,
+    )
+    if prepared.already_running:
+        return
+    if prepared.encrypted and not start_locked and password is None:
+        raise InvalidDaemonPasswordError()
+    if prepared.session_auth_required and session_auth_password is None:
+        raise ValueError('Session-auth password is required for daemon startup.')
 
     daemon = create_managed_daemon(
         pm,

@@ -240,23 +240,18 @@ class ProcessManager:
             r'python(?:3(?:\.\d+)*)?(?:\.exe)?',
             executable,
         )
-        internal = python_executable is not None and arguments[:2] == [
-            '-m',
-            'metor.daemon_main',
-        ]
         public = executable in ('metor', 'metor.exe')
-        headless_alias = executable in ('metor-daemon', 'metor-daemon.exe')
-        if internal:
-            arguments = arguments[2:]
-        elif not public and not headless_alias:
+        if python_executable is not None or not public:
             return False
 
         explicit_profile = False
         daemon_count = 0
         index = 0
-        allowed_flags = {'--locked'}
-        if internal or headless_alias:
-            allowed_flags.add('--startup-session-auth-stdin')
+        allowed_flags = {
+            '--locked',
+            '--startup-session-auth-stdin',
+            '--daemon-child',
+        }
         while index < len(arguments):
             argument = arguments[index]
             if argument == 'daemon':
@@ -276,10 +271,9 @@ class ProcessManager:
                 return False
             index += 1
 
-        valid_command = daemon_count == 1 or (headless_alias and daemon_count == 0)
+        valid_command = daemon_count == 1
         return valid_command and (
-            explicit_profile
-            or ((public or headless_alias) and not require_explicit_profile)
+            explicit_profile or (public and not require_explicit_profile)
         )
 
     @staticmethod

@@ -2,8 +2,6 @@
 
 import sys
 
-from metor.cli import run_cli
-
 
 def main() -> None:
     """
@@ -15,7 +13,15 @@ def main() -> None:
     Returns:
         None
     """
-    sys.exit(run_cli(sys.argv[1:]))
+    argv: list[str] = sys.argv[1:]
+    if '--daemon-child' in argv:
+        from metor.daemon_main import run
+
+        sys.exit(run(argv))
+
+    from metor.cli import run_cli
+
+    sys.exit(run_cli(argv))
 
 
 if __name__ == '__main__':

@@ -19,11 +19,16 @@ from metor.client import (
 from metor.application import (
     cleanup_local_runtime,
     CorruptedDaemonStorageError,
+    DaemonProfileMissingError,
+    DaemonStartPreparation,
     DaemonStatus,
     InvalidDaemonPasswordError,
     PlaintextLockedDaemonError,
+    RemoteDaemonProfileError,
     configure_daemon_runtime_logging,
     create_local_frontend_host,
+    read_startup_secret,
+    prepare_managed_daemon_start,
     run_managed_daemon,
 )
 from metor.data import (
@@ -59,22 +64,6 @@ def _prompt_hidden_optional(prompt: str) -> Optional[str]:
     if not value:
         return None
     return value
-
-
-def _read_startup_session_auth_password_from_stdin() -> Optional[str]:
-    """
-    Reads one startup-only session-auth password from a detached parent pipe.
-
-    Args:
-        None
-
-    Returns:
-        Optional[str]: The provided password, or None when absent.
-    """
-    password: str = sys.stdin.readline().rstrip('\r\n')
-    if not password:
-        return None
-    return password
 
 
 class CommandHandlers:
@@ -146,10 +135,22 @@ class CommandHandlers:
         Returns:
             None
         """
-        if pm.is_remote():
-            print('Cannot start a daemon on a remote profile!')
+        try:
+            preparation: DaemonStartPreparation = prepare_managed_daemon_start(
+                pm,
+                start_locked=start_locked,
+            )
+        except (DaemonProfileMissingError, RemoteDaemonProfileError) as exc:
+            print(escape_terminal_text(str(exc)))
             return
-        if pm.is_daemon_running():
+        except PlaintextLockedDaemonError:
+            print('Plaintext profiles cannot be started in locked mode.')
+            return
+        except ValueError as exc:
+            print(format_safe_local_runtime_error(exc))
+            return
+
+        if preparation.already_running:
             print(
                 'Daemon for profile '
                 f"'{escape_terminal_text(pm.profile_name)}' is already running!"
@@ -160,15 +161,10 @@ class CommandHandlers:
             f"Starting daemon for profile '{escape_terminal_text(pm.profile_name)}'..."
         )
 
-        if start_locked and pm.uses_plaintext_storage():
-            print('Plaintext profiles cannot be started in locked mode.')
-            return
-
         password: Optional[str] = None
         session_auth_password: Optional[str] = None
         output_spacer = PromptOutputSpacer()
-        require_local_auth: bool = pm.config.get_bool(SettingKey.REQUIRE_LOCAL_AUTH)
-        if pm.uses_encrypted_storage() and not start_locked:
+        if preparation.encrypted and not start_locked:
             try:
                 password = _prompt_hidden_optional(
                     f'{Theme.GREEN}Enter Master Password: {Theme.RESET}'
@@ -180,9 +176,13 @@ class CommandHandlers:
             if password is None:
                 print(output_spacer.format('Aborted.'))
                 return
-        elif require_local_auth and not start_locked:
+        elif preparation.session_auth_required:
             if startup_session_auth_stdin:
-                session_auth_password = _read_startup_session_auth_password_from_stdin()
+                try:
+                    session_auth_password = read_startup_secret(sys.stdin)
+                except ValueError as exc:
+                    print(output_spacer.format(escape_terminal_text(str(exc))))
+                    return
                 if session_auth_password is None:
                     print('Aborted.')
                     return
@@ -240,6 +240,7 @@ class CommandHandlers:
                     session_auth_password=session_auth_password,
                     start_locked=True,
                     status_callback=status_cb,
+                    preparation=preparation,
                 )
             except InvalidDaemonPasswordError:
                 msg, _ = Translator.get(EventType.INVALID_PASSWORD)
@@ -268,6 +269,7 @@ class CommandHandlers:
                 session_auth_password=session_auth_password,
                 start_locked=False,
                 status_callback=status_cb,
+                preparation=preparation,
             )
         except InvalidDaemonPasswordError:
             msg, _ = Translator.get(EventType.INVALID_PASSWORD)

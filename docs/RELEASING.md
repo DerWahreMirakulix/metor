@@ -157,8 +157,9 @@ The four package builds are `metor-sdk`, the headless/base `metor`,
 `metor-ui-terminal`, and `metor-ui-gui`. Their wheels must have no overlapping files and must use
 the same application version. The release builder accepts `sdk`, `base`,
 `terminal`, `gui`, or `all`; UI variants create base-plus-UI wheelhouses. The
-obsolete separate `metor-daemon` distribution and `daemon` bundle variant do
-not exist. The `metor-daemon` executable remains a base-package entry point.
+obsolete separate daemon distribution and `daemon` bundle variant do not
+exist. The base package exposes daemon startup through the canonical `metor`
+entry point.
 Offline installers select the intended distribution by name from the
 wheelhouse, allowing pip to resolve only its exact dependencies.
 

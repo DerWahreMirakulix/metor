@@ -93,19 +93,20 @@ def run_cli(argv: List[str]) -> int:
         args.loaded_frontend = loaded_frontend
 
     pm: ProfileManager = ProfileManager(args.profile)
-    try:
-        Settings.validate_integrity()
-    except ValueError as e:
-        sys.stderr.write(f'{Theme.RED}Global Settings Error:{Theme.RESET} {e}\n')
-        return 1
+    if args.command != 'daemon':
+        try:
+            Settings.validate_integrity()
+        except ValueError as e:
+            sys.stderr.write(f'{Theme.RED}Global Settings Error:{Theme.RESET} {e}\n')
+            return 1
 
-    try:
-        pm.validate_integrity()
-    except ValueError as e:
-        sys.stderr.write(
-            f"{Theme.RED}Profile '{pm.profile_name}' Error:{Theme.RESET} {e}\n"
-        )
-        return 1
+        try:
+            pm.validate_integrity()
+        except ValueError as e:
+            sys.stderr.write(
+                f"{Theme.RED}Profile '{pm.profile_name}' Error:{Theme.RESET} {e}\n"
+            )
+            return 1
 
     dispatcher: CliDispatcher = CliDispatcher(args, extra, pm)
     try:

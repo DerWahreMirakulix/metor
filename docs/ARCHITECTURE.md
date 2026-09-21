@@ -958,8 +958,8 @@ When you add a new architecture-relevant behavior:
 ## CLI and frontend distribution boundary
 
 The `metor` distribution owns the general command parser, one-shot renderers,
-daemon/profile orchestration, and both `metor` and `metor-daemon` executable
-entries. It contains no interactive frontend. `metor-sdk` owns `metor.client`,
+daemon/profile orchestration, and the canonical `metor` executable entry. It
+contains no interactive frontend. `metor-sdk` owns `metor.client`,
 typed `metor.core.api` DTOs, shared proof helpers, protocol/version data, and the
 versioned `FrontendLaunchContext`. `metor-ui-terminal` owns
 `metor.ui.terminal`, including slash-command definitions, the upper help panel,

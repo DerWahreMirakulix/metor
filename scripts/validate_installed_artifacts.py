@@ -256,7 +256,7 @@ def run_acceptance(bundle_root: Path) -> None:
         for module, arguments in (
             ('metor', ['--help']),
             ('metor', ['--version']),
-            ('metor.daemon_main', ['--help']),
+            ('metor', ['daemon', '--help']),
             ('metor', ['chat', '--list-ui']),
         ):
             run([str(executable), '-I', '-m', module, *arguments])

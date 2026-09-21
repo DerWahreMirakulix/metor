@@ -23,7 +23,7 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
     """
 
     def test_daemon_detector_accepts_only_supported_exact_start_forms(self) -> None:
-        """Canonical CLI and internal module starts exclude substring lookalikes.
+        """Canonical CLI starts exclude aliases and module lookalikes.
 
         Args:
             None
@@ -34,14 +34,12 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
         accepted = (
             ['/usr/bin/metor', 'daemon'],
             ['/usr/bin/metor', '-p', 'alpha', 'daemon'],
-            ['/usr/bin/metor-daemon', '-p', 'alpha', '--locked'],
             [
-                sys.executable,
-                '-m',
-                'metor.daemon_main',
+                '/usr/bin/metor',
                 '-p',
                 'alpha',
                 '--locked',
+                '--daemon-child',
                 'daemon',
             ],
         )
@@ -49,6 +47,8 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
             [sys.executable, '/tmp/metor-helper.py', 'daemon'],
             ['/tmp/python-malware', '-m', 'metor.daemon_main', 'daemon'],
             [sys.executable, '-m', 'other.metor', 'daemon'],
+            [sys.executable, '-m', 'metor.daemon_main', 'daemon'],
+            ['/usr/bin/metor-daemon', '-p', 'alpha', '--locked', 'daemon'],
             ['/usr/bin/metor', 'chat', 'daemon'],
         )
         for command in accepted:
@@ -417,9 +417,9 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
             self.assertEqual(killed, 0)
             self.assertTrue(pid_file.exists())
 
-    def test_daemon_launch_command_uses_headless_daemon_main_entry(self) -> None:
+    def test_daemon_launch_command_uses_public_metor_child_entry(self) -> None:
         """
-        Verifies that daemon autostart spawns metor.daemon_main without UI dependencies.
+        Verifies that daemon autostart uses the canonical public Metor command.
 
         Args:
             None
@@ -436,8 +436,9 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
         cmd = _build_daemon_launch_command(
             pm, start_locked=False, startup_session_auth_stdin=False
         )
-        self.assertIn('metor.daemon_main', cmd)
-        self.assertNotIn('metor.main', cmd)
+        self.assertEqual(Path(cmd[0]).name, 'metor')
+        self.assertIn('--daemon-child', cmd)
+        self.assertNotIn('metor.daemon_main', cmd)
         self.assertNotIn('metor.ui', ' '.join(cmd))
 
 

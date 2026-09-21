@@ -450,3 +450,57 @@ general UI layer.
 | `mypy` for all 28 A10b-touched source paths and the regression test | PASS; strict project configuration, no issues |
 | `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
 | `git diff --check` | PASS |
+
+## A11 verification
+
+Daemon startup now has one Application-runtime preparation contract. It checks
+profile existence, global/profile integrity, remote/local ownership, an already
+running daemon, locked/plaintext incompatibility, storage mode, and plaintext
+session-auth requirements. The interactive CLI and the noninteractive child
+adapter consume the same immutable preparation result, so credential prompting
+remains a CLI concern while the runtime owns startup eligibility.
+
+Autostart now executes the installed public `metor` entry with an internal
+`--daemon-child` marker instead of `python -m metor.daemon_main`. The public
+main module is import-light and routes only the child marker before importing
+the CLI package; the child import graph contains neither `metor.cli` nor
+`metor.ui`. The retired `metor-daemon` console script was removed from package
+metadata, active architecture/release/user documentation, installed-artifact
+validation, and accepted process-identification forms. `daemon_main.py` remains
+an internal implementation module used behind the canonical public entry, not
+an independently documented executable.
+
+Argument parsing no longer reads the default profile. For actual child work,
+the environment is initialized first and then the default is resolved only
+when `-p` was absent; an explicit profile never reads the default. Help exits
+without profile, environment, terminal frontend, GUI toolkit, or daemon work.
+The `.env` data-parent projection was exercised before profile resolution.
+
+The duplicated stdin readers were replaced by one bounded UTF-8-aware reader.
+Empty EOF aborts, overlong or multiline secrets fail explicitly, and secrets
+remain on the existing stdin pipe rather than argv or logs. Autostart resolves
+the public executable beside the active interpreter (falling back to an exact
+PATH lookup), verifies complete writes, and closes the pipe. Missing pipes,
+write/flush/close failures, readiness timeout, and interrupted handshakes now
+perform bounded terminate/wait/kill cleanup of the process they spawned.
+
+This changes the pre-public launcher surface but no wire, peer, database,
+keyslot, blob, or derivation format. Metor still has no prior public release,
+so no compatibility generation or application-version bump is required.
+Linux subprocess behavior was executed; the Windows detached flags and `.exe`
+resolution are structurally covered by the existing platform matrix but no
+native Windows run is claimed here.
+
+| Command | Result |
+| ------- | ------ |
+| `python -m unittest tests.test_daemon_bootstrap_contract -v` before implementation | EXPECTED FAIL; 4 failures and 2 errors reproduced eager default/CLI loading, module-based launch, missing bounded reader, and leaked failed children |
+| `python -m unittest tests.test_daemon_bootstrap_contract tests.test_application_runtime_contract tests.test_ui_ipc_contract tests.test_release_contract tests.test_refactor2_cli_contract tests.test_closure_frontend tests.test_platform_contracts -q` | PASS; 105 tests in 2.939 seconds; expected cleanup diagnostics, plaintext notice, and temporary bundle paths were emitted |
+| Fresh subprocess imports of `metor.main` and `metor.daemon_main`, plus `python -m metor --daemon-child --help` | PASS; no CLI/UI eager import in the child graph and help exited 0 without profile access |
+| Fresh `python -m metor --help`, `python -m metor daemon --help`, and installed `metor daemon --help` | PASS; canonical help paths exit without daemon/profile work |
+| `ruff check` for all A11 source, script, and test files | PASS |
+| `ruff format --check` for all A11 source, script, and test files | PASS after canonical formatting |
+| `mypy` for the 10 A11 runtime/entry/script/test paths | PASS under strict project configuration |
+| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
+| `python scripts/versioning.py validate` | PASS; application 0.2.0 and compatibility registry remain valid |
+| Active-source search for `metor-daemon` outside immutable historical/spec evidence | PASS; only an explicit negative process-detector regression remains |
+| `git diff --check` | PASS |

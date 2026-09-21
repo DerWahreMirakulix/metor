@@ -1178,9 +1178,9 @@ class ReleaseContractTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.code, 0)
 
-    def test_daemon_main_unlock_guard_exits_with_code_1(self) -> None:
+    def test_internal_daemon_child_unlock_guard_exits_with_code_1(self) -> None:
         """
-        Verifies that metor-daemon unlock delegates to the terminal UI.
+        Verifies that the noninteractive child rejects credential interaction.
 
         Args:
             None
@@ -1191,7 +1191,7 @@ class ReleaseContractTests(unittest.TestCase):
         from metor import daemon_main
 
         with (
-            patch('sys.argv', ['metor-daemon', 'unlock']),
+            patch('sys.argv', ['metor', '--daemon-child', 'unlock']),
             patch('sys.stderr'),
             patch('sys.exit', side_effect=_raise_system_exit),
         ):
@@ -1200,9 +1200,9 @@ class ReleaseContractTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.code, 1)
 
-    def test_daemon_main_missing_profile_exits_with_code_1(self) -> None:
+    def test_internal_daemon_child_missing_profile_exits_with_code_1(self) -> None:
         """
-        Verifies that metor-daemon rejects a non-existent profile cleanly.
+        Verifies that the noninteractive child rejects a missing profile cleanly.
 
         Regression guard: the encrypted-startup guard fired before the
         profile-existence check, producing a misleading error message.
@@ -1220,7 +1220,16 @@ class ReleaseContractTests(unittest.TestCase):
                 'metor.daemon_main.ProfileManager.load_default_profile',
                 return_value='default',
             ),
-            patch('sys.argv', ['metor-daemon', '-p', 'existiert-nicht', 'daemon']),
+            patch(
+                'sys.argv',
+                [
+                    'metor',
+                    '-p',
+                    'existiert-nicht',
+                    '--daemon-child',
+                    'daemon',
+                ],
+            ),
             patch('builtins.print') as print_mock,
             patch('sys.exit', side_effect=_raise_system_exit),
         ):
@@ -1231,9 +1240,9 @@ class ReleaseContractTests(unittest.TestCase):
         printed = ' '.join(str(call) for call in print_mock.call_args_list)
         self.assertIn('does not exist', printed)
 
-    def test_daemon_main_parser_parity_with_daemon_launch_command(self) -> None:
+    def test_daemon_child_parser_parity_with_launch_command(self) -> None:
         """
-        Verifies that daemon_main CLI parser supports all flags produced by daemon launch.
+        Verifies that the child parser supports every internal launch flag.
 
         Args:
             None
@@ -1251,6 +1260,7 @@ class ReleaseContractTests(unittest.TestCase):
                     argv.append('--locked')
                 if startup_session_auth_stdin:
                     argv.append('--startup-session-auth-stdin')
+                argv.append('--daemon-child')
                 argv.append('daemon')
 
                 args = parser.parse_args(argv)
@@ -1259,6 +1269,7 @@ class ReleaseContractTests(unittest.TestCase):
                 self.assertEqual(
                     args.startup_session_auth_stdin, startup_session_auth_stdin
                 )
+                self.assertTrue(args.daemon_child)
                 self.assertEqual(args.command, 'daemon')
 
     def test_messages_show_error_rendering_exits_nonzero(self) -> None:

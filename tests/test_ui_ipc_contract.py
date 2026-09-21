@@ -363,6 +363,14 @@ class _AuthPromptProfileManager:
 
         return False
 
+    def exists(self) -> bool:
+        """Reports that the synthetic profile exists."""
+        return True
+
+    def validate_integrity(self) -> None:
+        """Accepts the synthetic profile configuration."""
+        return None
+
     def is_daemon_running(self) -> bool:
         """
         Reports whether the helper is daemon running.
@@ -1059,6 +1067,7 @@ class UiIpcContractTests(unittest.TestCase):
 
         process = Mock()
         process.stdin = Mock()
+        process.stdin.write.return_value = len(b'session-secret\n')
         process.poll.return_value = None
 
         with (
@@ -1076,6 +1085,8 @@ class UiIpcContractTests(unittest.TestCase):
 
         self.assertTrue(result)
         command = popen_mock.call_args.args[0]
+        self.assertEqual(Path(command[0]).name, 'metor')
+        self.assertIn('--daemon-child', command)
         self.assertIn('--startup-session-auth-stdin', command)
         self.assertEqual(command[-1], 'daemon')
         process.stdin.write.assert_called_once_with(b'session-secret\n')

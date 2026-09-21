@@ -10,33 +10,22 @@ from typing import Optional
 
 from metor.application import (
     CorruptedDaemonStorageError,
+    DaemonProfileMissingError,
+    DaemonStartPreparation,
     InvalidDaemonPasswordError,
     PlaintextLockedDaemonError,
+    RemoteDaemonProfileError,
     cleanup_local_runtime,
     run_managed_daemon,
+    prepare_managed_daemon_start,
 )
-from metor.data import ProfileManager, SettingKey, Settings
-
-
-def _read_startup_session_auth_password_from_stdin() -> Optional[str]:
-    """
-    Reads one startup-only session-auth password from a detached parent pipe.
-
-    Args:
-        None
-
-    Returns:
-        Optional[str]: The provided password, or None when absent.
-    """
-    password: str = sys.stdin.readline().rstrip('\r\n')
-    if not password:
-        return None
-    return password
+from metor.application.runtime.daemon import read_startup_secret
+from metor.data import ProfileManager
 
 
 def _build_parser() -> argparse.ArgumentParser:
     """
-    Builds the minimal metor-daemon argument parser.
+    Builds the minimal noninteractive `metor daemon` child parser.
 
     Args:
         None
@@ -45,13 +34,13 @@ def _build_parser() -> argparse.ArgumentParser:
         argparse.ArgumentParser: The configured parser.
     """
     parser: argparse.ArgumentParser = argparse.ArgumentParser(
-        prog='metor-daemon',
-        description='Headless daemon-only entry point for the Metor application.',
+        prog='metor',
+        description='Noninteractive daemon child entry for the Metor application.',
     )
     parser.add_argument(
         '-p',
         '--profile',
-        default=ProfileManager.load_default_profile(),
+        default=None,
     )
     parser.add_argument(
         '--locked',
@@ -63,6 +52,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action='store_true',
         help=argparse.SUPPRESS,
     )
+    parser.add_argument('--daemon-child', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument(
         'command',
         nargs='?',
@@ -94,31 +84,26 @@ def _run_daemon(
         int: The process exit code.
     """
     pm: ProfileManager = ProfileManager(profile)
-
-    if not pm.exists():
-        print(f"Profile '{profile}' does not exist.")
-        return 1
-
     try:
-        Settings.validate_integrity()
-        pm.validate_integrity()
+        preparation: DaemonStartPreparation = prepare_managed_daemon_start(
+            pm,
+            start_locked=start_locked,
+        )
+    except (DaemonProfileMissingError, RemoteDaemonProfileError) as exc:
+        print(exc)
+        return 1
+    except PlaintextLockedDaemonError:
+        print('Plaintext profiles cannot be started in locked mode.')
+        return 1
     except ValueError as exc:
         sys.stderr.write(f'{exc}\n')
         return 1
 
-    if pm.is_remote():
-        print('Cannot start a daemon on a remote profile!')
-        return 1
-
-    if pm.is_daemon_running():
+    if preparation.already_running:
         print(f"Daemon for profile '{pm.profile_name}' is already running!")
         return 0
 
-    if start_locked and pm.uses_plaintext_storage():
-        print('Plaintext profiles cannot be started in locked mode.')
-        return 1
-
-    if not start_locked and pm.uses_encrypted_storage():
+    if not start_locked and preparation.encrypted:
         sys.stderr.write(
             "Encrypted profiles require '--locked' startup in headless mode. "
             "Use 'metor daemon' for interactive password entry.\n"
@@ -126,14 +111,18 @@ def _run_daemon(
         return 1
 
     session_auth_password: Optional[str] = None
-    if not start_locked and pm.config.get_bool(SettingKey.REQUIRE_LOCAL_AUTH):
+    if preparation.session_auth_required:
         if not startup_session_auth_stdin:
             sys.stderr.write(
                 'This profile requires local session auth. '
                 'Pass --startup-session-auth-stdin in headless mode.\n'
             )
             return 1
-        session_auth_password = _read_startup_session_auth_password_from_stdin()
+        try:
+            session_auth_password = read_startup_secret(sys.stdin)
+        except ValueError as exc:
+            sys.stderr.write(f'{exc}\n')
+            return 1
         if session_auth_password is None:
             print('Aborted.')
             return 1
@@ -144,6 +133,7 @@ def _run_daemon(
             password=None,
             session_auth_password=session_auth_password,
             start_locked=start_locked,
+            preparation=preparation,
         )
     except InvalidDaemonPasswordError:
         print('Invalid master password.')
@@ -197,9 +187,35 @@ def _run_cleanup(force: bool) -> int:
 
     print(
         'Cleanup completed. No managed processes or daemon state were found. '
-        "If the local runtime state is damaged, try 'metor-daemon cleanup --force'."
+        "If the local runtime state is damaged, try 'metor cleanup --force'."
     )
     return 0
+
+
+def run(argv: Optional[list[str]] = None) -> int:
+    """Runs the noninteractive daemon adapter and returns its exit status."""
+    args: argparse.Namespace = _build_parser().parse_args(argv)
+    from metor.application import initialize_runtime_environment
+
+    initialize_runtime_environment()
+
+    try:
+        if args.command == 'cleanup':
+            return _run_cleanup(force=args.force)
+        if args.command == 'unlock':
+            sys.stderr.write(
+                "Unlock requires credential interaction. Run 'metor unlock' instead.\n"
+            )
+            return 1
+        profile: str = args.profile or ProfileManager.load_default_profile()
+        return _run_daemon(
+            profile=profile,
+            start_locked=args.locked,
+            startup_session_auth_stdin=args.startup_session_auth_stdin,
+        )
+    except (EOFError, KeyboardInterrupt):
+        sys.stderr.write('\n')
+        return 130
 
 
 def main() -> None:
@@ -212,31 +228,7 @@ def main() -> None:
     Returns:
         None
     """
-    args: argparse.Namespace = _build_parser().parse_args()
-    from metor.application import initialize_runtime_environment
-
-    initialize_runtime_environment()
-
-    try:
-        exit_code: int
-        if args.command == 'cleanup':
-            exit_code = _run_cleanup(force=args.force)
-        elif args.command == 'unlock':
-            sys.stderr.write(
-                "Unlock requires credential interaction. Run 'metor unlock' instead.\n"
-            )
-            exit_code = 1
-        else:
-            exit_code = _run_daemon(
-                profile=args.profile,
-                start_locked=args.locked,
-                startup_session_auth_stdin=args.startup_session_auth_stdin,
-            )
-    except (EOFError, KeyboardInterrupt):
-        sys.stderr.write('\n')
-        sys.exit(130)
-
-    sys.exit(exit_code)
+    sys.exit(run())
 
 
 if __name__ == '__main__':

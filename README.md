@@ -155,8 +155,8 @@ python -m metor chat --list-ui
 
 For deliberately base-only development omit both UI installs and GUI dependencies,
 retaining the SDK.
-Source visibility alone does not register frontend entry points. The managed
-`metor-daemon` entry needs no interactive display; it is distinct from the
+Source visibility alone does not register frontend entry points. Managed daemon
+startup uses the base-owned `metor daemon` command and remains distinct from the
 short-lived offline executor used by applicable one-shot CLI commands.
 
 The lock files pin the full tested dependency set so normal resolver drift does not silently pull newer transitive packages.
@@ -186,14 +186,14 @@ If you want the daemon to expose IPC first and defer all key/database access unt
 metor daemon --locked
 ```
 
-The base `metor` package includes a headless daemon entry without installing UI code:
+The base `metor` package starts daemons without installing UI code:
 
 ```bash
 # Encrypted profiles (default) require locked startup in headless mode:
-metor-daemon -p my_server --locked daemon
+metor -p my_server --locked daemon
 
 # Plaintext profiles can start unlocked directly:
-metor-daemon -p my_server daemon
+metor -p my_server daemon
 ```
 
 Use `metor unlock` only to unlock a daemon that was explicitly started in locked mode:
@@ -268,7 +268,7 @@ same PMK; they do not rewrite the database, secrets, or blobs.
 
 Want to run Metor on a server and connect securely from your laptop?
 
-1. **On the Server (VPS):** Install `metor`, then run `metor-daemon -p my_server --locked daemon`.
+1. **On the Server (VPS):** Install `metor`, then run `metor -p my_server --locked daemon`.
 2. **On your Laptop:** Run `metor profiles add remote_node --remote --port 50051`.
 3. **Establish SSH Tunnel:** `ssh -N -L 50051:127.0.0.1:50051 user@server_ip`.
 4. **Start Chatting:** Run `metor -p remote_node chat` (Your local UI now securely controls the remote daemon over the forwarded port).
