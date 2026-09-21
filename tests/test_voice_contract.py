@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from metor.core.api import ContentType, Delivery, MessageReceivedEvent
 from metor.core.daemon.managed.network.state import StateTracker
 from metor.core.daemon.managed.network.voice import VoiceTransferManager
+from metor.core.daemon.managed.network.voice.capture import VoiceCaptureMixin
 from metor.core.daemon.managed.network.voice.inbound import VoiceInboundMixin
 from metor.core.daemon.managed.network.voice.retained import VoiceRetainedMixin
 from metor.data import ContactManager, MessageDirection, MessageManager, SettingKey
@@ -54,8 +55,9 @@ class VoiceContractTests(unittest.TestCase):
         self.addCleanup(self._blobs.close)
         self.addCleanup(SqlManager.close_connection, self._pm.paths.get_db_file())
         self._onion = 'b' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
-        self._alias = self._cm.ensure_alias_for_onion(self._onion)
-        assert self._alias is not None
+        alias = self._cm.ensure_alias_for_onion(self._onion)
+        assert alias is not None
+        self._alias: str = alias
         self._events: list[object] = []
         self._state = StateTracker()
         self._voice = VoiceTransferManager(
@@ -91,6 +93,12 @@ class VoiceContractTests(unittest.TestCase):
             VoiceTransferManager.dismiss_inbound,
             VoiceRetainedMixin.dismiss_inbound,
         )
+
+    def test_outbound_capture_methods_have_one_dedicated_owner(self) -> None:
+        """Capture admission, append, and finalization share one focused owner."""
+        self.assertIs(VoiceTransferManager.begin, VoiceCaptureMixin.begin)
+        self.assertIs(VoiceTransferManager.append, VoiceCaptureMixin.append)
+        self.assertIs(VoiceTransferManager.finalize, VoiceCaptureMixin.finalize)
 
     def test_finalized_live_voice_falls_back_with_same_message_id(self) -> None:
         """Promotes one complete disconnected Voice turn without changing identity."""
@@ -246,7 +254,7 @@ class VoiceContractTests(unittest.TestCase):
         """Uses retained dedupe metadata without recreating a shredded Voice spool."""
         conn = cast(socket.socket, _VoiceSocket())
         payload = b'consume once'
-        begin = {'id': 'voice-consumed', 'codec': 'opus'}
+        begin: dict[str, object] = {'id': 'voice-consumed', 'codec': 'opus'}
         self.assertFalse(self._voice.receive_begin(conn, self._onion, begin))
         self.assertFalse(
             self._voice.receive_chunk(

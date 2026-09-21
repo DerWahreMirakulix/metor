@@ -994,6 +994,14 @@ never message bytes or storage paths. `GetVoiceChunkCommand` performs bounded
 non-consuming exact-identity reads; only `ReleaseVoiceCommand` consumes one
 eligible finalized inbound Voice item.
 
+The managed `network.voice` package has one `VoiceTransferManager` composition
+and one manager-owned transition lock plus inbound/outbound turn maps.
+`inbound.py` admits and acknowledges peer begin/chunk/end frames;
+`retained.py` owns metadata, hydration, object lifecycle and canonical retained
+projections; `capture.py` owns outbound begin/append/finalize mutation; and
+`outbound.py` owns replay, fallback, acknowledgement and explicit release. The
+mixins add no independent state store, lock, event bus or service locator.
+
 ### Public integration and deterministic shared ownership
 
 `metor.core.auth` owns PIN/session proof primitives; `metor.shared` owns pure

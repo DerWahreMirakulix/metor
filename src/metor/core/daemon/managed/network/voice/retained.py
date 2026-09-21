@@ -8,7 +8,13 @@ import json
 import threading
 from typing import TYPE_CHECKING, Callable, Optional
 
-from metor.core.api import ContentType, Delivery, IpcEvent
+from metor.core.api import (
+    ContentType,
+    Delivery,
+    IpcEvent,
+    MessageDirectionCode,
+    VoiceFinalizedEvent,
+)
 from metor.core.daemon.managed.models import TorCommand
 from metor.data import ContactManager, MessageDirection, MessageManager, SettingKey
 from metor.data.blob import BlobLifecycle, BlobStore
@@ -290,6 +296,18 @@ class VoiceRetainedMixin:
         except Exception:
             return None
 
+    def _canonical_outbound_metadata(self, turn: VoiceTurn) -> bool | None:
+        """Resolves an ambiguous outbound write before deleting retained bytes."""
+        try:
+            record = self._messages.get_voice_payload(
+                turn.onion, turn.msg_id, MessageDirection.OUT
+            )
+            return record is not None and json.loads(record.payload) == json.loads(
+                self._metadata(turn)
+            )
+        except Exception:
+            return None
+
     @staticmethod
     def _metadata(turn: VoiceTurn) -> str:
         """Serializes content-only Voice metadata for the message spool.
@@ -388,6 +406,33 @@ class VoiceRetainedMixin:
             return Delivery(record.delivery)
         except ValueError:
             return None
+
+    def _finalized_outbound_event(self, msg_id: str) -> Optional[VoiceFinalizedEvent]:
+        """Projects one unambiguous finalized outbound item from canonical storage.
+
+        Args:
+            msg_id: Exact logical Voice identity.
+        Returns:
+            Optional[VoiceFinalizedEvent]: Canonical result, or None if unavailable.
+        """
+        page = self._messages.list_retained_messages(
+            direction=MessageDirection.OUT,
+            limit=2,
+            msg_id=msg_id,
+        )
+        if len(page.messages) != 1:
+            return None
+        record = page.messages[0]
+        if record.content_type != ContentType.VOICE.value or not record.finalized:
+            return None
+        return VoiceFinalizedEvent(
+            msg_id=record.msg_id,
+            onion=record.peer_onion,
+            direction=MessageDirectionCode.OUT,
+            delivery=Delivery(record.delivery),
+            size_bytes=record.retained_bytes,
+            duration_ms=record.duration_ms,
+        )
 
     def _used_bytes(self) -> int:
         """Returns current local and inbound in-memory Voice retention.

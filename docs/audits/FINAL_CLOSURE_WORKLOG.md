@@ -66,7 +66,8 @@ ownership map. Counts sum to 763; no path is unclassified.
 | A16      | verified | `src/metor/core/daemon/managed/{notify/notification.py,notify/sinks.py,ipc.py,engine/daemon.py}`, `tests/{test_notification_delivery.py,test_gui_capture.py}`, this worklog | A16 gates below | Complete |
 | A17      | verified | Removed `src/metor/ui/embedded/**` and `tests/test_embedded_contract.py`; `tests/{test_ui_boundaries.py,test_contact_qr.py}`, this worklog | A17 gates below | Complete |
 | A18      | verified | `scripts/{build_release_wheelhouse.py,release/bundle.py}`, Base/shared/Core owner imports, `src/metor/utils/{__init__,constants}.py`, `tests/{test_release_contract.py,test_closure_architecture.py}`, `docs/ARCHITECTURE.md`, this worklog | A18 gates below | Complete |
-| A19–A25 | open     | None                                                                                                            | Not run              | A19: split oversized Voice responsibilities                                  |
+| A19      | verified | `src/metor/core/daemon/managed/network/voice/{manager,inbound,retained,capture,outbound}.py`, `tests/{test_voice_contract.py,test_gui_producers.py}`, `docs/ARCHITECTURE.md`, this worklog | A19 gates below | Complete |
+| A20–A25 | open     | None                                                                                                            | Not run              | A20: audit the complete production tree                                      |
 
 ## A00 verification
 
@@ -828,4 +829,55 @@ or application version.
 | Active source/test/tooling search for old builder and cross-owner utils imports | PASS; only the negative no-compatibility regression names the old module |
 | `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
 | `python scripts/versioning.py validate` | PASS; application 0.2.0 and compatibility registry remain valid |
+| `git diff --check` | PASS |
+
+## A19 verification
+
+`VoiceTransferManager` is now a 104-line composition that alone constructs the
+shared transition lock, purge fence, dependencies, and inbound/outbound turn
+maps. The Voice package names four cohesive behavior owners: `inbound.py`
+admits and acknowledges peer begin/chunk/end frames; `retained.py` owns
+metadata, hydration, object lifecycle, canonical reconciliation, and retained
+projections; `capture.py` owns outbound begin/append/finalize mutation; and
+`outbound.py` owns replay, fallback, acknowledgement, read/release, commit, and
+cancel behavior. No extracted mixin constructs a second lock, state dictionary,
+event bus, or service locator.
+
+The three extractions were made as separate checkpoints. The receive methods
+and capture mutation methods have exactly one implementation owner, while
+shared metadata helpers moved out of the former outbound abstract placeholders
+into the retained owner. Physical module sizes are now 104, 648, 488, 707, and
+523 lines respectively; the former 1,078-line manager and 1,184-line outbound
+modules no longer exist, and no code was compressed or stripped of explanatory
+docstrings to reach that result.
+
+The first complete neighborhood run caught one omitted concrete helper,
+outbound ambiguous-write reconciliation; restoring it to `retained.py` made
+both commit-then-error regressions pass. The same run also exposed an existing
+A12 repeat-finalization timeout when automatic fallback had already removed the
+RAM turn. An isolated execution against the untouched A18 commit reproduced
+that timeout, proving it was not introduced by the extraction. The narrow
+correction projects a repeated finalize only when canonical retained inventory
+contains exactly one matching, finalized outbound Voice item. It reads no
+content and reports no success for absent, unfinalized, or ambiguous identity.
+
+Accepted protocol frames, persisted metadata and segmented object bytes,
+security ordering, producer ownership, and the shared lock contract remain
+unchanged. The idempotent canonical projection closes an existing request
+completion gap without changing DTO shape, persistence format, protocol
+generation, or application version.
+
+| Command | Result |
+| ------- | ------ |
+| New inbound, retained, and capture single-owner structure regressions before each extraction | EXPECTED ERROR; each dedicated module was absent before its checkpoint |
+| `PYTHONPATH=tests python -m unittest test_voice_contract test_closure_voice_edges test_acceptance_repair_contract -q` after inbound extraction | PASS; 36 Voice admission, edge, and repair tests |
+| Same focused extraction suite after retained extraction | PASS; 37 tests including the added owner regression |
+| First full A12/A15 neighborhood run | 93 PASS, 3 ERROR; identified the omitted outbound reconciliation helper and the independently reproducible A12 repeat-finalization gap |
+| Three focused ambiguous-write/recovery regressions after correction | PASS |
+| `PYTHONPATH=tests python -m unittest test_voice_contract test_closure_voice_edges test_acceptance_repair_contract test_gui_producers test_gui_capture test_gui_playback test_closure_integration -q` outside the socket sandbox | PASS; 96 actual SDK/IPC, SQLCipher/blob, producer recovery, capture/playback, fallback, and Voice edge tests |
+| Isolated repeat-finalization test against temporary archive of A18 commit `c90b9f8` | EXPECTED BASELINE ERROR; reproduced the same timeout after canonical LIVE-to-DROP fallback |
+| `mypy` for all five Voice implementation modules and the focused contract test | PASS under strict project configuration |
+| `ruff check` and `ruff format --check` for the Voice package and changed tests | PASS |
+| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
+| Voice method-owner and physical-size inventory | PASS; receive only in `inbound.py`, begin/append/finalize only in `capture.py`, every production module below 800 physical lines |
 | `git diff --check` | PASS |
