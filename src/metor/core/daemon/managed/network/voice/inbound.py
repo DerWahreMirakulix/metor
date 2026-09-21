@@ -76,7 +76,11 @@ class VoiceInboundMixin:
         def _promote_turn_blobs(self, turn: VoiceTurn) -> None: ...
 
         def _read_turn_range(
-            self, turn: VoiceTurn, offset: int, size: int
+            self,
+            turn: VoiceTurn,
+            offset: int,
+            max_bytes: int,
+            lifecycle: BlobLifecycle = BlobLifecycle.TEMPORARY,
         ) -> bytes: ...
 
         def _turn_from_metadata(

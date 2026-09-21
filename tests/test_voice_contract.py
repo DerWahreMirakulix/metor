@@ -18,6 +18,7 @@ from metor.core.api import ContentType, Delivery, MessageReceivedEvent
 from metor.core.daemon.managed.network.state import StateTracker
 from metor.core.daemon.managed.network.voice import VoiceTransferManager
 from metor.core.daemon.managed.network.voice.inbound import VoiceInboundMixin
+from metor.core.daemon.managed.network.voice.retained import VoiceRetainedMixin
 from metor.data import ContactManager, MessageDirection, MessageManager, SettingKey
 from metor.data.blob import BlobLifecycle, PlaintextBlobStore
 from metor.data.profile import ProfileManager
@@ -75,6 +76,21 @@ class VoiceContractTests(unittest.TestCase):
             VoiceTransferManager.receive_chunk, VoiceInboundMixin.receive_chunk
         )
         self.assertIs(VoiceTransferManager.receive_end, VoiceInboundMixin.receive_end)
+
+    def test_retained_metadata_methods_have_one_dedicated_owner(self) -> None:
+        """Hydration and retained-content operations share one focused component."""
+        self.assertIs(
+            VoiceTransferManager.finalize_interrupted,
+            VoiceRetainedMixin.finalize_interrupted,
+        )
+        self.assertIs(
+            VoiceTransferManager.inbound_delivery,
+            VoiceRetainedMixin.inbound_delivery,
+        )
+        self.assertIs(
+            VoiceTransferManager.dismiss_inbound,
+            VoiceRetainedMixin.dismiss_inbound,
+        )
 
     def test_finalized_live_voice_falls_back_with_same_message_id(self) -> None:
         """Promotes one complete disconnected Voice turn without changing identity."""
