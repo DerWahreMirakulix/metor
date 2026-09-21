@@ -1219,3 +1219,79 @@ remain the single inputs used by the builder.
 | Windows native installer execution                                                               | NOT RUN locally; non-Windows host, retained as the pinned Windows CPython 3.11 release-matrix gate                        |
 | `ruff check`, `ruff format --check`, and strict `mypy` for changed Python                        | PASS                                                                                                                      |
 | `npm run check:md` and `git diff --check`                                                        | PASS                                                                                                                      |
+
+## A25 final acceptance
+
+The final local acceptance candidate was
+`8b2a9bc3683b1ea9ca455e74fc4ad87c608c12e9` on branch `embeddedui`, tested on
+Linux WSL2 x86_64. The complete nonmutating `npm run check` path used system
+CPython 3.11.4; the explicit native SDL fixtures used the repository environment
+with CPython 3.11.15 and Kivy 2.3.1. Every A00–A24 checkpoint, including A10b,
+has a dedicated section above with its implementation decision, evidence, and
+any scope limit. No confirmed software defect from the assignment remains
+reclassified as a documentation or hardware issue.
+
+The functional and visual review followed
+`docs/contracts/GUI_INTEGRATION_MAP.md`, not test count alone. Its mapped owners
+and evidence cover bootstrap/profile switching; Text, Voice, and LIVE admission,
+continuation, accepted-prefix recovery, and truthful outcomes; lock/privacy,
+lost input, lifecycle/power, purge fencing, offline/recovery behavior, contacts,
+history, settings, QR, and local keyboard; accessibility/tooltip revocation; and
+minimum 360 × 640 at 150% plus wider layouts. The current root-refresh and
+settings-keyboard fixtures executed the production Kivy renderer at 360 × 640
+and 150% and their PNGs were visually inspected. Unit, encrypted Core/IPC,
+controlled-port, simulator, offscreen-native, installed-artifact, and physical
+hardware evidence remain explicitly distinct throughout the map and worklog.
+
+The complete gate passed 804 discovered tests in 649.606 seconds after Markdown,
+Ruff lint/format, strict mypy, distribution boundaries, and two identical
+generated-reference passes. The separate 20 MiB production-worker pressure
+fixture passed with 64 KiB maximum reads, 640-byte frames, a 16 MiB cache ceiling,
+and a sampled 52-record queue peak. The first native renderer attempt used the
+system interpreter and failed before product execution because Kivy was absent;
+the exact same fixtures then passed in the project environment. Missing optional
+`libmtdev` and unavailable sandbox clipboard helpers produced Kivy diagnostics
+but did not fail the SDL renderer. These are recorded as environment diagnostics,
+not hidden skips.
+
+A24's fresh Linux bundles remain the package acceptance for this unchanged
+product tree: all four exact wheels and ZIPs passed version/dependency, real
+RECORD hash/ownership, namespace/type-marker, isolated noneditable install, both
+UI coexistence, and both removal-order checks without checkout/PYTHONPATH or
+online installation. The final A25-only change is this report. Windows native
+installer behavior remains required in the pinned Windows CI/release matrix and
+was not rerun on this Linux host.
+
+The approved functional and layout specs still hash to
+`8907c510aeb7cf9272816e60bd1c09a2f38c31c7d340d67859163254f2c8cca7` and
+`3202019b3fd3e7aef472d281006cdb35c1caf073dbaaf2ee75bf691eeaadf5b0`.
+Version registry and machine-readable support JSON validate. Human GUI/release
+contracts and `support.json` agree that implementation exists but mandatory
+acceptance is pending. The tracked-file inventory has 777 files; checkpoint
+ownership above accounts for the introduced packages, scripts, tests, assets,
+contracts, and retained dated evidence. There are no untracked files, leaked
+credential patterns, tracked local environments, or changed generated/spec
+artifacts. Fresh-build `build/` and `*.egg-info` intermediates were removed with
+the repository's focused packaging cleanup; user environments and caches were
+left intact.
+
+The GUI is therefore **not declared completed at its claimed support level**.
+The remaining mandatory native gates are exactly: installed Windows WTS
+lock/unlock plus power/media behavior, real Linux suspend/locked-session media
+behavior, and a current full-GUI duplex rerun on the documented Razer route.
+There is no registered production physical-device adapter, so appliance purge,
+shutdown, or arbitrary-headset support is not claimed. No release, tag, upload,
+remote push, certification, error-free claim, or completion percentage was made.
+
+| Command / evidence                                                                                                                                       | Result                                                                                                                                           |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `npm run check`                                                                                                                                          | PASS; Markdown, Ruff, format, strict mypy, boundaries, reproducible generated references, and 804 tests in 649.606 s                             |
+| `python tests/gui_stream_pressure.py --result /tmp/metor-a25-stream-pressure.json`                                                                       | PASS; 20 MiB input/output, 64 KiB reads, 640-byte frames, 16 MiB cache limit, 52-record sampled queue peak                                       |
+| System-Python native SDL attempt                                                                                                                         | ENVIRONMENT ERROR before product execution; Kivy not installed                                                                                   |
+| Project-venv `gui_native_capture.py --view root_refresh` and `--view setting_keyboard` with offscreen SDL at 360 × 640 / 150%                            | PASS; production renderer/widget execution and visual inspection; optional mtdev/clipboard diagnostics do not change the result                  |
+| A24 fresh four-bundle installer and installed-artifact validation                                                                                        | PASS; exact SDK/Base/Terminal/GUI identities, offline installs, RECORD ownership/hashes, type consumers, coexistence, and both UI removal orders |
+| `python scripts/versioning.py validate`; `python -m json.tool docs/contracts/gui/support.json`; generated-reference validation                           | PASS                                                                                                                                             |
+| Approved-spec `sha256sum`                                                                                                                                | PASS; both owner-supplied hashes unchanged                                                                                                       |
+| Active integration-map review against Lock/Continuation/Purge/Power, Text/Voice/LIVE, profiles, lost input, offline/recovery, accessibility, and layouts | PASS at implemented software/test scope; mandatory physical/native reruns remain explicitly pending                                              |
+| Native installed Windows WTS/power/media, real Linux suspend/lock media, current full-GUI Razer duplex                                                   | BLOCKED by unavailable target OS/session/hardware on this WSL2 host; retained as mandatory acceptance gates, not reported as passes              |
+| `git status`, ignored packaging-output inventory, tracked-file/secret-pattern checks, and `git diff --check`                                             | PASS after focused packaging cleanup; no unintended repository artifact or credential found                                                      |
