@@ -54,7 +54,8 @@ ownership map. Counts sum to 763; no path is unclassified.
 | A05     | verified | `src/metor/utils/lock.py`, `tests/test_lock_contract.py`, this worklog                                          | A05 gates below      | Complete                                                                   |
 | A06     | verified | `src/metor/data/profile/{support,paths,manager,catalog,lifecycle}.py`, `src/metor/data/profile/migration/{journal,orchestrator}.py`, `tests/test_profile_path_security.py`, this worklog | A06 gates below | Complete |
 | A07     | verified | `src/metor/{utils/process.py,data/profile/manager.py,application/runtime/maintenance.py,application/frontend/host.py,core/tor.py}`, `tests/test_application_runtime_contract.py`, this worklog | A07 gates below | Complete |
-| A08–A25 | open     | None                                                                                                            | Not run              | A08: complete recursive IPC type validation                                |
+| A08     | verified | `src/metor/core/api/{base.py,events/shared.py,events/entries.py}`, `tests/test_ipc_type_validation.py`, this worklog | A08 gates below | Complete |
+| A09–A25 | open     | None                                                                                                            | Not run              | A09: align generated contracts and examples with the decoder                |
 
 ## A00 verification
 
@@ -284,3 +285,43 @@ is required.
 | `python -m mypy src/metor/utils/process.py src/metor/data/profile/manager.py src/metor/application/runtime/maintenance.py src/metor/application/frontend/host.py src/metor/core/tor.py`                      | PASS; 5 source files                                                 |
 | `python scripts/check_boundaries.py`                                                                                                                                                                           | PASS                                                                 |
 | `git diff --check`                                                                                                                                                                                             | PASS                                                                 |
+
+## A08 verification
+
+The existing IPC decoder now validates every decoded value recursively against
+the registered DTO annotation. Both `typing.Union` and PEP 604 unions preserve
+explicit optional nulls; primitives use exact JSON-compatible runtime types so
+a Boolean cannot satisfy an integer field. Lists and sequences validate every
+element, mappings validate both keys and values, and nested dataclasses reject
+unknown fields and require their declared content discriminator. Recursive
+`JsonValue` mappings remain open to arbitrary JSON trees while rejecting
+non-JSON Python objects.
+
+The nested-entry compatibility helpers now delegate to the same validator for
+each entry, including mixed or later list elements, rather than retaining a
+second permissive hydration path. `VoiceContent.duration_ms` consequently
+preserves explicit `None`, accepts an integer, and rejects strings and Booleans;
+unknown duration is not converted to zero. Request IDs, epochs, and revisions
+retain their existing nullable envelope behavior, with integer revisions now
+rejecting Booleans.
+
+This enforces the already-declared DTO annotations and rejects inputs that were
+never valid under the generated contract. It adds no route, field, peer format,
+or IPC format and therefore requires no compatibility-axis or application
+version bump. `base.py` remains below the mandatory 500-line decomposition
+review threshold, and the added behavior is its existing cohesive
+responsibility: strict JSON-to-DTO hydration.
+
+| Command | Result |
+| ------- | ------ |
+| `python -m unittest -v test_ipc_type_validation` before implementation | EXPECTED FAIL; accepted Boolean integers, bad later list/dictionary values and arbitrary open-map objects, while valid structured content and explicit Voice null failed |
+| `python -m unittest -v test_ipc_type_validation` | PASS; 7 tests, including valid JSON roundtrips for all 66 command and 160 event registrations |
+| `python -m unittest -v test_raw_client_contract` | PASS; 3 tests in 4.316 seconds with local IPC socket access |
+| `python -m unittest -v test_gui_handoff test_gui_metadata test_ui_boundaries test_session_auth_contract test_history_contract test_gui_pages test_gui_producers test_embedded_contract test_closure_security` | PASS; 70 tests in 142.071 seconds with local IPC socket access |
+| `python -m unittest -v test_ipc_type_validation test_ui_boundaries test_history_contract test_message_architecture_contract test_ui_ipc_contract` | PASS; 62 tests |
+| Three focused `test_daemon_hardening.DaemonHardeningTests` IPC writer/rejection/dispatch tests | PASS; 3 tests in 0.008 seconds with local socket-pair access |
+| `python -m ruff check src/metor/core/api/base.py src/metor/core/api/events/shared.py src/metor/core/api/events/entries.py tests/test_ipc_type_validation.py` | PASS |
+| `python -m ruff format --check src/metor/core/api/base.py src/metor/core/api/events/shared.py src/metor/core/api/events/entries.py tests/test_ipc_type_validation.py` | PASS; 4 files already formatted |
+| `python -m mypy src/metor/core/api/base.py src/metor/core/api/events/shared.py src/metor/core/api/events/entries.py` | PASS; 3 source files |
+| `python scripts/check_boundaries.py` | PASS |
+| `git diff --check` | PASS |

@@ -2,8 +2,9 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, TypeVar
+from typing import Optional, TypeVar, cast
 
+from metor.core.api.base import _validate_value
 from metor.core.api.codes import (
     ConnectionActor,
     ConnectionOrigin,
@@ -16,8 +17,6 @@ from metor.core.api.content import (
     ContentType,
     Delivery,
     MessageContent,
-    TextContent,
-    VoiceContent,
 )
 
 
@@ -41,17 +40,7 @@ def _coerce_content(value: MessageContent | dict[str, object]) -> MessageContent
     Returns:
         MessageContent: Typed content DTO.
     """
-    if not isinstance(value, dict):
-        return value
-    if value.get('type') == ContentType.VOICE.value:
-        duration = value.get('duration_ms')
-        return VoiceContent(
-            blob_id=str(value['blob_id']),
-            codec=str(value['codec']),
-            size_bytes=int(str(value['size_bytes'])),
-            duration_ms=int(str(duration)) if duration is not None else None,
-        )
-    return TextContent(text=str(value['text']))
+    return cast(MessageContent, _validate_value(MessageContent, value, 'content'))
 
 
 @dataclass

@@ -1,9 +1,9 @@
 """Shared helpers for strict IPC DTO modules."""
 
-from typing import ClassVar, Dict, List, Mapping, Sequence, Type, TypeVar, cast
+from typing import ClassVar, List, Mapping, Sequence, Type, TypeVar, cast
 
 # Local Package Imports
-from metor.core.api.base import JsonValue
+from metor.core.api.base import _validate_value
 
 
 EntryT = TypeVar('EntryT')
@@ -23,9 +23,13 @@ def cast_entry_list(
     Returns:
         List[EntryT]: The typed entry list.
     """
-    if values and isinstance(values[0], dict):
-        return [entry_type(**cast(Dict[str, JsonValue], value)) for value in values]
-    return [cast(EntryT, value) for value in values]
+    return [
+        cast(
+            EntryT,
+            _validate_value(entry_type, value, f'entries[{index}]'),
+        )
+        for index, value in enumerate(values)
+    ]
 
 
 class NestedEntryCastingMixin:
