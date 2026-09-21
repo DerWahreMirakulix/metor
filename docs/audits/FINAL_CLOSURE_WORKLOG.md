@@ -63,7 +63,8 @@ ownership map. Counts sum to 763; no path is unclassified.
 | A13      | verified | `src/metor/ui/gui/platform/{configuration,configuration_security}.py`, `tests/test_device_configuration_security.py`, this worklog | A13 gates below | Complete |
 | A14      | verified | `src/metor/ui/gui/{app.py,platform/lifecycle.py,runtime/controller.py}`, `packaging/gui/setup.py`, `requirements/gui.lock`, `tests/{test_gui_os_lifecycle.py,gui_native_lifecycle.py,test_gui_lifecycle.py}`, `docs/contracts/{GUI_PLATFORM_ADR.md,gui/support.json}`, this worklog | A14 gates below | Complete |
 | A15      | verified | `tests/{test_gui_capture.py,test_gui_audio.py,gui_native_voice.py}`, `docs/contracts/{GUI_PLATFORM_ADR.md,gui/support.json}`, this worklog | A15 gates below | Complete |
-| A16–A25 | open     | None                                                                                                            | Not run              | A16: bound optional notifications and socket rejection                      |
+| A16      | verified | `src/metor/core/daemon/managed/{notify/notification.py,notify/sinks.py,ipc.py,engine/daemon.py}`, `tests/{test_notification_delivery.py,test_gui_capture.py}`, this worklog | A16 gates below | Complete |
+| A17–A25 | open     | None                                                                                                            | Not run              | A17: remove historical embedded preparation code                            |
 
 ## A00 verification
 
@@ -696,5 +697,51 @@ compatibility, or application version changes are required.
 | `python -m ruff check tests/test_gui_capture.py tests/test_gui_audio.py tests/gui_native_voice.py` | PASS |
 | `python -m ruff format --check tests/test_gui_capture.py tests/test_gui_audio.py tests/gui_native_voice.py` | PASS |
 | `python -m json.tool docs/contracts/gui/support.json` | PASS; claims remain explicit and machine-readable |
+| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
+| `git diff --check` | PASS |
+
+## A16 verification
+
+Optional notification delivery now has one daemon-owned worker and a fixed
+64-record transient queue. Callers only attempt a nonblocking enqueue. When the
+queue is full, new optional work is dropped, an overload bit is coalesced, and
+the worker emits one generic error without aliases, onions, URLs, payload data,
+or exception text. Configuration resolution, sink construction, file/webhook
+I/O, and error callbacks all run outside media and authorization callers.
+
+Daemon stop closes the service as an independent release phase: it stops new
+admission, drops queued optional work, wakes the worker, and joins only for the
+configured one-second bound. Built-in webhook I/O retains its five-second
+network timeout but does not read any response body; opening and closing the
+HTTP response is sufficient. Sink exceptions propagate only to the service,
+which reports a generic bounded diagnostic. The public sink `deliver(payload)`
+shape and configured sink registry remain unchanged.
+
+A controlled sink was held blocked while a real capture worker continued
+through authenticated SDK/IPC, SQLCipher/blob staging, append, and finalization.
+Queue saturation did not spawn workers or requeue records. A controlled local
+HTTP endpoint declared and delayed an 8 MiB response body; webhook delivery
+returned after headers without reading it.
+
+Fresh IPC sockets rejected at the client ceiling now close in `finally`, even
+when sending the typed rejection fails. The adjacent acceptor construction
+failure and writer saturation/interrupt paths were reviewed and their existing
+cleanup regressions passed; no general network ownership or transport policy
+was changed.
+
+This is internal optional-I/O isolation and descriptor cleanup. It changes no
+notification payload schema, IPC DTO, peer behavior, persistence format,
+compatibility generation, or application version.
+
+| Command | Result |
+| ------- | ------ |
+| `python -m unittest tests.test_notification_delivery -v` before implementation | EXPECTED FAIL/ERROR; response body was read, slow dispatch was synchronous, bounded queue/stop controls were absent, and reject-send failure leaked close |
+| `python -m unittest tests.test_notification_delivery -v` outside the socket sandbox | PASS; 6 large/slow response, slow/failing/full/stop queue, and reject-close tests using only local controlled counterparts |
+| `PYTHONPATH=tests python -m unittest test_gui_capture.CaptureIntegrationTests.test_blocked_optional_notification_does_not_delay_media_progress -v` outside the socket sandbox | PASS; real SDK/Core capture finalized 640 accepted bytes while the sink remained blocked |
+| `PYTHONPATH=tests python -m unittest test_gui_producers test_closure_integration test_daemon_lock_lifecycle test_release_contract -q` outside the socket sandbox | PASS; real Voice, IPC, lifecycle release, and packaging regressions |
+| Two focused IPC client-ceiling/writer-saturation contract tests outside the socket sandbox | PASS; typed reject and interruptible finite writer behavior |
+| `python -m mypy` for the four changed daemon source files | PASS; strict project configuration |
+| `python -m ruff check` for all A16 source/test files | PASS |
+| `python -m ruff format --check` for all A16 source/test files | PASS |
 | `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
 | `git diff --check` | PASS |

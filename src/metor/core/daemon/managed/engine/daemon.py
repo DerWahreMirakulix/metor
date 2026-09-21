@@ -577,6 +577,7 @@ class Daemon(DaemonLifecycleMixin):
 
         self._last_stop_release = release_resources(
             (
+                ('notifications', self._notification_service.close),
                 (
                     'runtime',
                     lambda: self._lock_runtime(

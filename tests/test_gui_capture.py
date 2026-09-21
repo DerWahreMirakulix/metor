@@ -3,6 +3,7 @@
 from collections import deque
 from dataclasses import replace
 from typing import Callable
+import json
 import threading
 import unittest
 from unittest.mock import Mock, patch
@@ -20,6 +21,7 @@ from metor.ui.gui.state import Route
 from metor.ui.gui.state.mailbox import Mailbox, Update
 from metor.ui.gui.state.media import MediaCache, PlaybackTarget
 from metor.ui.gui.runtime.playback.worker import PlaybackWorker
+from metor.core.daemon.managed.notify import NotificationPayload, NotificationService
 
 
 class FiniteMicrophone:
@@ -144,6 +146,34 @@ class CaptureIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(record.status, 'draft')
         self.assertEqual(self.h.messages.get_pending_outbox(), [])
+
+    def test_blocked_optional_notification_does_not_delay_media_progress(self) -> None:
+        """Sink I/O cannot retain the caller while actual SDK capture advances."""
+        entered, release = threading.Event(), threading.Event()
+        sink = Mock()
+        sink.deliver.side_effect = lambda _payload: (entered.set(), release.wait(10))
+        with patch(
+            'metor.core.daemon.managed.notify.notification.build_sink',
+            return_value=sink,
+        ):
+            service = NotificationService(
+                lambda: json.dumps({'type': 'controlled'}), stop_timeout=0.05
+            )
+            try:
+                service.dispatch(NotificationPayload('inbox_notification'))
+                self.assertTrue(entered.wait(1))
+                worker, _audio, updates = self.run_capture([b'\x00\x01' * 320])
+                self.assertEqual(worker.accepted_bytes, 640)
+                self.assertTrue(
+                    any(
+                        update.operation == 'voice-finished:capture'
+                        for update in updates
+                    )
+                )
+                self.assertFalse(release.is_set())
+            finally:
+                release.set()
+                service.close()
 
     def test_own_live_cache_requires_every_confirmed_source_range(self) -> None:
         """Actual finalization cannot turn a lost append acknowledgement into cached source bytes.

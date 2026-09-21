@@ -394,9 +394,13 @@ class IpcServer:
         self._stamp_revision(event)
         try:
             conn.sendall((event.to_json() + '\n').encode('utf-8'))
-            conn.close()
         except Exception:
             pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def _acceptor(self) -> None:
         """

@@ -2,9 +2,9 @@
 Module defining the built-in file and webhook notification sinks.
 
 FileSink appends JSON-Lines records under a lock and flushes after every write;
-WebhookSink POSTs JSON with a short timeout and swallows every failure so a
-notification can never crash the daemon. Both sink factories are registered
-into the shared sink-type registry on import.
+WebhookSink POSTs JSON with a short timeout and never reads a response body.
+The asynchronous notification service contains and safely reports sink failures.
+Both sink factories are registered into the shared registry on import.
 """
 
 import json
@@ -59,7 +59,7 @@ class FileSink:
 
 
 class WebhookSink:
-    """POSTs each notification as JSON to a webhook URL; failures are swallowed silently."""
+    """POSTs each notification as JSON without retaining a response body."""
 
     def __init__(self, url: str) -> None:
         """Initializes the WebhookSink.
@@ -73,7 +73,7 @@ class WebhookSink:
         self._url: str = url
 
     def deliver(self, payload: NotificationPayload) -> None:
-        """POSTs the serialized payload to the webhook URL without raising.
+        """POSTs the serialized payload without reading an optional response body.
 
         Args:
             payload (NotificationPayload): The structured payload to deliver.
@@ -81,19 +81,14 @@ class WebhookSink:
         Returns:
             None
         """
-        try:
-            body: bytes = json.dumps(asdict(payload), ensure_ascii=False).encode(
-                'utf-8'
-            )
-            request = Request(
-                self._url,
-                data=body,
-                headers={'Content-Type': 'application/json'},
-                method='POST',
-            )
-            with urlopen(request, timeout=WEBHOOK_TIMEOUT_SECONDS) as response:
-                response.read()
-        except Exception:
+        body: bytes = json.dumps(asdict(payload), ensure_ascii=False).encode('utf-8')
+        request = Request(
+            self._url,
+            data=body,
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        with urlopen(request, timeout=WEBHOOK_TIMEOUT_SECONDS):
             pass
 
 
