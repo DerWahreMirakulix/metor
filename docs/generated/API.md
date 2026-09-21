@@ -11,6 +11,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - Events sent from the daemon to the UI must include a top-level `event_type` field.
 - Every payload is a single JSON object followed by a newline (`\n`).
 - The daemon emits structured data only. Human-readable text is resolved in the UI from `event_type`.
+- `api.schema.json` is a route/definition catalog, not a root message validator; select the route reference under `commands` or `events` to validate one complete message.
 
 ## Canonical Client Session Sequence
 
@@ -1621,7 +1622,10 @@ Sends typed content using the requested delivery semantics.
   "command_type": "send_message",
   "target": "string",
   "delivery": "live",
-  "content": "value",
+  "content": {
+    "text": "string",
+    "type": "text"
+  },
   "msg_id": "string"
 }
 ```
@@ -2863,8 +2867,18 @@ Returns the structured address book.
 ```json
 {
   "event_type": "contacts_data",
-  "saved": ["value"],
-  "discovered": ["value"],
+  "saved": [
+    {
+      "alias": "string",
+      "onion": "string"
+    }
+  ],
+  "discovered": [
+    {
+      "alias": "string",
+      "onion": "string"
+    }
+  ],
   "profile": "string"
 }
 ```
@@ -3334,7 +3348,19 @@ Returns projected user-facing history rows.
 ```json
 {
   "event_type": "history_data",
-  "entries": "value",
+  "entries": [
+    {
+      "timestamp": "string",
+      "family": "live",
+      "event_code": "connection_requested",
+      "peer_onion": "string",
+      "actor": "local",
+      "trigger": "auto_accept_contact",
+      "detail_code": "auto_fallback_to_drop",
+      "detail_text": "string",
+      "flow_id": "string"
+    }
+  ],
   "profile": "string"
 }
 ```
@@ -3368,7 +3394,19 @@ Returns raw transport history ledger rows.
 ```json
 {
   "event_type": "history_raw_data",
-  "entries": "value",
+  "entries": [
+    {
+      "timestamp": "string",
+      "family": "live",
+      "event_code": "queued",
+      "peer_onion": "string",
+      "actor": "local",
+      "trigger": "auto_accept_contact",
+      "detail_code": "auto_fallback_to_drop",
+      "detail_text": "string",
+      "flow_id": "string"
+    }
+  ],
   "profile": "string"
 }
 ```
@@ -3994,7 +4032,10 @@ Carries inbound typed content and independent delivery semantics.
   "event_type": "message_received",
   "alias": "string",
   "delivery": "live",
-  "content": "value"
+  "content": {
+    "text": "string",
+    "type": "text"
+  }
 }
 ```
 
@@ -4142,7 +4183,18 @@ Returns stored chat messages for a peer.
 ```json
 {
   "event_type": "messages_data",
-  "messages": ["value"],
+  "messages": [
+    {
+      "direction": "in",
+      "status": "pending",
+      "delivery": "live",
+      "content": {
+        "text": "string",
+        "type": "text"
+      },
+      "timestamp": "string"
+    }
+  ],
   "alias": "string"
 }
 ```
@@ -4571,7 +4623,14 @@ event_type (EventType): The stable IPC routing code.
 ```json
 {
   "event_type": "profiles_data",
-  "profiles": ["value"]
+  "profiles": [
+    {
+      "name": "string",
+      "is_active": false,
+      "is_remote": false,
+      "port": 0
+    }
+  ]
 }
 ```
 
@@ -5493,7 +5552,16 @@ Returns unread messages consumed explicitly for a peer.
 ```json
 {
   "event_type": "unread_messages",
-  "messages": ["value"],
+  "messages": [
+    {
+      "timestamp": "string",
+      "delivery": "live",
+      "content": {
+        "text": "string",
+        "type": "text"
+      }
+    }
+  ],
   "alias": "string"
 }
 ```

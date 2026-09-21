@@ -55,7 +55,8 @@ ownership map. Counts sum to 763; no path is unclassified.
 | A06     | verified | `src/metor/data/profile/{support,paths,manager,catalog,lifecycle}.py`, `src/metor/data/profile/migration/{journal,orchestrator}.py`, `tests/test_profile_path_security.py`, this worklog | A06 gates below | Complete |
 | A07     | verified | `src/metor/{utils/process.py,data/profile/manager.py,application/runtime/maintenance.py,application/frontend/host.py,core/tor.py}`, `tests/test_application_runtime_contract.py`, this worklog | A07 gates below | Complete |
 | A08     | verified | `src/metor/core/api/{base.py,events/shared.py,events/entries.py}`, `tests/test_ipc_type_validation.py`, this worklog | A08 gates below | Complete |
-| A09–A25 | open     | None                                                                                                            | Not run              | A09: align generated contracts and examples with the decoder                |
+| A09     | verified | `scripts/{generate_api_docs.py,release/compatibility.py}`, `docs/generated/{API.md,api.schema.json,compatibility.json}`, `tests/test_api_generation_contract.py`, this worklog | A09 gates below | Complete |
+| A10–A25 | open     | None                                                                                                            | Not run              | A10: repair CLI argument loss                                                |
 
 ## A00 verification
 
@@ -323,5 +324,54 @@ responsibility: strict JSON-to-DTO hydration.
 | `python -m ruff check src/metor/core/api/base.py src/metor/core/api/events/shared.py src/metor/core/api/events/entries.py tests/test_ipc_type_validation.py` | PASS |
 | `python -m ruff format --check src/metor/core/api/base.py src/metor/core/api/events/shared.py src/metor/core/api/events/entries.py tests/test_ipc_type_validation.py` | PASS; 4 files already formatted |
 | `python -m mypy src/metor/core/api/base.py src/metor/core/api/events/shared.py src/metor/core/api/events/entries.py` | PASS; 3 source files |
+| `python scripts/check_boundaries.py` | PASS |
+| `git diff --check` | PASS |
+
+## A09 verification
+
+API examples now resolve annotations before constructing required values and
+recursively construct nested dataclasses with their exact discriminators. All
+66 command and 160 event examples therefore pass the real decoder, including
+structured text content for `send_message` and `message_received`.
+
+The schema generator now emits typed `Sequence` items, typed dictionary values,
+strict nested DTO objects, exact content discriminator constants, and a
+recursive `JsonValue` definition. Unsupported annotations abort generation
+instead of silently degrading to `{}`. The generated schema and API reference
+state that the schema root is a route/definition catalog: consumers select the
+matching `commands` or `events` reference to validate a complete message,
+rather than treating the catalog root as a complete message validator. Route
+discriminators are required constants in those definitions; the compatibility
+checker ignores only their first schema representation because route presence
+and removal are already compared by the catalog keys.
+
+The unchanged compatibility comparator classifies the two formerly `{}`
+history sequence schemas as narrowings when the new schema is compared directly
+with the internal A08 artifact. This is a reviewed documentation correction:
+both fields were already declared and decoded as typed sequences, A08 made that
+existing decoder contract complete, and Metor has no prior public release. The
+release compatibility gate therefore accepts the corrected artifact as the
+first baseline. No route, field, peer wire, persisted format, compatibility
+generation, or application version changed.
+
+`scripts/generate_api_docs.py` is 562 lines after the change, so decomposition
+was evaluated. Its single responsibility remains generating the paired Markdown
+and machine-readable views from the same registries; separating annotation
+resolution at this size would duplicate or obscure that shared contract. It
+remains below the exceptional 800-line ceiling and introduces no new subsystem.
+
+| Command | Result |
+| ------- | ------ |
+| `python -m unittest -v test_api_generation_contract` before implementation | EXPECTED FAIL; invalid content examples, untyped dictionary values, permissive open mappings, missing catalog semantics, and silent unknown annotations were reproduced |
+| `python -m unittest -v test_api_generation_contract` | PASS; 6 tests covering all 226 examples, complete route definitions, negative containers/discriminators, open JSON, fail-closed annotations, compatibility classification, and repeated generation |
+| `python scripts/generate_api_docs.py` and `python scripts/generate_compatibility_manifest.py` | PASS; canonical API, schema, and compatibility artifacts regenerated from source |
+| `python scripts/validate_generated_docs.py` | PASS; all four generated artifacts remained byte-identical across two generations |
+| Direct `ipc_breaking_changes()` comparison with the A08 checked-in schema | REVIEWED; only `history_data.entries` and `history_raw_data.entries` schema corrections classified as narrowed |
+| `python scripts/check_release_compatibility.py --current docs/generated/compatibility.json` | PASS; first public baseline, no automatic bump |
+| `python scripts/versioning.py validate` | PASS; application 0.2.0 and IPC generation 2 remain valid |
+| `python -m unittest -v test_api_generation_contract test_ipc_type_validation test_message_architecture_contract test_versioning_release` | PASS; 51 tests in 3.294 seconds |
+| `python -m ruff check scripts/generate_api_docs.py scripts/release/compatibility.py tests/test_api_generation_contract.py` | PASS |
+| `python -m ruff format --check scripts/generate_api_docs.py scripts/release/compatibility.py tests/test_api_generation_contract.py` | PASS; 3 files already formatted |
+| `python -m mypy scripts/generate_api_docs.py scripts/release/compatibility.py` | PASS; 2 source files |
 | `python scripts/check_boundaries.py` | PASS |
 | `git diff --check` | PASS |

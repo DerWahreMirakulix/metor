@@ -112,6 +112,7 @@ def ipc_breaking_changes(previous: JsonObject, current: JsonObject) -> tuple[str
     """
     changes: list[str] = []
     for group in ('commands', 'events'):
+        route_field: str = 'command_type' if group == 'commands' else 'event_type'
         old_routes: dict[str, JsonObject] = _resolved_routes(previous, group)
         new_routes: dict[str, JsonObject] = _resolved_routes(current, group)
         for route in sorted(old_routes.keys() - new_routes.keys()):
@@ -126,6 +127,8 @@ def ipc_breaking_changes(previous: JsonObject, current: JsonObject) -> tuple[str
             old_required: set[str] = set(cast(list[str], old_dto.get('required', [])))
             new_required: set[str] = set(cast(list[str], new_dto.get('required', [])))
             for field in sorted(new_required - old_required):
+                if field == route_field:
+                    continue
                 changes.append(f'IPC required field added: {route}.{field}')
             for field in sorted(old_properties.keys() & new_properties.keys()):
                 if not _accepts_previous_schema(

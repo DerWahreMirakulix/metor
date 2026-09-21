@@ -1047,6 +1047,7 @@
       },
       "definitions": {
         "AcceptCommand": {
+          "additionalProperties": false,
           "properties": {
             "action_handle": {
               "anyOf": [
@@ -1057,6 +1058,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "command_type": {
+              "const": "accept",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -1073,12 +1078,14 @@
             }
           },
           "required": [
+            "command_type",
             "target"
           ],
           "title": "AcceptCommand",
           "type": "object"
         },
         "AckEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -1089,6 +1096,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "ack",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -1125,14 +1136,20 @@
             }
           },
           "required": [
+            "event_type",
             "msg_id"
           ],
           "title": "AckEvent",
           "type": "object"
         },
         "AddContactCommand": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
+              "type": "string"
+            },
+            "command_type": {
+              "const": "add_contact",
               "type": "string"
             },
             "onion": {
@@ -1157,13 +1174,19 @@
             }
           },
           "required": [
+            "command_type",
             "alias"
           ],
           "title": "AddContactCommand",
           "type": "object"
         },
         "AddProfileCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "add_profile",
+              "type": "string"
+            },
             "is_remote": {
               "type": "boolean"
             },
@@ -1205,12 +1228,14 @@
             }
           },
           "required": [
+            "command_type",
             "name"
           ],
           "title": "AddProfileCommand",
           "type": "object"
         },
         "AddressCantGenerateRunningEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -1221,6 +1246,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "address_cant_generate_running",
+              "type": "string"
             },
             "profile": {
               "type": "string"
@@ -1247,12 +1276,14 @@
             }
           },
           "required": [
+            "event_type",
             "profile"
           ],
           "title": "AddressCantGenerateRunningEvent",
           "type": "object"
         },
         "AddressCurrentEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -1263,6 +1294,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "address_current",
+              "type": "string"
             },
             "onion": {
               "type": "string"
@@ -1292,6 +1327,7 @@
             }
           },
           "required": [
+            "event_type",
             "profile",
             "onion"
           ],
@@ -1299,6 +1335,7 @@
           "type": "object"
         },
         "AddressGeneratedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -1309,6 +1346,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "address_generated",
+              "type": "string"
             },
             "onion": {
               "type": "string"
@@ -1338,6 +1379,7 @@
             }
           },
           "required": [
+            "event_type",
             "profile",
             "onion"
           ],
@@ -1345,6 +1387,7 @@
           "type": "object"
         },
         "AddressNotGeneratedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -1355,6 +1398,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "address_not_generated",
+              "type": "string"
             },
             "profile": {
               "type": "string"
@@ -1381,12 +1428,14 @@
             }
           },
           "required": [
+            "event_type",
             "profile"
           ],
           "title": "AddressNotGeneratedEvent",
           "type": "object"
         },
         "AliasInUseEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -1400,6 +1449,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "alias_in_use",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -1433,12 +1486,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "AliasInUseEvent",
           "type": "object"
         },
         "AliasNotFoundEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -1452,6 +1507,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "alias_not_found",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -1475,12 +1534,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "AliasNotFoundEvent",
           "type": "object"
         },
         "AliasRenamedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -1491,6 +1552,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "alias_renamed",
+              "type": "string"
             },
             "new_alias": {
               "type": "string"
@@ -1530,6 +1595,7 @@
             }
           },
           "required": [
+            "event_type",
             "old_alias",
             "new_alias"
           ],
@@ -1537,6 +1603,7 @@
           "type": "object"
         },
         "AliasSameEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -1547,6 +1614,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "alias_same",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -1569,10 +1640,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "AliasSameEvent",
           "type": "object"
         },
         "AlreadyUnlockedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -1583,6 +1658,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "already_unlocked",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -1605,11 +1684,19 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "AlreadyUnlockedEvent",
           "type": "object"
         },
         "AppendVoiceChunkCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "append_voice_chunk",
+              "type": "string"
+            },
             "data": {
               "type": "string"
             },
@@ -1641,6 +1728,7 @@
             }
           },
           "required": [
+            "command_type",
             "msg_id",
             "offset",
             "data"
@@ -1649,6 +1737,7 @@
           "type": "object"
         },
         "AuthRequiredEvent": {
+          "additionalProperties": false,
           "properties": {
             "challenge": {
               "anyOf": [
@@ -1669,6 +1758,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "auth_required",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -1701,11 +1794,19 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "AuthRequiredEvent",
           "type": "object"
         },
         "AuthenticateSessionCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "authenticate_session",
+              "type": "string"
+            },
             "proof": {
               "type": "string"
             },
@@ -1721,12 +1822,14 @@
             }
           },
           "required": [
+            "command_type",
             "proof"
           ],
           "title": "AuthenticateSessionCommand",
           "type": "object"
         },
         "AutoFallbackQueuedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -1740,6 +1843,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "auto_fallback_queued",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -1776,6 +1883,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "msg_id"
           ],
@@ -1783,6 +1891,7 @@
           "type": "object"
         },
         "AutoReconnectScheduledEvent": {
+          "additionalProperties": false,
           "properties": {
             "actor": {
               "enum": [
@@ -1804,6 +1913,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "auto_reconnect_scheduled",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -1849,14 +1962,20 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "AutoReconnectScheduledEvent",
           "type": "object"
         },
         "BeginVoiceCommand": {
+          "additionalProperties": false,
           "properties": {
             "codec": {
+              "type": "string"
+            },
+            "command_type": {
+              "const": "begin_voice",
               "type": "string"
             },
             "context_generation": {
@@ -1904,6 +2023,7 @@
             }
           },
           "required": [
+            "command_type",
             "target",
             "delivery",
             "msg_id",
@@ -1913,7 +2033,12 @@
           "type": "object"
         },
         "CancelVoiceCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "cancel_voice",
+              "type": "string"
+            },
             "msg_id": {
               "type": "string"
             },
@@ -1942,6 +2067,7 @@
             }
           },
           "required": [
+            "command_type",
             "target",
             "msg_id"
           ],
@@ -1949,6 +2075,7 @@
           "type": "object"
         },
         "CannotConnectSelfEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -1959,6 +2086,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "cannot_connect_self",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -1981,10 +2112,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "CannotConnectSelfEvent",
           "type": "object"
         },
         "CannotDropSelfEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -1995,6 +2130,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "cannot_drop_self",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -2017,10 +2156,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "CannotDropSelfEvent",
           "type": "object"
         },
         "CannotSwitchSelfEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -2031,6 +2174,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "cannot_switch_self",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -2053,11 +2200,19 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "CannotSwitchSelfEvent",
           "type": "object"
         },
         "ChangePasswordCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "change_password",
+              "type": "string"
+            },
             "current_password": {
               "type": "string"
             },
@@ -2076,6 +2231,7 @@
             }
           },
           "required": [
+            "command_type",
             "current_password",
             "new_password"
           ],
@@ -2083,6 +2239,7 @@
           "type": "object"
         },
         "ChatStartupStateEvent": {
+          "additionalProperties": false,
           "properties": {
             "active": {
               "items": {
@@ -2106,8 +2263,13 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "chat_startup_state",
+              "type": "string"
+            },
             "pending": {
               "items": {
+                "additionalProperties": false,
                 "properties": {
                   "action_handle": {
                     "anyOf": [
@@ -2195,6 +2357,7 @@
             },
             "unread": {
               "items": {
+                "additionalProperties": false,
                 "properties": {
                   "alias": {
                     "type": "string"
@@ -2233,6 +2396,7 @@
             }
           },
           "required": [
+            "event_type",
             "active",
             "contacts"
           ],
@@ -2240,7 +2404,12 @@
           "type": "object"
         },
         "ClearContactsCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "clear_contacts",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -2252,11 +2421,19 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "ClearContactsCommand",
           "type": "object"
         },
         "ClearHistoryCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "clear_history",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -2278,11 +2455,19 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "ClearHistoryCommand",
           "type": "object"
         },
         "ClearMessagesCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "clear_messages",
+              "type": "string"
+            },
             "non_contacts_only": {
               "type": "boolean"
             },
@@ -2307,11 +2492,19 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "ClearMessagesCommand",
           "type": "object"
         },
         "ClearProfileDbCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "clear_profile_db",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -2323,10 +2516,14 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "ClearProfileDbCommand",
           "type": "object"
         },
         "ClientAccessRestrictedEvent": {
+          "additionalProperties": false,
           "properties": {
             "command": {
               "type": "string"
@@ -2340,6 +2537,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "client_access_restricted",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -2363,12 +2564,14 @@
             }
           },
           "required": [
+            "event_type",
             "command"
           ],
           "title": "ClientAccessRestrictedEvent",
           "type": "object"
         },
         "ClientReauthorizedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -2379,6 +2582,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "client_reauthorized",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -2401,10 +2608,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "ClientReauthorizedEvent",
           "type": "object"
         },
         "ClientRestrictedEvent": {
+          "additionalProperties": false,
           "properties": {
             "challenge": {
               "anyOf": [
@@ -2449,6 +2660,10 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "client_restricted",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -2489,12 +2704,14 @@
             }
           },
           "required": [
+            "event_type",
             "unlock_method"
           ],
           "title": "ClientRestrictedEvent",
           "type": "object"
         },
         "ClientScopeKeyRejectedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -2505,6 +2722,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "client_scope_key_rejected",
+              "type": "string"
             },
             "key": {
               "type": "string"
@@ -2530,11 +2751,19 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "ClientScopeKeyRejectedEvent",
           "type": "object"
         },
         "CommitVoiceCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "commit_voice",
+              "type": "string"
+            },
             "msg_id": {
               "type": "string"
             },
@@ -2563,6 +2792,7 @@
             }
           },
           "required": [
+            "command_type",
             "target",
             "msg_id"
           ],
@@ -2570,6 +2800,7 @@
           "type": "object"
         },
         "ConfigDataEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -2580,6 +2811,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "config_data",
+              "type": "string"
             },
             "key": {
               "type": "string"
@@ -2609,6 +2844,7 @@
             }
           },
           "required": [
+            "event_type",
             "key",
             "value"
           ],
@@ -2616,9 +2852,11 @@
           "type": "object"
         },
         "ConfigListDataEvent": {
+          "additionalProperties": false,
           "properties": {
             "entries": {
               "items": {
+                "additionalProperties": false,
                 "properties": {
                   "category": {
                     "type": "string"
@@ -2698,6 +2936,10 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "config_list_data",
+              "type": "string"
+            },
             "profile": {
               "type": "string"
             },
@@ -2726,6 +2968,7 @@
             }
           },
           "required": [
+            "event_type",
             "scope",
             "profile"
           ],
@@ -2733,6 +2976,7 @@
           "type": "object"
         },
         "ConfigSyncedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -2743,6 +2987,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "config_synced",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -2765,10 +3013,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "ConfigSyncedEvent",
           "type": "object"
         },
         "ConfigUpdateFailedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -2779,6 +3031,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "config_update_failed",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -2801,10 +3057,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "ConfigUpdateFailedEvent",
           "type": "object"
         },
         "ConfigUpdatedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -2815,6 +3075,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "config_updated",
+              "type": "string"
             },
             "key": {
               "type": "string"
@@ -2841,18 +3105,24 @@
             }
           },
           "required": [
+            "event_type",
             "key"
           ],
           "title": "ConfigUpdatedEvent",
           "type": "object"
         },
         "ConfigureQuickUnlockCommand": {
+          "additionalProperties": false,
           "properties": {
             "action": {
               "enum": [
                 "set",
                 "remove"
               ],
+              "type": "string"
+            },
+            "command_type": {
+              "const": "configure_quick_unlock",
               "type": "string"
             },
             "request_id": {
@@ -2887,13 +3157,19 @@
             }
           },
           "required": [
+            "command_type",
             "action"
           ],
           "title": "ConfigureQuickUnlockCommand",
           "type": "object"
         },
         "ConnectCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "connect",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -2909,12 +3185,14 @@
             }
           },
           "required": [
+            "command_type",
             "target"
           ],
           "title": "ConnectCommand",
           "type": "object"
         },
         "ConnectedEvent": {
+          "additionalProperties": false,
           "properties": {
             "actor": {
               "enum": [
@@ -2936,6 +3214,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "connected",
+              "type": "string"
             },
             "onion": {
               "type": "string"
@@ -2974,6 +3256,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "onion"
           ],
@@ -2981,6 +3264,7 @@
           "type": "object"
         },
         "ConnectionAutoAcceptedEvent": {
+          "additionalProperties": false,
           "properties": {
             "actor": {
               "enum": [
@@ -3002,6 +3286,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "connection_auto_accepted",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -3047,12 +3335,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "ConnectionAutoAcceptedEvent",
           "type": "object"
         },
         "ConnectionConnectingEvent": {
+          "additionalProperties": false,
           "properties": {
             "actor": {
               "enum": [
@@ -3074,6 +3364,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "connection_connecting",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -3119,12 +3413,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "ConnectionConnectingEvent",
           "type": "object"
         },
         "ConnectionFailedEvent": {
+          "additionalProperties": false,
           "properties": {
             "actor": {
               "enum": [
@@ -3157,6 +3453,10 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "connection_failed",
+              "type": "string"
+            },
             "onion": {
               "anyOf": [
                 {
@@ -3228,12 +3528,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "ConnectionFailedEvent",
           "type": "object"
         },
         "ConnectionPendingEvent": {
+          "additionalProperties": false,
           "properties": {
             "actor": {
               "enum": [
@@ -3255,6 +3557,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "connection_pending",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -3300,12 +3606,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "ConnectionPendingEvent",
           "type": "object"
         },
         "ConnectionRejectedEvent": {
+          "additionalProperties": false,
           "properties": {
             "actor": {
               "enum": [
@@ -3327,6 +3635,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "connection_rejected",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -3399,12 +3711,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "ConnectionRejectedEvent",
           "type": "object"
         },
         "ConnectionRetryEvent": {
+          "additionalProperties": false,
           "properties": {
             "actor": {
               "enum": [
@@ -3429,6 +3743,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "connection_retry",
+              "type": "string"
             },
             "max_retries": {
               "type": "integer"
@@ -3477,6 +3795,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "attempt",
             "max_retries"
@@ -3485,6 +3804,7 @@
           "type": "object"
         },
         "ConnectionsStateEvent": {
+          "additionalProperties": false,
           "properties": {
             "active": {
               "items": {
@@ -3507,6 +3827,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "connections_state",
+              "type": "string"
             },
             "is_header": {
               "type": "boolean"
@@ -3539,6 +3863,7 @@
             }
           },
           "required": [
+            "event_type",
             "active",
             "pending",
             "contacts"
@@ -3547,6 +3872,7 @@
           "type": "object"
         },
         "ContactAddedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -3560,6 +3886,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "contact_added",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -3596,6 +3926,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "profile"
           ],
@@ -3603,6 +3934,7 @@
           "type": "object"
         },
         "ContactAlreadySavedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -3616,6 +3948,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "contact_already_saved",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -3649,12 +3985,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "ContactAlreadySavedEvent",
           "type": "object"
         },
         "ContactDowngradedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -3668,6 +4006,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "contact_downgraded",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -3701,12 +4043,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "ContactDowngradedEvent",
           "type": "object"
         },
         "ContactRemovedDowngradedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -3720,6 +4064,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "contact_removed_downgraded",
+              "type": "string"
             },
             "new_alias": {
               "type": "string"
@@ -3756,6 +4104,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "new_alias"
           ],
@@ -3763,6 +4112,7 @@
           "type": "object"
         },
         "ContactRemovedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -3776,6 +4126,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "contact_removed",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -3819,12 +4173,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "ContactRemovedEvent",
           "type": "object"
         },
         "ContactsClearFailedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -3835,6 +4191,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "contacts_clear_failed",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -3857,10 +4217,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "ContactsClearFailedEvent",
           "type": "object"
         },
         "ContactsClearedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -3871,6 +4235,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "contacts_cleared",
+              "type": "string"
             },
             "preserved_peers": {
               "type": "integer"
@@ -3900,15 +4268,18 @@
             }
           },
           "required": [
+            "event_type",
             "profile"
           ],
           "title": "ContactsClearedEvent",
           "type": "object"
         },
         "ContactsDataEvent": {
+          "additionalProperties": false,
           "properties": {
             "discovered": {
               "items": {
+                "additionalProperties": false,
                 "properties": {
                   "alias": {
                     "type": "string"
@@ -3938,6 +4309,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "contacts_data",
+              "type": "string"
             },
             "profile": {
               "type": "string"
@@ -3964,6 +4339,7 @@
             },
             "saved": {
               "items": {
+                "additionalProperties": false,
                 "properties": {
                   "alias": {
                     "type": "string"
@@ -3986,6 +4362,7 @@
             }
           },
           "required": [
+            "event_type",
             "saved",
             "discovered",
             "profile"
@@ -3994,6 +4371,7 @@
           "type": "object"
         },
         "DaemonLockedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -4004,6 +4382,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "daemon_locked",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -4026,10 +4408,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "DaemonLockedEvent",
           "type": "object"
         },
         "DaemonOfflineEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -4040,6 +4426,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "daemon_offline",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -4062,10 +4452,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "DaemonOfflineEvent",
           "type": "object"
         },
         "DaemonUnlockedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -4076,6 +4470,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "daemon_unlocked",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -4098,10 +4496,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "DaemonUnlockedEvent",
           "type": "object"
         },
         "DatabaseClearFailedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -4112,6 +4514,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "db_clear_failed",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -4134,10 +4540,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "DatabaseClearFailedEvent",
           "type": "object"
         },
         "DatabaseClearedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -4148,6 +4558,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "db_cleared",
+              "type": "string"
             },
             "preserved_peers": {
               "type": "integer"
@@ -4177,12 +4591,14 @@
             }
           },
           "required": [
+            "event_type",
             "profile"
           ],
           "title": "DatabaseClearedEvent",
           "type": "object"
         },
         "DatabaseCorruptedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -4193,6 +4609,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "db_corrupted",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -4215,11 +4635,19 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "DatabaseCorruptedEvent",
           "type": "object"
         },
         "DeleteMessageCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "delete_message",
+              "type": "string"
+            },
             "direction": {
               "anyOf": [
                 {
@@ -4252,6 +4680,7 @@
             }
           },
           "required": [
+            "command_type",
             "target",
             "msg_id"
           ],
@@ -4259,6 +4688,7 @@
           "type": "object"
         },
         "DisconnectCommand": {
+          "additionalProperties": false,
           "properties": {
             "attempt_id": {
               "anyOf": [
@@ -4269,6 +4699,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "command_type": {
+              "const": "disconnect",
+              "type": "string"
             },
             "context_generation": {
               "anyOf": [
@@ -4295,12 +4729,14 @@
             }
           },
           "required": [
+            "command_type",
             "target"
           ],
           "title": "DisconnectCommand",
           "type": "object"
         },
         "DisconnectedEvent": {
+          "additionalProperties": false,
           "properties": {
             "actor": {
               "enum": [
@@ -4322,6 +4758,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "disconnected",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -4394,12 +4834,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "DisconnectedEvent",
           "type": "object"
         },
         "DiscoveredPeerNotFoundEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -4410,6 +4852,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "discovered_peer_not_found",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -4436,13 +4882,19 @@
             }
           },
           "required": [
+            "event_type",
             "target"
           ],
           "title": "DiscoveredPeerNotFoundEvent",
           "type": "object"
         },
         "DismissLiveContextCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "dismiss_live_context",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -4458,12 +4910,14 @@
             }
           },
           "required": [
+            "command_type",
             "target"
           ],
           "title": "DismissLiveContextCommand",
           "type": "object"
         },
         "DropFailedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -4474,6 +4928,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "drop_failed",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -4510,12 +4968,14 @@
             }
           },
           "required": [
+            "event_type",
             "msg_id"
           ],
           "title": "DropFailedEvent",
           "type": "object"
         },
         "DropQueuedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -4529,6 +4989,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "drop_queued",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -4562,12 +5026,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "DropQueuedEvent",
           "type": "object"
         },
         "DropsDisabledEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -4578,6 +5044,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "drops_disabled",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -4600,11 +5070,19 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "DropsDisabledEvent",
           "type": "object"
         },
         "FallbackCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "fallback",
+              "type": "string"
+            },
             "msg_ids": {
               "anyOf": [
                 {
@@ -4633,12 +5111,14 @@
             }
           },
           "required": [
+            "command_type",
             "target"
           ],
           "title": "FallbackCommand",
           "type": "object"
         },
         "FallbackRejectedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -4652,6 +5132,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "fallback_rejected",
+              "type": "string"
             },
             "msg_ids": {
               "items": {
@@ -4715,6 +5199,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "reason",
             "msg_ids"
@@ -4723,6 +5208,7 @@
           "type": "object"
         },
         "FallbackSuccessEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -4739,6 +5225,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "fallback_success",
+              "type": "string"
             },
             "msg_ids": {
               "items": {
@@ -4778,6 +5268,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "count",
             "msg_ids"
@@ -4786,7 +5277,12 @@
           "type": "object"
         },
         "FinalizeVoiceCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "finalize_voice",
+              "type": "string"
+            },
             "duration_ms": {
               "anyOf": [
                 {
@@ -4822,13 +5318,19 @@
             }
           },
           "required": [
+            "command_type",
             "msg_id"
           ],
           "title": "FinalizeVoiceCommand",
           "type": "object"
         },
         "GenerateAddressCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "generate_address",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -4840,11 +5342,19 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "GenerateAddressCommand",
           "type": "object"
         },
         "GetAddressCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "get_address",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -4856,11 +5366,19 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "GetAddressCommand",
           "type": "object"
         },
         "GetChatStartupStateCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "get_chat_startup_state",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -4872,11 +5390,19 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "GetChatStartupStateCommand",
           "type": "object"
         },
         "GetConfigCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "get_config",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -4892,13 +5418,19 @@
             }
           },
           "required": [
+            "command_type",
             "setting_key"
           ],
           "title": "GetConfigCommand",
           "type": "object"
         },
         "GetConfigListCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "get_config_list",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -4913,11 +5445,19 @@
               "type": "boolean"
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "GetConfigListCommand",
           "type": "object"
         },
         "GetConnectionsCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "get_connections",
+              "type": "string"
+            },
             "is_header": {
               "type": "boolean"
             },
@@ -4932,13 +5472,21 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "GetConnectionsCommand",
           "type": "object"
         },
         "GetContactsListCommand": {
+          "additionalProperties": false,
           "properties": {
             "chat_mode": {
               "type": "boolean"
+            },
+            "command_type": {
+              "const": "get_contacts_list",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -4951,11 +5499,19 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "GetContactsListCommand",
           "type": "object"
         },
         "GetGuiPreferencesCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "get_gui_preferences",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -4967,10 +5523,14 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "GetGuiPreferencesCommand",
           "type": "object"
         },
         "GetHistoryCommand": {
+          "additionalProperties": false,
           "properties": {
             "before_id": {
               "anyOf": [
@@ -4981,6 +5541,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "command_type": {
+              "const": "get_history",
+              "type": "string"
             },
             "limit": {
               "anyOf": [
@@ -5023,11 +5587,19 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "GetHistoryCommand",
           "type": "object"
         },
         "GetInboxCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "get_inbox",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -5039,11 +5611,19 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "GetInboxCommand",
           "type": "object"
         },
         "GetMessageOutcomeCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "get_message_outcome",
+              "type": "string"
+            },
             "direction": {
               "enum": [
                 "in",
@@ -5068,10 +5648,14 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "GetMessageOutcomeCommand",
           "type": "object"
         },
         "GetMessagesCommand": {
+          "additionalProperties": false,
           "properties": {
             "before_direction": {
               "anyOf": [
@@ -5096,6 +5680,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "command_type": {
+              "const": "get_messages",
+              "type": "string"
             },
             "limit": {
               "anyOf": [
@@ -5138,10 +5726,14 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "GetMessagesCommand",
           "type": "object"
         },
         "GetRawHistoryCommand": {
+          "additionalProperties": false,
           "properties": {
             "before_id": {
               "anyOf": [
@@ -5152,6 +5744,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "command_type": {
+              "const": "get_raw_history",
+              "type": "string"
             },
             "limit": {
               "anyOf": [
@@ -5194,11 +5790,19 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "GetRawHistoryCommand",
           "type": "object"
         },
         "GetRestrictedClientStateCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "get_restricted_client_state",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -5210,11 +5814,19 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "GetRestrictedClientStateCommand",
           "type": "object"
         },
         "GetRuntimeSnapshotCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "get_runtime_snapshot",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -5226,11 +5838,19 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "GetRuntimeSnapshotCommand",
           "type": "object"
         },
         "GetSettingCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "get_setting",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -5246,13 +5866,19 @@
             }
           },
           "required": [
+            "command_type",
             "setting_key"
           ],
           "title": "GetSettingCommand",
           "type": "object"
         },
         "GetSettingsListCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "get_settings_list",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -5264,11 +5890,19 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "GetSettingsListCommand",
           "type": "object"
         },
         "GetTransportStateCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "get_transport_state",
+              "type": "string"
+            },
             "peer": {
               "anyOf": [
                 {
@@ -5290,11 +5924,19 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "GetTransportStateCommand",
           "type": "object"
         },
         "GetVoiceChunkCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "get_voice_chunk",
+              "type": "string"
+            },
             "direction": {
               "enum": [
                 "in",
@@ -5336,6 +5978,7 @@
             }
           },
           "required": [
+            "command_type",
             "target",
             "msg_id",
             "direction",
@@ -5346,6 +5989,7 @@
           "type": "object"
         },
         "GuiPreferencesEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -5357,7 +6001,12 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "gui_preferences",
+              "type": "string"
+            },
             "preferences": {
+              "additionalProperties": false,
               "properties": {
                 "accept_live_locked": {
                   "enum": [
@@ -5438,10 +6087,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "GuiPreferencesEvent",
           "type": "object"
         },
         "GuiPreferencesRejectedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -5452,6 +6105,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "gui_preferences_rejected",
+              "type": "string"
             },
             "reason": {
               "enum": [
@@ -5486,10 +6143,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "GuiPreferencesRejectedEvent",
           "type": "object"
         },
         "HistoryClearFailedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -5500,6 +6161,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "history_clear_failed",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -5522,10 +6187,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "HistoryClearFailedEvent",
           "type": "object"
         },
         "HistoryClearedAllEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -5536,6 +6205,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "history_cleared_all",
+              "type": "string"
             },
             "profile": {
               "type": "string"
@@ -5562,12 +6235,14 @@
             }
           },
           "required": [
+            "event_type",
             "profile"
           ],
           "title": "HistoryClearedAllEvent",
           "type": "object"
         },
         "HistoryClearedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -5581,6 +6256,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "history_cleared",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -5614,12 +6293,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "HistoryClearedEvent",
           "type": "object"
         },
         "HistoryDataEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "anyOf": [
@@ -5631,7 +6312,133 @@
                 }
               ]
             },
-            "entries": {},
+            "entries": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "actor": {
+                    "enum": [
+                      "local",
+                      "remote",
+                      "system"
+                    ],
+                    "type": "string"
+                  },
+                  "alias": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "detail_code": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "auto_fallback_to_drop",
+                          "manual_fallback_to_drop",
+                          "retry_exhausted",
+                          "max_connections_reached",
+                          "retunnel_pending_connection_missing",
+                          "late_acceptance_timeout",
+                          "outbound_attempt_rejected",
+                          "outbound_attempt_closed_before_acceptance",
+                          "pending_acceptance_expired",
+                          "mutual_tiebreaker_loser",
+                          "duplicate_incoming_connected",
+                          "duplicate_incoming_pending",
+                          "unacked_live_converted_to_drop"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "detail_text": {
+                    "type": "string"
+                  },
+                  "event_code": {
+                    "enum": [
+                      "connection_requested",
+                      "connected",
+                      "connection_rejected",
+                      "connection_failed",
+                      "connection_lost",
+                      "disconnected",
+                      "pending_expired",
+                      "retunnel_initiated",
+                      "retunnel_succeeded",
+                      "drop_queued",
+                      "drop_sent",
+                      "drop_received",
+                      "drop_failed"
+                    ],
+                    "type": "string"
+                  },
+                  "family": {
+                    "enum": [
+                      "live",
+                      "drop"
+                    ],
+                    "type": "string"
+                  },
+                  "flow_id": {
+                    "type": "string"
+                  },
+                  "peer_onion": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "timestamp": {
+                    "type": "string"
+                  },
+                  "trigger": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "auto_accept_contact",
+                          "auto_reconnect",
+                          "grace_reconnect",
+                          "incoming",
+                          "manual",
+                          "mutual_connect",
+                          "retunnel"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "timestamp",
+                  "family",
+                  "event_code",
+                  "peer_onion",
+                  "actor",
+                  "trigger",
+                  "detail_code",
+                  "detail_text",
+                  "flow_id"
+                ],
+                "title": "SummaryHistoryEntry",
+                "type": "object"
+              },
+              "type": "array"
+            },
             "epoch": {
               "anyOf": [
                 {
@@ -5641,6 +6448,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "history_data",
+              "type": "string"
             },
             "has_older": {
               "type": "boolean"
@@ -5716,6 +6527,7 @@
             }
           },
           "required": [
+            "event_type",
             "entries",
             "profile"
           ],
@@ -5723,6 +6535,7 @@
           "type": "object"
         },
         "HistoryRawDataEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "anyOf": [
@@ -5734,7 +6547,146 @@
                 }
               ]
             },
-            "entries": {},
+            "entries": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "actor": {
+                    "enum": [
+                      "local",
+                      "remote",
+                      "system"
+                    ],
+                    "type": "string"
+                  },
+                  "alias": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "detail_code": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "auto_fallback_to_drop",
+                          "manual_fallback_to_drop",
+                          "retry_exhausted",
+                          "max_connections_reached",
+                          "retunnel_pending_connection_missing",
+                          "late_acceptance_timeout",
+                          "outbound_attempt_rejected",
+                          "outbound_attempt_closed_before_acceptance",
+                          "pending_acceptance_expired",
+                          "mutual_tiebreaker_loser",
+                          "duplicate_incoming_connected",
+                          "duplicate_incoming_pending",
+                          "unacked_live_converted_to_drop"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "detail_text": {
+                    "type": "string"
+                  },
+                  "event_code": {
+                    "enum": [
+                      "queued",
+                      "sent",
+                      "received",
+                      "failed",
+                      "tunnel_connected",
+                      "tunnel_failed",
+                      "tunnel_closed",
+                      "requested",
+                      "connected",
+                      "rejected",
+                      "disconnected",
+                      "connection_lost",
+                      "auto_reconnect_scheduled",
+                      "retunnel_initiated",
+                      "retunnel_succeeded",
+                      "stream_corrupted"
+                    ],
+                    "type": "string"
+                  },
+                  "family": {
+                    "enum": [
+                      "live",
+                      "drop"
+                    ],
+                    "type": "string"
+                  },
+                  "flow_id": {
+                    "type": "string"
+                  },
+                  "peer_onion": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "timestamp": {
+                    "type": "string"
+                  },
+                  "transport": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "trigger": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "auto_accept_contact",
+                          "auto_reconnect",
+                          "grace_reconnect",
+                          "incoming",
+                          "manual",
+                          "mutual_connect",
+                          "retunnel"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "timestamp",
+                  "family",
+                  "event_code",
+                  "peer_onion",
+                  "actor",
+                  "trigger",
+                  "detail_code",
+                  "detail_text",
+                  "flow_id"
+                ],
+                "title": "RawHistoryEntry",
+                "type": "object"
+              },
+              "type": "array"
+            },
             "epoch": {
               "anyOf": [
                 {
@@ -5744,6 +6696,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "history_raw_data",
+              "type": "string"
             },
             "has_older": {
               "type": "boolean"
@@ -5819,6 +6775,7 @@
             }
           },
           "required": [
+            "event_type",
             "entries",
             "profile"
           ],
@@ -5826,6 +6783,7 @@
           "type": "object"
         },
         "InboxCountsEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -5837,7 +6795,14 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "inbox_counts",
+              "type": "string"
+            },
             "inbox": {
+              "additionalProperties": {
+                "type": "integer"
+              },
               "type": "object"
             },
             "request_id": {
@@ -5862,12 +6827,14 @@
             }
           },
           "required": [
+            "event_type",
             "inbox"
           ],
           "title": "InboxCountsEvent",
           "type": "object"
         },
         "InboxDataEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -5882,7 +6849,14 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "inbox_data",
+              "type": "string"
+            },
             "inbox_counts": {
+              "additionalProperties": {
+                "type": "integer"
+              },
               "type": "object"
             },
             "is_live_flush": {
@@ -5890,29 +6864,30 @@
             },
             "messages": {
               "items": {
+                "additionalProperties": false,
                 "properties": {
                   "content": {
                     "anyOf": [
                       {
+                        "additionalProperties": false,
                         "properties": {
                           "text": {
                             "type": "string"
                           },
                           "type": {
-                            "enum": [
-                              "text",
-                              "voice"
-                            ],
+                            "const": "text",
                             "type": "string"
                           }
                         },
                         "required": [
-                          "text"
+                          "text",
+                          "type"
                         ],
                         "title": "TextContent",
                         "type": "object"
                       },
                       {
+                        "additionalProperties": false,
                         "properties": {
                           "blob_id": {
                             "type": "string"
@@ -5934,17 +6909,15 @@
                             "type": "integer"
                           },
                           "type": {
-                            "enum": [
-                              "text",
-                              "voice"
-                            ],
+                            "const": "voice",
                             "type": "string"
                           }
                         },
                         "required": [
                           "blob_id",
                           "codec",
-                          "size_bytes"
+                          "size_bytes",
+                          "type"
                         ],
                         "title": "VoiceContent",
                         "type": "object"
@@ -6014,12 +6987,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "InboxDataEvent",
           "type": "object"
         },
         "InboxNotificationEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -6043,6 +7018,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "inbox_notification",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -6086,12 +7065,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "InboxNotificationEvent",
           "type": "object"
         },
         "IncomingConnectionEvent": {
+          "additionalProperties": false,
           "properties": {
             "action_handle": {
               "anyOf": [
@@ -6123,6 +7104,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "incoming_connection",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -6168,13 +7153,19 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "IncomingConnectionEvent",
           "type": "object"
         },
         "InitCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "init",
+              "type": "string"
+            },
             "current_version": {
               "type": "integer"
             },
@@ -6193,6 +7184,7 @@
             }
           },
           "required": [
+            "command_type",
             "current_version",
             "min_supported"
           ],
@@ -6200,6 +7192,7 @@
           "type": "object"
         },
         "InitEvent": {
+          "additionalProperties": false,
           "properties": {
             "capabilities": {
               "items": {
@@ -6222,6 +7215,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "init",
+              "type": "string"
             },
             "negotiated_version": {
               "type": "integer"
@@ -6268,6 +7265,7 @@
             }
           },
           "required": [
+            "event_type",
             "negotiated_version",
             "daemon_current_version",
             "daemon_min_supported"
@@ -6276,6 +7274,7 @@
           "type": "object"
         },
         "InternalErrorEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -6286,6 +7285,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "internal_error",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -6308,10 +7311,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "InternalErrorEvent",
           "type": "object"
         },
         "InvalidConfigKeyEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -6322,6 +7329,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "invalid_config_key",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -6344,10 +7355,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "InvalidConfigKeyEvent",
           "type": "object"
         },
         "InvalidNewPasswordEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -6358,6 +7373,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "invalid_new_password",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -6380,10 +7399,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "InvalidNewPasswordEvent",
           "type": "object"
         },
         "InvalidPasswordEvent": {
+          "additionalProperties": false,
           "properties": {
             "challenge": {
               "anyOf": [
@@ -6404,6 +7427,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "invalid_password",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -6436,10 +7463,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "InvalidPasswordEvent",
           "type": "object"
         },
         "InvalidSettingKeyEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -6450,6 +7481,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "invalid_setting_key",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -6472,10 +7507,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "InvalidSettingKeyEvent",
           "type": "object"
         },
         "InvalidTargetEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -6486,6 +7525,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "invalid_target",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -6512,12 +7555,14 @@
             }
           },
           "required": [
+            "event_type",
             "target"
           ],
           "title": "InvalidTargetEvent",
           "type": "object"
         },
         "IpcClientLimitReachedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -6528,6 +7573,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "ipc_client_limit_reached",
+              "type": "string"
             },
             "max_clients": {
               "type": "integer"
@@ -6554,13 +7603,50 @@
             }
           },
           "required": [
+            "event_type",
             "max_clients"
           ],
           "title": "IpcClientLimitReachedEvent",
           "type": "object"
         },
+        "JsonValue": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "additionalProperties": {
+                "$ref": "#/definitions/JsonValue"
+              },
+              "type": "object"
+            },
+            {
+              "items": {
+                "$ref": "#/definitions/JsonValue"
+              },
+              "type": "array"
+            }
+          ]
+        },
         "ListRetainedMessagesCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "list_retained_messages",
+              "type": "string"
+            },
             "cursor": {
               "anyOf": [
                 {
@@ -6643,10 +7729,14 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "ListRetainedMessagesCommand",
           "type": "object"
         },
         "LiveContextDismissRejectedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -6660,6 +7750,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "live_context_dismiss_rejected",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -6717,6 +7811,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "reason"
           ],
@@ -6724,6 +7819,7 @@
           "type": "object"
         },
         "LiveContextDismissedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -6737,6 +7833,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "live_context_dismissed",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -6773,12 +7873,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "LiveContextDismissedEvent",
           "type": "object"
         },
         "LiveControlCompletedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -6789,6 +7891,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "live_control_completed",
+              "type": "string"
             },
             "onion": {
               "type": "string"
@@ -6814,10 +7920,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "LiveControlCompletedEvent",
           "type": "object"
         },
         "LiveControlRejectedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -6828,6 +7938,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "live_control_rejected",
+              "type": "string"
             },
             "onion": {
               "type": "string"
@@ -6877,10 +7991,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "LiveControlRejectedEvent",
           "type": "object"
         },
         "LiveMessageResourcePressureEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -6894,6 +8012,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "live_message_resource_pressure",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -6960,6 +8082,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "msg_id",
             "reason"
@@ -6968,6 +8091,7 @@
           "type": "object"
         },
         "LiveMessageUnavailableEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -6981,6 +8105,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "live_message_unavailable",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -7041,6 +8169,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "msg_id"
           ],
@@ -7048,6 +8177,7 @@
           "type": "object"
         },
         "LocalAuthRateLimitedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -7058,6 +8188,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "local_auth_rate_limited",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -7084,13 +8218,19 @@
             }
           },
           "required": [
+            "event_type",
             "retry_after"
           ],
           "title": "LocalAuthRateLimitedEvent",
           "type": "object"
         },
         "LockCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "lock",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -7102,11 +8242,19 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "LockCommand",
           "type": "object"
         },
         "MarkReadCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "mark_read",
+              "type": "string"
+            },
             "delivery": {
               "anyOf": [
                 {
@@ -7156,12 +8304,14 @@
             }
           },
           "required": [
+            "command_type",
             "target"
           ],
           "title": "MarkReadCommand",
           "type": "object"
         },
         "MaxConnectionsReachedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -7172,6 +8322,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "max_connections_reached",
+              "type": "string"
             },
             "max_conn": {
               "type": "integer"
@@ -7201,6 +8355,7 @@
             }
           },
           "required": [
+            "event_type",
             "target",
             "max_conn"
           ],
@@ -7208,6 +8363,7 @@
           "type": "object"
         },
         "MessageDeleteRejectedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -7218,6 +8374,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "message_delete_rejected",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -7281,6 +8441,7 @@
             }
           },
           "required": [
+            "event_type",
             "target",
             "msg_id",
             "reason"
@@ -7289,6 +8450,7 @@
           "type": "object"
         },
         "MessageDeletedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -7302,6 +8464,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "message_deleted",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -7338,6 +8504,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "msg_id"
           ],
@@ -7345,6 +8512,7 @@
           "type": "object"
         },
         "MessageOutcomeEvent": {
+          "additionalProperties": false,
           "properties": {
             "archive_available": {
               "anyOf": [
@@ -7386,6 +8554,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "message_outcome",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -7431,10 +8603,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "MessageOutcomeEvent",
           "type": "object"
         },
         "MessageReceivedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -7442,25 +8618,25 @@
             "content": {
               "anyOf": [
                 {
+                  "additionalProperties": false,
                   "properties": {
                     "text": {
                       "type": "string"
                     },
                     "type": {
-                      "enum": [
-                        "text",
-                        "voice"
-                      ],
+                      "const": "text",
                       "type": "string"
                     }
                   },
                   "required": [
-                    "text"
+                    "text",
+                    "type"
                   ],
                   "title": "TextContent",
                   "type": "object"
                 },
                 {
+                  "additionalProperties": false,
                   "properties": {
                     "blob_id": {
                       "type": "string"
@@ -7482,17 +8658,15 @@
                       "type": "integer"
                     },
                     "type": {
-                      "enum": [
-                        "text",
-                        "voice"
-                      ],
+                      "const": "voice",
                       "type": "string"
                     }
                   },
                   "required": [
                     "blob_id",
                     "codec",
-                    "size_bytes"
+                    "size_bytes",
+                    "type"
                   ],
                   "title": "VoiceContent",
                   "type": "object"
@@ -7515,6 +8689,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "message_received",
+              "type": "string"
             },
             "msg_id": {
               "anyOf": [
@@ -7568,6 +8746,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "delivery",
             "content"
@@ -7576,6 +8755,7 @@
           "type": "object"
         },
         "MessagesClearFailedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -7586,6 +8766,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "messages_clear_failed",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -7608,10 +8792,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "MessagesClearFailedEvent",
           "type": "object"
         },
         "MessagesClearedAllEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -7622,6 +8810,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "messages_cleared_all",
+              "type": "string"
             },
             "profile": {
               "type": "string"
@@ -7648,12 +8840,14 @@
             }
           },
           "required": [
+            "event_type",
             "profile"
           ],
           "title": "MessagesClearedAllEvent",
           "type": "object"
         },
         "MessagesClearedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -7667,6 +8861,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "messages_cleared",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -7700,12 +8898,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "MessagesClearedEvent",
           "type": "object"
         },
         "MessagesClearedNonContactsAllEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -7716,6 +8916,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "messages_cleared_non_contacts_all",
+              "type": "string"
             },
             "profile": {
               "type": "string"
@@ -7742,12 +8946,14 @@
             }
           },
           "required": [
+            "event_type",
             "profile"
           ],
           "title": "MessagesClearedNonContactsAllEvent",
           "type": "object"
         },
         "MessagesClearedNonContactsEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -7761,6 +8967,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "messages_cleared_non_contacts",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -7794,12 +9004,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "MessagesClearedNonContactsEvent",
           "type": "object"
         },
         "MessagesDataEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -7814,34 +9026,39 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "messages_data",
+              "type": "string"
+            },
             "has_older": {
               "type": "boolean"
             },
             "messages": {
               "items": {
+                "additionalProperties": false,
                 "properties": {
                   "content": {
                     "anyOf": [
                       {
+                        "additionalProperties": false,
                         "properties": {
                           "text": {
                             "type": "string"
                           },
                           "type": {
-                            "enum": [
-                              "text",
-                              "voice"
-                            ],
+                            "const": "text",
                             "type": "string"
                           }
                         },
                         "required": [
-                          "text"
+                          "text",
+                          "type"
                         ],
                         "title": "TextContent",
                         "type": "object"
                       },
                       {
+                        "additionalProperties": false,
                         "properties": {
                           "blob_id": {
                             "type": "string"
@@ -7863,17 +9080,15 @@
                             "type": "integer"
                           },
                           "type": {
-                            "enum": [
-                              "text",
-                              "voice"
-                            ],
+                            "const": "voice",
                             "type": "string"
                           }
                         },
                         "required": [
                           "blob_id",
                           "codec",
-                          "size_bytes"
+                          "size_bytes",
+                          "type"
                         ],
                         "title": "VoiceContent",
                         "type": "object"
@@ -7965,6 +9180,7 @@
             }
           },
           "required": [
+            "event_type",
             "messages",
             "alias"
           ],
@@ -7972,7 +9188,12 @@
           "type": "object"
         },
         "MigrateProfileSecurityCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "migrate_profile_security",
+              "type": "string"
+            },
             "current_password": {
               "anyOf": [
                 {
@@ -8011,6 +9232,7 @@
             }
           },
           "required": [
+            "command_type",
             "name",
             "target_mode"
           ],
@@ -8018,6 +9240,7 @@
           "type": "object"
         },
         "NoConnectionToDisconnectEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -8031,6 +9254,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "no_connection_to_disconnect",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -8064,12 +9291,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "NoConnectionToDisconnectEvent",
           "type": "object"
         },
         "NoConnectionToRejectEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -8083,6 +9312,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "no_connection_to_reject",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -8116,12 +9349,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "NoConnectionToRejectEvent",
           "type": "object"
         },
         "NoPendingConnectionEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -8135,6 +9370,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "no_pending_connection",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -8168,12 +9407,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "NoPendingConnectionEvent",
           "type": "object"
         },
         "NoPendingLiveMessagesEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -8187,6 +9428,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "no_pending_live_msgs",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -8220,12 +9465,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "NoPendingLiveMessagesEvent",
           "type": "object"
         },
         "OnionInUseEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -8239,6 +9486,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "onion_in_use",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -8272,12 +9523,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "OnionInUseEvent",
           "type": "object"
         },
         "PasswordChangeFailedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -8288,6 +9541,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "password_change_failed",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -8310,10 +9567,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "PasswordChangeFailedEvent",
           "type": "object"
         },
         "PasswordChangeUnsupportedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -8324,6 +9585,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "password_change_unsupported",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -8346,10 +9611,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "PasswordChangeUnsupportedEvent",
           "type": "object"
         },
         "PasswordChangedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -8360,6 +9629,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "password_changed",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -8382,10 +9655,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "PasswordChangedEvent",
           "type": "object"
         },
         "PeerAnonymizedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -8399,6 +9676,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "peer_anonymized",
+              "type": "string"
             },
             "new_alias": {
               "type": "string"
@@ -8435,6 +9716,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "new_alias"
           ],
@@ -8442,6 +9724,7 @@
           "type": "object"
         },
         "PeerCantDeleteActiveEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -8455,6 +9738,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "peer_cant_delete_active",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -8488,12 +9775,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "PeerCantDeleteActiveEvent",
           "type": "object"
         },
         "PeerNotFoundEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -8504,6 +9793,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "peer_not_found",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -8530,12 +9823,14 @@
             }
           },
           "required": [
+            "event_type",
             "target"
           ],
           "title": "PeerNotFoundEvent",
           "type": "object"
         },
         "PeerPromotedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -8549,6 +9844,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "peer_promoted",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -8582,12 +9881,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "PeerPromotedEvent",
           "type": "object"
         },
         "PeerRemovedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -8601,6 +9902,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "peer_removed",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -8634,12 +9939,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "PeerRemovedEvent",
           "type": "object"
         },
         "PendingConnectionExpiredEvent": {
+          "additionalProperties": false,
           "properties": {
             "action_handle": {
               "anyOf": [
@@ -8671,6 +9978,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "pending_connection_expired",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -8736,13 +10047,19 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "PendingConnectionExpiredEvent",
           "type": "object"
         },
         "PrepareProfileExitCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "prepare_profile_exit",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -8754,10 +10071,14 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "PrepareProfileExitCommand",
           "type": "object"
         },
         "ProfileExitPreparedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -8768,6 +10089,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "profile_exit_prepared",
+              "type": "string"
             },
             "profile": {
               "type": "string"
@@ -8794,12 +10119,14 @@
             }
           },
           "required": [
+            "event_type",
             "profile"
           ],
           "title": "ProfileExitPreparedEvent",
           "type": "object"
         },
         "ProfileOperationResultEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -8810,6 +10137,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "profile_operation_result",
+              "type": "string"
             },
             "operation_type": {
               "enum": [
@@ -8841,6 +10172,93 @@
               "type": "string"
             },
             "params": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "additionalProperties": {
+                            "$ref": "#/definitions/JsonValue"
+                          },
+                          "type": "object"
+                        },
+                        {
+                          "items": {
+                            "$ref": "#/definitions/JsonValue"
+                          },
+                          "type": "array"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "additionalProperties": {
+                            "$ref": "#/definitions/JsonValue"
+                          },
+                          "type": "object"
+                        },
+                        {
+                          "items": {
+                            "$ref": "#/definitions/JsonValue"
+                          },
+                          "type": "array"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "type": "object"
             },
             "request_id": {
@@ -8868,6 +10286,7 @@
             }
           },
           "required": [
+            "event_type",
             "success",
             "operation_type",
             "params"
@@ -8876,6 +10295,7 @@
           "type": "object"
         },
         "ProfilesDataEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -8887,8 +10307,13 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "profiles_data",
+              "type": "string"
+            },
             "profiles": {
               "items": {
+                "additionalProperties": false,
                 "properties": {
                   "is_active": {
                     "type": "boolean"
@@ -8943,12 +10368,14 @@
             }
           },
           "required": [
+            "event_type",
             "profiles"
           ],
           "title": "ProfilesDataEvent",
           "type": "object"
         },
         "ProtocolMismatchEvent": {
+          "additionalProperties": false,
           "properties": {
             "client_current_version": {
               "type": "integer"
@@ -8972,6 +10399,10 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "protocol_mismatch",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -8994,6 +10425,7 @@
             }
           },
           "required": [
+            "event_type",
             "daemon_current_version",
             "daemon_min_supported",
             "client_current_version",
@@ -9003,6 +10435,7 @@
           "type": "object"
         },
         "QuickUnlockConfiguredEvent": {
+          "additionalProperties": false,
           "properties": {
             "enabled": {
               "type": "boolean"
@@ -9017,6 +10450,10 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "quick_unlock_configured",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -9039,12 +10476,14 @@
             }
           },
           "required": [
+            "event_type",
             "enabled"
           ],
           "title": "QuickUnlockConfiguredEvent",
           "type": "object"
         },
         "QuickUnlockFailedEvent": {
+          "additionalProperties": false,
           "properties": {
             "challenge": {
               "anyOf": [
@@ -9065,6 +10504,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "quick_unlock_failed",
+              "type": "string"
             },
             "password_required": {
               "type": "boolean"
@@ -9100,10 +10543,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "QuickUnlockFailedEvent",
           "type": "object"
         },
         "ReadReceiptEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -9117,6 +10564,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "read_receipt",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -9153,6 +10604,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "msg_id"
           ],
@@ -9160,7 +10612,12 @@
           "type": "object"
         },
         "ReauthorizeClientCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "reauthorize_client",
+              "type": "string"
+            },
             "method": {
               "enum": [
                 "pin",
@@ -9191,13 +10648,19 @@
             }
           },
           "required": [
+            "command_type",
             "method"
           ],
           "title": "ReauthorizeClientCommand",
           "type": "object"
         },
         "RegisterLiveConsumerCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "register_live_consumer",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -9209,11 +10672,19 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "RegisterLiveConsumerCommand",
           "type": "object"
         },
         "RegisterVoiceOwnerCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "register_voice_owner",
+              "type": "string"
+            },
             "disposable_drop": {
               "type": "boolean"
             },
@@ -9228,10 +10699,14 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "RegisterVoiceOwnerCommand",
           "type": "object"
         },
         "RejectCommand": {
+          "additionalProperties": false,
           "properties": {
             "action_handle": {
               "anyOf": [
@@ -9242,6 +10717,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "command_type": {
+              "const": "reject",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -9258,13 +10737,19 @@
             }
           },
           "required": [
+            "command_type",
             "target"
           ],
           "title": "RejectCommand",
           "type": "object"
         },
         "ReleaseVoiceCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "release_voice",
+              "type": "string"
+            },
             "msg_id": {
               "type": "string"
             },
@@ -9283,6 +10768,7 @@
             }
           },
           "required": [
+            "command_type",
             "target",
             "msg_id"
           ],
@@ -9290,7 +10776,12 @@
           "type": "object"
         },
         "ReleaseVoiceOwnerCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "release_voice_owner",
+              "type": "string"
+            },
             "owner_token": {
               "type": "string"
             },
@@ -9305,12 +10796,20 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "ReleaseVoiceOwnerCommand",
           "type": "object"
         },
         "RemoveContactCommand": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
+              "type": "string"
+            },
+            "command_type": {
+              "const": "remove_contact",
               "type": "string"
             },
             "onion": {
@@ -9335,12 +10834,14 @@
             }
           },
           "required": [
+            "command_type",
             "alias"
           ],
           "title": "RemoveContactCommand",
           "type": "object"
         },
         "RemoveProfileCommand": {
+          "additionalProperties": false,
           "properties": {
             "active_profile": {
               "anyOf": [
@@ -9351,6 +10852,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "command_type": {
+              "const": "remove_profile",
+              "type": "string"
             },
             "name": {
               "type": "string"
@@ -9367,13 +10872,19 @@
             }
           },
           "required": [
+            "command_type",
             "name"
           ],
           "title": "RemoveProfileCommand",
           "type": "object"
         },
         "RenameContactCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "rename_contact",
+              "type": "string"
+            },
             "new_alias": {
               "type": "string"
             },
@@ -9402,6 +10913,7 @@
             }
           },
           "required": [
+            "command_type",
             "old_alias",
             "new_alias"
           ],
@@ -9409,7 +10921,12 @@
           "type": "object"
         },
         "RenameProfileCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "rename_profile",
+              "type": "string"
+            },
             "new_name": {
               "type": "string"
             },
@@ -9428,6 +10945,7 @@
             }
           },
           "required": [
+            "command_type",
             "old_name",
             "new_name"
           ],
@@ -9435,6 +10953,7 @@
           "type": "object"
         },
         "RenameSuccessEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -9445,6 +10964,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "rename_success",
+              "type": "string"
             },
             "is_demotion": {
               "type": "boolean"
@@ -9490,6 +11013,7 @@
             }
           },
           "required": [
+            "event_type",
             "old_alias",
             "new_alias"
           ],
@@ -9497,6 +11021,7 @@
           "type": "object"
         },
         "RestrictClientCommand": {
+          "additionalProperties": false,
           "properties": {
             "accept_while_locked": {
               "enum": [
@@ -9504,6 +11029,10 @@
                 "saved_contacts",
                 "none"
               ],
+              "type": "string"
+            },
+            "command_type": {
+              "const": "restrict_client",
               "type": "string"
             },
             "continued_live_context_generation": {
@@ -9559,10 +11088,14 @@
               "type": "string"
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "RestrictClientCommand",
           "type": "object"
         },
         "RestrictedClientStateEvent": {
+          "additionalProperties": false,
           "properties": {
             "accept_while_locked": {
               "enum": [
@@ -9608,6 +11141,10 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "restricted_client_state",
+              "type": "string"
+            },
             "notification_privacy": {
               "enum": [
                 "show_all",
@@ -9618,6 +11155,7 @@
             },
             "pending": {
               "items": {
+                "additionalProperties": false,
                 "properties": {
                   "action_handle": {
                     "anyOf": [
@@ -9710,10 +11248,14 @@
               "type": "string"
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "RestrictedClientStateEvent",
           "type": "object"
         },
         "RetainedMessagesEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -9725,11 +11267,16 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "retained_messages",
+              "type": "string"
+            },
             "inventory_version": {
               "type": "string"
             },
             "messages": {
               "items": {
+                "additionalProperties": false,
                 "properties": {
                   "alias": {
                     "type": "string"
@@ -9850,10 +11397,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "RetainedMessagesEvent",
           "type": "object"
         },
         "RetainedMessagesUnavailableEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -9864,6 +11415,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "retained_messages_unavailable",
+              "type": "string"
             },
             "reason": {
               "type": "string"
@@ -9893,13 +11448,19 @@
             }
           },
           "required": [
+            "event_type",
             "reason"
           ],
           "title": "RetainedMessagesUnavailableEvent",
           "type": "object"
         },
         "RetunnelCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "retunnel",
+              "type": "string"
+            },
             "context_generation": {
               "anyOf": [
                 {
@@ -9925,12 +11486,14 @@
             }
           },
           "required": [
+            "command_type",
             "target"
           ],
           "title": "RetunnelCommand",
           "type": "object"
         },
         "RetunnelFailedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -9986,6 +11549,10 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "retunnel_failed",
+              "type": "string"
+            },
             "onion": {
               "anyOf": [
                 {
@@ -10018,12 +11585,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "RetunnelFailedEvent",
           "type": "object"
         },
         "RetunnelInitiatedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -10037,6 +11606,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "retunnel_initiated",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -10070,12 +11643,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "RetunnelInitiatedEvent",
           "type": "object"
         },
         "RetunnelSuccessEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -10089,6 +11664,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "retunnel_success",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -10122,12 +11701,14 @@
             }
           },
           "required": [
+            "event_type",
             "alias"
           ],
           "title": "RetunnelSuccessEvent",
           "type": "object"
         },
         "RuntimeSnapshotEvent": {
+          "additionalProperties": false,
           "properties": {
             "authenticated_client_count": {
               "anyOf": [
@@ -10141,6 +11722,7 @@
             },
             "contacts": {
               "items": {
+                "additionalProperties": false,
                 "properties": {
                   "alias": {
                     "type": "string"
@@ -10163,6 +11745,7 @@
             },
             "conversations": {
               "items": {
+                "additionalProperties": false,
                 "properties": {
                   "alias": {
                     "type": "string"
@@ -10196,8 +11779,13 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "runtime_snapshot",
+              "type": "string"
+            },
             "live_contexts": {
               "items": {
+                "additionalProperties": false,
                 "properties": {
                   "alias": {
                     "type": "string"
@@ -10312,6 +11900,7 @@
             },
             "pending": {
               "items": {
+                "additionalProperties": false,
                 "properties": {
                   "action_handle": {
                     "anyOf": [
@@ -10415,6 +12004,7 @@
             }
           },
           "required": [
+            "event_type",
             "profile",
             "onion"
           ],
@@ -10422,6 +12012,7 @@
           "type": "object"
         },
         "RuntimeSnapshotUnavailableEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -10432,6 +12023,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "runtime_snapshot_unavailable",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -10457,10 +12052,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "RuntimeSnapshotUnavailableEvent",
           "type": "object"
         },
         "RuntimeStateChangedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -10471,6 +12070,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "runtime_state_changed",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -10507,12 +12110,14 @@
             }
           },
           "required": [
+            "event_type",
             "scope"
           ],
           "title": "RuntimeStateChangedEvent",
           "type": "object"
         },
         "SelfDestructCleanupFailedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -10523,6 +12128,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "self_destruct_cleanup_failed",
+              "type": "string"
             },
             "key_destroyed": {
               "type": "boolean"
@@ -10565,13 +12174,19 @@
             }
           },
           "required": [
+            "event_type",
             "profile"
           ],
           "title": "SelfDestructCleanupFailedEvent",
           "type": "object"
         },
         "SelfDestructCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "self_destruct",
+              "type": "string"
+            },
             "operation_id": {
               "anyOf": [
                 {
@@ -10593,10 +12208,14 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "SelfDestructCommand",
           "type": "object"
         },
         "SelfDestructCompletedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -10607,6 +12226,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "self_destruct_completed",
+              "type": "string"
             },
             "operation_id": {
               "anyOf": [
@@ -10649,10 +12272,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "SelfDestructCompletedEvent",
           "type": "object"
         },
         "SelfDestructInitiatedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -10663,6 +12290,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "self_destruct_initiated",
+              "type": "string"
             },
             "operation_id": {
               "anyOf": [
@@ -10705,10 +12336,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "SelfDestructInitiatedEvent",
           "type": "object"
         },
         "SelfDestructKeyDestroyedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -10719,6 +12354,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "self_destruct_key_destroyed",
+              "type": "string"
             },
             "operation_id": {
               "anyOf": [
@@ -10755,12 +12394,14 @@
             }
           },
           "required": [
+            "event_type",
             "profile"
           ],
           "title": "SelfDestructKeyDestroyedEvent",
           "type": "object"
         },
         "SelfDestructRuntimeReleasedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -10771,6 +12412,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "self_destruct_runtime_released",
+              "type": "string"
             },
             "operation_id": {
               "type": "string"
@@ -10799,10 +12444,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "SelfDestructRuntimeReleasedEvent",
           "type": "object"
         },
         "SelfDestructSafeEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -10813,6 +12462,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "self_destruct_safe",
+              "type": "string"
             },
             "operation_id": {
               "type": "string"
@@ -10841,33 +12494,41 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "SelfDestructSafeEvent",
           "type": "object"
         },
         "SendMessageCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "send_message",
+              "type": "string"
+            },
             "content": {
               "anyOf": [
                 {
+                  "additionalProperties": false,
                   "properties": {
                     "text": {
                       "type": "string"
                     },
                     "type": {
-                      "enum": [
-                        "text",
-                        "voice"
-                      ],
+                      "const": "text",
                       "type": "string"
                     }
                   },
                   "required": [
-                    "text"
+                    "text",
+                    "type"
                   ],
                   "title": "TextContent",
                   "type": "object"
                 },
                 {
+                  "additionalProperties": false,
                   "properties": {
                     "blob_id": {
                       "type": "string"
@@ -10889,17 +12550,15 @@
                       "type": "integer"
                     },
                     "type": {
-                      "enum": [
-                        "text",
-                        "voice"
-                      ],
+                      "const": "voice",
                       "type": "string"
                     }
                   },
                   "required": [
                     "blob_id",
                     "codec",
-                    "size_bytes"
+                    "size_bytes",
+                    "type"
                   ],
                   "title": "VoiceContent",
                   "type": "object"
@@ -10934,6 +12593,7 @@
             }
           },
           "required": [
+            "command_type",
             "target",
             "delivery",
             "content",
@@ -10943,6 +12603,7 @@
           "type": "object"
         },
         "SessionAuthenticatedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -10953,6 +12614,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "session_authenticated",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -10975,11 +12640,19 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "SessionAuthenticatedEvent",
           "type": "object"
         },
         "SetConfigCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "set_config",
+              "type": "string"
+            },
             "expected_value": {
               "anyOf": [
                 {
@@ -11024,6 +12697,7 @@
             }
           },
           "required": [
+            "command_type",
             "setting_key",
             "setting_value"
           ],
@@ -11031,7 +12705,12 @@
           "type": "object"
         },
         "SetDefaultProfileCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "set_default_profile",
+              "type": "string"
+            },
             "profile_name": {
               "type": "string"
             },
@@ -11047,17 +12726,24 @@
             }
           },
           "required": [
+            "command_type",
             "profile_name"
           ],
           "title": "SetDefaultProfileCommand",
           "type": "object"
         },
         "SetGuiPreferencesCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "set_gui_preferences",
+              "type": "string"
+            },
             "expected_revision": {
               "type": "integer"
             },
             "preferences": {
+              "additionalProperties": false,
               "properties": {
                 "accept_live_locked": {
                   "enum": [
@@ -11122,11 +12808,19 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "SetGuiPreferencesCommand",
           "type": "object"
         },
         "SetSettingCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "set_setting",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -11158,6 +12852,7 @@
             }
           },
           "required": [
+            "command_type",
             "setting_key",
             "setting_value"
           ],
@@ -11165,6 +12860,7 @@
           "type": "object"
         },
         "SettingDataEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -11175,6 +12871,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "setting_data",
+              "type": "string"
             },
             "key": {
               "type": "string"
@@ -11204,6 +12904,7 @@
             }
           },
           "required": [
+            "event_type",
             "key",
             "value"
           ],
@@ -11211,6 +12912,7 @@
           "type": "object"
         },
         "SettingTypeErrorEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -11221,6 +12923,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "setting_type_error",
+              "type": "string"
             },
             "key": {
               "anyOf": [
@@ -11263,10 +12969,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "SettingTypeErrorEvent",
           "type": "object"
         },
         "SettingUpdateFailedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -11277,6 +12987,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "setting_update_failed",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -11299,10 +13013,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "SettingUpdateFailedEvent",
           "type": "object"
         },
         "SettingUpdatedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -11313,6 +13031,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "setting_updated",
+              "type": "string"
             },
             "key": {
               "type": "string"
@@ -11339,15 +13061,18 @@
             }
           },
           "required": [
+            "event_type",
             "key"
           ],
           "title": "SettingUpdatedEvent",
           "type": "object"
         },
         "SettingsListDataEvent": {
+          "additionalProperties": false,
           "properties": {
             "entries": {
               "items": {
+                "additionalProperties": false,
                 "properties": {
                   "category": {
                     "type": "string"
@@ -11427,6 +13152,10 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "settings_list_data",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -11452,13 +13181,19 @@
             }
           },
           "required": [
+            "event_type",
             "scope"
           ],
           "title": "SettingsListDataEvent",
           "type": "object"
         },
         "SwitchCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "switch",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -11480,10 +13215,14 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "SwitchCommand",
           "type": "object"
         },
         "SwitchSuccessEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "anyOf": [
@@ -11504,6 +13243,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "switch_success",
+              "type": "string"
             },
             "onion": {
               "anyOf": [
@@ -11536,11 +13279,19 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "SwitchSuccessEvent",
           "type": "object"
         },
         "SyncConfigCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "sync_config",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -11552,10 +13303,14 @@
               ]
             }
           },
+          "required": [
+            "command_type"
+          ],
           "title": "SyncConfigCommand",
           "type": "object"
         },
         "TextAcceptedEvent": {
+          "additionalProperties": false,
           "properties": {
             "delivery": {
               "enum": [
@@ -11573,6 +13328,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "text_accepted",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -11601,10 +13360,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "TextAcceptedEvent",
           "type": "object"
         },
         "TextRejectedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -11615,6 +13378,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "text_rejected",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -11667,10 +13434,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "TextRejectedEvent",
           "type": "object"
         },
         "TorKeyDecryptFailedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -11681,6 +13452,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "tor_key_decrypt_failed",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -11703,10 +13478,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "TorKeyDecryptFailedEvent",
           "type": "object"
         },
         "TorKeyWriteFailedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -11717,6 +13496,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "tor_key_write_failed",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -11739,10 +13522,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "TorKeyWriteFailedEvent",
           "type": "object"
         },
         "TorProcessTerminatedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -11795,6 +13582,10 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "tor_process_terminated",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -11816,10 +13607,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "TorProcessTerminatedEvent",
           "type": "object"
         },
         "TorStartFailedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -11872,6 +13667,10 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "tor_start_failed",
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -11893,10 +13692,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "TorStartFailedEvent",
           "type": "object"
         },
         "TransportStateEvent": {
+          "additionalProperties": false,
           "properties": {
             "auto_accept": {
               "type": "boolean"
@@ -11904,6 +13707,93 @@
             "drop_tunnel": {
               "anyOf": [
                 {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "additionalProperties": {
+                                "$ref": "#/definitions/JsonValue"
+                              },
+                              "type": "object"
+                            },
+                            {
+                              "items": {
+                                "$ref": "#/definitions/JsonValue"
+                              },
+                              "type": "array"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "type": "object"
+                      },
+                      {
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "additionalProperties": {
+                                "$ref": "#/definitions/JsonValue"
+                              },
+                              "type": "object"
+                            },
+                            {
+                              "items": {
+                                "$ref": "#/definitions/JsonValue"
+                              },
+                              "type": "array"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "type": "object"
                 },
                 {
@@ -11920,6 +13810,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "transport_state",
+              "type": "string"
             },
             "focus_count": {
               "type": "integer"
@@ -11965,6 +13859,7 @@
             }
           },
           "required": [
+            "event_type",
             "peer",
             "session_state"
           ],
@@ -11972,6 +13867,7 @@
           "type": "object"
         },
         "UnknownCommandEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -11982,6 +13878,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "unknown_command",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -12004,11 +13904,19 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "UnknownCommandEvent",
           "type": "object"
         },
         "UnlockCommand": {
+          "additionalProperties": false,
           "properties": {
+            "command_type": {
+              "const": "unlock",
+              "type": "string"
+            },
             "password": {
               "type": "string"
             },
@@ -12024,12 +13932,14 @@
             }
           },
           "required": [
+            "command_type",
             "password"
           ],
           "title": "UnlockCommand",
           "type": "object"
         },
         "UnreadMessagesEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -12044,31 +13954,36 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "unread_messages",
+              "type": "string"
+            },
             "messages": {
               "items": {
+                "additionalProperties": false,
                 "properties": {
                   "content": {
                     "anyOf": [
                       {
+                        "additionalProperties": false,
                         "properties": {
                           "text": {
                             "type": "string"
                           },
                           "type": {
-                            "enum": [
-                              "text",
-                              "voice"
-                            ],
+                            "const": "text",
                             "type": "string"
                           }
                         },
                         "required": [
-                          "text"
+                          "text",
+                          "type"
                         ],
                         "title": "TextContent",
                         "type": "object"
                       },
                       {
+                        "additionalProperties": false,
                         "properties": {
                           "blob_id": {
                             "type": "string"
@@ -12090,17 +14005,15 @@
                             "type": "integer"
                           },
                           "type": {
-                            "enum": [
-                              "text",
-                              "voice"
-                            ],
+                            "const": "voice",
                             "type": "string"
                           }
                         },
                         "required": [
                           "blob_id",
                           "codec",
-                          "size_bytes"
+                          "size_bytes",
+                          "type"
                         ],
                         "title": "VoiceContent",
                         "type": "object"
@@ -12170,6 +14083,7 @@
             }
           },
           "required": [
+            "event_type",
             "messages",
             "alias"
           ],
@@ -12177,6 +14091,7 @@
           "type": "object"
         },
         "VoiceCancelledEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -12190,6 +14105,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "voice_cancelled",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -12226,6 +14145,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "msg_id"
           ],
@@ -12233,6 +14153,7 @@
           "type": "object"
         },
         "VoiceChunkAcceptedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -12243,6 +14164,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "voice_chunk_accepted",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -12272,6 +14197,7 @@
             }
           },
           "required": [
+            "event_type",
             "msg_id",
             "next_offset"
           ],
@@ -12279,6 +14205,7 @@
           "type": "object"
         },
         "VoiceChunkReceivedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -12312,6 +14239,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "voice_chunk_received",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -12351,6 +14282,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "msg_id",
             "offset",
@@ -12360,6 +14292,7 @@
           "type": "object"
         },
         "VoiceCommittedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -12373,6 +14306,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "voice_committed",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -12409,6 +14346,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "msg_id"
           ],
@@ -12416,6 +14354,7 @@
           "type": "object"
         },
         "VoiceDataEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -12463,6 +14402,10 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "voice_data",
+              "type": "string"
+            },
             "msg_id": {
               "type": "string"
             },
@@ -12507,6 +14450,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "msg_id",
             "direction",
@@ -12522,6 +14466,7 @@
           "type": "object"
         },
         "VoiceFinalizedEvent": {
+          "additionalProperties": false,
           "properties": {
             "delivery": {
               "anyOf": [
@@ -12571,6 +14516,10 @@
                 }
               ]
             },
+            "event_type": {
+              "const": "voice_finalized",
+              "type": "string"
+            },
             "msg_id": {
               "type": "string"
             },
@@ -12609,6 +14558,7 @@
             }
           },
           "required": [
+            "event_type",
             "msg_id",
             "size_bytes"
           ],
@@ -12616,6 +14566,7 @@
           "type": "object"
         },
         "VoiceIncomingStartedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -12639,6 +14590,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "voice_incoming_started",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -12678,6 +14633,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "msg_id",
             "delivery",
@@ -12688,6 +14644,7 @@
           "type": "object"
         },
         "VoiceOperationRejectedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -12698,6 +14655,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "voice_operation_rejected",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -12758,6 +14719,7 @@
             }
           },
           "required": [
+            "event_type",
             "msg_id",
             "reason"
           ],
@@ -12765,6 +14727,7 @@
           "type": "object"
         },
         "VoiceOwnerRegisteredEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -12775,6 +14738,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "voice_owner_registered",
+              "type": "string"
             },
             "owner_token": {
               "type": "string"
@@ -12800,10 +14767,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "VoiceOwnerRegisteredEvent",
           "type": "object"
         },
         "VoiceOwnerRejectedEvent": {
+          "additionalProperties": false,
           "properties": {
             "epoch": {
               "anyOf": [
@@ -12814,6 +14785,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "voice_owner_rejected",
+              "type": "string"
             },
             "reason": {
               "enum": [
@@ -12860,10 +14835,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "VoiceOwnerRejectedEvent",
           "type": "object"
         },
         "VoiceOwnerReleasedEvent": {
+          "additionalProperties": false,
           "properties": {
             "cleanup_pending": {
               "type": "boolean"
@@ -12877,6 +14856,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "voice_owner_released",
+              "type": "string"
             },
             "request_id": {
               "anyOf": [
@@ -12899,10 +14882,14 @@
               ]
             }
           },
+          "required": [
+            "event_type"
+          ],
           "title": "VoiceOwnerReleasedEvent",
           "type": "object"
         },
         "VoiceReleasedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -12916,6 +14903,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "voice_released",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -12952,6 +14943,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "msg_id"
           ],
@@ -12959,6 +14951,7 @@
           "type": "object"
         },
         "VoiceResourceLimitEvent": {
+          "additionalProperties": false,
           "properties": {
             "delivery": {
               "anyOf": [
@@ -12983,6 +14976,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "voice_resource_limit",
+              "type": "string"
             },
             "limit_bytes": {
               "type": "integer"
@@ -13063,6 +15060,7 @@
             }
           },
           "required": [
+            "event_type",
             "used_bytes",
             "limit_bytes"
           ],
@@ -13070,6 +15068,7 @@
           "type": "object"
         },
         "VoiceResourcePressureEvent": {
+          "additionalProperties": false,
           "properties": {
             "delivery": {
               "anyOf": [
@@ -13094,6 +15093,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "voice_resource_pressure",
+              "type": "string"
             },
             "limit_bytes": {
               "type": "integer"
@@ -13143,6 +15146,7 @@
             }
           },
           "required": [
+            "event_type",
             "used_bytes",
             "limit_bytes"
           ],
@@ -13150,6 +15154,7 @@
           "type": "object"
         },
         "VoiceStartedEvent": {
+          "additionalProperties": false,
           "properties": {
             "alias": {
               "type": "string"
@@ -13170,6 +15175,10 @@
                   "type": "null"
                 }
               ]
+            },
+            "event_type": {
+              "const": "voice_started",
+              "type": "string"
             },
             "msg_id": {
               "type": "string"
@@ -13206,6 +15215,7 @@
             }
           },
           "required": [
+            "event_type",
             "alias",
             "msg_id",
             "delivery"
@@ -13214,6 +15224,7 @@
           "type": "object"
         }
       },
+      "description": "Route and DTO definition catalog for the Metor IPC contract. Select the matching commands or events reference to validate a complete message; this catalog root is not itself a validator.",
       "events": {
         "ack": {
           "$ref": "#/definitions/AckEvent"

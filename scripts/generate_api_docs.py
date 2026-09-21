@@ -12,12 +12,14 @@ import sys
 import json
 import inspect
 import dataclasses
+from collections.abc import Sequence as SequenceABC
 from enum import Enum
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
     Dict,
+    ForwardRef,
     List,
     Type,
     Union,
@@ -127,7 +129,7 @@ class ApiDocGenerator:
         origin: Any = get_origin(field_type)
         args: tuple[Any, ...] = get_args(field_type)
 
-        if origin is list and args:
+        if origin in (list, SequenceABC) and args:
             return [self._sample_value(args[0])]
         if origin is dict and len(args) == 2:
             return {'key': self._sample_value(args[1])}
@@ -136,6 +138,19 @@ class ApiDocGenerator:
         if origin is not None and args:
             non_none_args: List[Any] = [arg for arg in args if arg is not type(None)]
             return self._sample_value(non_none_args[0]) if non_none_args else None
+        if isinstance(field_type, type) and dataclasses.is_dataclass(field_type):
+            hints: Dict[str, object] = get_type_hints(field_type)
+            payload: Dict[str, Any] = {}
+            for field in dataclasses.fields(field_type):
+                if not field.init and isinstance(field.default, Enum):
+                    payload[field.name] = field.default.value
+                elif (
+                    field.init
+                    and field.default is dataclasses.MISSING
+                    and field.default_factory is dataclasses.MISSING
+                ):
+                    payload[field.name] = self._sample_value(hints[field.name])
+            return payload
         if isinstance(field_type, type) and issubclass(field_type, Enum):
             return next(iter(field_type)).value
         if field_type is str:
@@ -148,7 +163,7 @@ class ApiDocGenerator:
             return False
         if field_type is type(None):
             return None
-        return 'value'
+        raise TypeError(f'Unsupported IPC example annotation: {field_type!r}')
 
     def _build_example_payload(
         self,
@@ -168,6 +183,7 @@ class ApiDocGenerator:
             str: A formatted JSON example string.
         """
         payload: Dict[str, Any] = {route_key: route_value}
+        hints: Dict[str, object] = get_type_hints(cls)
 
         for field in dataclasses.fields(cls):
             if field.name in ('command_type', 'event_type'):
@@ -177,7 +193,7 @@ class ApiDocGenerator:
                 field.default is dataclasses.MISSING
                 and field.default_factory is dataclasses.MISSING
             ):
-                payload[field.name] = self._sample_value(field.type)
+                payload[field.name] = self._sample_value(hints[field.name])
 
         return json.dumps(payload, indent=2)
 
@@ -256,6 +272,7 @@ class ApiDocGenerator:
             '- Events sent from the daemon to the UI must include a top-level `event_type` field.',
             '- Every payload is a single JSON object followed by a newline (`\\n`).',
             '- The daemon emits structured data only. Human-readable text is resolved in the UI from `event_type`.',
+            '- `api.schema.json` is a route/definition catalog, not a root message validator; select the route reference under `commands` or `events` to validate one complete message.',
             '',
             '## Canonical Client Session Sequence',
             '',
@@ -347,8 +364,8 @@ class ApiSchemaGenerator:
         """
         Maps one dataclass field annotation to a JSON Schema fragment.
 
-        Unknown or unresolvable type information degrades to an empty schema
-        fragment so a single exotic annotation can never crash the generator.
+        Unknown or unresolvable type information fails generation so published
+        schemas cannot silently become more permissive than the decoder.
 
         Args:
             field_type (object): The type annotation from the dataclass field.
@@ -359,6 +376,11 @@ class ApiSchemaGenerator:
         origin: Any = get_origin(field_type)
         args: tuple[Any, ...] = get_args(field_type)
 
+        if isinstance(field_type, ForwardRef):
+            if field_type.__forward_arg__ == 'JsonValue':
+                return {'$ref': '#/definitions/JsonValue'}
+            raise TypeError(f'Unsupported IPC schema forward reference: {field_type!r}')
+
         if origin is Union or origin is UnionType:
             member_schemas: List[Dict[str, Any]] = [
                 self._field_schema(arg) for arg in args if arg is not type(None)
@@ -366,13 +388,22 @@ class ApiSchemaGenerator:
             if type(None) in args:
                 member_schemas.append({'type': 'null'})
             if not member_schemas:
-                return {}
+                raise TypeError(f'Empty IPC union annotation: {field_type!r}')
             return {'anyOf': member_schemas}
-        if origin in (list, List):
-            items: Dict[str, Any] = self._field_schema(args[0]) if args else {}
+        if origin in (list, List, SequenceABC):
+            if len(args) != 1:
+                raise TypeError(f'Untyped IPC sequence annotation: {field_type!r}')
+            items: Dict[str, Any] = self._field_schema(args[0])
             return {'type': 'array', 'items': items}
         if origin in (dict, Dict):
-            return {'type': 'object'}
+            if len(args) != 2 or self._field_schema(args[0]) != {'type': 'string'}:
+                raise TypeError(
+                    f'Unsupported IPC mapping key annotation: {field_type!r}'
+                )
+            return {
+                'type': 'object',
+                'additionalProperties': self._field_schema(args[1]),
+            }
         if isinstance(field_type, type) and issubclass(field_type, Enum):
             enum_values: List[Any] = [member.value for member in field_type]
             schema: Dict[str, Any] = {'enum': enum_values}
@@ -387,17 +418,19 @@ class ApiSchemaGenerator:
             return {'type': 'number'}
         if field_type is bool:
             return {'type': 'boolean'}
+        if field_type is type(None):
+            return {'type': 'null'}
         if isinstance(field_type, type) and dataclasses.is_dataclass(field_type):
             return self._dto_schema(field_type)
-        return {}
+        raise TypeError(f'Unsupported IPC schema annotation: {field_type!r}')
 
     def _dto_schema(self, cls: type[Any]) -> Dict[str, Any]:
         """
         Builds one JSON Schema object schema for a command or event DTO.
 
-        Routing constants (`command_type` / `event_type`) are excluded from the
-        payload schema because they are envelope-level values. Fields without a
-        default are listed as required.
+        Routing constants (`command_type` / `event_type`) are represented as
+        required constants so one selected route definition validates a complete
+        wire message. Fields without a default are listed as required.
 
         Args:
             cls: The registered DTO or nested public dataclass to introspect.
@@ -405,19 +438,21 @@ class ApiSchemaGenerator:
         Returns:
             Dict[str, Any]: The JSON Schema object schema for the DTO.
         """
-        try:
-            hints: Dict[str, object] = get_type_hints(cls)
-        except Exception:
-            hints = {}
+        hints: Dict[str, object] = get_type_hints(cls)
 
         properties: Dict[str, Any] = {}
         required: List[str] = []
 
         for f in dataclasses.fields(cls):
-            if f.name in ('command_type', 'event_type'):
-                continue
-            properties[f.name] = self._field_schema(hints.get(f.name, f.type))
-            if (
+            if not f.init and isinstance(f.default, Enum):
+                properties[f.name] = {
+                    'type': 'string',
+                    'const': f.default.value,
+                }
+                required.append(f.name)
+            else:
+                properties[f.name] = self._field_schema(hints[f.name])
+            if f.init and (
                 f.default is dataclasses.MISSING
                 and f.default_factory is dataclasses.MISSING
             ):
@@ -427,6 +462,7 @@ class ApiSchemaGenerator:
             'title': cls.__name__,
             'type': 'object',
             'properties': properties,
+            'additionalProperties': False,
         }
         if required:
             schema['required'] = required
@@ -446,7 +482,25 @@ class ApiSchemaGenerator:
         sorted_commands = sorted(CMD_MAP.items(), key=lambda item: item[0].value)
         sorted_events = sorted(EVENT_MAP.items(), key=lambda item: item[0].value)
 
-        definitions: Dict[str, Any] = {}
+        definitions: Dict[str, Any] = {
+            'JsonValue': {
+                'anyOf': [
+                    {'type': 'string'},
+                    {'type': 'integer'},
+                    {'type': 'number'},
+                    {'type': 'boolean'},
+                    {'type': 'null'},
+                    {
+                        'type': 'object',
+                        'additionalProperties': {'$ref': '#/definitions/JsonValue'},
+                    },
+                    {
+                        'type': 'array',
+                        'items': {'$ref': '#/definitions/JsonValue'},
+                    },
+                ]
+            }
+        }
         commands: Dict[str, Any] = {}
         events: Dict[str, Any] = {}
 
@@ -461,6 +515,11 @@ class ApiSchemaGenerator:
         document: Dict[str, Any] = {
             '$schema': 'https://json-schema.org/draft/2020-12/schema',
             'title': 'Metor IPC Contract',
+            'description': (
+                'Route and DTO definition catalog for the Metor IPC contract. '
+                'Select the matching commands or events reference to validate a '
+                'complete message; this catalog root is not itself a validator.'
+            ),
             'definitions': definitions,
             'commands': commands,
             'events': events,

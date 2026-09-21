@@ -1,7 +1,39 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Metor IPC Contract",
+  "description": "Route and DTO definition catalog for the Metor IPC contract. Select the matching commands or events reference to validate a complete message; this catalog root is not itself a validator.",
   "definitions": {
+    "JsonValue": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/JsonValue"
+          }
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/JsonValue"
+          }
+        }
+      ]
+    },
     "AcceptCommand": {
       "title": "AcceptCommand",
       "type": "object",
@@ -15,6 +47,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "accept"
         },
         "target": {
           "type": "string"
@@ -30,7 +66,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "target"
       ]
     },
@@ -48,6 +86,10 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "add_contact"
+        },
         "alias": {
           "type": "string"
         },
@@ -62,7 +104,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "alias"
       ]
     },
@@ -79,6 +123,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "add_profile"
         },
         "name": {
           "type": "string"
@@ -110,7 +158,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "name"
       ]
     },
@@ -127,6 +177,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "append_voice_chunk"
         },
         "msg_id": {
           "type": "string"
@@ -148,7 +202,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "msg_id",
         "offset",
         "data"
@@ -168,11 +224,17 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "authenticate_session"
+        },
         "proof": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "proof"
       ]
     },
@@ -189,6 +251,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "begin_voice"
         },
         "target": {
           "type": "string"
@@ -227,7 +293,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "target",
         "delivery",
         "msg_id",
@@ -248,6 +316,10 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "cancel_voice"
+        },
         "target": {
           "type": "string"
         },
@@ -265,7 +337,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "target",
         "msg_id"
       ]
@@ -284,6 +358,10 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "change_password"
+        },
         "current_password": {
           "type": "string"
         },
@@ -291,7 +369,9 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "current_password",
         "new_password"
       ]
@@ -309,8 +389,16 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "clear_contacts"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "ClearHistoryCommand": {
       "title": "ClearHistoryCommand",
@@ -326,6 +414,10 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "clear_history"
+        },
         "target": {
           "anyOf": [
             {
@@ -336,7 +428,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "ClearMessagesCommand": {
       "title": "ClearMessagesCommand",
@@ -352,6 +448,10 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "clear_messages"
+        },
         "target": {
           "anyOf": [
             {
@@ -365,7 +465,11 @@
         "non_contacts_only": {
           "type": "boolean"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "ClearProfileDbCommand": {
       "title": "ClearProfileDbCommand",
@@ -380,8 +484,16 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "clear_profile_db"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "CommitVoiceCommand": {
       "title": "CommitVoiceCommand",
@@ -396,6 +508,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "commit_voice"
         },
         "target": {
           "type": "string"
@@ -414,7 +530,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "target",
         "msg_id"
       ]
@@ -432,6 +550,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "configure_quick_unlock"
         },
         "action": {
           "enum": [
@@ -461,7 +583,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "action"
       ]
     },
@@ -479,11 +603,17 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "connect"
+        },
         "target": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "target"
       ]
     },
@@ -500,6 +630,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "delete_message"
         },
         "target": {
           "type": "string"
@@ -522,7 +656,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "target",
         "msg_id"
       ]
@@ -540,6 +676,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "disconnect"
         },
         "target": {
           "type": "string"
@@ -565,7 +705,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "target"
       ]
     },
@@ -583,11 +725,17 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "dismiss_live_context"
+        },
         "target": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "target"
       ]
     },
@@ -604,6 +752,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "fallback"
         },
         "target": {
           "type": "string"
@@ -622,7 +774,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "target"
       ]
     },
@@ -639,6 +793,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "finalize_voice"
         },
         "msg_id": {
           "type": "string"
@@ -664,7 +822,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "msg_id"
       ]
     },
@@ -681,8 +841,16 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "generate_address"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "GetAddressCommand": {
       "title": "GetAddressCommand",
@@ -697,8 +865,16 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "get_address"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "GetChatStartupStateCommand": {
       "title": "GetChatStartupStateCommand",
@@ -713,8 +889,16 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "get_chat_startup_state"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "GetConfigCommand": {
       "title": "GetConfigCommand",
@@ -730,11 +914,17 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "get_config"
+        },
         "setting_key": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "setting_key"
       ]
     },
@@ -752,10 +942,18 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "get_config_list"
+        },
         "safe_descriptors": {
           "type": "boolean"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "GetConnectionsCommand": {
       "title": "GetConnectionsCommand",
@@ -771,10 +969,18 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "get_connections"
+        },
         "is_header": {
           "type": "boolean"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "GetContactsListCommand": {
       "title": "GetContactsListCommand",
@@ -790,10 +996,18 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "get_contacts_list"
+        },
         "chat_mode": {
           "type": "boolean"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "GetGuiPreferencesCommand": {
       "title": "GetGuiPreferencesCommand",
@@ -808,8 +1022,16 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "get_gui_preferences"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "GetHistoryCommand": {
       "title": "GetHistoryCommand",
@@ -824,6 +1046,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "get_history"
         },
         "target": {
           "anyOf": [
@@ -865,7 +1091,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "GetInboxCommand": {
       "title": "GetInboxCommand",
@@ -880,8 +1110,16 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "get_inbox"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "GetMessageOutcomeCommand": {
       "title": "GetMessageOutcomeCommand",
@@ -897,6 +1135,10 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "get_message_outcome"
+        },
         "onion": {
           "type": "string"
         },
@@ -910,7 +1152,11 @@
           ],
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "GetMessagesCommand": {
       "title": "GetMessagesCommand",
@@ -925,6 +1171,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "get_messages"
         },
         "target": {
           "anyOf": [
@@ -980,7 +1230,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "GetRawHistoryCommand": {
       "title": "GetRawHistoryCommand",
@@ -995,6 +1249,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "get_raw_history"
         },
         "target": {
           "anyOf": [
@@ -1036,7 +1294,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "GetRestrictedClientStateCommand": {
       "title": "GetRestrictedClientStateCommand",
@@ -1051,8 +1313,16 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "get_restricted_client_state"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "GetRuntimeSnapshotCommand": {
       "title": "GetRuntimeSnapshotCommand",
@@ -1067,8 +1337,16 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "get_runtime_snapshot"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "GetSettingCommand": {
       "title": "GetSettingCommand",
@@ -1084,11 +1362,17 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "get_setting"
+        },
         "setting_key": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "setting_key"
       ]
     },
@@ -1105,8 +1389,16 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "get_settings_list"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "GetTransportStateCommand": {
       "title": "GetTransportStateCommand",
@@ -1122,6 +1414,10 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "get_transport_state"
+        },
         "peer": {
           "anyOf": [
             {
@@ -1132,7 +1428,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "GetVoiceChunkCommand": {
       "title": "GetVoiceChunkCommand",
@@ -1147,6 +1447,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "get_voice_chunk"
         },
         "target": {
           "type": "string"
@@ -1178,7 +1482,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "target",
         "msg_id",
         "direction",
@@ -1200,6 +1506,10 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "init"
+        },
         "current_version": {
           "type": "integer"
         },
@@ -1207,7 +1517,9 @@
           "type": "integer"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "current_version",
         "min_supported"
       ]
@@ -1225,6 +1537,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "list_retained_messages"
         },
         "target": {
           "anyOf": [
@@ -1297,7 +1613,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "LockCommand": {
       "title": "LockCommand",
@@ -1312,8 +1632,16 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "lock"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "MarkReadCommand": {
       "title": "MarkReadCommand",
@@ -1328,6 +1656,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "mark_read"
         },
         "target": {
           "type": "string"
@@ -1367,7 +1699,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "target"
       ]
     },
@@ -1384,6 +1718,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "migrate_profile_security"
         },
         "name": {
           "type": "string"
@@ -1412,7 +1750,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "name",
         "target_mode"
       ]
@@ -1430,8 +1770,16 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "prepare_profile_exit"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "ReauthorizeClientCommand": {
       "title": "ReauthorizeClientCommand",
@@ -1446,6 +1794,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "reauthorize_client"
         },
         "method": {
           "enum": [
@@ -1466,7 +1818,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "method"
       ]
     },
@@ -1483,8 +1837,16 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "register_live_consumer"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "RegisterVoiceOwnerCommand": {
       "title": "RegisterVoiceOwnerCommand",
@@ -1500,10 +1862,18 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "register_voice_owner"
+        },
         "disposable_drop": {
           "type": "boolean"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "RejectCommand": {
       "title": "RejectCommand",
@@ -1519,6 +1889,10 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "reject"
+        },
         "target": {
           "type": "string"
         },
@@ -1533,7 +1907,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "target"
       ]
     },
@@ -1551,6 +1927,10 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "release_voice"
+        },
         "target": {
           "type": "string"
         },
@@ -1558,7 +1938,9 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "target",
         "msg_id"
       ]
@@ -1577,10 +1959,18 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "release_voice_owner"
+        },
         "owner_token": {
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "RemoveContactCommand": {
       "title": "RemoveContactCommand",
@@ -1596,6 +1986,10 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "remove_contact"
+        },
         "alias": {
           "type": "string"
         },
@@ -1610,7 +2004,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "alias"
       ]
     },
@@ -1628,6 +2024,10 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "remove_profile"
+        },
         "name": {
           "type": "string"
         },
@@ -1642,7 +2042,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "name"
       ]
     },
@@ -1659,6 +2061,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "rename_contact"
         },
         "old_alias": {
           "type": "string"
@@ -1677,7 +2083,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "old_alias",
         "new_alias"
       ]
@@ -1696,6 +2104,10 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "rename_profile"
+        },
         "old_name": {
           "type": "string"
         },
@@ -1703,7 +2115,9 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "old_name",
         "new_name"
       ]
@@ -1721,6 +2135,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "restrict_client"
         },
         "unlock_method": {
           "enum": [
@@ -1772,7 +2190,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "RetunnelCommand": {
       "title": "RetunnelCommand",
@@ -1788,6 +2210,10 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "retunnel"
+        },
         "target": {
           "type": "string"
         },
@@ -1802,7 +2228,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "target"
       ]
     },
@@ -1820,6 +2248,10 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "self_destruct"
+        },
         "operation_id": {
           "anyOf": [
             {
@@ -1830,7 +2262,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "SendMessageCommand": {
       "title": "SendMessageCommand",
@@ -1845,6 +2281,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "send_message"
         },
         "target": {
           "type": "string"
@@ -1866,15 +2306,14 @@
                   "type": "string"
                 },
                 "type": {
-                  "enum": [
-                    "text",
-                    "voice"
-                  ],
-                  "type": "string"
+                  "type": "string",
+                  "const": "text"
                 }
               },
+              "additionalProperties": false,
               "required": [
-                "text"
+                "text",
+                "type"
               ]
             },
             {
@@ -1901,17 +2340,16 @@
                   ]
                 },
                 "type": {
-                  "enum": [
-                    "text",
-                    "voice"
-                  ],
-                  "type": "string"
+                  "type": "string",
+                  "const": "voice"
                 }
               },
+              "additionalProperties": false,
               "required": [
                 "blob_id",
                 "codec",
-                "size_bytes"
+                "size_bytes",
+                "type"
               ]
             }
           ]
@@ -1923,7 +2361,9 @@
           "type": "boolean"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "target",
         "delivery",
         "content",
@@ -1943,6 +2383,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "set_config"
         },
         "setting_key": {
           "type": "string"
@@ -1977,7 +2421,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "setting_key",
         "setting_value"
       ]
@@ -1996,11 +2442,17 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "set_default_profile"
+        },
         "profile_name": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "profile_name"
       ]
     },
@@ -2017,6 +2469,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "set_gui_preferences"
         },
         "expected_revision": {
           "type": "integer"
@@ -2073,9 +2529,14 @@
             "setup_complete": {
               "type": "boolean"
             }
-          }
+          },
+          "additionalProperties": false
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "SetSettingCommand": {
       "title": "SetSettingCommand",
@@ -2090,6 +2551,10 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "set_setting"
         },
         "setting_key": {
           "type": "string"
@@ -2111,7 +2576,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "setting_key",
         "setting_value"
       ]
@@ -2130,6 +2597,10 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "switch"
+        },
         "target": {
           "anyOf": [
             {
@@ -2140,7 +2611,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "SyncConfigCommand": {
       "title": "SyncConfigCommand",
@@ -2155,8 +2630,16 @@
               "type": "null"
             }
           ]
+        },
+        "command_type": {
+          "type": "string",
+          "const": "sync_config"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "command_type"
+      ]
     },
     "UnlockCommand": {
       "title": "UnlockCommand",
@@ -2172,11 +2655,17 @@
             }
           ]
         },
+        "command_type": {
+          "type": "string",
+          "const": "unlock"
+        },
         "password": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "command_type",
         "password"
       ]
     },
@@ -2214,6 +2703,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "ack"
+        },
         "msg_id": {
           "type": "string"
         },
@@ -2228,7 +2721,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "msg_id"
       ]
     },
@@ -2266,11 +2761,17 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "address_cant_generate_running"
+        },
         "profile": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "profile"
       ]
     },
@@ -2308,6 +2809,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "address_current"
+        },
         "profile": {
           "type": "string"
         },
@@ -2315,7 +2820,9 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "profile",
         "onion"
       ]
@@ -2354,6 +2861,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "address_generated"
+        },
         "profile": {
           "type": "string"
         },
@@ -2361,7 +2872,9 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "profile",
         "onion"
       ]
@@ -2400,11 +2913,17 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "address_not_generated"
+        },
         "profile": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "profile"
       ]
     },
@@ -2442,6 +2961,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "alias_in_use"
+        },
         "alias": {
           "type": "string"
         },
@@ -2456,7 +2979,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -2494,11 +3019,17 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "alias_not_found"
+        },
         "alias": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -2536,6 +3067,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "alias_renamed"
+        },
         "old_alias": {
           "type": "string"
         },
@@ -2553,7 +3088,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "old_alias",
         "new_alias"
       ]
@@ -2591,8 +3128,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "alias_same"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "AlreadyUnlockedEvent": {
       "title": "AlreadyUnlockedEvent",
@@ -2627,8 +3172,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "already_unlocked"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "AuthRequiredEvent": {
       "title": "AuthRequiredEvent",
@@ -2664,6 +3217,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "auth_required"
+        },
         "challenge": {
           "anyOf": [
             {
@@ -2684,7 +3241,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "AutoFallbackQueuedEvent": {
       "title": "AutoFallbackQueuedEvent",
@@ -2720,6 +3281,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "auto_fallback_queued"
+        },
         "alias": {
           "type": "string"
         },
@@ -2737,7 +3302,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "msg_id"
       ]
@@ -2776,6 +3343,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "auto_reconnect_scheduled"
+        },
         "alias": {
           "type": "string"
         },
@@ -2810,7 +3381,9 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -2847,8 +3420,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "cannot_connect_self"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "CannotDropSelfEvent": {
       "title": "CannotDropSelfEvent",
@@ -2883,8 +3464,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "cannot_drop_self"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "CannotSwitchSelfEvent": {
       "title": "CannotSwitchSelfEvent",
@@ -2919,8 +3508,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "cannot_switch_self"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "ChatStartupStateEvent": {
       "title": "ChatStartupStateEvent",
@@ -2955,6 +3552,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "chat_startup_state"
         },
         "active": {
           "type": "array",
@@ -3027,6 +3628,7 @@
                 ]
               }
             },
+            "additionalProperties": false,
             "required": [
               "alias",
               "onion",
@@ -3064,6 +3666,7 @@
                 "type": "integer"
               }
             },
+            "additionalProperties": false,
             "required": [
               "alias",
               "onion",
@@ -3074,7 +3677,9 @@
           }
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "active",
         "contacts"
       ]
@@ -3113,11 +3718,17 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "client_access_restricted"
+        },
         "command": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "command"
       ]
     },
@@ -3154,8 +3765,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "client_reauthorized"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "ClientRestrictedEvent": {
       "title": "ClientRestrictedEvent",
@@ -3190,6 +3809,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "client_restricted"
         },
         "unlock_method": {
           "enum": [
@@ -3243,7 +3866,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "unlock_method"
       ]
     },
@@ -3281,10 +3906,18 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "client_scope_key_rejected"
+        },
         "key": {
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "ConfigDataEvent": {
       "title": "ConfigDataEvent",
@@ -3320,6 +3953,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "config_data"
+        },
         "key": {
           "type": "string"
         },
@@ -3327,7 +3964,9 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "key",
         "value"
       ]
@@ -3365,6 +4004,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "config_list_data"
         },
         "scope": {
           "type": "string"
@@ -3435,6 +4078,7 @@
                 "type": "string"
               }
             },
+            "additionalProperties": false,
             "required": [
               "key",
               "value",
@@ -3444,7 +4088,9 @@
           }
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "scope",
         "profile"
       ]
@@ -3482,8 +4128,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "config_synced"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "ConfigUpdateFailedEvent": {
       "title": "ConfigUpdateFailedEvent",
@@ -3518,8 +4172,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "config_update_failed"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "ConfigUpdatedEvent": {
       "title": "ConfigUpdatedEvent",
@@ -3555,11 +4217,17 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "config_updated"
+        },
         "key": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "key"
       ]
     },
@@ -3597,6 +4265,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "connected"
+        },
         "alias": {
           "type": "string"
         },
@@ -3624,7 +4296,9 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "onion"
       ]
@@ -3663,6 +4337,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "connection_auto_accepted"
+        },
         "alias": {
           "type": "string"
         },
@@ -3697,7 +4375,9 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -3735,6 +4415,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "connection_connecting"
+        },
         "alias": {
           "type": "string"
         },
@@ -3769,7 +4453,9 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -3806,6 +4492,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "connection_failed"
         },
         "alias": {
           "type": "string"
@@ -3878,7 +4568,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -3916,6 +4608,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "connection_pending"
+        },
         "alias": {
           "type": "string"
         },
@@ -3950,7 +4646,9 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -3987,6 +4685,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "connection_rejected"
         },
         "alias": {
           "type": "string"
@@ -4049,7 +4751,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -4086,6 +4790,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "connection_retry"
         },
         "alias": {
           "type": "string"
@@ -4127,7 +4835,9 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "attempt",
         "max_retries"
@@ -4167,6 +4877,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "connections_state"
+        },
         "active": {
           "type": "array",
           "items": {
@@ -4189,7 +4903,9 @@
           "type": "boolean"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "active",
         "pending",
         "contacts"
@@ -4229,6 +4945,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "contact_added"
+        },
         "alias": {
           "type": "string"
         },
@@ -4246,7 +4966,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "profile"
       ]
@@ -4285,6 +5007,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "contact_already_saved"
+        },
         "alias": {
           "type": "string"
         },
@@ -4299,7 +5025,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -4337,6 +5065,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "contact_downgraded"
+        },
         "alias": {
           "type": "string"
         },
@@ -4351,7 +5083,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -4389,6 +5123,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "contact_removed"
+        },
         "alias": {
           "type": "string"
         },
@@ -4413,7 +5151,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -4451,6 +5191,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "contact_removed_downgraded"
+        },
         "alias": {
           "type": "string"
         },
@@ -4468,7 +5212,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "new_alias"
       ]
@@ -4506,8 +5252,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "contacts_clear_failed"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "ContactsClearedEvent": {
       "title": "ContactsClearedEvent",
@@ -4543,6 +5297,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "contacts_cleared"
+        },
         "profile": {
           "type": "string"
         },
@@ -4550,7 +5308,9 @@
           "type": "integer"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "profile"
       ]
     },
@@ -4588,6 +5348,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "contacts_data"
+        },
         "saved": {
           "type": "array",
           "items": {
@@ -4604,6 +5368,7 @@
                 "type": "boolean"
               }
             },
+            "additionalProperties": false,
             "required": [
               "alias",
               "onion"
@@ -4626,6 +5391,7 @@
                 "type": "boolean"
               }
             },
+            "additionalProperties": false,
             "required": [
               "alias",
               "onion"
@@ -4636,7 +5402,9 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "saved",
         "discovered",
         "profile"
@@ -4675,8 +5443,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "daemon_locked"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "DaemonOfflineEvent": {
       "title": "DaemonOfflineEvent",
@@ -4711,8 +5487,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "daemon_offline"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "DaemonUnlockedEvent": {
       "title": "DaemonUnlockedEvent",
@@ -4747,8 +5531,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "daemon_unlocked"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "DatabaseClearFailedEvent": {
       "title": "DatabaseClearFailedEvent",
@@ -4783,8 +5575,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "db_clear_failed"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "DatabaseClearedEvent": {
       "title": "DatabaseClearedEvent",
@@ -4820,6 +5620,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "db_cleared"
+        },
         "profile": {
           "type": "string"
         },
@@ -4827,7 +5631,9 @@
           "type": "integer"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "profile"
       ]
     },
@@ -4864,8 +5670,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "db_corrupted"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "DisconnectedEvent": {
       "title": "DisconnectedEvent",
@@ -4900,6 +5714,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "disconnected"
         },
         "alias": {
           "type": "string"
@@ -4962,7 +5780,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -5000,11 +5820,17 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "discovered_peer_not_found"
+        },
         "target": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "target"
       ]
     },
@@ -5042,6 +5868,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "drop_failed"
+        },
         "msg_id": {
           "type": "string"
         },
@@ -5056,7 +5886,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "msg_id"
       ]
     },
@@ -5094,6 +5926,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "drop_queued"
+        },
         "alias": {
           "type": "string"
         },
@@ -5108,7 +5944,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -5145,8 +5983,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "drops_disabled"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "FallbackRejectedEvent": {
       "title": "FallbackRejectedEvent",
@@ -5181,6 +6027,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "fallback_rejected"
         },
         "alias": {
           "type": "string"
@@ -5226,7 +6076,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "reason",
         "msg_ids"
@@ -5266,6 +6118,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "fallback_success"
+        },
         "alias": {
           "type": "string"
         },
@@ -5289,7 +6145,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "count",
         "msg_ids"
@@ -5328,6 +6186,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "gui_preferences"
         },
         "profile_instance_id": {
           "type": "string"
@@ -5387,9 +6249,14 @@
             "setup_complete": {
               "type": "boolean"
             }
-          }
+          },
+          "additionalProperties": false
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "GuiPreferencesRejectedEvent": {
       "title": "GuiPreferencesRejectedEvent",
@@ -5425,6 +6292,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "gui_preferences_rejected"
+        },
         "reason": {
           "enum": [
             "unavailable",
@@ -5437,7 +6308,11 @@
           ],
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "HistoryClearFailedEvent": {
       "title": "HistoryClearFailedEvent",
@@ -5472,8 +6347,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "history_clear_failed"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "HistoryClearedEvent": {
       "title": "HistoryClearedEvent",
@@ -5509,6 +6392,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "history_cleared"
+        },
         "alias": {
           "type": "string"
         },
@@ -5523,7 +6410,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -5561,11 +6450,17 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "history_cleared_all"
+        },
         "profile": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "profile"
       ]
     },
@@ -5603,7 +6498,137 @@
             }
           ]
         },
-        "entries": {},
+        "event_type": {
+          "type": "string",
+          "const": "history_data"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "title": "SummaryHistoryEntry",
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "string"
+              },
+              "family": {
+                "enum": [
+                  "live",
+                  "drop"
+                ],
+                "type": "string"
+              },
+              "event_code": {
+                "enum": [
+                  "connection_requested",
+                  "connected",
+                  "connection_rejected",
+                  "connection_failed",
+                  "connection_lost",
+                  "disconnected",
+                  "pending_expired",
+                  "retunnel_initiated",
+                  "retunnel_succeeded",
+                  "drop_queued",
+                  "drop_sent",
+                  "drop_received",
+                  "drop_failed"
+                ],
+                "type": "string"
+              },
+              "peer_onion": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "actor": {
+                "enum": [
+                  "local",
+                  "remote",
+                  "system"
+                ],
+                "type": "string"
+              },
+              "trigger": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "auto_accept_contact",
+                      "auto_reconnect",
+                      "grace_reconnect",
+                      "incoming",
+                      "manual",
+                      "mutual_connect",
+                      "retunnel"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "detail_code": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "auto_fallback_to_drop",
+                      "manual_fallback_to_drop",
+                      "retry_exhausted",
+                      "max_connections_reached",
+                      "retunnel_pending_connection_missing",
+                      "late_acceptance_timeout",
+                      "outbound_attempt_rejected",
+                      "outbound_attempt_closed_before_acceptance",
+                      "pending_acceptance_expired",
+                      "mutual_tiebreaker_loser",
+                      "duplicate_incoming_connected",
+                      "duplicate_incoming_pending",
+                      "unacked_live_converted_to_drop"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "detail_text": {
+                "type": "string"
+              },
+              "flow_id": {
+                "type": "string"
+              },
+              "alias": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "timestamp",
+              "family",
+              "event_code",
+              "peer_onion",
+              "actor",
+              "trigger",
+              "detail_code",
+              "detail_text",
+              "flow_id"
+            ]
+          }
+        },
         "profile": {
           "type": "string"
         },
@@ -5667,7 +6692,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "entries",
         "profile"
       ]
@@ -5706,7 +6733,150 @@
             }
           ]
         },
-        "entries": {},
+        "event_type": {
+          "type": "string",
+          "const": "history_raw_data"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "title": "RawHistoryEntry",
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "string"
+              },
+              "family": {
+                "enum": [
+                  "live",
+                  "drop"
+                ],
+                "type": "string"
+              },
+              "event_code": {
+                "enum": [
+                  "queued",
+                  "sent",
+                  "received",
+                  "failed",
+                  "tunnel_connected",
+                  "tunnel_failed",
+                  "tunnel_closed",
+                  "requested",
+                  "connected",
+                  "rejected",
+                  "disconnected",
+                  "connection_lost",
+                  "auto_reconnect_scheduled",
+                  "retunnel_initiated",
+                  "retunnel_succeeded",
+                  "stream_corrupted"
+                ],
+                "type": "string"
+              },
+              "peer_onion": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "actor": {
+                "enum": [
+                  "local",
+                  "remote",
+                  "system"
+                ],
+                "type": "string"
+              },
+              "trigger": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "auto_accept_contact",
+                      "auto_reconnect",
+                      "grace_reconnect",
+                      "incoming",
+                      "manual",
+                      "mutual_connect",
+                      "retunnel"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "detail_code": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "auto_fallback_to_drop",
+                      "manual_fallback_to_drop",
+                      "retry_exhausted",
+                      "max_connections_reached",
+                      "retunnel_pending_connection_missing",
+                      "late_acceptance_timeout",
+                      "outbound_attempt_rejected",
+                      "outbound_attempt_closed_before_acceptance",
+                      "pending_acceptance_expired",
+                      "mutual_tiebreaker_loser",
+                      "duplicate_incoming_connected",
+                      "duplicate_incoming_pending",
+                      "unacked_live_converted_to_drop"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "detail_text": {
+                "type": "string"
+              },
+              "flow_id": {
+                "type": "string"
+              },
+              "alias": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "transport": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "timestamp",
+              "family",
+              "event_code",
+              "peer_onion",
+              "actor",
+              "trigger",
+              "detail_code",
+              "detail_text",
+              "flow_id"
+            ]
+          }
+        },
         "profile": {
           "type": "string"
         },
@@ -5770,7 +6940,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "entries",
         "profile"
       ]
@@ -5809,11 +6981,20 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "inbox_counts"
+        },
         "inbox": {
-          "type": "object"
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "inbox"
       ]
     },
@@ -5850,6 +7031,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "inbox_data"
         },
         "alias": {
           "type": "string"
@@ -5890,15 +7075,14 @@
                         "type": "string"
                       },
                       "type": {
-                        "enum": [
-                          "text",
-                          "voice"
-                        ],
-                        "type": "string"
+                        "type": "string",
+                        "const": "text"
                       }
                     },
+                    "additionalProperties": false,
                     "required": [
-                      "text"
+                      "text",
+                      "type"
                     ]
                   },
                   {
@@ -5925,17 +7109,16 @@
                         ]
                       },
                       "type": {
-                        "enum": [
-                          "text",
-                          "voice"
-                        ],
-                        "type": "string"
+                        "type": "string",
+                        "const": "voice"
                       }
                     },
+                    "additionalProperties": false,
                     "required": [
                       "blob_id",
                       "codec",
-                      "size_bytes"
+                      "size_bytes",
+                      "type"
                     ]
                   }
                 ]
@@ -5951,6 +7134,7 @@
                 ]
               }
             },
+            "additionalProperties": false,
             "required": [
               "timestamp",
               "delivery",
@@ -5959,13 +7143,18 @@
           }
         },
         "inbox_counts": {
-          "type": "object"
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
         },
         "is_live_flush": {
           "type": "boolean"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -6003,6 +7192,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "inbox_notification"
+        },
         "alias": {
           "type": "string"
         },
@@ -6037,7 +7230,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -6074,6 +7269,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "incoming_connection"
         },
         "alias": {
           "type": "string"
@@ -6119,7 +7318,9 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -6157,6 +7358,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "init"
+        },
         "negotiated_version": {
           "type": "integer"
         },
@@ -6193,7 +7398,9 @@
           }
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "negotiated_version",
         "daemon_current_version",
         "daemon_min_supported"
@@ -6232,8 +7439,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "internal_error"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "InvalidConfigKeyEvent": {
       "title": "InvalidConfigKeyEvent",
@@ -6268,8 +7483,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "invalid_config_key"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "InvalidNewPasswordEvent": {
       "title": "InvalidNewPasswordEvent",
@@ -6304,8 +7527,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "invalid_new_password"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "InvalidPasswordEvent": {
       "title": "InvalidPasswordEvent",
@@ -6341,6 +7572,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "invalid_password"
+        },
         "challenge": {
           "anyOf": [
             {
@@ -6361,7 +7596,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "InvalidSettingKeyEvent": {
       "title": "InvalidSettingKeyEvent",
@@ -6396,8 +7635,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "invalid_setting_key"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "InvalidTargetEvent": {
       "title": "InvalidTargetEvent",
@@ -6433,11 +7680,17 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "invalid_target"
+        },
         "target": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "target"
       ]
     },
@@ -6475,11 +7728,17 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "ipc_client_limit_reached"
+        },
         "max_clients": {
           "type": "integer"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "max_clients"
       ]
     },
@@ -6516,6 +7775,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "live_context_dismiss_rejected"
         },
         "alias": {
           "type": "string"
@@ -6555,7 +7818,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "reason"
       ]
@@ -6594,6 +7859,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "live_context_dismissed"
+        },
         "alias": {
           "type": "string"
         },
@@ -6611,7 +7880,9 @@
           "type": "integer"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -6649,10 +7920,18 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "live_control_completed"
+        },
         "onion": {
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "LiveControlRejectedEvent": {
       "title": "LiveControlRejectedEvent",
@@ -6688,6 +7967,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "live_control_rejected"
+        },
         "onion": {
           "type": "string"
         },
@@ -6715,7 +7998,11 @@
           ],
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "LiveMessageResourcePressureEvent": {
       "title": "LiveMessageResourcePressureEvent",
@@ -6750,6 +8037,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "live_message_resource_pressure"
         },
         "alias": {
           "type": "string"
@@ -6798,7 +8089,9 @@
           "type": "integer"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "msg_id",
         "reason"
@@ -6838,6 +8131,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "live_message_unavailable"
+        },
         "alias": {
           "type": "string"
         },
@@ -6879,7 +8176,9 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "msg_id"
       ]
@@ -6918,11 +8217,17 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "local_auth_rate_limited"
+        },
         "retry_after": {
           "type": "integer"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "retry_after"
       ]
     },
@@ -6960,6 +8265,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "max_connections_reached"
+        },
         "target": {
           "type": "string"
         },
@@ -6967,7 +8276,9 @@
           "type": "integer"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "target",
         "max_conn"
       ]
@@ -7005,6 +8316,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "message_delete_rejected"
         },
         "target": {
           "type": "string"
@@ -7047,7 +8362,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "target",
         "msg_id",
         "reason"
@@ -7087,6 +8404,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "message_deleted"
+        },
         "alias": {
           "type": "string"
         },
@@ -7104,7 +8425,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "msg_id"
       ]
@@ -7142,6 +8465,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "message_outcome"
         },
         "onion": {
           "type": "string"
@@ -7197,7 +8524,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "MessageReceivedEvent": {
       "title": "MessageReceivedEvent",
@@ -7233,6 +8564,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "message_received"
+        },
         "alias": {
           "type": "string"
         },
@@ -7253,15 +8588,14 @@
                   "type": "string"
                 },
                 "type": {
-                  "enum": [
-                    "text",
-                    "voice"
-                  ],
-                  "type": "string"
+                  "type": "string",
+                  "const": "text"
                 }
               },
+              "additionalProperties": false,
               "required": [
-                "text"
+                "text",
+                "type"
               ]
             },
             {
@@ -7288,17 +8622,16 @@
                   ]
                 },
                 "type": {
-                  "enum": [
-                    "text",
-                    "voice"
-                  ],
-                  "type": "string"
+                  "type": "string",
+                  "const": "voice"
                 }
               },
+              "additionalProperties": false,
               "required": [
                 "blob_id",
                 "codec",
-                "size_bytes"
+                "size_bytes",
+                "type"
               ]
             }
           ]
@@ -7334,7 +8667,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "delivery",
         "content"
@@ -7373,8 +8708,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "messages_clear_failed"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "MessagesClearedEvent": {
       "title": "MessagesClearedEvent",
@@ -7410,6 +8753,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "messages_cleared"
+        },
         "alias": {
           "type": "string"
         },
@@ -7424,7 +8771,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -7462,11 +8811,17 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "messages_cleared_all"
+        },
         "profile": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "profile"
       ]
     },
@@ -7504,6 +8859,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "messages_cleared_non_contacts"
+        },
         "alias": {
           "type": "string"
         },
@@ -7518,7 +8877,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -7556,11 +8917,17 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "messages_cleared_non_contacts_all"
+        },
         "profile": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "profile"
       ]
     },
@@ -7597,6 +8964,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "messages_data"
         },
         "messages": {
           "type": "array",
@@ -7638,15 +9009,14 @@
                         "type": "string"
                       },
                       "type": {
-                        "enum": [
-                          "text",
-                          "voice"
-                        ],
-                        "type": "string"
+                        "type": "string",
+                        "const": "text"
                       }
                     },
+                    "additionalProperties": false,
                     "required": [
-                      "text"
+                      "text",
+                      "type"
                     ]
                   },
                   {
@@ -7673,17 +9043,16 @@
                         ]
                       },
                       "type": {
-                        "enum": [
-                          "text",
-                          "voice"
-                        ],
-                        "type": "string"
+                        "type": "string",
+                        "const": "voice"
                       }
                     },
+                    "additionalProperties": false,
                     "required": [
                       "blob_id",
                       "codec",
-                      "size_bytes"
+                      "size_bytes",
+                      "type"
                     ]
                   }
                 ]
@@ -7702,6 +9071,7 @@
                 ]
               }
             },
+            "additionalProperties": false,
             "required": [
               "direction",
               "status",
@@ -7731,7 +9101,9 @@
           "type": "boolean"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "messages",
         "alias"
       ]
@@ -7770,6 +9142,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "no_connection_to_disconnect"
+        },
         "alias": {
           "type": "string"
         },
@@ -7784,7 +9160,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -7822,6 +9200,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "no_connection_to_reject"
+        },
         "alias": {
           "type": "string"
         },
@@ -7836,7 +9218,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -7874,6 +9258,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "no_pending_connection"
+        },
         "alias": {
           "type": "string"
         },
@@ -7888,7 +9276,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -7926,6 +9316,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "no_pending_live_msgs"
+        },
         "alias": {
           "type": "string"
         },
@@ -7940,7 +9334,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -7978,6 +9374,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "onion_in_use"
+        },
         "alias": {
           "type": "string"
         },
@@ -7992,7 +9392,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -8029,8 +9431,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "password_change_failed"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "PasswordChangeUnsupportedEvent": {
       "title": "PasswordChangeUnsupportedEvent",
@@ -8065,8 +9475,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "password_change_unsupported"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "PasswordChangedEvent": {
       "title": "PasswordChangedEvent",
@@ -8101,8 +9519,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "password_changed"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "PeerAnonymizedEvent": {
       "title": "PeerAnonymizedEvent",
@@ -8138,6 +9564,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "peer_anonymized"
+        },
         "alias": {
           "type": "string"
         },
@@ -8155,7 +9585,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "new_alias"
       ]
@@ -8194,6 +9626,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "peer_cant_delete_active"
+        },
         "alias": {
           "type": "string"
         },
@@ -8208,7 +9644,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -8246,11 +9684,17 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "peer_not_found"
+        },
         "target": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "target"
       ]
     },
@@ -8288,6 +9732,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "peer_promoted"
+        },
         "alias": {
           "type": "string"
         },
@@ -8302,7 +9750,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -8340,6 +9790,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "peer_removed"
+        },
         "alias": {
           "type": "string"
         },
@@ -8354,7 +9808,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -8391,6 +9847,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "pending_connection_expired"
         },
         "alias": {
           "type": "string"
@@ -8456,7 +9916,9 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -8494,11 +9956,17 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "profile_exit_prepared"
+        },
         "profile": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "profile"
       ]
     },
@@ -8536,6 +10004,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "profile_operation_result"
+        },
         "success": {
           "type": "boolean"
         },
@@ -8569,10 +10041,99 @@
           "type": "string"
         },
         "params": {
-          "type": "object"
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": {
+                        "$ref": "#/definitions/JsonValue"
+                      }
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/JsonValue"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": {
+                        "$ref": "#/definitions/JsonValue"
+                      }
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/JsonValue"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "success",
         "operation_type",
         "params"
@@ -8612,6 +10173,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "profiles_data"
+        },
         "profiles": {
           "type": "array",
           "items": {
@@ -8638,6 +10203,7 @@
                 ]
               }
             },
+            "additionalProperties": false,
             "required": [
               "name",
               "is_active",
@@ -8647,7 +10213,9 @@
           }
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "profiles"
       ]
     },
@@ -8685,6 +10253,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "protocol_mismatch"
+        },
         "daemon_current_version": {
           "type": "integer"
         },
@@ -8698,7 +10270,9 @@
           "type": "integer"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "daemon_current_version",
         "daemon_min_supported",
         "client_current_version",
@@ -8739,11 +10313,17 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "quick_unlock_configured"
+        },
         "enabled": {
           "type": "boolean"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "enabled"
       ]
     },
@@ -8781,6 +10361,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "quick_unlock_failed"
+        },
         "password_required": {
           "type": "boolean"
         },
@@ -8804,7 +10388,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "ReadReceiptEvent": {
       "title": "ReadReceiptEvent",
@@ -8840,6 +10428,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "read_receipt"
+        },
         "alias": {
           "type": "string"
         },
@@ -8857,7 +10449,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "msg_id"
       ]
@@ -8896,6 +10490,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "rename_success"
+        },
         "old_alias": {
           "type": "string"
         },
@@ -8919,7 +10517,9 @@
           "type": "boolean"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "old_alias",
         "new_alias"
       ]
@@ -8957,6 +10557,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "restricted_client_state"
         },
         "restricted": {
           "type": "boolean"
@@ -9059,6 +10663,7 @@
                 ]
               }
             },
+            "additionalProperties": false,
             "required": [
               "alias",
               "onion",
@@ -9073,7 +10678,11 @@
             "type": "string"
           }
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "RetainedMessagesEvent": {
       "title": "RetainedMessagesEvent",
@@ -9108,6 +10717,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "retained_messages"
         },
         "messages": {
           "type": "array",
@@ -9188,6 +10801,7 @@
                 "type": "boolean"
               }
             },
+            "additionalProperties": false,
             "required": [
               "onion",
               "alias",
@@ -9213,7 +10827,11 @@
         "inventory_version": {
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "RetainedMessagesUnavailableEvent": {
       "title": "RetainedMessagesUnavailableEvent",
@@ -9249,6 +10867,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "retained_messages_unavailable"
+        },
         "reason": {
           "type": "string"
         },
@@ -9256,7 +10878,9 @@
           "type": "boolean"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "reason"
       ]
     },
@@ -9293,6 +10917,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "retunnel_failed"
         },
         "alias": {
           "type": "string"
@@ -9349,7 +10977,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -9387,6 +11017,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "retunnel_initiated"
+        },
         "alias": {
           "type": "string"
         },
@@ -9401,7 +11035,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -9439,6 +11075,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "retunnel_success"
+        },
         "alias": {
           "type": "string"
         },
@@ -9453,7 +11093,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias"
       ]
     },
@@ -9491,6 +11133,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "runtime_snapshot"
+        },
         "profile": {
           "type": "string"
         },
@@ -9513,6 +11159,7 @@
                 "type": "boolean"
               }
             },
+            "additionalProperties": false,
             "required": [
               "alias",
               "onion"
@@ -9538,6 +11185,7 @@
                 "type": "integer"
               }
             },
+            "additionalProperties": false,
             "required": [
               "alias",
               "onion"
@@ -9647,6 +11295,7 @@
                 "type": "boolean"
               }
             },
+            "additionalProperties": false,
             "required": [
               "alias",
               "onion",
@@ -9714,6 +11363,7 @@
                 ]
               }
             },
+            "additionalProperties": false,
             "required": [
               "alias",
               "onion",
@@ -9746,7 +11396,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "profile",
         "onion"
       ]
@@ -9785,10 +11437,18 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "runtime_snapshot_unavailable"
+        },
         "retryable": {
           "type": "boolean"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "RuntimeStateChangedEvent": {
       "title": "RuntimeStateChangedEvent",
@@ -9824,6 +11484,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "runtime_state_changed"
+        },
         "scope": {
           "type": "string"
         },
@@ -9838,7 +11502,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "scope"
       ]
     },
@@ -9876,6 +11542,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "self_destruct_cleanup_failed"
+        },
         "profile": {
           "type": "string"
         },
@@ -9896,7 +11566,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "profile"
       ]
     },
@@ -9934,6 +11606,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "self_destruct_completed"
+        },
         "profile": {
           "anyOf": [
             {
@@ -9954,7 +11630,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "SelfDestructInitiatedEvent": {
       "title": "SelfDestructInitiatedEvent",
@@ -9990,6 +11670,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "self_destruct_initiated"
+        },
         "profile": {
           "anyOf": [
             {
@@ -10010,7 +11694,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "SelfDestructKeyDestroyedEvent": {
       "title": "SelfDestructKeyDestroyedEvent",
@@ -10046,6 +11734,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "self_destruct_key_destroyed"
+        },
         "profile": {
           "type": "string"
         },
@@ -10060,7 +11752,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "profile"
       ]
     },
@@ -10098,13 +11792,21 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "self_destruct_runtime_released"
+        },
         "profile": {
           "type": "string"
         },
         "operation_id": {
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "SelfDestructSafeEvent": {
       "title": "SelfDestructSafeEvent",
@@ -10140,13 +11842,21 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "self_destruct_safe"
+        },
         "profile": {
           "type": "string"
         },
         "operation_id": {
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "SessionAuthenticatedEvent": {
       "title": "SessionAuthenticatedEvent",
@@ -10181,8 +11891,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "session_authenticated"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "SettingDataEvent": {
       "title": "SettingDataEvent",
@@ -10218,6 +11936,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "setting_data"
+        },
         "key": {
           "type": "string"
         },
@@ -10225,7 +11947,9 @@
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "key",
         "value"
       ]
@@ -10264,6 +11988,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "setting_type_error"
+        },
         "key": {
           "anyOf": [
             {
@@ -10284,7 +12012,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "SettingUpdateFailedEvent": {
       "title": "SettingUpdateFailedEvent",
@@ -10319,8 +12051,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "setting_update_failed"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "SettingUpdatedEvent": {
       "title": "SettingUpdatedEvent",
@@ -10356,11 +12096,17 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "setting_updated"
+        },
         "key": {
           "type": "string"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "key"
       ]
     },
@@ -10397,6 +12143,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "settings_list_data"
         },
         "scope": {
           "type": "string"
@@ -10464,6 +12214,7 @@
                 "type": "string"
               }
             },
+            "additionalProperties": false,
             "required": [
               "key",
               "value",
@@ -10473,7 +12224,9 @@
           }
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "scope"
       ]
     },
@@ -10511,6 +12264,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "switch_success"
+        },
         "alias": {
           "anyOf": [
             {
@@ -10531,7 +12288,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "TextAcceptedEvent": {
       "title": "TextAcceptedEvent",
@@ -10567,6 +12328,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "text_accepted"
+        },
         "onion": {
           "type": "string"
         },
@@ -10580,7 +12345,11 @@
           ],
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "TextRejectedEvent": {
       "title": "TextRejectedEvent",
@@ -10616,6 +12385,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "text_rejected"
+        },
         "onion": {
           "type": "string"
         },
@@ -10646,7 +12419,11 @@
           ],
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "TorKeyDecryptFailedEvent": {
       "title": "TorKeyDecryptFailedEvent",
@@ -10681,8 +12458,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "tor_key_decrypt_failed"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "TorKeyWriteFailedEvent": {
       "title": "TorKeyWriteFailedEvent",
@@ -10717,8 +12502,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "tor_key_write_failed"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "TorProcessTerminatedEvent": {
       "title": "TorProcessTerminatedEvent",
@@ -10754,6 +12547,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "tor_process_terminated"
+        },
         "error": {
           "anyOf": [
             {
@@ -10795,7 +12592,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "TorStartFailedEvent": {
       "title": "TorStartFailedEvent",
@@ -10831,6 +12632,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "tor_start_failed"
+        },
         "error": {
           "anyOf": [
             {
@@ -10872,7 +12677,11 @@
             }
           ]
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "TransportStateEvent": {
       "title": "TransportStateEvent",
@@ -10908,6 +12717,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "transport_state"
+        },
         "peer": {
           "type": "string"
         },
@@ -10927,7 +12740,94 @@
         "drop_tunnel": {
           "anyOf": [
             {
-              "type": "object"
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": {
+                            "$ref": "#/definitions/JsonValue"
+                          }
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/definitions/JsonValue"
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": {
+                            "$ref": "#/definitions/JsonValue"
+                          }
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/definitions/JsonValue"
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
             },
             {
               "type": "null"
@@ -10944,7 +12844,9 @@
           "type": "boolean"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "peer",
         "session_state"
       ]
@@ -10982,8 +12884,16 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "unknown_command"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "UnreadMessagesEvent": {
       "title": "UnreadMessagesEvent",
@@ -11019,6 +12929,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "unread_messages"
+        },
         "messages": {
           "type": "array",
           "items": {
@@ -11045,15 +12959,14 @@
                         "type": "string"
                       },
                       "type": {
-                        "enum": [
-                          "text",
-                          "voice"
-                        ],
-                        "type": "string"
+                        "type": "string",
+                        "const": "text"
                       }
                     },
+                    "additionalProperties": false,
                     "required": [
-                      "text"
+                      "text",
+                      "type"
                     ]
                   },
                   {
@@ -11080,17 +12993,16 @@
                         ]
                       },
                       "type": {
-                        "enum": [
-                          "text",
-                          "voice"
-                        ],
-                        "type": "string"
+                        "type": "string",
+                        "const": "voice"
                       }
                     },
+                    "additionalProperties": false,
                     "required": [
                       "blob_id",
                       "codec",
-                      "size_bytes"
+                      "size_bytes",
+                      "type"
                     ]
                   }
                 ]
@@ -11106,6 +13018,7 @@
                 ]
               }
             },
+            "additionalProperties": false,
             "required": [
               "timestamp",
               "delivery",
@@ -11127,7 +13040,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "messages",
         "alias"
       ]
@@ -11166,6 +13081,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "voice_cancelled"
+        },
         "alias": {
           "type": "string"
         },
@@ -11183,7 +13102,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "msg_id"
       ]
@@ -11222,6 +13143,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "voice_chunk_accepted"
+        },
         "msg_id": {
           "type": "string"
         },
@@ -11229,7 +13154,9 @@
           "type": "integer"
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "msg_id",
         "next_offset"
       ]
@@ -11267,6 +13194,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "voice_chunk_received"
         },
         "alias": {
           "type": "string"
@@ -11308,7 +13239,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "msg_id",
         "offset",
@@ -11349,6 +13282,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "voice_committed"
+        },
         "alias": {
           "type": "string"
         },
@@ -11366,7 +13303,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "msg_id"
       ]
@@ -11404,6 +13343,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "voice_data"
         },
         "alias": {
           "type": "string"
@@ -11464,7 +13407,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "msg_id",
         "direction",
@@ -11510,6 +13455,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "voice_finalized"
         },
         "msg_id": {
           "type": "string"
@@ -11566,7 +13515,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "msg_id",
         "size_bytes"
       ]
@@ -11605,6 +13556,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "voice_incoming_started"
+        },
         "alias": {
           "type": "string"
         },
@@ -11635,7 +13590,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "msg_id",
         "delivery",
@@ -11677,6 +13634,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "voice_operation_rejected"
+        },
         "msg_id": {
           "type": "string"
         },
@@ -11715,7 +13676,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "msg_id",
         "reason"
       ]
@@ -11754,10 +13717,18 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "voice_owner_registered"
+        },
         "owner_token": {
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "VoiceOwnerRejectedEvent": {
       "title": "VoiceOwnerRejectedEvent",
@@ -11793,6 +13764,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "voice_owner_rejected"
+        },
         "reason": {
           "enum": [
             "invalid_selection",
@@ -11817,7 +13792,11 @@
           ],
           "type": "string"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "VoiceOwnerReleasedEvent": {
       "title": "VoiceOwnerReleasedEvent",
@@ -11853,10 +13832,18 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "voice_owner_released"
+        },
         "cleanup_pending": {
           "type": "boolean"
         }
-      }
+      },
+      "additionalProperties": false,
+      "required": [
+        "event_type"
+      ]
     },
     "VoiceReleasedEvent": {
       "title": "VoiceReleasedEvent",
@@ -11892,6 +13879,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "voice_released"
+        },
         "alias": {
           "type": "string"
         },
@@ -11909,7 +13900,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "msg_id"
       ]
@@ -11947,6 +13940,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "voice_resource_limit"
         },
         "used_bytes": {
           "type": "integer"
@@ -12020,7 +14017,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "used_bytes",
         "limit_bytes"
       ]
@@ -12058,6 +14057,10 @@
               "type": "null"
             }
           ]
+        },
+        "event_type": {
+          "type": "string",
+          "const": "voice_resource_pressure"
         },
         "used_bytes": {
           "type": "integer"
@@ -12100,7 +14103,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "used_bytes",
         "limit_bytes"
       ]
@@ -12139,6 +14144,10 @@
             }
           ]
         },
+        "event_type": {
+          "type": "string",
+          "const": "voice_started"
+        },
         "alias": {
           "type": "string"
         },
@@ -12163,7 +14172,9 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
+        "event_type",
         "alias",
         "msg_id",
         "delivery"
