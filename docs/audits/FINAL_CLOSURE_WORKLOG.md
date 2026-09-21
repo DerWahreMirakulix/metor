@@ -1170,3 +1170,52 @@ migration. Application SemVer remains independent from those axes.
 | Post-validation repository status                                                                      | PASS; no generated reference or version registry change remained                                             |
 | `ruff check`, `ruff format --check`, and strict `mypy` for changed Python                              | PASS                                                                                                         |
 | `git diff --check`                                                                                     | PASS                                                                                                         |
+
+## A24 verification
+
+Every native offline bundle now declares its exact CPython minor/ABI, operating
+system, architecture, distribution, and variant in `BUNDLE.json`. The shipped
+stdlib-only verifier rejects a mismatched interpreter or host before creating
+or changing `.venv`, then requires a complete, duplicate-free checksum manifest
+and validates every bundled file, including the pip wheel. Existing incomplete
+or incompatible environments are preserved and rejected rather than silently
+reused or deleted. Both installers continue to name one explicit distribution;
+they do not install wheel globs. Documentation describes these SHA-256 values as
+internal completeness/integrity checks, not signatures or publisher provenance.
+
+The release validators agree on exactly four Metor distribution identities:
+SDK, Base, Terminal, and GUI. Missing and duplicate identities fail before the
+RECORD ownership checks. Fresh Linux CPython 3.11/x86_64 bundles for all four
+variants were built online into a temporary directory; each extracted installer
+then installed solely from its wheelhouse. The isolated consumer sequence
+verified SDK-only, Base-without-UI, each UI, both UIs together, both UI removal
+orders, external strict-mypy consumers, and the final SDK reimport. The Windows
+installer has equivalent target/integrity logic and remains an explicit Windows
+CI matrix gate; this Linux host cannot honestly supply a fresh native Windows
+execution result.
+
+All external GitHub Actions now use immutable commits verified against their
+official repositories: checkout v6 `d23441a48e516b6c34aea4fa41551a30e30af803`,
+setup-python v6 `ece7cb06caefa5fff74198d8649806c4678c61a1`, setup-node
+v6 `249970729cb0ef3589644e2896645e5dc5ba9c38`, upload-artifact v4
+`ea165f8d65b6e75b540449e92b4886f43607fa02`, and download-artifact v4
+`d3f86a106a0bac45b974a628896c90dbdf5c8093`. Workflow defaults grant no
+permissions; each job declares only what it needs. Release jobs checkout the
+recorded candidate SHA, publication refuses a moved main branch or an existing
+version tag, and the eventual branch/tag push is one explicit command. No tag,
+upload, release, or remote mutation was performed here. The unused duplicate
+`requirements/runtime.lock` was removed; the active SDK, Base, and GUI locks
+remain the single inputs used by the builder.
+
+| Command                                                                                          | Result                                                                                                                    |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| New target/hash/identity/workflow regressions before implementation                              | EXPECTED FAIL; installers accepted broad interpreters, ignored checksums, GUI was optional, and Actions used mutable tags |
+| `python -m unittest tests.test_release_contract tests.test_versioning_release`                   | PASS; 74 installer, integrity, wheel-set, immutable-workflow, SemVer, and release-contract tests                          |
+| Fresh `python scripts/release/bundle.py --variant all` under Linux CPython 3.11/x86_64           | PASS; SDK, Base, Terminal, and GUI directories and ZIPs built with complete wheelhouses                                   |
+| `python scripts/validate_release_installers.py /tmp/metor-a24-bundles.IIjo3C`                    | PASS; all four fresh ZIPs verified hashes first and installed with `--no-index`                                           |
+| `python scripts/validate_installed_artifacts.py /tmp/metor-a24-bundles.IIjo3C`                   | PASS; all isolated package/type/ownership/removal scenarios; `ALL_ISOLATED_ARTIFACT_SCENARIOS_OK`                         |
+| Wrong Python/architecture, changed/missing wheel, and preserved incompatible `.venv` regressions | PASS; each fails before environment mutation                                                                              |
+| Official Action `git ls-remote` verification                                                     | PASS; every pinned commit above resolves from its named official Action repository                                        |
+| Windows native installer execution                                                               | NOT RUN locally; non-Windows host, retained as the pinned Windows CPython 3.11 release-matrix gate                        |
+| `ruff check`, `ruff format --check`, and strict `mypy` for changed Python                        | PASS                                                                                                                      |
+| `npm run check:md` and `git diff --check`                                                        | PASS                                                                                                                      |

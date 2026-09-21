@@ -124,7 +124,13 @@ sh install.sh
 
 On Windows, run `install.cmd` from the extracted bundle folder.
 
-The installer creates a local `.venv` inside the extracted bundle and installs Metor entirely from the bundled wheelhouse, including the pinned `pip` wheel. This path is the recommended runtime install for both Linux and Windows because it does not require a local C/C++ build toolchain or package index access during installation.
+The installer first checks the exact CPython minor/ABI, OS, architecture, and
+every file listed in `SHA256SUMS.txt`, including the pinned `pip` wheel. It then
+creates a local `.venv` and installs entirely from the bundled wheelhouse. An
+existing incompatible `.venv` is left untouched. Checksums detect incomplete
+or modified archive contents; they are not a signature or proof of publisher
+identity. This path requires neither a local C/C++ build toolchain nor package
+index access during installation.
 
 This self-contained installer is intentionally local to the extracted bundle folder. If you want the old "global command on my chosen environment" behavior, use the source checkout path below or run `pip install --no-index --find-links wheelhouse metor` inside your own already activated venv or user-managed Python environment.
 

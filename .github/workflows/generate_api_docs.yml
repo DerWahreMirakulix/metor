@@ -1,5 +1,11 @@
 name: Generate Documentation
 
+permissions: {}
+
+concurrency:
+  group: metor-generated-docs-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   push:
     paths:
@@ -25,16 +31,18 @@ on:
 
 jobs:
   build-and-commit-docs:
+    if: github.ref_type == 'branch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           # Fetch the full history so the bot can push back to the branch cleanly
           fetch-depth: 0
+          ref: ${{ github.sha }}
 
       - name: Run Shared Python Quality Checks
         uses: ./.github/actions/python-quality
@@ -45,7 +53,7 @@ jobs:
           mypy-paths: "src/metor/ scripts/"
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "22.17.1"
           cache: "npm"
@@ -69,5 +77,5 @@ jobs:
           # Evaluate diff; commit and push only if the generation resulted in changes
           if ! git diff --cached --quiet; then
             git commit -m "docs: auto-update generated documentation"
-            git push origin HEAD
+            git push origin HEAD:${GITHUB_REF_NAME}
           fi

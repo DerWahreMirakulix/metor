@@ -162,6 +162,12 @@ exist. The base package exposes daemon startup through the canonical `metor`
 entry point.
 Offline installers select the intended distribution by name from the
 wheelhouse, allowing pip to resolve only its exact dependencies.
+Each native archive declares and verifies its exact CPython minor/ABI, OS, and
+architecture. Its installer verifies the complete `SHA256SUMS.txt` inventory,
+including the bundled pip wheel, before creating or changing `.venv`; an
+incompatible existing environment is rejected without deletion. The checksum
+manifest provides integrity detection, not origin authentication or a release
+signature.
 
 The `metor-ui-gui` distribution uses `requirements/gui.lock`. The canonical
 `all` builder, CI and release workflow include its package, dependency closure,

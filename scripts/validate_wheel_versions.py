@@ -55,7 +55,7 @@ def wheel_owned_files(wheel_path: Path) -> set[str]:
 
 
 def validate_wheel_versions(wheel_paths: Sequence[Path]) -> tuple[str, ...]:
-    """Checks all three release distributions against ``APP_VERSION``.
+    """Checks the exact four release distributions against ``APP_VERSION``.
 
     Args:
         wheel_paths (Sequence[Path]): Candidate Metor wheels.
@@ -63,16 +63,25 @@ def validate_wheel_versions(wheel_paths: Sequence[Path]) -> tuple[str, ...]:
     Returns:
         tuple[str, ...]: Validation errors; empty on success.
     """
-    expected_names: set[str] = {'metor', 'metor-sdk', 'metor-ui-terminal'}
-    supported_names = expected_names | {'metor-ui-gui'}
+    expected_names: set[str] = {
+        'metor',
+        'metor-sdk',
+        'metor-ui-gui',
+        'metor-ui-terminal',
+    }
     found_names: set[str] = set()
+    name_counts: dict[str, int] = {}
     ownership: dict[str, set[str]] = {}
     errors: list[str] = []
     for wheel_path in wheel_paths:
         name, version, requirements = wheel_metadata(wheel_path)
-        if name not in supported_names:
+        if name not in expected_names:
             continue
         found_names.add(name)
+        name_counts[name] = name_counts.get(name, 0) + 1
+        if name_counts[name] > 1:
+            errors.append(f'Duplicate Metor wheel identity: {name}.')
+            continue
         ownership[name] = wheel_owned_files(wheel_path)
         if version != APP_VERSION:
             errors.append(f'{name} reports {version}; expected {APP_VERSION}.')

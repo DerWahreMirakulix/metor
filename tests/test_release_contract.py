@@ -4,6 +4,8 @@
 
 import argparse
 import importlib
+import json
+import shutil
 import subprocess
 import sys
 import unittest
@@ -17,8 +19,13 @@ from zipfile import ZipFile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from scripts.release.bundle import (
+    BUNDLE_METADATA_NAME,
+    BUNDLE_VERIFIER_NAME,
+    CHECKSUM_FILE_NAME,
     PIP_VERSION,
+    build_bundle_metadata,
     build_bundle_name,
+    build_sha256_manifest,
     clean_packaging_artifacts,
     build_install_guide,
     build_release_wheelhouse,
@@ -26,6 +33,7 @@ from scripts.release.bundle import (
     build_install_windows_script,
 )
 from scripts.release.paths import PROJECT_ROOT
+from scripts.release.verify_bundle import verify_bundle
 from metor.data.profile import (
     ProfileManager,
 )
@@ -669,6 +677,9 @@ class ReleaseContractTests(unittest.TestCase):
             guide,
         )
         self.assertIn('requires no package index access', guide)
+        self.assertIn('python verify_bundle.py .', guide)
+        self.assertIn('including the bundled pip wheel', guide)
+        self.assertIn('not a signature', guide)
 
     def test_release_shell_installer_uses_local_wheelhouse(self) -> None:
         """
@@ -683,11 +694,12 @@ class ReleaseContractTests(unittest.TestCase):
 
         script = build_install_shell_script()
 
-        self.assertIn('python3 python', script)
-        self.assertIn(
-            'sys.version_info >= (3, 11)',
-            script,
-        )
+        self.assertIn('python3.11 python3 python', script)
+        self.assertIn('verify_bundle.py', script)
+        self.assertIn('--target-only', script)
+        self.assertIn('refusing to replace or delete it', script)
+        self.assertNotIn('sys.version_info >=', script)
+        self.assertNotIn('rm -', script)
         self.assertIn(
             '--no-index --find-links "$script_dir/wheelhouse" --upgrade pip==26.0.1',
             script,
@@ -708,17 +720,117 @@ class ReleaseContractTests(unittest.TestCase):
 
         script = build_install_windows_script()
 
-        self.assertIn(
-            'VERSION_CHECK=import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)',
-            script,
-        )
+        self.assertIn('verify_bundle.py', script)
+        self.assertIn('--target-only', script)
         self.assertIn('py -3.11 -m venv', script)
+        self.assertIn('refusing to modify or delete it', script)
+        self.assertNotIn('sys.version_info >=', script)
+        self.assertNotIn('rd /s /q', script)
         self.assertIn(
             '--no-index --find-links "%SCRIPT_DIR%wheelhouse" --upgrade pip==26.0.1',
             script,
         )
         self.assertIn('--no-index --find-links "%SCRIPT_DIR%wheelhouse" metor', script)
         self.assertIn('Scripts\\metor.exe --help', script)
+
+    def test_bundle_verifier_rejects_tampering_missing_files_and_wrong_target(
+        self,
+    ) -> None:
+        """Validates the complete hash set and exact native build target.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as directory:
+            bundle = Path(directory)
+            wheel = bundle / 'wheelhouse' / 'pip-26.0.1-py3-none-any.whl'
+            wheel.parent.mkdir()
+            wheel.write_bytes(b'pip wheel')
+            (bundle / BUNDLE_METADATA_NAME).write_text(
+                build_bundle_metadata('sdk', 'metor-sdk'), encoding='utf-8'
+            )
+            (bundle / BUNDLE_VERIFIER_NAME).write_text(
+                '# verifier fixture\n', encoding='utf-8'
+            )
+            (bundle / CHECKSUM_FILE_NAME).write_text(
+                build_sha256_manifest(bundle), encoding='utf-8'
+            )
+
+            verify_bundle(bundle)
+            wheel.write_bytes(b'tampered')
+            with self.assertRaisesRegex(ValueError, 'Checksum mismatch'):
+                verify_bundle(bundle)
+            wheel.write_bytes(b'pip wheel')
+            wheel.unlink()
+            with self.assertRaisesRegex(ValueError, 'Missing bundle files'):
+                verify_bundle(bundle)
+
+            wheel.write_bytes(b'pip wheel')
+            original_metadata = json.loads(
+                (bundle / BUNDLE_METADATA_NAME).read_text(encoding='utf-8')
+            )
+            for field, value, diagnostic in (
+                ('python', '9.9', 'Python minor'),
+                ('machine', 'unsupported-architecture', 'architecture'),
+            ):
+                with self.subTest(field=field):
+                    metadata = dict(original_metadata)
+                    metadata[field] = value
+                    (bundle / BUNDLE_METADATA_NAME).write_text(
+                        json.dumps(metadata), encoding='utf-8'
+                    )
+                    with self.assertRaisesRegex(ValueError, diagnostic):
+                        verify_bundle(bundle, target_only=True)
+
+    @unittest.skipIf(sys.platform == 'win32', 'Shell installer is validated on Unix.')
+    def test_shell_installer_preserves_incompatible_existing_venv(self) -> None:
+        """Refuses an old target environment without deleting or changing it.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as directory:
+            bundle = Path(directory)
+            metadata = json.loads(build_bundle_metadata('sdk', 'metor-sdk'))
+            metadata['python'] = '9.9'
+            (bundle / BUNDLE_METADATA_NAME).write_text(
+                json.dumps(metadata), encoding='utf-8'
+            )
+            shutil.copyfile(
+                PROJECT_ROOT / 'scripts' / 'release' / BUNDLE_VERIFIER_NAME,
+                bundle / BUNDLE_VERIFIER_NAME,
+            )
+            installer = bundle / 'install.sh'
+            installer.write_text(
+                build_install_shell_script('metor-sdk'), encoding='utf-8'
+            )
+            installer.chmod(0o755)
+            venv_bin = bundle / '.venv' / 'bin'
+            venv_bin.mkdir(parents=True)
+            (venv_bin / 'python').symlink_to(sys.executable)
+            sentinel = bundle / '.venv' / 'preserve-me'
+            sentinel.write_text('unchanged', encoding='utf-8')
+            (bundle / CHECKSUM_FILE_NAME).write_text(
+                build_sha256_manifest(bundle), encoding='utf-8'
+            )
+
+            result = subprocess.run(
+                ['sh', str(installer)],
+                cwd=bundle,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('refusing to modify it', result.stderr)
+            self.assertEqual(sentinel.read_text(encoding='utf-8'), 'unchanged')
 
     def test_release_builder_downloads_pip_wheel_for_offline_installs(self) -> None:
         """

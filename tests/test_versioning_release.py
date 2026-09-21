@@ -721,7 +721,7 @@ class ReleaseCompatibilityTests(unittest.TestCase):
         )
 
     def test_all_built_wheels_report_central_application_version(self) -> None:
-        """Builds and validates base, Terminal, and SDK wheel metadata.
+        """Builds and validates Base, SDK, Terminal, and GUI wheel metadata.
 
         Args:
             None
@@ -736,6 +736,7 @@ class ReleaseCompatibilityTests(unittest.TestCase):
                 root,
                 root / 'packaging' / 'sdk',
                 root / 'packaging' / 'terminal',
+                root / 'packaging' / 'gui',
             ):
                 subprocess.run(
                     [
@@ -779,6 +780,11 @@ class ReleaseCompatibilityTests(unittest.TestCase):
                         self.assertIn(
                             f'Requires-Dist: metor-sdk=={APP_VERSION}', metadata
                         )
+                    if wheel_path.name.startswith('metor_ui_gui-'):
+                        self.assertIn(f'Requires-Dist: metor=={APP_VERSION}', metadata)
+                        self.assertIn(
+                            f'Requires-Dist: metor-sdk=={APP_VERSION}', metadata
+                        )
 
     def test_wheel_validator_requires_all_variants(self) -> None:
         """Verifies package validation rejects an incomplete release wheel set.
@@ -789,7 +795,42 @@ class ReleaseCompatibilityTests(unittest.TestCase):
         Returns:
             None
         """
-        self.assertTrue(validate_wheel_versions(()))
+        errors = validate_wheel_versions(())
+        self.assertTrue(errors)
+        self.assertIn('metor-ui-gui', errors[0])
+
+    def test_wheel_validator_rejects_duplicate_distribution_identity(self) -> None:
+        """Rejects two wheel files claiming the same coordinated distribution.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        names = ('metor', 'metor-sdk', 'metor-ui-terminal', 'metor-ui-gui', 'metor')
+        paths = tuple(Path(f'{index}.whl') for index in range(len(names)))
+
+        def metadata(path: Path) -> tuple[str, str, tuple[str, ...]]:
+            name = names[int(path.stem)]
+            requirements: tuple[str, ...] = ()
+            if name == 'metor':
+                requirements = (f'metor-sdk=={APP_VERSION}',)
+            elif name.startswith('metor-ui-'):
+                requirements = (
+                    f'metor=={APP_VERSION}',
+                    f'metor-sdk=={APP_VERSION}',
+                )
+            return name, APP_VERSION, requirements
+
+        with (
+            patch('scripts.validate_wheel_versions.wheel_metadata', metadata),
+            patch(
+                'scripts.validate_wheel_versions.wheel_owned_files', return_value=set()
+            ),
+        ):
+            errors = validate_wheel_versions(paths)
+        self.assertIn('Duplicate Metor wheel identity: metor.', errors)
 
 
 class DocumentationReleaseArchitectureTests(unittest.TestCase):
@@ -871,7 +912,10 @@ class DocumentationReleaseArchitectureTests(unittest.TestCase):
         self.assertIn('contents: read', validation_jobs)
         self.assertIn('contents: write', publish_job)
         self.assertIn("github.ref_name == 'main'", publish_job)
-        self.assertIn('actions/setup-node@v6', validation_jobs)
+        self.assertIn(
+            'actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38',
+            validation_jobs,
+        )
         self.assertIn('node-version: "22.17.1"', validation_jobs)
         self.assertIn('npm ci', validation_jobs)
         self.assertIn('python scripts/validate_generated_docs.py', validation_jobs)
@@ -888,6 +932,37 @@ class DocumentationReleaseArchitectureTests(unittest.TestCase):
         self.assertIn('Smoke-test Windows bundle installers', validation_jobs)
         self.assertIn('install.sh', validation_jobs)
         self.assertIn('install.cmd', validation_jobs)
+        self.assertIn('candidate_sha:', workflow)
+        self.assertIn('main moved after release validation', publish_job)
+        self.assertIn('HEAD:refs/heads/main', publish_job)
+
+    def test_external_actions_are_commit_pinned_and_permissions_are_explicit(
+        self,
+    ) -> None:
+        """Rejects mutable action tags and implicit token permissions.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        root = Path(__file__).resolve().parents[1]
+        action_files = tuple((root / '.github').rglob('*.yml'))
+        expected = {
+            'actions/checkout': 'd23441a48e516b6c34aea4fa41551a30e30af803',
+            'actions/setup-python': 'ece7cb06caefa5fff74198d8649806c4678c61a1',
+            'actions/setup-node': '249970729cb0ef3589644e2896645e5dc5ba9c38',
+            'actions/upload-artifact': 'ea165f8d65b6e75b540449e92b4886f43607fa02',
+            'actions/download-artifact': 'd3f86a106a0bac45b974a628896c90dbdf5c8093',
+        }
+        for path in action_files:
+            source = path.read_text(encoding='utf-8')
+            for owner, sha in expected.items():
+                for match in re.findall(rf'{re.escape(owner)}@([^\s#]+)', source):
+                    self.assertEqual(match, sha, f'{path}: {owner}')
+            if '/workflows/' in path.as_posix():
+                self.assertIn('permissions:', source, path.as_posix())
 
     def test_canonical_release_workflow_replaces_legacy_bundle_workflow(
         self,

@@ -23,6 +23,15 @@ def validate_zip(archive: Path) -> None:
         if len(installers) != 1:
             raise ValueError('Release must have exactly one installer.')
         installer = installers[0]
+        subprocess.run(
+            [
+                sys.executable,
+                str(installer.parent / 'verify_bundle.py'),
+                str(installer.parent),
+            ],
+            cwd=installer.parent,
+            check=True,
+        )
         environment = {
             k: v for k, v in os.environ.items() if k not in {'PYTHONPATH', 'MYPYPATH'}
         }
@@ -110,6 +119,20 @@ def main() -> None:
     archives = sorted(root.glob('*.zip'))
     if len(archives) != 4:
         raise ValueError('Expected SDK, base, Terminal and GUI ZIPs.')
+    prefixes = {
+        'base': 'metor-wheelhouse-',
+        'gui': 'metor-ui-gui-wheelhouse-',
+        'sdk': 'metor-sdk-wheelhouse-',
+        'terminal': 'metor-ui-terminal-wheelhouse-',
+    }
+    identities = {
+        variant
+        for archive in archives
+        for variant, prefix in prefixes.items()
+        if archive.name.startswith(prefix)
+    }
+    if identities != set(prefixes):
+        raise ValueError('Release ZIP identities must be SDK, base, Terminal and GUI.')
     for archive in archives:
         validate_zip(archive)
 

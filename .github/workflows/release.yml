@@ -1,5 +1,11 @@
 name: Release Metor
 
+permissions: {}
+
+concurrency:
+  group: metor-release
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
     inputs:
@@ -25,16 +31,23 @@ jobs:
     permissions:
       contents: read
     outputs:
+      candidate_sha: ${{ steps.candidate.outputs.sha }}
       latest_tag: ${{ steps.version.outputs.latest_tag }}
       next_version: ${{ steps.version.outputs.next_version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
+          ref: ${{ github.sha }}
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
+
+      - name: Record immutable candidate
+        id: candidate
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Reject non-main publish requests
         shell: bash
@@ -66,6 +79,10 @@ jobs:
           echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
           echo "next_version=$next_version" >> "$GITHUB_OUTPUT"
           echo "Candidate release: v$next_version"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$next_version" >/dev/null 2>&1; then
+            echo "Release tag v$next_version already exists." >&2
+            exit 1
+          fi
 
   quality:
     needs: prepare
@@ -80,9 +97,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
 
       - name: Apply candidate application version
         shell: bash
@@ -98,7 +116,7 @@ jobs:
           run-tests: "false"
 
       - name: Set up Node.js for documentation generators
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "22.17.1"
           cache: "npm"
@@ -239,7 +257,7 @@ jobs:
           & "$sdkDir\.venv\Scripts\python.exe" -c "try:`n    import metor.data`n    raise SystemExit(1)`nexcept ModuleNotFoundError:`n    pass"
 
       - name: Preserve platform release bundles
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: metor-release-bundles-${{ matrix.os }}
           path: dist/release/*.zip
@@ -247,7 +265,7 @@ jobs:
 
       - name: Preserve generated release baseline
         if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-compatibility-baseline
           path: |
@@ -266,16 +284,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-compatibility-baseline
           path: release-state
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: metor-release-bundles-*
           path: dist/release-assets
@@ -284,6 +303,15 @@ jobs:
       - name: Create release commit and tag
         shell: bash
         run: |
+          git fetch --no-tags origin main
+          if [ "$(git rev-parse refs/remotes/origin/main)" != '${{ needs.prepare.outputs.candidate_sha }}' ]; then
+            echo 'main moved after release validation; restart from the new commit.' >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin 'refs/tags/v${{ needs.prepare.outputs.next_version }}' >/dev/null 2>&1; then
+            echo 'Release tag already exists.' >&2
+            exit 1
+          fi
           python scripts/versioning.py set-app '${{ needs.prepare.outputs.next_version }}'
           cp release-state/API.md docs/generated/API.md
           cp release-state/SETTINGS.md docs/generated/SETTINGS.md
@@ -296,7 +324,7 @@ jobs:
             git commit -m 'release: v${{ needs.prepare.outputs.next_version }}'
           fi
           git tag -a 'v${{ needs.prepare.outputs.next_version }}' -m 'Metor v${{ needs.prepare.outputs.next_version }}'
-          git push origin HEAD:${GITHUB_REF_NAME} 'refs/tags/v${{ needs.prepare.outputs.next_version }}'
+          git push origin HEAD:refs/heads/main 'refs/tags/v${{ needs.prepare.outputs.next_version }}'
 
       - name: Publish GitHub release with compatibility matrix
         shell: bash
@@ -321,5 +349,6 @@ jobs:
       - quality
     runs-on: ubuntu-latest
     if: inputs.dry_run == true
+    permissions: {}
     steps:
       - run: echo 'Dry run passed for v${{ needs.prepare.outputs.next_version }}; no repository or release state was changed.'

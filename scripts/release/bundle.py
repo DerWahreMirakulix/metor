@@ -2,6 +2,7 @@
 
 import argparse
 import hashlib
+import json
 import platform
 import shutil
 import subprocess
@@ -20,6 +21,8 @@ INSTALL_GUIDE_NAME: str = 'INSTALL.txt'
 INSTALL_SHELL_NAME: str = 'install.sh'
 INSTALL_WINDOWS_NAME: str = 'install.cmd'
 CHECKSUM_FILE_NAME: str = 'SHA256SUMS.txt'
+BUNDLE_METADATA_NAME: str = 'BUNDLE.json'
+BUNDLE_VERIFIER_NAME: str = 'verify_bundle.py'
 RELEASE_VARIANTS: tuple[str, ...] = ('base', 'terminal', 'sdk', 'gui')
 
 
@@ -128,18 +131,24 @@ def build_install_guide(bundle_name: str, package_name: str = 'metor') -> str:
 
         Manual fallback:
 
+          python {BUNDLE_VERIFIER_NAME} .
           python -m venv .venv
           .venv/bin/python -m pip install --no-index --find-links wheelhouse --upgrade pip=={PIP_VERSION}
           .venv/bin/python -m pip install --no-index --find-links wheelhouse {package_name}
 
         On Windows PowerShell, use:
 
+          python {BUNDLE_VERIFIER_NAME} .
           .venv\\Scripts\\python.exe -m pip install --no-index --find-links wheelhouse --upgrade pip=={PIP_VERSION}
           .venv\\Scripts\\python.exe -m pip install --no-index --find-links wheelhouse {package_name}
 
         The --no-index flag ensures installation stays inside this bundle,
         requires no package index access, and never falls back to building
         native extensions on the target host.
+
+        The installers verify SHA256SUMS.txt, including the bundled pip wheel,
+        before changing .venv. These hashes detect incomplete or modified bundle
+        contents; they are not a signature or publisher-authenticity proof.
         """
     )
 
@@ -168,24 +177,37 @@ def build_install_shell_script(package_name: str = 'metor') -> str:
         venv_dir="$script_dir/.venv"
         python_bin=''
 
-        for candidate in python3 python; do
-          if command -v "$candidate" >/dev/null 2>&1; then
-            python_bin="$candidate"
-            break
+        if [ -e "$venv_dir" ]; then
+          if [ ! -x "$venv_dir/bin/python" ]; then
+            echo 'Existing .venv is incomplete; refusing to replace or delete it.' >&2
+            exit 1
           fi
-        done
+          if ! "$venv_dir/bin/python" "$script_dir/{BUNDLE_VERIFIER_NAME}" "$script_dir" --target-only; then
+            echo 'Existing .venv targets a different Python/OS/architecture; refusing to modify it.' >&2
+            exit 1
+          fi
+          python_bin="$venv_dir/bin/python"
+        fi
 
         if [ -z "$python_bin" ]; then
-          echo 'Python 3.11 or newer is required.' >&2
+          for candidate in python{sys.version_info.major}.{sys.version_info.minor} python3 python; do
+            if command -v "$candidate" >/dev/null 2>&1 && "$candidate" "$script_dir/{BUNDLE_VERIFIER_NAME}" "$script_dir" --target-only >/dev/null 2>&1; then
+              python_bin="$candidate"
+              break
+            fi
+          done
+        fi
+
+        if [ -z "$python_bin" ]; then
+          echo 'No interpreter matches this bundle target.' >&2
           exit 1
         fi
 
-        if ! "$python_bin" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"; then
-            echo 'Python 3.11 or newer is required.' >&2
-            exit 1
-        fi
+        "$python_bin" "$script_dir/{BUNDLE_VERIFIER_NAME}" "$script_dir"
 
-        "$python_bin" -m venv "$venv_dir"
+        if [ ! -x "$venv_dir/bin/python" ]; then
+          "$python_bin" -m venv "$venv_dir"
+        fi
         "$venv_dir/bin/python" -m pip install --no-index --find-links "$script_dir/{WHEELHOUSE_DIRNAME}" --upgrade pip=={PIP_VERSION}
         "$venv_dir/bin/python" -m pip install --no-index --find-links "$script_dir/{WHEELHOUSE_DIRNAME}" {package_name}
 
@@ -196,11 +218,10 @@ def build_install_shell_script(package_name: str = 'metor') -> str:
 
 
 def build_install_windows_script(package_name: str = 'metor') -> str:
-    """
-    Builds the Windows batch installer shipped inside one release bundle.
+    """Builds the Windows batch installer shipped inside one release bundle.
 
     Args:
-        package_name (str): Name of the package to install.
+        package_name: Name of the package to install.
 
     Returns:
         str: The Windows batch installer script.
@@ -216,40 +237,44 @@ def build_install_windows_script(package_name: str = 'metor') -> str:
         setlocal
         set "SCRIPT_DIR=%~dp0"
         set "VENV_DIR=%SCRIPT_DIR%.venv"
-        set "VERSION_CHECK=import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"
+        set "VERIFY=%SCRIPT_DIR%{BUNDLE_VERIFIER_NAME}"
 
-        if exist "%VENV_DIR%\\Scripts\\python.exe" goto install
+        if exist "%VENV_DIR%" (
+            if not exist "%VENV_DIR%\\Scripts\\python.exe" goto incompatible_venv
+            "%VENV_DIR%\\Scripts\\python.exe" "%VERIFY%" "%SCRIPT_DIR%" --target-only >nul 2>nul
+            if not %ERRORLEVEL%==0 goto incompatible_venv
+            "%VENV_DIR%\\Scripts\\python.exe" "%VERIFY%" "%SCRIPT_DIR%" || exit /b 1
+            goto install
+        )
 
         where py >nul 2>nul
         if %ERRORLEVEL%==0 (
-            py -3.11 -c "%VERSION_CHECK%" >nul 2>nul
+            py -{sys.version_info.major}.{sys.version_info.minor} "%VERIFY%" "%SCRIPT_DIR%" --target-only >nul 2>nul
             if %ERRORLEVEL%==0 (
-                py -3.11 -m venv "%VENV_DIR%" >nul 2>nul
-                if exist "%VENV_DIR%\\Scripts\\python.exe" goto install
-                rd /s /q "%VENV_DIR%" >nul 2>nul
-            )
-            py -3 -c "%VERSION_CHECK%" >nul 2>nul
-            if %ERRORLEVEL%==0 (
-                py -3 -m venv "%VENV_DIR%" >nul 2>nul
-                if exist "%VENV_DIR%\\Scripts\\python.exe" goto install
-                rd /s /q "%VENV_DIR%" >nul 2>nul
+                py -{sys.version_info.major}.{sys.version_info.minor} "%VERIFY%" "%SCRIPT_DIR%" || exit /b 1
+                py -{sys.version_info.major}.{sys.version_info.minor} -m venv "%VENV_DIR%" || exit /b 1
+                goto install
             )
         )
 
         where python >nul 2>nul
         if %ERRORLEVEL%==0 (
-            python -c "%VERSION_CHECK%" >nul 2>nul
+            python "%VERIFY%" "%SCRIPT_DIR%" --target-only >nul 2>nul
             if not %ERRORLEVEL%==0 goto wrong_python
-            python -m venv "%VENV_DIR%"
+            python "%VERIFY%" "%SCRIPT_DIR%" || exit /b 1
+            python -m venv "%VENV_DIR%" || exit /b 1
             goto install
         )
 
         :wrong_python
-        echo Python 3.11 or newer is required.
+        echo No interpreter matches this bundle target.
+        exit /b 1
+
+        :incompatible_venv
+        echo Existing .venv is incompatible or incomplete; refusing to modify or delete it.
         exit /b 1
 
         :install
-        "%VENV_DIR%\\Scripts\\python.exe" -c "%VERSION_CHECK%" >nul 2>nul || goto wrong_python
         "%VENV_DIR%\\Scripts\\python.exe" -m pip install --no-index --find-links "%SCRIPT_DIR%{WHEELHOUSE_DIRNAME}" --upgrade pip=={PIP_VERSION} || exit /b 1
         "%VENV_DIR%\\Scripts\\python.exe" -m pip install --no-index --find-links "%SCRIPT_DIR%{WHEELHOUSE_DIRNAME}" {package_name} || exit /b 1
         echo Metor installed in "%VENV_DIR%"
@@ -338,6 +363,28 @@ def build_sha256_manifest(bundle_dir: Path) -> str:
         relative_path: str = file_path.relative_to(bundle_dir).as_posix()
         lines.append(f'{digest}  {relative_path}')
     return '\n'.join(lines) + '\n'
+
+
+def build_bundle_metadata(variant: str, package_name: str) -> str:
+    """Builds exact interpreter and host metadata for one native wheelhouse.
+
+    Args:
+        variant: Release bundle variant.
+        package_name: Explicit distribution installed by the bundle.
+
+    Returns:
+        str: Deterministic JSON target metadata.
+    """
+    document = {
+        'abi': sys.implementation.cache_tag,
+        'machine': normalize_machine(platform.machine()),
+        'package': package_name,
+        'python': f'{sys.version_info.major}.{sys.version_info.minor}',
+        'schema': 1,
+        'system': platform.system().strip().lower(),
+        'variant': variant,
+    }
+    return json.dumps(document, indent=2, sort_keys=True) + '\n'
 
 
 def archive_bundle(bundle_dir: Path) -> Path:
@@ -468,6 +515,14 @@ def build_release_wheelhouse(
     write_text_file(
         bundle_dir / INSTALL_WINDOWS_NAME,
         build_install_windows_script(package_name),
+    )
+    write_text_file(
+        bundle_dir / BUNDLE_METADATA_NAME,
+        build_bundle_metadata(variant, package_name),
+    )
+    shutil.copyfile(
+        repo_root / 'scripts' / 'release' / BUNDLE_VERIFIER_NAME,
+        bundle_dir / BUNDLE_VERIFIER_NAME,
     )
     write_text_file(bundle_dir / CHECKSUM_FILE_NAME, build_sha256_manifest(bundle_dir))
     archive_path: Path = archive_bundle(bundle_dir)
