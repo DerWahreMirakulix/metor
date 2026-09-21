@@ -467,19 +467,50 @@ class NetworkManager:
         self._router.finalize_voice(msg_id, duration_ms)
 
     def release_consumed_voice(self, onion: str, msg_ids: List[str]) -> None:
-        """Releases consumed inbound LIVE Voice payloads."""
+        """Releases consumed inbound LIVE Voice payloads.
+
+        Args:
+            onion (str): The onion input.
+            msg_ids (List[str]): The msg ids input.
+
+        Returns:
+            None
+        """
         self._router.release_consumed_voice(onion, msg_ids)
 
     def voice_target(self, msg_id: str) -> Optional[str]:
-        """Returns the onion identity bound to one active outbound Voice turn."""
+        """Returns the onion identity bound to one active outbound Voice turn.
+
+        Args:
+            msg_id (str): The msg id input.
+
+        Returns:
+            Optional[str]: The resulting value.
+        """
         return self._router.voice_target(msg_id)
 
     def voice_context(self, onion: str, msg_id: str, direction: str) -> int | None:
-        """Returns immutable message provenance for restricted media access."""
+        """Returns immutable message provenance for restricted media access.
+
+        Args:
+            onion (str): The onion input.
+            msg_id (str): The msg id input.
+            direction (str): The direction input.
+
+        Returns:
+            int | None: The resulting value.
+        """
         return self._router.voice_context(onion, msg_id, direction)
 
     def voice_delivery(self, msg_id: str) -> Optional[Delivery]:
-        """Returns the delivery semantics fixed at Voice begin."""
+        """Returns the delivery semantics fixed at Voice begin.
+
+        Args:
+            msg_id (str): The msg id input.
+
+        Returns:
+            Optional[Delivery]: The resulting value.
+        """
         return self._router.voice_delivery(msg_id)
 
     def inbound_voice_delivery(self, onion: str, msg_id: str) -> Optional[Delivery]:
@@ -530,21 +561,56 @@ class NetworkManager:
         bool,
         Optional[MessageOperationReason],
     ]:
-        """Reads one bounded retained Voice byte range."""
+        """Reads one bounded retained Voice byte range.
+
+        Args:
+            onion (str): The onion input.
+            msg_id (str): The msg id input.
+            direction (MessageDirection): The direction input.
+            offset (int): The offset input.
+            max_bytes (int): The max bytes input.
+
+        Returns:
+            tuple[Optional[VoiceContent], Optional[Delivery], Optional[bytes], int, bool, Optional[MessageOperationReason]]: The resulting value.
+        """
         return self._router.read_voice_chunk(
             onion, msg_id, direction, offset, max_bytes
         )
 
     def release_inbound_voice_item(self, onion: str, msg_id: str) -> bool:
-        """Consumes one finalized inbound Voice item explicitly."""
+        """Consumes one finalized inbound Voice item explicitly.
+
+        Args:
+            onion (str): The onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         return self._router.release_inbound_voice_item(onion, msg_id)
 
     def commit_voice_draft(self, target: str, msg_id: str) -> bool:
-        """Publishes one finalized DROP Voice draft."""
+        """Publishes one finalized DROP Voice draft.
+
+        Args:
+            target (str): The target input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         return self._router.commit_voice_draft(target, msg_id)
 
     def cancel_voice_draft(self, target: str, msg_id: str) -> bool:
-        """Cancels one unsent DROP Voice draft."""
+        """Cancels one unsent DROP Voice draft.
+
+        Args:
+            target (str): The target input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         return self._router.cancel_voice_draft(target, msg_id)
 
     def finalize_interrupted_voice(self, onion: str, msg_id: str) -> bool:
@@ -571,7 +637,14 @@ class NetworkManager:
         self._router.set_voice_capture_allocator(allocator)
 
     def dismiss_inbound_voice(self, onion: str) -> None:
-        """Releases inbound Voice payloads for a dismissed LIVE context."""
+        """Releases inbound Voice payloads for a dismissed LIVE context.
+
+        Args:
+            onion (str): The onion input.
+
+        Returns:
+            None
+        """
         self._router.dismiss_inbound_voice(onion)
 
     def get_active_onions(self) -> List[str]:
@@ -652,11 +725,25 @@ class NetworkManager:
         return self._state.get_live_state(onion)
 
     def get_last_disconnect_reason(self, onion: str) -> Optional[ConnectionReasonCode]:
-        """Returns the last machine-readable disconnect reason for snapshots."""
+        """Returns the last machine-readable disconnect reason for snapshots.
+
+        Args:
+            onion (str): The onion input.
+
+        Returns:
+            Optional[ConnectionReasonCode]: The resulting value.
+        """
         return self._state.get_last_disconnect_reason(onion)
 
     def get_last_disconnect_actor(self, onion: str) -> Optional[ConnectionActor]:
-        """Returns the last machine-readable disconnect actor for snapshots."""
+        """Returns the last machine-readable disconnect actor for snapshots.
+
+        Args:
+            onion (str): The onion input.
+
+        Returns:
+            Optional[ConnectionActor]: The resulting value.
+        """
         return self._state.get_last_disconnect_actor(onion)
 
     def get_session_last_activity(self, onion: str) -> Optional[float]:
@@ -670,7 +757,14 @@ class NetworkManager:
         return self._state.get_session_last_activity(onion)
 
     def get_snapshot_token(self) -> Tuple[object, ...]:
-        """Returns an atomic fingerprint used to reject torn projections."""
+        """Returns an atomic fingerprint used to reject torn projections.
+
+        Args:
+            None
+
+        Returns:
+            Tuple[object, ...]: The resulting value.
+        """
         return self._state.snapshot_token()
 
     @contextmanager

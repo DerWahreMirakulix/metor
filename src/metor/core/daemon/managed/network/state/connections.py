@@ -61,7 +61,16 @@ class StateTrackerConnectionsMixin:
         reason: Optional[ConnectionReasonCode],
         actor: Optional[ConnectionActor] = None,
     ) -> None:
-        """Stores only machine-readable lifecycle state for later snapshots."""
+        """Stores only machine-readable lifecycle state for later snapshots.
+
+        Args:
+            onion (str): The onion input.
+            reason (Optional[ConnectionReasonCode]): The reason input.
+            actor (Optional[ConnectionActor]): The actor input.
+
+        Returns:
+            None
+        """
         with self._lock:
             if reason is None:
                 self._last_disconnect_reasons.pop(onion, None)
@@ -73,12 +82,26 @@ class StateTrackerConnectionsMixin:
                 self._last_disconnect_actors[onion] = actor
 
     def get_last_disconnect_reason(self, onion: str) -> Optional[ConnectionReasonCode]:
-        """Returns the last relevant disconnect reason for one peer."""
+        """Returns the last relevant disconnect reason for one peer.
+
+        Args:
+            onion (str): The onion input.
+
+        Returns:
+            Optional[ConnectionReasonCode]: The resulting value.
+        """
         with self._lock:
             return self._last_disconnect_reasons.get(onion)
 
     def get_last_disconnect_actor(self, onion: str) -> Optional[ConnectionActor]:
-        """Returns the actor associated with the last relevant disconnect."""
+        """Returns the actor associated with the last relevant disconnect.
+
+        Args:
+            onion (str): The onion input.
+
+        Returns:
+            Optional[ConnectionActor]: The resulting value.
+        """
         with self._lock:
             return self._last_disconnect_actors.get(onion)
 

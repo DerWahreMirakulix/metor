@@ -43,11 +43,27 @@ class VoiceRetainedMixin:
 
     if TYPE_CHECKING:
 
-        def finalize(self, msg_id: str, duration_ms: Optional[int]) -> None: ...
+        def finalize(self, msg_id: str, duration_ms: Optional[int]) -> None:
+            """Finalizes one admitted outbound Voice capture.
+
+            Args:
+                msg_id: Stable Voice message identity.
+                duration_ms: Optional measured capture duration.
+            Returns:
+                None
+            """
+            ...
 
     @staticmethod
     def _metadata_blob_ids(payload: str) -> Optional[tuple[str, ...]]:
-        """Parses the complete segmented object inventory from Voice metadata."""
+        """Parses the complete segmented object inventory from Voice metadata.
+
+        Args:
+            payload (str): The payload input.
+
+        Returns:
+            Optional[tuple[str, ...]]: The resulting value.
+        """
         try:
             metadata = json.loads(payload)
         except (TypeError, ValueError):
@@ -89,7 +105,14 @@ class VoiceRetainedMixin:
             return turn.context_generation
 
     def _reconcile_drop_ownership(self) -> None:
-        """Completes interrupted temporary-to-persistent Voice promotions."""
+        """Completes interrupted temporary-to-persistent Voice promotions.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         payloads = [
             row[3]
             for row in self._messages.get_pending_outbox()
@@ -118,7 +141,14 @@ class VoiceRetainedMixin:
 
     @staticmethod
     def _metadata_finalized(payload: str) -> bool:
-        """Reports whether one Voice metadata document is finalized."""
+        """Reports whether one Voice metadata document is finalized.
+
+        Args:
+            payload (str): The payload input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         try:
             metadata = json.loads(payload)
         except (TypeError, ValueError):
@@ -126,7 +156,14 @@ class VoiceRetainedMixin:
         return isinstance(metadata, dict) and metadata.get('finalized') is True
 
     def _hydrate_retained_turns(self) -> None:
-        """Restores resumable Voice turns from canonical receipt/blob storage."""
+        """Restores resumable Voice turns from canonical receipt/blob storage.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         for record in self._messages.get_pending_live_outbox():
             if record.content_type != ContentType.VOICE.value:
                 continue
@@ -213,7 +250,19 @@ class VoiceRetainedMixin:
         delivery: Delivery,
         lifecycle: BlobLifecycle,
     ) -> Optional[VoiceTurn]:
-        """Builds one retained turn without trusting serialized byte counts."""
+        """Builds one retained turn without trusting serialized byte counts.
+
+        Args:
+            onion (str): The onion input.
+            msg_id (str): The msg id input.
+            payload (str): The payload input.
+            timestamp (str): The timestamp input.
+            delivery (Delivery): The delivery input.
+            lifecycle (BlobLifecycle): The lifecycle input.
+
+        Returns:
+            Optional[VoiceTurn]: The resulting value.
+        """
         if len(payload.encode('utf-8')) > Constants.VOICE_METADATA_MAX_BYTES:
             return None
         try:
@@ -287,7 +336,14 @@ class VoiceRetainedMixin:
             return None
 
     def _canonical_inbound_metadata(self, turn: VoiceTurn) -> bool | None:
-        """Resolves ambiguous writes before rollback; unavailable is not absent."""
+        """Resolves ambiguous writes before rollback; unavailable is not absent.
+
+        Args:
+            turn (VoiceTurn): The turn input.
+
+        Returns:
+            bool | None: The resulting value.
+        """
         try:
             record = self._messages.get_inbound_voice(turn.onion, turn.msg_id)
             return record is not None and json.loads(record.payload) == json.loads(
@@ -297,7 +353,14 @@ class VoiceRetainedMixin:
             return None
 
     def _canonical_outbound_metadata(self, turn: VoiceTurn) -> bool | None:
-        """Resolves an ambiguous outbound write before deleting retained bytes."""
+        """Resolves an ambiguous outbound write before deleting retained bytes.
+
+        Args:
+            turn (VoiceTurn): The turn input.
+
+        Returns:
+            bool | None: The resulting value.
+        """
         try:
             record = self._messages.get_voice_payload(
                 turn.onion, turn.msg_id, MessageDirection.OUT
@@ -347,12 +410,27 @@ class VoiceRetainedMixin:
         return (turn.blob_id, *turn.chunk_ids)
 
     def _delete_turn_blobs(self, turn: VoiceTurn, lifecycle: BlobLifecycle) -> None:
-        """Deletes every segmented object owned by one Voice turn."""
+        """Deletes every segmented object owned by one Voice turn.
+
+        Args:
+            turn (VoiceTurn): The turn input.
+            lifecycle (BlobLifecycle): The lifecycle input.
+
+        Returns:
+            None
+        """
         for blob_id in self._blob_ids(turn):
             self._blobs.delete(blob_id, lifecycle)
 
     def _promote_turn_blobs(self, turn: VoiceTurn) -> None:
-        """Idempotently promotes every segmented Voice object."""
+        """Idempotently promotes every segmented Voice object.
+
+        Args:
+            turn (VoiceTurn): The turn input.
+
+        Returns:
+            None
+        """
         for blob_id in self._blob_ids(turn):
             if self._blobs.exists(blob_id, BlobLifecycle.PERSISTENT):
                 continue
@@ -454,7 +532,17 @@ class VoiceRetainedMixin:
         max_bytes: int,
         lifecycle: BlobLifecycle = BlobLifecycle.TEMPORARY,
     ) -> bytes:
-        """Reads an indexed bounded range without decrypting its prefix."""
+        """Reads an indexed bounded range without decrypting its prefix.
+
+        Args:
+            turn (VoiceTurn): The turn input.
+            offset (int): The offset input.
+            max_bytes (int): The max bytes input.
+            lifecycle (BlobLifecycle): The lifecycle input.
+
+        Returns:
+            bytes: The resulting value.
+        """
         if offset < 0 or max_bytes < 0 or offset > turn.size_bytes:
             raise ValueError('Invalid Voice range.')
         remaining = max_bytes
@@ -478,7 +566,14 @@ class VoiceRetainedMixin:
         return bytes(selected)
 
     def dismiss_inbound(self, onion: str) -> None:
-        """Shreds all retained inbound LIVE Voice payloads for one context."""
+        """Shreds all retained inbound LIVE Voice payloads for one context.
+
+        Args:
+            onion (str): The onion input.
+
+        Returns:
+            None
+        """
         if self._purge_fence.is_set():
             return
         with self._lock:

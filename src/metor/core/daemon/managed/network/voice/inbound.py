@@ -62,18 +62,57 @@ class VoiceInboundMixin:
 
     if TYPE_CHECKING:
 
-        def _canonical_inbound_metadata(self, turn: VoiceTurn) -> bool | None: ...
+        def _canonical_inbound_metadata(self, turn: VoiceTurn) -> bool | None:
+            """Checks retained metadata against one inbound turn.
 
-        def _delete_turn_blobs(
-            self, turn: VoiceTurn, lifecycle: BlobLifecycle
-        ) -> None: ...
+            Args:
+                turn: In-memory inbound turn.
+            Returns:
+                bool | None: Match result, or unknown when metadata is unavailable.
+            """
+            ...
 
-        def _limit(self) -> int: ...
+        def _delete_turn_blobs(self, turn: VoiceTurn, lifecycle: BlobLifecycle) -> None:
+            """Deletes every object owned by one Voice turn.
+
+            Args:
+                turn: Voice turn whose objects are removed.
+                lifecycle: Expected object lifecycle.
+            Returns:
+                None
+            """
+            ...
+
+        def _limit(self) -> int:
+            """Returns the configured aggregate Voice byte limit.
+
+            Args:
+                None
+            Returns:
+                int: Maximum retained Voice bytes.
+            """
+            ...
 
         @staticmethod
-        def _metadata(turn: VoiceTurn) -> str: ...
+        def _metadata(turn: VoiceTurn) -> str:
+            """Serializes canonical metadata for one Voice turn.
 
-        def _promote_turn_blobs(self, turn: VoiceTurn) -> None: ...
+            Args:
+                turn: Voice turn to describe.
+            Returns:
+                str: Canonical metadata JSON.
+            """
+            ...
+
+        def _promote_turn_blobs(self, turn: VoiceTurn) -> None:
+            """Promotes every temporary object owned by a finalized turn.
+
+            Args:
+                turn: Finalized Voice turn.
+            Returns:
+                None
+            """
+            ...
 
         def _read_turn_range(
             self,
@@ -81,7 +120,18 @@ class VoiceInboundMixin:
             offset: int,
             max_bytes: int,
             lifecycle: BlobLifecycle = BlobLifecycle.TEMPORARY,
-        ) -> bytes: ...
+        ) -> bytes:
+            """Reads one bounded contiguous range from segmented Voice objects.
+
+            Args:
+                turn: Voice turn owning the objects.
+                offset: First byte to read.
+                max_bytes: Maximum number of bytes to return.
+                lifecycle: Expected object lifecycle.
+            Returns:
+                bytes: Available contiguous payload bytes.
+            """
+            ...
 
         def _turn_from_metadata(
             self,
@@ -91,9 +141,30 @@ class VoiceInboundMixin:
             timestamp: str,
             delivery: Delivery,
             lifecycle: BlobLifecycle,
-        ) -> Optional[VoiceTurn]: ...
+        ) -> Optional[VoiceTurn]:
+            """Hydrates a Voice turn only from valid canonical metadata.
 
-        def _used_bytes(self) -> int: ...
+            Args:
+                onion: Authenticated peer identity.
+                msg_id: Stable Voice message identity.
+                payload: Stored canonical metadata.
+                timestamp: Stored message timestamp.
+                delivery: Recorded delivery mode.
+                lifecycle: Expected object lifecycle.
+            Returns:
+                Optional[VoiceTurn]: Hydrated turn when all metadata is valid.
+            """
+            ...
+
+        def _used_bytes(self) -> int:
+            """Counts bytes currently retained by active Voice turns.
+
+            Args:
+                None
+            Returns:
+                int: Aggregate retained byte count.
+            """
+            ...
 
     def receive_begin(
         self,
@@ -348,7 +419,15 @@ class VoiceInboundMixin:
             return FrameAdmission.ACCEPTED
 
     def _send_receive_offset(self, conn: socket.socket, turn: VoiceTurn) -> None:
-        """Acknowledges a resumable byte boundary or completed DROP item."""
+        """Acknowledges a resumable byte boundary or completed DROP item.
+
+        Args:
+            conn (socket.socket): The conn input.
+            turn (VoiceTurn): The turn input.
+
+        Returns:
+            None
+        """
         if turn.finalized:
             self._state.send_frame(
                 conn,
@@ -625,7 +704,14 @@ class VoiceInboundMixin:
             return FrameAdmission.ACCEPTED
 
     def _notify_inbox(self, turn: VoiceTurn) -> None:
-        """Emits content-free attached or detached unseen notification metadata."""
+        """Emits content-free attached or detached unseen notification metadata.
+
+        Args:
+            turn (VoiceTurn): The turn input.
+
+        Returns:
+            None
+        """
         if self._has_clients():
             self._broadcast(
                 InboxNotificationEvent(

@@ -74,15 +74,36 @@ class DaemonLifecycleMixin:
     _domain_operation_lock: threading.RLock
 
     def _on_runtime_internal_error(self, message: str) -> None:
-        """Reports one lifecycle failure through the concrete daemon."""
+        """Reports one lifecycle failure through the concrete daemon.
+
+        Args:
+            message (str): The message input.
+
+        Returns:
+            None
+        """
         raise NotImplementedError
 
     def stop(self) -> None:
-        """Stops the concrete daemon after destructive teardown."""
+        """Stops the concrete daemon after destructive teardown.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         raise NotImplementedError
 
     def _lock_runtime(self, preserve_reliability: bool = True) -> bool:
-        """Serializes runtime release against repeated lock, stop and purge attempts."""
+        """Serializes runtime release against repeated lock, stop and purge attempts.
+
+        Args:
+            preserve_reliability (bool): The preserve reliability input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         # Dispatch already owns the domain barrier. External stop must use the
         # same order, otherwise network teardown can invert these two locks.
         with self._domain_operation_lock, self._release_lock:
@@ -182,7 +203,15 @@ class DaemonLifecycleMixin:
         def publish(
             event_type: EventType, payload: dict[str, JsonValue] | None = None
         ) -> None:
-            """Publishes purge status only to the initiating control session."""
+            """Publishes purge status only to the initiating control session.
+
+            Args:
+                event_type (EventType): The event type input.
+                payload (dict[str, JsonValue] | None): The payload input.
+
+            Returns:
+                None
+            """
             ipc = getattr(self, '_ipc', None)
             if ipc is None:
                 return
@@ -198,7 +227,14 @@ class DaemonLifecycleMixin:
                 pass
 
         def report_key_destroyed() -> None:
-            """Publishes the irreversible key-destruction milestone."""
+            """Publishes the irreversible key-destruction milestone.
+
+            Args:
+                None
+
+            Returns:
+                None
+            """
             nonlocal key_destroyed
             key_destroyed = True
             publish(
@@ -207,7 +243,15 @@ class DaemonLifecycleMixin:
             )
 
         def record_failure(phase: str, destroyed: bool) -> None:
-            """Captures the destruction phase before the original error propagates."""
+            """Captures the destruction phase before the original error propagates.
+
+            Args:
+                phase (str): The phase input.
+                destroyed (bool): The destroyed input.
+
+            Returns:
+                None
+            """
             nonlocal failure_phase, key_destroyed
             failure_phase = phase
             key_destroyed = destroyed

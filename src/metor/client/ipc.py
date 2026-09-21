@@ -125,7 +125,14 @@ class IpcClient:
         return self._port
 
     def connect(self, *, start_listener: bool = True) -> bool:
-        """Serializes replacement; at most two callback generations may remain alive."""
+        """Serializes replacement; at most two callback generations may remain alive.
+
+        Args:
+            start_listener (bool): Whether to start asynchronous event delivery.
+
+        Returns:
+            bool: Whether this call installed a complete authenticated connection.
+        """
         if not self._connect_lock.acquire(blocking=False):
             return False
         try:
@@ -165,7 +172,14 @@ class IpcClient:
             return False
 
     def _publish_connection(self, candidate: socket.socket) -> None:
-        """Publishes replacement state under the exchange/loss transition lock."""
+        """Publishes replacement state under the exchange/loss transition lock.
+
+        Args:
+            candidate (socket.socket): Fully handshaken replacement socket.
+
+        Returns:
+            None
+        """
         self._generation += 1
         self._caller.generation = self._generation
         if hasattr(self._caller, 'callback_generation'):
@@ -546,7 +560,15 @@ class IpcClient:
     def _disconnect_transition(
         self, generation: int | None, sock: socket.socket | None
     ) -> None:
-        """Retires only the matching transport under the replacement-state lock."""
+        """Retires only the matching transport under the replacement-state lock.
+
+        Args:
+            generation (int | None): Transport generation reporting the loss.
+            sock (socket.socket | None): Socket reporting the loss.
+
+        Returns:
+            None
+        """
         effective_generation = self._generation if generation is None else generation
         if effective_generation != self._generation or self._stop_flag.is_set():
             return
@@ -584,7 +606,18 @@ class IpcClient:
         lost_signal: Optional[threading.Event] = None,
         wakeup: Optional[threading.Event] = None,
     ) -> None:
-        """Dispatches asynchronous events without blocking the sole reader."""
+        """Dispatches asynchronous events without blocking the sole reader.
+
+        Args:
+            generation (Optional[int]): The generation input.
+            stop_flag (Optional[threading.Event]): The stop flag input.
+            event_queue (Optional[queue.Queue[IpcEvent]]): The event queue input.
+            lost_signal (Optional[threading.Event]): The lost signal input.
+            wakeup (Optional[threading.Event]): The wakeup input.
+
+        Returns:
+            None
+        """
         effective_generation = self._generation if generation is None else generation
         effective_stop = stop_flag or self._stop_flag
         effective_queue = event_queue or self._event_queue

@@ -112,7 +112,19 @@ class DropMessageRouter:
         timestamp: Optional[str],
         transport: str,
     ) -> bool:
-        """Commits and publishes one validated DROP under the state barrier."""
+        """Commits and publishes one validated DROP under the state barrier.
+
+        Args:
+            conn (socket.socket): The conn input.
+            onion (str): The onion input.
+            msg_id (str): The msg id input.
+            content (str): The content input.
+            timestamp (Optional[str]): The timestamp input.
+            transport (str): The transport input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         unread_drop_limit: int = self._config.get_int(SettingKey.MAX_UNSEEN_DROP_MSGS)
         outcome = self._mm.store_inbound_drop_text(
             onion, msg_id, content, timestamp, unread_drop_limit

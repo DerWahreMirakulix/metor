@@ -24,7 +24,15 @@ EnumT = TypeVar('EnumT', bound=Enum)
 
 
 def _coerce_enum(enum_type: type[EnumT], value: object) -> EnumT:
-    """Coerces one string-backed DTO field to its target enum type."""
+    """Coerces one string-backed DTO field to its target enum type.
+
+    Args:
+        enum_type (type[EnumT]): The enum type input.
+        value (object): The value input.
+
+    Returns:
+        EnumT: The resulting value.
+    """
 
     if isinstance(value, enum_type):
         return value
@@ -64,7 +72,14 @@ class MessageEntry:
     msg_id: Optional[str] = None
 
     def __post_init__(self) -> None:
-        """Coerces string-backed direction and status fields to their typed enum equivalents."""
+        """Coerces string-backed direction and status fields to their typed enum equivalents.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         self.direction = _coerce_enum(MessageDirectionCode, self.direction)
         self.status = _coerce_enum(MessageStatusCode, self.status)
         self.delivery = _coerce_enum(Delivery, self.delivery)
@@ -140,7 +155,14 @@ class PendingConnectionEntry:
     action_handle: Optional[str] = None
 
     def __post_init__(self) -> None:
-        """Coerces string-backed origin and reason values to typed enums."""
+        """Coerces string-backed origin and reason values to typed enums.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         self.origin = _coerce_enum(ConnectionOrigin, self.origin)
         self.reason = _coerce_enum(PendingConnectionReasonCode, self.reason)
 
@@ -175,7 +197,14 @@ class LiveContextEntry:
     route_changing: bool = False
 
     def __post_init__(self) -> None:
-        """Coerces optional disconnect fields to their public enums."""
+        """Coerces optional disconnect fields to their public enums.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         if self.context_generation is not None and (
             type(self.context_generation) is not int or self.context_generation <= 0
         ):

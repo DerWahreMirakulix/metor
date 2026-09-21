@@ -63,7 +63,14 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
     _delete_persistent_blob_cb: Optional[Callable[[str], None]]
 
     def _delete_voice_payloads(self, payloads: List[str]) -> None:
-        """Best-effort deletes persistent Voice objects after metadata commits."""
+        """Best-effort deletes persistent Voice objects after metadata commits.
+
+        Args:
+            payloads (List[str]): The payloads input.
+
+        Returns:
+            None
+        """
         if self._delete_persistent_blob_cb is None:
             return
         for payload in payloads:
@@ -156,7 +163,14 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
     def _handle_list_retained_messages(
         self, cmd: ListRetainedMessagesCommand
     ) -> IpcEvent:
-        """Returns retained identities without reading or consuming payloads."""
+        """Returns retained identities without reading or consuming payloads.
+
+        Args:
+            cmd (ListRetainedMessagesCommand): The cmd input.
+
+        Returns:
+            IpcEvent: The resulting value.
+        """
         onion: Optional[str] = None
         if cmd.target:
             resolved = self._cm.resolve_target(cmd.target)

@@ -36,7 +36,19 @@ class BoundedSocketWriter:
         on_failure: Optional[Callable[[socket.socket, Exception], None]] = None,
         on_exit: Optional[Callable[['BoundedSocketWriter'], None]] = None,
     ) -> None:
-        """Starts a single daemon worker for one socket."""
+        """Starts a single daemon worker for one socket.
+
+        Args:
+            conn (socket.socket): The conn input.
+            capacity (int): The capacity input.
+            byte_capacity (int): The byte capacity input.
+            max_frame_bytes (int): The max frame bytes input.
+            on_failure (Optional[Callable[[socket.socket, Exception], None]]): The on failure input.
+            on_exit (Optional[Callable[['BoundedSocketWriter'], None]]): The on exit input.
+
+        Returns:
+            None
+        """
         if capacity <= 0:
             raise ValueError('Socket writer capacity must be positive.')
         if byte_capacity <= 0 or max_frame_bytes <= 0:
@@ -68,7 +80,16 @@ class BoundedSocketWriter:
         *,
         final: bool = False,
     ) -> None:
-        """Admits one bounded frame without waiting for socket I/O."""
+        """Admits one bounded frame without waiting for socket I/O.
+
+        Args:
+            payload (bytes): The payload input.
+            claim (Optional[Callable[[], bool]]): The claim input.
+            final (bool): The final input.
+
+        Returns:
+            None
+        """
         payload_size = len(payload)
         if payload_size > self._max_frame_bytes:
             raise FrameQueueFull('Socket writer frame exceeds its size limit.')
@@ -181,7 +202,14 @@ class BoundedSocketWriter:
             self._queue.task_done()
 
     def _run(self) -> None:
-        """Serially admits claims and writes complete frames."""
+        """Serially admits claims and writes complete frames.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         self._started.set()
         try:
             while not self._closed.is_set():

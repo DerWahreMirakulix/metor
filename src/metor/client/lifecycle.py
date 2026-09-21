@@ -79,7 +79,14 @@ class ProfileRuntimeCoordinator:
 
     @property
     def client(self) -> MetorClient:
-        """Returns the client for the currently selected profile runtime."""
+        """Returns the client for the currently selected profile runtime.
+
+        Args:
+            None
+
+        Returns:
+            MetorClient: The resulting value.
+        """
         return self._client
 
     def switch(

@@ -11,9 +11,35 @@ from .press import PressSource
 class PressSink(Protocol):
     """Semantic interaction target implemented by the current Voice controller."""
 
-    def down(self, source: PressSource) -> bool: ...
-    def up(self, source: PressSource) -> None: ...
-    def depart(self, *, purge: bool = False) -> None: ...
+    def down(self, source: PressSource) -> bool:
+        """Offers one exact press identity to the current Voice owner.
+
+        Args:
+            source: Physical input source.
+        Returns:
+            bool: Whether the owner accepted the press.
+        """
+        ...
+
+    def up(self, source: PressSource) -> None:
+        """Releases one exact press identity.
+
+        Args:
+            source: Physical input source.
+        Returns:
+            None
+        """
+        ...
+
+    def depart(self, *, purge: bool = False) -> None:
+        """Leaves the current Voice route and optionally purges it.
+
+        Args:
+            purge: Whether to revoke and erase the current capture.
+        Returns:
+            None
+        """
+        ...
 
 
 @dataclass(frozen=True)

@@ -328,21 +328,49 @@ class MetorApp(App):
         self.refresh()
 
     def _queue_lifecycle(self, event: DesktopLifecycleEvent) -> None:
-        """Admit one native-thread transition and wake the GUI loop promptly."""
+        """Admit one native-thread transition and wake the GUI loop promptly.
+
+        Args:
+            event (DesktopLifecycleEvent): The event input.
+
+        Returns:
+            None
+        """
         if self._lifecycle_inbox.put(event):
             Clock.schedule_once(self._drain_lifecycle, 0)
 
     def _drain_lifecycle(self, _elapsed: float) -> None:
-        """Apply bounded native lifecycle work on the sole GUI thread."""
+        """Apply bounded native lifecycle work on the sole GUI thread.
+
+        Args:
+            _elapsed (float): The  elapsed input.
+
+        Returns:
+            None
+        """
         for event in self._lifecycle_inbox.take_all():
             self._apply_lifecycle(event)
 
     def _apply_lifecycle(self, event: DesktopLifecycleEvent) -> None:
-        """Synchronously fence privacy before scheduling any replacement frame."""
+        """Synchronously fence privacy before scheduling any replacement frame.
+
+        Args:
+            event (DesktopLifecycleEvent): The event input.
+
+        Returns:
+            None
+        """
         self._lifecycle.apply(event)
 
     def _revoke_native_privacy(self) -> None:
-        """Remove native and in-window auxiliary text before applying a cover."""
+        """Remove native and in-window auxiliary text before applying a cover.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         if self.accessibility is not None:
             self.accessibility.native.focus(False)
             self.accessibility.revoke()

@@ -1,7 +1,8 @@
-"""
-Module providing the terminal frontend entry point.
-Executes the CLI parser, validates systemic configuration integrity,
-and delegates to the command dispatcher.
+"""General CLI entry point for commands and versioned frontend selection.
+
+The module validates host configuration before dispatching Base-owned commands.
+For interactive chat it selects a frontend by identifier and launches it only
+through the public client contract; it does not implement a frontend itself.
 """
 
 import argparse
@@ -20,9 +21,10 @@ from metor.application import initialize_runtime_environment
 
 def run_cli(argv: List[str]) -> int:
     """
-    Runs the terminal frontend against the given argument vector.
-    Validates configuration integrity before dispatch. Implements Fail-Fast
-    architecture to prevent runtime crashes on corrupted JSON.
+    Runs the general command-line entry against the given argument vector.
+
+    Validates configuration integrity before command dispatch and resolves an
+    interactive frontend without importing its implementation into Base.
 
     Args:
         argv (List[str]): The raw argument vector excluding the program name.

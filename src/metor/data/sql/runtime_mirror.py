@@ -31,6 +31,9 @@ def capture_sqlcipher_stderr(
 
     Yields:
         None
+
+    Returns:
+        Iterator[None]: The resulting value.
     """
     try:
         fd: int = sys.stderr.fileno()

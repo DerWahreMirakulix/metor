@@ -176,7 +176,14 @@ class NotificationService:
             self._condition.notify()
 
     def _run(self) -> None:
-        """Resolve and deliver on one finite worker outside domain callers."""
+        """Resolve and deliver on one finite worker outside domain callers.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         while True:
             payload = None
             overloaded = False
@@ -202,7 +209,14 @@ class NotificationService:
                 self._report('Notification sink delivery failed')
 
     def close(self) -> None:
-        """Drop pending optional work and wait only a configured finite interval."""
+        """Drop pending optional work and wait only a configured finite interval.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         with self._condition:
             self._closed = True
             self._queue.clear()

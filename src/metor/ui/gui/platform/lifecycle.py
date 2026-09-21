@@ -22,7 +22,14 @@ class LifecycleInbox:
     """Small synchronized handoff that preserves departures under overload."""
 
     def __init__(self, limit: int = 4) -> None:
-        """Create an inbox with a fixed positive record limit."""
+        """Create an inbox with a fixed positive record limit.
+
+        Args:
+            limit (int): The limit input.
+
+        Returns:
+            None
+        """
         if limit < 1:
             raise ValueError('Lifecycle inbox limit must be positive')
         self._limit = limit
@@ -30,7 +37,14 @@ class LifecycleInbox:
         self._lock = threading.Lock()
 
     def put(self, event: DesktopLifecycleEvent) -> bool:
-        """Coalesce duplicates and prefer a privacy departure over resume."""
+        """Coalesce duplicates and prefer a privacy departure over resume.
+
+        Args:
+            event (DesktopLifecycleEvent): The event input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         with self._lock:
             if self._records and self._records[-1] is event:
                 return False
@@ -45,7 +59,14 @@ class LifecycleInbox:
             return True
 
     def take_all(self) -> tuple[DesktopLifecycleEvent, ...]:
-        """Atomically drain the finite event sequence on the GUI thread."""
+        """Atomically drain the finite event sequence on the GUI thread.
+
+        Args:
+            None
+
+        Returns:
+            tuple[DesktopLifecycleEvent, ...]: The resulting value.
+        """
         with self._lock:
             records = tuple(self._records)
             self._records.clear()
@@ -62,14 +83,31 @@ class LifecycleCoordinator:
         resume: Callable[[], None],
         refresh: Callable[[], None],
     ) -> None:
-        """Bind the sole UI-thread lifecycle actions."""
+        """Bind the sole UI-thread lifecycle actions.
+
+        Args:
+            revoke (Callable[[], None]): The revoke input.
+            suspend (Callable[[], None]): The suspend input.
+            resume (Callable[[], None]): The resume input.
+            refresh (Callable[[], None]): The refresh input.
+
+        Returns:
+            None
+        """
         self._revoke = revoke
         self._suspend = suspend
         self._resume = resume
         self._refresh = refresh
 
     def apply(self, event: DesktopLifecycleEvent) -> None:
-        """Fence departures before controller work and never reveal on resume."""
+        """Fence departures before controller work and never reveal on resume.
+
+        Args:
+            event (DesktopLifecycleEvent): The event input.
+
+        Returns:
+            None
+        """
         if event in {DesktopLifecycleEvent.LOCK, DesktopLifecycleEvent.SUSPEND}:
             self._revoke()
             self._suspend()
@@ -82,10 +120,24 @@ class DesktopLifecycleSource(Protocol):
     """Lifecycle source owned by one GUI process."""
 
     def start(self) -> None:
-        """Begin native event delivery or fail explicitly."""
+        """Begin native event delivery or fail explicitly.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
 
     def close(self) -> None:
-        """Stop native event delivery within a fixed bound."""
+        """Stop native event delivery within a fixed bound.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
 
 
 class WindowsLifecycleSource:
@@ -103,7 +155,14 @@ class WindowsLifecycleSource:
     _NOTIFY_FOR_THIS_SESSION = 0
 
     def __init__(self, publish: Callable[[DesktopLifecycleEvent], None]) -> None:
-        """Create an inert native source with no Kivy-window subclass ownership."""
+        """Create an inert native source with no Kivy-window subclass ownership.
+
+        Args:
+            publish (Callable[[DesktopLifecycleEvent], None]): The publish input.
+
+        Returns:
+            None
+        """
         self._publish = publish
         self._thread: threading.Thread | None = None
         self._ready = threading.Event()
@@ -114,7 +173,14 @@ class WindowsLifecycleSource:
         self._win32ts: Any = None
 
     def start(self) -> None:
-        """Register WTS and power delivery, failing closed if unavailable."""
+        """Register WTS and power delivery, failing closed if unavailable.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         if self._thread is not None:
             return
         self._thread = threading.Thread(
@@ -134,7 +200,14 @@ class WindowsLifecycleSource:
             ) from error
 
     def _run(self) -> None:
-        """Own the hidden window and its message loop on one native thread."""
+        """Own the hidden window and its message loop on one native thread.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         try:
             win32api = importlib.import_module('win32api')
             win32gui = importlib.import_module('win32gui')
@@ -179,7 +252,17 @@ class WindowsLifecycleSource:
             self._window = None
 
     def _window_proc(self, hwnd: int, message: int, wparam: int, lparam: int) -> int:
-        """Map only native session/power transitions and retain default handling."""
+        """Map only native session/power transitions and retain default handling.
+
+        Args:
+            hwnd (int): The hwnd input.
+            message (int): The message input.
+            wparam (int): The wparam input.
+            lparam (int): The lparam input.
+
+        Returns:
+            int: The resulting integer value.
+        """
         if not self._closing.is_set():
             event = None
             if (
@@ -214,14 +297,31 @@ class WindowsLifecycleSource:
     def _default_window_proc(
         self, hwnd: int, message: int, wparam: int, lparam: int
     ) -> int:
-        """Delegate unowned messages to Win32."""
+        """Delegate unowned messages to Win32.
+
+        Args:
+            hwnd (int): The hwnd input.
+            message (int): The message input.
+            wparam (int): The wparam input.
+            lparam (int): The lparam input.
+
+        Returns:
+            int: The resulting integer value.
+        """
         if self._win32gui is None:
             win32gui = importlib.import_module('win32gui')
             return int(win32gui.DefWindowProc(hwnd, message, wparam, lparam))
         return int(self._win32gui.DefWindowProc(hwnd, message, wparam, lparam))
 
     def close(self) -> None:
-        """Stop publication and request bounded native-window teardown."""
+        """Stop publication and request bounded native-window teardown.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         self._closing.set()
         thread, window = self._thread, self._window
         if thread is None:
@@ -254,7 +354,14 @@ class LinuxLifecycleSource:
     )
 
     def __init__(self, publish: Callable[[DesktopLifecycleEvent], None]) -> None:
-        """Create an inert source; D-Bus imports remain Linux-runtime-only."""
+        """Create an inert source; D-Bus imports remain Linux-runtime-only.
+
+        Args:
+            publish (Callable[[DesktopLifecycleEvent], None]): The publish input.
+
+        Returns:
+            None
+        """
         self._publish = publish
         self._thread: threading.Thread | None = None
         self._ready = threading.Event()
@@ -264,7 +371,14 @@ class LinuxLifecycleSource:
         self._stop: asyncio.Event | None = None
 
     def start(self) -> None:
-        """Subscribe at least one native bus or reject unsupported sessions."""
+        """Subscribe at least one native bus or reject unsupported sessions.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         if self._thread is not None:
             return
         self._thread = threading.Thread(
@@ -282,7 +396,14 @@ class LinuxLifecycleSource:
             raise RuntimeError('Linux lifecycle integration is unavailable') from error
 
     def _run(self) -> None:
-        """Own asyncio and every D-Bus connection on one bounded thread."""
+        """Own asyncio and every D-Bus connection on one bounded thread.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         loop = asyncio.new_event_loop()
         self._loop = loop
         asyncio.set_event_loop(loop)
@@ -296,7 +417,14 @@ class LinuxLifecycleSource:
             loop.close()
 
     async def _listen(self) -> None:
-        """Install low-level matches without relying on desktop proxy objects."""
+        """Install low-level matches without relying on desktop proxy objects.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         aio = importlib.import_module('dbus_next.aio')
         constants = importlib.import_module('dbus_next.constants')
         message_module = importlib.import_module('dbus_next.message')
@@ -340,7 +468,14 @@ class LinuxLifecycleSource:
             self._stop = None
 
     def _message(self, message: Any) -> None:
-        """Extract only the finite signal fields used by the lifecycle mapper."""
+        """Extract only the finite signal fields used by the lifecycle mapper.
+
+        Args:
+            message (Any): The message input.
+
+        Returns:
+            None
+        """
         interface = message.interface
         member = message.member
         body = message.body
@@ -348,7 +483,16 @@ class LinuxLifecycleSource:
             self._dispatch(interface, member, body if isinstance(body, list) else [])
 
     def _dispatch(self, interface: str, member: str, body: list[Any]) -> None:
-        """Map supported D-Bus signals; ordinary focus is intentionally absent."""
+        """Map supported D-Bus signals; ordinary focus is intentionally absent.
+
+        Args:
+            interface (str): The interface input.
+            member (str): The member input.
+            body (list[Any]): The body input.
+
+        Returns:
+            None
+        """
         event = None
         if (
             interface == 'org.freedesktop.login1.Manager'
@@ -384,7 +528,14 @@ class LinuxLifecycleSource:
             self._publish(event)
 
     def close(self) -> None:
-        """Stop publication and wake the owned asyncio loop within a fixed bound."""
+        """Stop publication and wake the owned asyncio loop within a fixed bound.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         self._closing.set()
         thread, loop, stop = self._thread, self._loop, self._stop
         if thread is None:
@@ -399,7 +550,14 @@ class LinuxLifecycleSource:
 def create_desktop_lifecycle_source(
     publish: Callable[[DesktopLifecycleEvent], None],
 ) -> DesktopLifecycleSource | None:
-    """Construct the active supported platform source without emulation."""
+    """Construct the active supported platform source without emulation.
+
+    Args:
+        publish (Callable[[DesktopLifecycleEvent], None]): The publish input.
+
+    Returns:
+        DesktopLifecycleSource | None: The resulting value.
+    """
     if platform.system() == 'Windows':
         return WindowsLifecycleSource(publish)
     if platform.system() == 'Linux':

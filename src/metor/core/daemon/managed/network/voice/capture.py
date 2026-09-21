@@ -60,23 +60,80 @@ class VoiceCaptureMixin:
 
     if TYPE_CHECKING:
 
-        def _canonical_outbound_metadata(self, turn: VoiceTurn) -> bool | None: ...
+        def _canonical_outbound_metadata(self, turn: VoiceTurn) -> bool | None:
+            """Checks retained metadata against one outbound turn.
+
+            Args:
+                turn: In-memory outbound turn.
+            Returns:
+                bool | None: Match result, or unknown when metadata is unavailable.
+            """
+            ...
 
         def _finalized_outbound_event(
             self, msg_id: str
-        ) -> Optional[VoiceFinalizedEvent]: ...
+        ) -> Optional[VoiceFinalizedEvent]:
+            """Projects a finalized outbound event from retained metadata.
 
-        def _limit(self) -> int: ...
+            Args:
+                msg_id: Stable Voice message identity.
+            Returns:
+                Optional[VoiceFinalizedEvent]: Safe finalized projection when unique.
+            """
+            ...
+
+        def _limit(self) -> int:
+            """Returns the configured aggregate Voice byte limit.
+
+            Args:
+                None
+            Returns:
+                int: Maximum retained Voice bytes.
+            """
+            ...
 
         @staticmethod
-        def _metadata(turn: VoiceTurn) -> str: ...
+        def _metadata(turn: VoiceTurn) -> str:
+            """Serializes canonical metadata for one Voice turn.
 
-        def _promote_turn_blobs(self, turn: VoiceTurn) -> None: ...
+            Args:
+                turn: Voice turn to describe.
+            Returns:
+                str: Canonical metadata JSON.
+            """
+            ...
 
-        def _used_bytes(self) -> int: ...
+        def _promote_turn_blobs(self, turn: VoiceTurn) -> None:
+            """Promotes every temporary object owned by a finalized turn.
+
+            Args:
+                turn: Finalized Voice turn.
+            Returns:
+                None
+            """
+            ...
+
+        def _used_bytes(self) -> int:
+            """Counts bytes currently retained by active Voice turns.
+
+            Args:
+                None
+            Returns:
+                int: Aggregate retained byte count.
+            """
+            ...
 
         @staticmethod
-        def _wire(command: TorCommand, payload: dict[str, object]) -> bytes: ...
+        def _wire(command: TorCommand, payload: dict[str, object]) -> bytes:
+            """Encodes one bounded Voice transport frame.
+
+            Args:
+                command: Voice transport command.
+                payload: Validated frame payload.
+            Returns:
+                bytes: Encoded wire frame.
+            """
+            ...
 
     def set_capture_allocator(self, allocator: Callable[[str, bytes], str]) -> None:
         """Installs the Core pre-write ownership hook before command admission.
@@ -326,12 +383,29 @@ class VoiceCaptureMixin:
     def _send_outbound_frame(
         self, turn: VoiceTurn, conn: socket.socket, payload: bytes
     ) -> None:
-        """Queues one LIVE frame with a fallback/purge generation claim."""
+        """Queues one LIVE frame with a fallback/purge generation claim.
+
+        Args:
+            turn (VoiceTurn): The turn input.
+            conn (socket.socket): The conn input.
+            payload (bytes): The payload input.
+
+        Returns:
+            None
+        """
         generation = self._state.get_live_generation(turn.onion, turn.msg_id)
         if generation is None:
             raise ConnectionError('LIVE emission authority has been revoked.')
 
         def claim() -> bool:
+            """Checks that this Voice turn still owns live emission authority.
+
+            Args:
+                None
+
+            Returns:
+                bool: Whether the documented condition holds.
+            """
             with self._lock:
                 return (
                     not self._purge_fence.is_set()

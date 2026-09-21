@@ -22,9 +22,35 @@ class DevicePresentation(Protocol):
     title: str
     detail: str
 
-    def remember_return(self) -> None: ...
-    def restore_return(self) -> None: ...
-    def critical(self, status: str) -> None: ...
+    def remember_return(self) -> None:
+        """Remembers the route preceding the power flow.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        ...
+
+    def restore_return(self) -> None:
+        """Restores the route preceding the power flow.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        ...
+
+    def critical(self, status: str) -> None:
+        """Shows a terminal power-flow failure.
+
+        Args:
+            status: Safe user-facing failure status.
+        Returns:
+            None
+        """
+        ...
 
 
 class PowerFlow:

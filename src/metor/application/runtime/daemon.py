@@ -123,7 +123,14 @@ def _build_daemon_launch_command(
 
 
 def read_startup_secret(stream: TextIO) -> Optional[str]:
-    """Reads one bounded startup secret from the existing stdin pipe."""
+    """Reads one bounded startup secret from the existing stdin pipe.
+
+    Args:
+        stream (TextIO): Existing child standard-input pipe.
+
+    Returns:
+        Optional[str]: One bounded secret, or None at clean end-of-file.
+    """
     line: str = stream.readline(MAX_STARTUP_SECRET_BYTES + 2)
     if line == '':
         return None
@@ -140,7 +147,15 @@ def prepare_managed_daemon_start(
     *,
     start_locked: bool,
 ) -> DaemonStartPreparation:
-    """Validates one daemon start and returns its credential requirements."""
+    """Validates one daemon start and returns its credential requirements.
+
+    Args:
+        pm (ProfileManager): Exact local profile selected for startup.
+        start_locked (bool): Whether startup must defer credential submission.
+
+    Returns:
+        DaemonStartPreparation: Validated launch and credential requirements.
+    """
     if not pm.exists():
         raise DaemonProfileMissingError(f"Profile '{pm.profile_name}' does not exist.")
     Settings.validate_integrity()
@@ -164,7 +179,14 @@ def prepare_managed_daemon_start(
 
 
 def _stop_failed_daemon_process(process: subprocess.Popen[bytes]) -> None:
-    """Best-effort bounded cleanup for a child whose startup did not complete."""
+    """Best-effort bounded cleanup for a child whose startup did not complete.
+
+    Args:
+        process (subprocess.Popen[bytes]): Child whose startup failed.
+
+    Returns:
+        None
+    """
     if process.poll() is not None:
         return
     try:

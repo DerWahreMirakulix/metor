@@ -44,6 +44,14 @@ def notification_center(
     header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
 
     def back() -> None:
+        """Cancels selection or returns to the preceding presentation.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         if store.selecting:
             store.selecting = False
             store.selected.clear()
@@ -52,6 +60,14 @@ def notification_center(
         refresh()
 
     def clear() -> None:
+        """Clears volatile notification-center entries and refreshes the view.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         store.clear_center()
         refresh()
 
@@ -83,6 +99,14 @@ def notification_center(
     if store.selecting:
 
         def dismiss_selected() -> None:
+            """Dismisses the explicitly selected local notification entries.
+
+            Args:
+                None
+
+            Returns:
+                None
+            """
             store.dismiss(set(store.selected))
             refresh()
 
@@ -109,6 +133,14 @@ def notice_row(
     row = BoxLayout(size_hint_y=None, height=dp(88), spacing=dp(8))
 
     def activate() -> None:
+        """Selects or opens this exact notification entry.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         if store.selecting:
             if key in store.selected:
                 store.selected.remove(key)
@@ -164,6 +196,14 @@ def notice_row(
     action.add_widget(column)
 
     def measure(*_args: object) -> None:
+        """Recomputes the native row height from rendered text metrics.
+
+        Args:
+            _args (object): The  args input.
+
+        Returns:
+            None
+        """
         top.height = max(dp(28), kind.height)
         action.height = row.height = max(
             dp(88), dp(16 + 8 + 18) + top.height + summary_label.height
@@ -211,13 +251,38 @@ def notice_menu(
     store = controller.notifications.store
 
     def build(body: BoxLayout) -> None:
+        """Builds actions for the captured notification identity.
+
+        Args:
+            body (BoxLayout): The body input.
+
+        Returns:
+            None
+        """
+
         def select() -> None:
+            """Enters notification selection mode without selecting stale entries.
+
+            Args:
+                None
+
+            Returns:
+                None
+            """
             sheet.dismiss(animation=False)
             store.selecting = True
             store.selected.clear()
             refresh()
 
         def dismiss() -> None:
+            """Dismisses the captured notification when it still exists.
+
+            Args:
+                None
+
+            Returns:
+                None
+            """
             sheet.dismiss(animation=False)
             store.dismiss({key})
             refresh()

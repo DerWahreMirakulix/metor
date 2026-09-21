@@ -193,7 +193,14 @@ def _run_cleanup(force: bool) -> int:
 
 
 def run(argv: Optional[list[str]] = None) -> int:
-    """Runs the noninteractive daemon adapter and returns its exit status."""
+    """Runs the noninteractive daemon adapter and returns its exit status.
+
+    Args:
+        argv (Optional[list[str]]): The argv input.
+
+    Returns:
+        int: The resulting integer value.
+    """
     args: argparse.Namespace = _build_parser().parse_args(argv)
     from metor.application import initialize_runtime_environment
 

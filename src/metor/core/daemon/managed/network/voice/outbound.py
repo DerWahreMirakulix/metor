@@ -48,18 +48,49 @@ class VoiceOutboundMixin:
 
     if TYPE_CHECKING:
 
-        def _delete_turn_blobs(
-            self, turn: VoiceTurn, lifecycle: BlobLifecycle
-        ) -> None: ...
+        def _delete_turn_blobs(self, turn: VoiceTurn, lifecycle: BlobLifecycle) -> None:
+            """Deletes every object owned by one Voice turn.
+
+            Args:
+                turn: Voice turn whose objects are removed.
+                lifecycle: Expected object lifecycle.
+            Returns:
+                None
+            """
+            ...
 
         @staticmethod
-        def _metadata(turn: VoiceTurn) -> str: ...
+        def _metadata(turn: VoiceTurn) -> str:
+            """Serializes canonical metadata for one Voice turn.
+
+            Args:
+                turn: Voice turn to describe.
+            Returns:
+                str: Canonical metadata JSON.
+            """
+            ...
 
         @staticmethod
-        def _metadata_blob_ids(payload: str) -> Optional[tuple[str, ...]]: ...
+        def _metadata_blob_ids(payload: str) -> Optional[tuple[str, ...]]:
+            """Extracts a complete object inventory from canonical metadata.
+
+            Args:
+                payload: Stored canonical metadata.
+            Returns:
+                Optional[tuple[str, ...]]: Object IDs when the inventory is valid.
+            """
+            ...
 
         @staticmethod
-        def _metadata_finalized(payload: str) -> bool: ...
+        def _metadata_finalized(payload: str) -> bool:
+            """Checks whether canonical metadata records finalization.
+
+            Args:
+                payload: Stored canonical metadata.
+            Returns:
+                bool: Whether the turn is finalized.
+            """
+            ...
 
         def _read_turn_range(
             self,
@@ -67,16 +98,54 @@ class VoiceOutboundMixin:
             offset: int,
             max_bytes: int,
             lifecycle: BlobLifecycle = BlobLifecycle.TEMPORARY,
-        ) -> bytes: ...
+        ) -> bytes:
+            """Reads one bounded contiguous range from segmented Voice objects.
 
-        def _send_begin(self, turn: VoiceTurn) -> None: ...
+            Args:
+                turn: Voice turn owning the objects.
+                offset: First byte to read.
+                max_bytes: Maximum number of bytes to return.
+                lifecycle: Expected object lifecycle.
+            Returns:
+                bytes: Available contiguous payload bytes.
+            """
+            ...
+
+        def _send_begin(self, turn: VoiceTurn) -> None:
+            """Emits an authorized live Voice begin frame.
+
+            Args:
+                turn: Outbound live Voice turn.
+            Returns:
+                None
+            """
+            ...
 
         def _send_outbound_frame(
             self, turn: VoiceTurn, conn: socket.socket, payload: bytes
-        ) -> None: ...
+        ) -> None:
+            """Queues one frame under its final emission claim.
+
+            Args:
+                turn: Outbound live Voice turn.
+                conn: Authenticated peer socket.
+                payload: Encoded frame bytes.
+            Returns:
+                None
+            """
+            ...
 
         @staticmethod
-        def _wire(command: TorCommand, payload: dict[str, object]) -> bytes: ...
+        def _wire(command: TorCommand, payload: dict[str, object]) -> bytes:
+            """Encodes one bounded Voice transport frame.
+
+            Args:
+                command: Voice transport command.
+                payload: Validated frame payload.
+            Returns:
+                bytes: Encoded wire frame.
+            """
+            ...
 
     def replay(self, onion: str) -> list[str]:
         """Resumes retained Voice turns after their acknowledged byte offset.
@@ -233,7 +302,15 @@ class VoiceOutboundMixin:
                 pass
 
     def acknowledge_complete(self, onion: str, msg_id: str) -> None:
-        """Releases retained LIVE Voice after a terminal logical-message ACK."""
+        """Releases retained LIVE Voice after a terminal logical-message ACK.
+
+        Args:
+            onion (str): The onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            None
+        """
         if self._purge_fence.is_set():
             return
         with self._lock:
@@ -271,7 +348,15 @@ class VoiceOutboundMixin:
             self._outbound.pop(msg_id, None)
 
     def release_consumed(self, onion: str, msg_ids: list[str]) -> None:
-        """Releases Core-owned inbound LIVE Voice payloads after explicit consume."""
+        """Releases Core-owned inbound LIVE Voice payloads after explicit consume.
+
+        Args:
+            onion (str): The onion input.
+            msg_ids (list[str]): The msg ids input.
+
+        Returns:
+            None
+        """
         if self._purge_fence.is_set():
             return
         with self._lock:
@@ -288,13 +373,27 @@ class VoiceOutboundMixin:
                     self._delete_turn_blobs(turn, BlobLifecycle.TEMPORARY)
 
     def outbound_target(self, msg_id: str) -> Optional[str]:
-        """Returns the immutable onion target bound at Voice begin."""
+        """Returns the immutable onion target bound at Voice begin.
+
+        Args:
+            msg_id (str): The msg id input.
+
+        Returns:
+            Optional[str]: The resulting value.
+        """
         with self._lock:
             turn = self._outbound.get(msg_id)
             return turn.onion if turn is not None else None
 
     def outbound_delivery(self, msg_id: str) -> Optional[Delivery]:
-        """Returns the immutable delivery semantics selected at Voice begin."""
+        """Returns the immutable delivery semantics selected at Voice begin.
+
+        Args:
+            msg_id (str): The msg id input.
+
+        Returns:
+            Optional[Delivery]: The resulting value.
+        """
         with self._lock:
             turn = self._outbound.get(msg_id)
             return turn.delivery if turn is not None else None
@@ -432,7 +531,15 @@ class VoiceOutboundMixin:
             return None, None, None, offset, False, MessageOperationReason.INVALID_RANGE
 
     def release_inbound(self, onion: str, msg_id: str) -> bool:
-        """Consumes and releases one finalized inbound Voice item explicitly."""
+        """Consumes and releases one finalized inbound Voice item explicitly.
+
+        Args:
+            onion (str): The onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         if self._purge_fence.is_set():
             return False
         with self._lock:

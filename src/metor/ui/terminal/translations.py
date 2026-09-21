@@ -50,7 +50,14 @@ VALIDATION_DETAIL_CODES: set[EventType] = {
 
 
 def _escape_terminal_value(value: JsonValue) -> JsonValue:
-    """Recursively makes untrusted translation values terminal-safe."""
+    """Recursively makes untrusted translation values terminal-safe.
+
+    Args:
+        value (JsonValue): The value input.
+
+    Returns:
+        JsonValue: The resulting value.
+    """
     if isinstance(value, Enum):
         return value
     if isinstance(value, str):

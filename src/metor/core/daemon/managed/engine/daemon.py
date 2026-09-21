@@ -308,6 +308,14 @@ class Daemon(DaemonLifecycleMixin):
         active_blob_store = runtime.blob_store
 
         def delete_persistent_blob_object(blob_id: str) -> None:
+            """Deletes one persistent blob through the active profile store.
+
+            Args:
+                blob_id (str): The blob id input.
+
+            Returns:
+                None
+            """
             if active_blob_store is not None:
                 active_blob_store.delete(blob_id, BlobLifecycle.PERSISTENT)
 
@@ -555,7 +563,14 @@ class Daemon(DaemonLifecycleMixin):
         return True
 
     def stop(self) -> None:
-        """Serializes independently attempted release; failed phases remain retryable."""
+        """Serializes independently attempted release; failed phases remain retryable.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         with self._domain_operation_lock, self._release_lock:
             self._stop_resources()
 
@@ -652,18 +667,41 @@ class Daemon(DaemonLifecycleMixin):
         return resolved[0] in self._cm.get_all_contacts()
 
     def _resolve_contact_target(self, target: str) -> Optional[str]:
-        """Resolves aliases to the stable onion identity used by lock policy."""
+        """Resolves aliases to the stable onion identity used by lock policy.
+
+        Args:
+            target (str): The target input.
+
+        Returns:
+            Optional[str]: The resulting value.
+        """
         if self._cm is None:
             return None
         resolved = self._cm.resolve_target(target)
         return resolved[1] if resolved is not None else None
 
     def _voice_target(self, msg_id: str) -> Optional[str]:
-        """Returns the stable target bound to an active outbound Voice turn."""
+        """Returns the stable target bound to an active outbound Voice turn.
+
+        Args:
+            msg_id (str): The msg id input.
+
+        Returns:
+            Optional[str]: The resulting value.
+        """
         return self._network.voice_target(msg_id) if self._network is not None else None
 
     def _voice_context(self, onion: str, msg_id: str, direction: str) -> int | None:
-        """Returns immutable recording ownership from the active runtime."""
+        """Returns immutable recording ownership from the active runtime.
+
+        Args:
+            onion (str): The onion input.
+            msg_id (str): The msg id input.
+            direction (str): The direction input.
+
+        Returns:
+            int | None: The resulting value.
+        """
         return (
             self._network.voice_context(onion, msg_id, direction)
             if self._network is not None
@@ -671,7 +709,14 @@ class Daemon(DaemonLifecycleMixin):
         )
 
     def _voice_delivery(self, msg_id: str) -> Optional[Delivery]:
-        """Returns delivery semantics bound to an active outbound Voice turn."""
+        """Returns delivery semantics bound to an active outbound Voice turn.
+
+        Args:
+            msg_id (str): The msg id input.
+
+        Returns:
+            Optional[Delivery]: The resulting value.
+        """
         return (
             self._network.voice_delivery(msg_id) if self._network is not None else None
         )
@@ -736,7 +781,14 @@ class Daemon(DaemonLifecycleMixin):
                 self._process_ui_command_in_context(cmd, conn)
 
     def _send_self_destruct_initiated(self, conn: socket.socket) -> None:
-        """Best-effort notification that never gates destructive work."""
+        """Best-effort notification that never gates destructive work.
+
+        Args:
+            conn (socket.socket): The conn input.
+
+        Returns:
+            None
+        """
         payload: dict[str, JsonValue] | None = None
         operation_id = getattr(self, '_purge_operation_id', None)
         if operation_id is not None and conn in getattr(

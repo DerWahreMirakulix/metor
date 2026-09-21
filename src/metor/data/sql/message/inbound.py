@@ -164,7 +164,15 @@ class MessageInboundMixin(MessageReceiptStore):
     def get_inbound_voice(
         self, contact_onion: str, msg_id: str
     ) -> Optional[InboundVoiceRecord]:
-        """Loads one inbound Voice receipt and its resumable spool metadata."""
+        """Loads one inbound Voice receipt and its resumable spool metadata.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            Optional[InboundVoiceRecord]: The resulting value.
+        """
         rows = self._sql.fetchall(
             'SELECT r.id, r.peer_onion, r.delivery, i.payload, r.msg_id, '
             'r.created_at, r.retained_bytes, r.status '
@@ -194,7 +202,15 @@ class MessageInboundMixin(MessageReceiptStore):
         )
 
     def has_inbound_voice_receipt(self, contact_onion: str, msg_id: str) -> bool:
-        """Reports whether a dedupe receipt belongs to inbound Voice content."""
+        """Reports whether a dedupe receipt belongs to inbound Voice content.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         receipt = self._get_receipt(
             clean_onion(contact_onion), MessageDirection.IN, msg_id
         )
@@ -295,7 +311,14 @@ class MessageInboundMixin(MessageReceiptStore):
             return payload, receipt.delivery
 
     def get_unread_inbound_live_voices(self) -> List[InboundVoiceRecord]:
-        """Loads crash-safe inbound LIVE Voice items still awaiting consume."""
+        """Loads crash-safe inbound LIVE Voice items still awaiting consume.
+
+        Args:
+            None
+
+        Returns:
+            List[InboundVoiceRecord]: The resulting value.
+        """
         rows = self._sql.fetchall(
             'SELECT r.id, r.peer_onion, r.delivery, i.payload, r.msg_id, '
             'r.created_at, r.retained_bytes, r.status '

@@ -29,9 +29,25 @@ def contact_sheet(
     """
 
     def build(body: BoxLayout) -> None:
+        """Builds the selected contact action sheet.
+
+        Args:
+            body (BoxLayout): The body input.
+
+        Returns:
+            None
+        """
         body.add_widget(Label(peer, role='support', tone='textSecondary'))
 
         def selected(delivery: Delivery) -> None:
+            """Applies the explicitly selected delivery mode to this peer.
+
+            Args:
+                delivery (Delivery): The delivery input.
+
+            Returns:
+                None
+            """
             sheet.dismiss(animation=False)
             controller.contacts.select(
                 peer, 'live' if delivery is Delivery.LIVE else 'drop'
@@ -49,6 +65,14 @@ def contact_sheet(
         )
 
         def rename() -> None:
+            """Opens the rename form for this immutable peer identity.
+
+            Args:
+                None
+
+            Returns:
+                None
+            """
             sheet.dismiss(animation=False)
             controller.contacts.begin('rename', peer)
             refresh()

@@ -266,7 +266,14 @@ class QuickUnlockStore:
 
     @staticmethod
     def _validate_windows_acl(path: Path) -> None:
-        """Verifies effective trustees after the ACL replacement."""
+        """Verifies effective trustees after the ACL replacement.
+
+        Args:
+            path (Path): Credential file whose effective trustees must be private.
+
+        Returns:
+            None
+        """
         script = (
             ''
             '$current=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; '
@@ -404,7 +411,15 @@ class QuickUnlockStore:
 
     @staticmethod
     def _fchmod(descriptor: int, mode: int) -> None:
-        """Invokes the POSIX-only descriptor permission primitive safely."""
+        """Invokes the POSIX-only descriptor permission primitive safely.
+
+        Args:
+            descriptor (int): Already-open credential-file descriptor.
+            mode (int): Exact restrictive POSIX permission mask.
+
+        Returns:
+            None
+        """
         fchmod = getattr(os, 'fchmod', None)
         if not callable(fchmod):
             raise OSError('Descriptor permissions are unavailable on this platform.')
@@ -412,7 +427,14 @@ class QuickUnlockStore:
 
     @staticmethod
     def _getuid() -> int:
-        """Returns the POSIX owner id without exposing it to Windows type checking."""
+        """Returns the POSIX owner id without exposing it to Windows type checking.
+
+        Args:
+            None
+
+        Returns:
+            int: Current effective POSIX user identity.
+        """
         getuid = getattr(os, 'getuid', None)
         if not callable(getuid):
             raise OSError('Owner validation is unavailable on this platform.')

@@ -186,6 +186,16 @@ class FallbackRouter:
                     identity: str = msg_id,
                     expected: int = expected_generation,
                 ) -> bool:
+                    """Checks that fallback has not revoked this exact live generation.
+
+                    Args:
+                        peer (str): The peer input.
+                        identity (str): The identity input.
+                        expected (int): The expected input.
+
+                    Returns:
+                        bool: Whether the documented condition holds.
+                    """
                     with self._transition_lock:
                         return (
                             not self._purge_fence.is_set()

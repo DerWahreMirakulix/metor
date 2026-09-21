@@ -241,7 +241,15 @@ class ChatPresenter:
         msg: ChatLine,
         resolved_alias: Optional[str] = None,
     ) -> str:
-        """Returns the safe visible text used by formatting and wrap accounting."""
+        """Returns the safe visible text used by formatting and wrap accounting.
+
+        Args:
+            msg (ChatLine): The msg input.
+            resolved_alias (Optional[str]): The resolved alias input.
+
+        Returns:
+            str: The resulting text value.
+        """
         if msg.msg_type in (ChatMessageType.SELF, ChatMessageType.REMOTE):
             return escape_terminal_text(msg.text)
         if msg.msg_type == ChatMessageType.STATUS:

@@ -93,10 +93,26 @@ class LiveMessageRouter:
         self._purge_fence = purge_fence or threading.Event()
 
     def _live_frame_claim(self, onion: str, msg_id: str) -> Callable[[], bool]:
-        """Creates a last-moment emission claim ordered with fallback."""
+        """Creates a last-moment emission claim ordered with fallback.
+
+        Args:
+            onion (str): The onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            Callable[[], bool]: The resulting value.
+        """
         generation = self._state.get_live_generation(onion, msg_id)
 
         def claim() -> bool:
+            """Checks that the queued live frame still owns emission authority.
+
+            Args:
+                None
+
+            Returns:
+                bool: Whether the documented condition holds.
+            """
             with self._transition_lock:
                 return (
                     not self._purge_fence.is_set()

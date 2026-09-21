@@ -20,11 +20,26 @@ class _ProfilesDispatcherProtocol(Protocol):
     _exit_code: int
 
     def _print_usage(self, cmd: str, sub: Optional[str] = None) -> None:
-        """Prints command usage help and flags a nonzero exit code."""
+        """Prints command usage help and flags a nonzero exit code.
+
+        Args:
+            cmd (str): The cmd input.
+            sub (Optional[str]): The sub input.
+
+        Returns:
+            None
+        """
         ...
 
     def _emit(self, text: str) -> None:
-        """Prints one proxy result and flags a nonzero exit on rendered errors."""
+        """Prints one proxy result and flags a nonzero exit on rendered errors.
+
+        Args:
+            text (str): The text input.
+
+        Returns:
+            None
+        """
         ...
 
 

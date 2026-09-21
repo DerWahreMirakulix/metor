@@ -172,7 +172,14 @@ class RuntimeSnapshotProjectionMixin:
         )
 
     def _compose_runtime_snapshot(self) -> RuntimeSnapshotEvent:
-        """Reads one candidate aggregate projection for revision validation."""
+        """Reads one candidate aggregate projection for revision validation.
+
+        Args:
+            None
+
+        Returns:
+            RuntimeSnapshotEvent: The resulting value.
+        """
         contact_snapshot = self._cm.get_contacts_data()
         saved_onions = {contact.onion for contact in contact_snapshot.saved}
         contacts = [

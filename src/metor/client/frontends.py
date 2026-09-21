@@ -162,30 +162,113 @@ class FrontendBootstrapResult:
     encrypted: bool
 
     def get_daemon_port(self) -> int:
-        """Returns the endpoint resolved by base bootstrap."""
+        """Returns the endpoint resolved by base bootstrap.
+
+        Args:
+            None
+
+        Returns:
+            int: The resulting integer value.
+        """
         return self.port
 
     def uses_encrypted_storage(self) -> bool:
-        """Returns only the non-secret credential prompt mode."""
+        """Returns only the non-secret credential prompt mode.
+
+        Args:
+            None
+
+        Returns:
+            bool: Whether profile storage requires credential entry.
+        """
         return self.encrypted
 
 
 class FrontendSettings(Protocol):
     """Bounded local client/UI values service; base owns validation and persistence."""
 
-    def get_int(self, key: str) -> int: ...
-    def get_float(self, key: str) -> float: ...
-    def get_namespace_str(self, key: str) -> str: ...
-    def get_namespace_int(self, key: str) -> int: ...
-    def get_namespace_bool(self, key: str) -> bool: ...
-    def get_namespace_float(self, key: str) -> float: ...
+    def get_int(self, key: str) -> int:
+        """Reads an allowed client integer setting.
+
+        Args:
+            key: Registered client setting key.
+        Returns:
+            int: Validated effective value.
+        """
+        ...
+
+    def get_float(self, key: str) -> float:
+        """Reads an allowed client floating-point setting.
+
+        Args:
+            key: Registered client setting key.
+        Returns:
+            float: Validated effective value.
+        """
+        ...
+
+    def get_namespace_str(self, key: str) -> str:
+        """Reads an allowed frontend string setting.
+
+        Args:
+            key: Registered frontend setting key.
+        Returns:
+            str: Validated effective value.
+        """
+        ...
+
+    def get_namespace_int(self, key: str) -> int:
+        """Reads an allowed frontend integer setting.
+
+        Args:
+            key: Registered frontend setting key.
+        Returns:
+            int: Validated effective value.
+        """
+        ...
+
+    def get_namespace_bool(self, key: str) -> bool:
+        """Reads an allowed frontend Boolean setting.
+
+        Args:
+            key: Registered frontend setting key.
+        Returns:
+            bool: Validated effective value.
+        """
+        ...
+
+    def get_namespace_float(self, key: str) -> float:
+        """Reads an allowed frontend floating-point setting.
+
+        Args:
+            key: Registered frontend setting key.
+        Returns:
+            float: Validated effective value.
+        """
+        ...
 
     def set_client_value(self, key: str, value: str | int | float | bool) -> None:
-        """Sets a validated selected-profile client override; never daemon policy."""
+        """Sets a validated selected-profile client override; never daemon policy.
+
+        Args:
+            key (str): The key input.
+            value (str | int | float | bool): The value input.
+
+        Returns:
+            None
+        """
         ...
 
     def set_ui_value(self, key: str, value: str | int | float | bool) -> None:
-        """Sets a validated selected-profile official frontend override."""
+        """Sets a validated selected-profile official frontend override.
+
+        Args:
+            key (str): The key input.
+            value (str | int | float | bool): The value input.
+
+        Returns:
+            None
+        """
         ...
 
 
@@ -357,7 +440,14 @@ def _frontend_entry_points() -> tuple[metadata.EntryPoint, ...]:
 def _discover_frontend_entries() -> dict[
     str, tuple[FrontendDescriptor, metadata.EntryPoint]
 ]:
-    """Captures one internally consistent entry-point discovery snapshot."""
+    """Captures one internally consistent entry-point discovery snapshot.
+
+    Args:
+        None
+
+    Returns:
+        dict[str, tuple[FrontendDescriptor, metadata.EntryPoint]]: The resulting value.
+    """
     discovered: dict[str, tuple[FrontendDescriptor, metadata.EntryPoint]] = {}
     for entry_point in _frontend_entry_points():
         distribution: str = (
@@ -444,7 +534,15 @@ def load_frontend(frontend_id: str) -> LoadedFrontend:
 
 
 def invoke_frontend(frontend: LoadedFrontend, context: FrontendLaunchContext) -> int:
-    """Invokes one already validated frontend without rediscovering plugins."""
+    """Invokes one already validated frontend without rediscovering plugins.
+
+    Args:
+        frontend (LoadedFrontend): The frontend input.
+        context (FrontendLaunchContext): The context input.
+
+    Returns:
+        int: The resulting integer value.
+    """
     frontend_id = frontend.descriptor.frontend_id
     try:
         status = frontend.entry(context)

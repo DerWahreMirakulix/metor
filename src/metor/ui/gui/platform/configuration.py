@@ -17,17 +17,38 @@ class DeviceConfigurationError(ValueError):
 
 
 def _is_windows() -> bool:
-    """Return whether Windows handle trust rules apply."""
+    """Return whether Windows handle trust rules apply.
+
+    Args:
+        None
+
+    Returns:
+        bool: Whether the documented condition holds.
+    """
     return os.name == 'nt'
 
 
 def _open_windows_configuration(location: Path) -> int:
-    """Expose the native opener at the parser boundary for focused verification."""
+    """Expose the native opener at the parser boundary for focused verification.
+
+    Args:
+        location (Path): The location input.
+
+    Returns:
+        int: The resulting integer value.
+    """
     return open_windows_configuration(location)
 
 
 def _open_configuration(location: Path) -> int:
-    """Open a configuration without following links on the active platform."""
+    """Open a configuration without following links on the active platform.
+
+    Args:
+        location (Path): The location input.
+
+    Returns:
+        int: The resulting integer value.
+    """
     if _is_windows():
         try:
             return _open_windows_configuration(location)
@@ -48,7 +69,14 @@ def _open_configuration(location: Path) -> int:
 
 
 def _read_trusted_configuration(location: Path) -> bytes:
-    """Validate metadata and read bounded bytes from one exact open object."""
+    """Validate metadata and read bounded bytes from one exact open object.
+
+    Args:
+        location (Path): The location input.
+
+    Returns:
+        bytes: The resulting value.
+    """
     descriptor = _open_configuration(location)
     try:
         metadata = os.fstat(descriptor)

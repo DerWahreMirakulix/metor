@@ -249,6 +249,15 @@ class MessageHistoryMixin(MessageReceiptStore):
 
         Pending outbound DROP rows are deliberately excluded because their blobs
         remain delivery-critical even after the visible conversation is cleared.
+
+        Args:
+            onion (Optional[str]): The onion input.
+            non_contacts_only (bool): The non contacts only input.
+            msg_id (Optional[str]): The msg id input.
+            direction (Optional[MessageDirection]): The direction input.
+
+        Returns:
+            List[str]: The resulting value.
         """
         filters = [
             'r.delivery = ?',
@@ -288,7 +297,15 @@ class MessageHistoryMixin(MessageReceiptStore):
         return [str(row[0]) for row in rows]
 
     def has_drop_payload(self, contact_onion: str, msg_id: str) -> bool:
-        """Reports whether one DROP receipt still owns visible archive payload."""
+        """Reports whether one DROP receipt still owns visible archive payload.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         rows = self._sql.fetchall(
             'SELECT 1 FROM message_receipts AS r '
             'INNER JOIN message_archive AS a ON a.receipt_id = r.id '

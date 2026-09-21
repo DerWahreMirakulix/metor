@@ -57,6 +57,13 @@ class MetorProtocolError(RuntimeError):
     """A valid wire DTO is incompatible with this correlated exchange's contract."""
 
     def __init__(self, event: IpcEvent) -> None:
-        """Retains the incompatible DTO without misrepresenting it as rejection."""
+        """Retains the incompatible DTO without misrepresenting it as rejection.
+
+        Args:
+            event (IpcEvent): The event input.
+
+        Returns:
+            None
+        """
         super().__init__(f'Unexpected correlated response: {event.event_type.value}.')
         self.event = event

@@ -15,11 +15,26 @@ class _MessagesDispatcherProtocol(Protocol):
     _exit_code: int
 
     def _print_usage(self, cmd: str, sub: Optional[str] = None) -> None:
-        """Prints command usage help and flags a nonzero exit code."""
+        """Prints command usage help and flags a nonzero exit code.
+
+        Args:
+            cmd (str): The cmd input.
+            sub (Optional[str]): The sub input.
+
+        Returns:
+            None
+        """
         ...
 
     def _emit(self, text: str) -> None:
-        """Prints one proxy result and flags a nonzero exit on rendered errors."""
+        """Prints one proxy result and flags a nonzero exit on rendered errors.
+
+        Args:
+            text (str): The text input.
+
+        Returns:
+            None
+        """
         ...
 
     def _collect_command_args(
@@ -28,11 +43,27 @@ class _MessagesDispatcherProtocol(Protocol):
         extra: List[str],
         reserved_subcommands: tuple[str, ...],
     ) -> List[str]:
-        """Collects positional command arguments, excluding reserved subcommand tokens."""
+        """Collects positional command arguments, excluding reserved subcommand tokens.
+
+        Args:
+            sub (Optional[str]): The sub input.
+            extra (List[str]): The extra input.
+            reserved_subcommands (tuple[str, ...]): The reserved subcommands input.
+
+        Returns:
+            List[str]: The resulting value.
+        """
         ...
 
     def _parse_optional_limit(self, limit_raw: Optional[str]) -> Optional[int]:
-        """Parses an optional integer limit token and returns None for invalid input."""
+        """Parses an optional integer limit token and returns None for invalid input.
+
+        Args:
+            limit_raw (Optional[str]): The limit raw input.
+
+        Returns:
+            Optional[int]: The resulting value.
+        """
         ...
 
 

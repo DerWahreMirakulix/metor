@@ -327,7 +327,16 @@ class DropDelivery:
         stream: TcpStreamReader,
         row: OutboxRow,
     ) -> Optional[str]:
-        """Sends one text or bounded resumable Voice DROP, leaving final ACK unread."""
+        """Sends one text or bounded resumable Voice DROP, leaving final ACK unread.
+
+        Args:
+            conn (socket.socket): The conn input.
+            stream (TcpStreamReader): The stream input.
+            row (OutboxRow): The row input.
+
+        Returns:
+            Optional[str]: The resulting value.
+        """
         _, _, content_type, payload, msg_id, timestamp = row
         if content_type == ContentType.TEXT.value:
             self._state.send_frame(
@@ -406,7 +415,15 @@ class DropDelivery:
 
     @staticmethod
     def _voice_frame(command: TorCommand, payload: Dict[str, JsonValue]) -> bytes:
-        """Encodes one bounded Voice DROP protocol frame."""
+        """Encodes one bounded Voice DROP protocol frame.
+
+        Args:
+            command (TorCommand): The command input.
+            payload (Dict[str, JsonValue]): The payload input.
+
+        Returns:
+            bytes: The resulting value.
+        """
         encoded = base64.b64encode(
             json.dumps(payload, separators=(',', ':')).encode('utf-8')
         ).decode('ascii')
@@ -414,7 +431,16 @@ class DropDelivery:
 
     @staticmethod
     def _parse_voice_offset(msg_id: str, line: Optional[str], maximum: int) -> int:
-        """Validates one exact monotonic Voice resume acknowledgement."""
+        """Validates one exact monotonic Voice resume acknowledgement.
+
+        Args:
+            msg_id (str): The msg id input.
+            line (Optional[str]): The line input.
+            maximum (int): The maximum input.
+
+        Returns:
+            int: The resulting integer value.
+        """
         if line is None:
             raise ConnectionError('Voice DROP acknowledgement missing.')
         parts = line.split()

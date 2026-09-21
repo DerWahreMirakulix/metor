@@ -263,16 +263,40 @@ class MessageRouter:
             self._voice.finalize(msg_id, duration_ms)
 
     def release_consumed_voice(self, onion: str, msg_ids: list[str]) -> None:
-        """Releases consumed inbound LIVE Voice retention."""
+        """Releases consumed inbound LIVE Voice retention.
+
+        Args:
+            onion (str): The onion input.
+            msg_ids (list[str]): The msg ids input.
+
+        Returns:
+            None
+        """
         if self._voice is not None and not self._purge_fence.is_set():
             self._voice.release_consumed(onion, msg_ids)
 
     def voice_target(self, msg_id: str) -> Optional[str]:
-        """Returns the peer identity permanently bound to one outbound turn."""
+        """Returns the peer identity permanently bound to one outbound turn.
+
+        Args:
+            msg_id (str): The msg id input.
+
+        Returns:
+            Optional[str]: The resulting value.
+        """
         return self._voice.outbound_target(msg_id) if self._voice is not None else None
 
     def voice_context(self, onion: str, msg_id: str, direction: str) -> int | None:
-        """Returns the recording's admission context, never the peer's latest call."""
+        """Returns the recording's admission context, never the peer's latest call.
+
+        Args:
+            onion (str): The onion input.
+            msg_id (str): The msg id input.
+            direction (str): The direction input.
+
+        Returns:
+            int | None: The resulting value.
+        """
         return (
             self._voice.context_token(onion, msg_id, direction)
             if self._voice is not None
@@ -280,7 +304,14 @@ class MessageRouter:
         )
 
     def voice_delivery(self, msg_id: str) -> Optional[Delivery]:
-        """Returns delivery semantics permanently bound to one outbound turn."""
+        """Returns delivery semantics permanently bound to one outbound turn.
+
+        Args:
+            msg_id (str): The msg id input.
+
+        Returns:
+            Optional[Delivery]: The resulting value.
+        """
         return (
             self._voice.outbound_delivery(msg_id) if self._voice is not None else None
         )
@@ -316,7 +347,18 @@ class MessageRouter:
         bool,
         Optional[MessageOperationReason],
     ]:
-        """Reads one bounded Voice range through the router boundary."""
+        """Reads one bounded Voice range through the router boundary.
+
+        Args:
+            onion (str): The onion input.
+            msg_id (str): The msg id input.
+            direction (MessageDirection): The direction input.
+            offset (int): The offset input.
+            max_bytes (int): The max bytes input.
+
+        Returns:
+            tuple[Optional[VoiceContent], Optional[Delivery], Optional[bytes], int, bool, Optional[MessageOperationReason]]: The resulting value.
+        """
         if self._purge_fence.is_set():
             return (
                 None,
@@ -338,14 +380,30 @@ class MessageRouter:
         return self._voice.read_chunk(onion, msg_id, direction, offset, max_bytes)
 
     def release_inbound_voice_item(self, onion: str, msg_id: str) -> bool:
-        """Consumes one finalized inbound Voice item after client handoff."""
+        """Consumes one finalized inbound Voice item after client handoff.
+
+        Args:
+            onion (str): The onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         if self._voice is None or self._purge_fence.is_set():
             return False
         with self._operation_lock:
             return self._voice.release_inbound(onion, msg_id)
 
     def commit_voice_draft(self, target: str, msg_id: str) -> bool:
-        """Publishes one finalized DROP Voice draft."""
+        """Publishes one finalized DROP Voice draft.
+
+        Args:
+            target (str): The target input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         return (
             self._voice.commit_draft(target, msg_id)
             if self._voice is not None and not self._purge_fence.is_set()
@@ -353,7 +411,15 @@ class MessageRouter:
         )
 
     def cancel_voice_draft(self, target: str, msg_id: str) -> bool:
-        """Cancels one unsent DROP Voice draft."""
+        """Cancels one unsent DROP Voice draft.
+
+        Args:
+            target (str): The target input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         return (
             self._voice.cancel_draft(target, msg_id)
             if self._voice is not None and not self._purge_fence.is_set()
@@ -389,7 +455,14 @@ class MessageRouter:
             self._voice.set_capture_allocator(allocator)
 
     def dismiss_inbound_voice(self, onion: str) -> None:
-        """Releases all inbound Voice retention for a dismissed LIVE context."""
+        """Releases all inbound Voice retention for a dismissed LIVE context.
+
+        Args:
+            onion (str): The onion input.
+
+        Returns:
+            None
+        """
         if self._voice is not None and not self._purge_fence.is_set():
             self._voice.dismiss_inbound(onion)
 
@@ -425,7 +498,17 @@ class MessageRouter:
     def process_drop_voice_frame(
         self, conn: socket.socket, onion: str, command: str, encoded: str
     ) -> FrameAdmission:
-        """Processes one typed Voice frame carrying DROP semantics."""
+        """Processes one typed Voice frame carrying DROP semantics.
+
+        Args:
+            conn (socket.socket): The conn input.
+            onion (str): The onion input.
+            command (str): The command input.
+            encoded (str): The encoded input.
+
+        Returns:
+            FrameAdmission: The resulting value.
+        """
         if self._voice is None:
             return FrameAdmission.MALFORMED
         if not self._drop.allows_inbound_drops():

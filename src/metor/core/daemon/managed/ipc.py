@@ -136,7 +136,14 @@ class IpcServer:
             return len(self._clients) > 0
 
     def active_clients(self) -> set[socket.socket]:
-        """Returns a lock-safe snapshot of attached IPC sockets."""
+        """Returns a lock-safe snapshot of attached IPC sockets.
+
+        Args:
+            None
+
+        Returns:
+            set[socket.socket]: The resulting value.
+        """
         with self._lock:
             return set(self._clients)
 
@@ -297,7 +304,15 @@ class IpcServer:
         return True
 
     def _enqueue_client_frame(self, conn: socket.socket, msg: bytes) -> None:
-        """Queues one client frame without holding daemon state across I/O."""
+        """Queues one client frame without holding daemon state across I/O.
+
+        Args:
+            conn (socket.socket): The conn input.
+            msg (bytes): The msg input.
+
+        Returns:
+            None
+        """
         if not isinstance(conn, socket.socket):
             with self._lock:
                 write_lock = self._client_write_locks.setdefault(conn, threading.Lock())
@@ -319,13 +334,28 @@ class IpcServer:
         writer.enqueue(msg)
 
     def _writer_exited(self, conn: socket.socket, writer: BoundedSocketWriter) -> None:
-        """Releases an idle IPC writer from the bounded inventory."""
+        """Releases an idle IPC writer from the bounded inventory.
+
+        Args:
+            conn (socket.socket): The conn input.
+            writer (BoundedSocketWriter): The writer input.
+
+        Returns:
+            None
+        """
         with self._lock:
             if self._client_writers.get(conn) is writer:
                 self._client_writers.pop(conn, None)
 
     def _drop_client(self, conn: socket.socket) -> None:
-        """Disconnects one failed or saturated client and releases its writer."""
+        """Disconnects one failed or saturated client and releases its writer.
+
+        Args:
+            conn (socket.socket): The conn input.
+
+        Returns:
+            None
+        """
         with self._lock:
             if conn in self._clients:
                 self._clients.remove(conn)

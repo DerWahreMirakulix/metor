@@ -195,6 +195,14 @@ class ProcessManager:
             return False
 
         def option_value(option: str) -> Optional[str]:
+            """Reads one exact option value from the inspected process command line.
+
+            Args:
+                option (str): The option input.
+
+            Returns:
+                Optional[str]: The resulting value.
+            """
             for index, value in enumerate(cmdline):
                 if value == option and index + 1 < len(cmdline):
                     return str(cmdline[index + 1])

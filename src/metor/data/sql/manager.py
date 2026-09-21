@@ -392,6 +392,9 @@ class SqlManager:
 
         Yields:
             SqlCipherCursor: The active transaction cursor.
+
+        Returns:
+            Iterator[SqlCipherCursor]: The resulting value.
         """
         conn = self._get_connection()
         with SqlManager._db_lock:

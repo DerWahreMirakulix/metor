@@ -13,7 +13,14 @@ class RuntimeReleaseResult:
 
     @property
     def succeeded(self) -> bool:
-        """Reports whether every attempted release returned successfully."""
+        """Reports whether every attempted release returned successfully.
+
+        Args:
+            None
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         return not self.failed
 
 

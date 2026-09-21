@@ -208,7 +208,14 @@ class StateTrackerPendingMixin:
             return self._pending_connection_tokens.get(onion)
 
     def pending_identity(self, onion: str) -> tuple[socket.socket, float] | None:
-        """Returns exact pending socket ownership with its bounded deadline."""
+        """Returns exact pending socket ownership with its bounded deadline.
+
+        Args:
+            onion (str): The onion input.
+
+        Returns:
+            tuple[socket.socket, float] | None: The resulting value.
+        """
         with self._lock:
             conn = self._pending_connections.get(onion)
             deadline = self._pending_connection_deadlines.get(onion)

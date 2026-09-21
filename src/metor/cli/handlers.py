@@ -71,7 +71,14 @@ class CommandHandlers:
 
     @staticmethod
     def handle_list_frontends() -> int:
-        """Lists installed frontend metadata without profile initialization."""
+        """Lists installed frontend metadata without profile initialization.
+
+        Args:
+            None
+
+        Returns:
+            int: The resulting integer value.
+        """
         try:
             installed = discover_frontends()
         except FrontendLaunchError as exc:
@@ -201,7 +208,14 @@ class CommandHandlers:
 
         # Inversion of Control: Define UI printing logic here and inject it into Data and Core layers
         def sql_log_cb(line: str) -> None:
-            """Writes one SQLCipher diagnostic line to stdout with its log tag."""
+            """Writes one SQLCipher diagnostic line to stdout with its log tag.
+
+            Args:
+                line (str): The line input.
+
+            Returns:
+                None
+            """
             sys.stdout.write(
                 f'\r\033[K{Theme.CYAN}[SQL-LOG]{Theme.RESET} '
                 f'{escape_terminal_text(line)}\n'
@@ -209,7 +223,14 @@ class CommandHandlers:
             sys.stdout.flush()
 
         def tor_log_cb(line: str) -> None:
-            """Writes one Tor process diagnostic line to stdout with its log tag."""
+            """Writes one Tor process diagnostic line to stdout with its log tag.
+
+            Args:
+                line (str): The line input.
+
+            Returns:
+                None
+            """
             sys.stdout.write(
                 f'\r\033[K{Theme.CYAN}[TOR-LOG]{Theme.RESET} '
                 f'{escape_terminal_text(line)}\n'
@@ -220,7 +241,15 @@ class CommandHandlers:
             code: Union[EventType, DaemonStatus],
             params: Optional[Dict[str, JsonValue]] = None,
         ) -> None:
-            """Translates and prints one daemon startup status event to stdout."""
+            """Translates and prints one daemon startup status event to stdout.
+
+            Args:
+                code (Union[EventType, DaemonStatus]): The code input.
+                params (Optional[Dict[str, JsonValue]]): The params input.
+
+            Returns:
+                None
+            """
             if params is None:
                 params = {}
             if isinstance(code, EventType):

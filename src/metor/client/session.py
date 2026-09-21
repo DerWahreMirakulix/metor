@@ -245,7 +245,19 @@ class MetorClient:
         owner_token: Optional[str] = None,
         context_generation: Optional[int] = None,
     ) -> Optional[VoiceStartedEvent]:
-        """Begins one bounded Voice upload or LIVE turn."""
+        """Begins one bounded Voice upload or LIVE turn.
+
+        Args:
+            target (str): The target input.
+            delivery (Delivery): The delivery input.
+            msg_id (str): The msg id input.
+            codec (str): The codec input.
+            owner_token (Optional[str]): The owner token input.
+            context_generation (Optional[int]): The context generation input.
+
+        Returns:
+            Optional[VoiceStartedEvent]: The resulting value.
+        """
         return self.request(
             BeginVoiceCommand(
                 target, delivery, msg_id, codec, owner_token, context_generation
@@ -292,7 +304,16 @@ class MetorClient:
         *,
         owner_token: Optional[str] = None,
     ) -> Optional[VoiceFinalizedEvent]:
-        """Finalizes capture without publishing a DROP draft."""
+        """Finalizes capture without publishing a DROP draft.
+
+        Args:
+            msg_id (str): The msg id input.
+            duration_ms (Optional[int]): The duration ms input.
+            owner_token (Optional[str]): The owner token input.
+
+        Returns:
+            Optional[VoiceFinalizedEvent]: The resulting value.
+        """
         return self.request(
             FinalizeVoiceCommand(msg_id, duration_ms, owner_token), VoiceFinalizedEvent
         )
@@ -300,7 +321,16 @@ class MetorClient:
     def commit_voice(
         self, target: str, msg_id: str, *, owner_token: Optional[str] = None
     ) -> Optional[VoiceCommittedEvent]:
-        """Publishes one finalized DROP Voice draft for delivery."""
+        """Publishes one finalized DROP Voice draft for delivery.
+
+        Args:
+            target (str): The target input.
+            msg_id (str): The msg id input.
+            owner_token (Optional[str]): The owner token input.
+
+        Returns:
+            Optional[VoiceCommittedEvent]: The resulting value.
+        """
         return self.request(
             CommitVoiceCommand(target, msg_id, owner_token), VoiceCommittedEvent
         )
@@ -308,7 +338,16 @@ class MetorClient:
     def cancel_voice(
         self, target: str, msg_id: str, *, owner_token: Optional[str] = None
     ) -> Optional[VoiceCancelledEvent]:
-        """Cancels one unpublished DROP Voice draft."""
+        """Cancels one unpublished DROP Voice draft.
+
+        Args:
+            target (str): The target input.
+            msg_id (str): The msg id input.
+            owner_token (Optional[str]): The owner token input.
+
+        Returns:
+            Optional[VoiceCancelledEvent]: The resulting value.
+        """
         return self.request(
             CancelVoiceCommand(target, msg_id, owner_token), VoiceCancelledEvent
         )
@@ -323,7 +362,19 @@ class MetorClient:
         *,
         owner_token: Optional[str] = None,
     ) -> Optional[VoiceDataEvent]:
-        """Retrieves one authorized bounded range without exposing daemon storage."""
+        """Retrieves one authorized bounded range without exposing daemon storage.
+
+        Args:
+            target (str): The target input.
+            msg_id (str): The msg id input.
+            direction (MessageDirectionCode): The direction input.
+            offset (int): The offset input.
+            max_bytes (int): The max bytes input.
+            owner_token (Optional[str]): The owner token input.
+
+        Returns:
+            Optional[VoiceDataEvent]: The resulting value.
+        """
         return self.request(
             GetVoiceChunkCommand(
                 target, msg_id, direction, offset, max_bytes, owner_token
@@ -332,7 +383,15 @@ class MetorClient:
         )
 
     def release_voice(self, target: str, msg_id: str) -> Optional[VoiceReleasedEvent]:
-        """Consumes one finalized inbound Voice item after byte handoff."""
+        """Consumes one finalized inbound Voice item after byte handoff.
+
+        Args:
+            target (str): The target input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            Optional[VoiceReleasedEvent]: The resulting value.
+        """
         return self.request(ReleaseVoiceCommand(target, msg_id), VoiceReleasedEvent)
 
     def lock(self) -> bool:
@@ -347,7 +406,14 @@ class MetorClient:
         return self.request(LockCommand(), DaemonLockedEvent) is not None
 
     def runtime_snapshot(self) -> Optional[RuntimeSnapshotEvent]:
-        """Returns the authoritative aggregate snapshot for the active runtime."""
+        """Returns the authoritative aggregate snapshot for the active runtime.
+
+        Args:
+            None
+
+        Returns:
+            Optional[RuntimeSnapshotEvent]: The resulting value.
+        """
         return self.request(GetRuntimeSnapshotCommand(), RuntimeSnapshotEvent)
 
     def list_retained_messages(
@@ -361,7 +427,20 @@ class MetorClient:
         owner_token: Optional[str] = None,
         msg_id: Optional[str] = None,
     ) -> Optional[RetainedMessagesEvent]:
-        """Discovers retained identities without reading or consuming content."""
+        """Discovers retained identities without reading or consuming content.
+
+        Args:
+            target (Optional[str]): The target input.
+            delivery (Optional[Delivery]): The delivery input.
+            direction (Optional[MessageDirectionCode]): The direction input.
+            cursor (Optional[str]): The cursor input.
+            limit (int): The limit input.
+            owner_token (Optional[str]): The owner token input.
+            msg_id (Optional[str]): The msg id input.
+
+        Returns:
+            Optional[RetainedMessagesEvent]: The resulting value.
+        """
         return self.request(
             ListRetainedMessagesCommand(
                 target=target,
@@ -376,7 +455,14 @@ class MetorClient:
         )
 
     def prepare_profile_exit(self) -> bool:
-        """Runs the normal reliability-preserving profile exit phase."""
+        """Runs the normal reliability-preserving profile exit phase.
+
+        Args:
+            None
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         return (
             self.request(PrepareProfileExitCommand(), ProfileExitPreparedEvent)
             is not None

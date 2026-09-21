@@ -63,7 +63,14 @@ class MessageReceiptStore:
 
     @staticmethod
     def _voice_payload_finalized(payload: str) -> bool:
-        """Checks whether compact Voice metadata represents a complete turn."""
+        """Checks whether compact Voice metadata represents a complete turn.
+
+        Args:
+            payload (str): The payload input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         try:
             metadata = json.loads(payload)
         except (TypeError, ValueError):

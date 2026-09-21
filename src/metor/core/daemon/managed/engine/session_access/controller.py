@@ -476,11 +476,26 @@ class SessionAccessController(SessionEventMixin):
         return projection._consume_call_handle(self, conn, handle)
 
     def _valid_call_grant(self, conn: socket.socket, grant: PendingCallGrant) -> bool:
-        """Checks the exact request, session cycle, runtime and expiry."""
+        """Checks the exact request, session cycle, runtime and expiry.
+
+        Args:
+            conn (socket.socket): Authenticated client connection presenting the grant.
+            grant (PendingCallGrant): Exact pending-call capability under review.
+
+        Returns:
+            bool: Whether the grant still authorizes this connection and runtime cycle.
+        """
         return projection._valid_call_grant(self, conn, grant)
 
     def take_pending_action(self, conn: socket.socket) -> socket.socket | None:
-        """Transfers exact pending identity to the controller's atomic removal."""
+        """Transfers exact pending identity to the controller's atomic removal.
+
+        Args:
+            conn (socket.socket): The conn input.
+
+        Returns:
+            socket.socket | None: The resulting value.
+        """
         return projection.take_pending_action(self, conn)
 
     def project_pending_snapshot(

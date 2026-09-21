@@ -132,7 +132,17 @@ class MessageManager:
         payload: str,
         retained_bytes: int,
     ) -> bool:
-        """Strengthens one inbound Voice identity to DROP semantics."""
+        """Strengthens one inbound Voice identity to DROP semantics.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+            payload (str): The payload input.
+            retained_bytes (int): The retained bytes input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         return self._messages.promote_inbound_voice_to_drop(
             contact_onion, msg_id, payload, retained_bytes
         )
@@ -189,11 +199,27 @@ class MessageManager:
     def get_inbound_voice(
         self, contact_onion: str, msg_id: str
     ) -> Optional[InboundVoiceRecord]:
-        """Returns retained inbound Voice metadata needed for exact resume."""
+        """Returns retained inbound Voice metadata needed for exact resume.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            Optional[InboundVoiceRecord]: The resulting value.
+        """
         return self._messages.get_inbound_voice(contact_onion, msg_id)
 
     def has_inbound_voice_receipt(self, contact_onion: str, msg_id: str) -> bool:
-        """Reports whether an inbound identity is typed as Voice."""
+        """Reports whether an inbound identity is typed as Voice.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         return self._messages.has_inbound_voice_receipt(contact_onion, msg_id)
 
     def get_voice_payload(
@@ -202,7 +228,16 @@ class MessageManager:
         msg_id: str,
         direction: MessageDirection,
     ) -> Optional[VoicePayloadRecord]:
-        """Returns one exact-direction retained Voice metadata record."""
+        """Returns one exact-direction retained Voice metadata record.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+            direction (MessageDirection): The direction input.
+
+        Returns:
+            Optional[VoicePayloadRecord]: The resulting value.
+        """
         return self._messages.get_voice_payload(contact_onion, msg_id, direction)
 
     def message_outcome(
@@ -243,7 +278,20 @@ class MessageManager:
         owner_token: Optional[str] = None,
         msg_id: Optional[str] = None,
     ) -> RetainedMessagePage:
-        """Returns a non-consuming page of retained logical identities."""
+        """Returns a non-consuming page of retained logical identities.
+
+        Args:
+            contact_onion (Optional[str]): The contact onion input.
+            delivery (Optional[Delivery]): The delivery input.
+            direction (Optional[MessageDirection]): The direction input.
+            cursor (Optional[str]): The cursor input.
+            limit (int): The limit input.
+            owner_token (Optional[str]): The owner token input.
+            msg_id (Optional[str]): The msg id input.
+
+        Returns:
+            RetainedMessagePage: The resulting value.
+        """
         return self._messages.list_retained_messages(
             contact_onion, delivery, direction, cursor, limit, owner_token, msg_id
         )
@@ -251,7 +299,15 @@ class MessageManager:
     def release_inbound_voice(
         self, contact_onion: str, msg_id: str
     ) -> Optional[tuple[str, Delivery]]:
-        """Consumes one finalized inbound Voice after explicit client release."""
+        """Consumes one finalized inbound Voice after explicit client release.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            Optional[tuple[str, Delivery]]: The resulting value.
+        """
         return self._messages.release_inbound_voice(
             contact_onion,
             msg_id,
@@ -259,11 +315,25 @@ class MessageManager:
         )
 
     def get_unread_inbound_live_voices(self) -> List[InboundVoiceRecord]:
-        """Returns crash-safe inbound LIVE Voice items awaiting consume."""
+        """Returns crash-safe inbound LIVE Voice items awaiting consume.
+
+        Args:
+            None
+
+        Returns:
+            List[InboundVoiceRecord]: The resulting value.
+        """
         return self._messages.get_unread_inbound_live_voices()
 
     def get_unread_inbound_voices(self) -> List[InboundVoiceRecord]:
-        """Returns all crash-safe inbound Voice items awaiting consume."""
+        """Returns all crash-safe inbound Voice items awaiting consume.
+
+        Args:
+            None
+
+        Returns:
+            List[InboundVoiceRecord]: The resulting value.
+        """
         return self._messages.get_unread_inbound_voices()
 
     def get_unread_live_count(self, contact_onion: str) -> int:
@@ -303,7 +373,14 @@ class MessageManager:
         return self._messages.get_pending_outbox()
 
     def get_voice_draft_payloads(self) -> List[str]:
-        """Returns outbound DROP Voice drafts for ownership reconciliation."""
+        """Returns outbound DROP Voice drafts for ownership reconciliation.
+
+        Args:
+            None
+
+        Returns:
+            List[str]: The resulting value.
+        """
         return self._messages.get_voice_draft_payloads()
 
     def get_pending_live_outbox(
@@ -343,7 +420,21 @@ class MessageManager:
         count_limit: int,
         byte_limit: int,
     ) -> PendingLiveAdmission:
-        """Atomically queues one pending LIVE item within shared quotas."""
+        """Atomically queues one pending LIVE item within shared quotas.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            content_type (ContentType): The content type input.
+            payload (str): The payload input.
+            msg_id (str): The msg id input.
+            timestamp (str): The timestamp input.
+            retained_bytes (int): The retained bytes input.
+            count_limit (int): The count limit input.
+            byte_limit (int): The byte limit input.
+
+        Returns:
+            PendingLiveAdmission: The resulting value.
+        """
         return self._messages.queue_pending_live_if_capacity(
             contact_onion,
             content_type,
@@ -364,7 +455,19 @@ class MessageManager:
         payload: str,
         byte_limit: int,
     ) -> PendingLiveAdmission:
-        """Atomically grows one Voice item within shared LIVE byte quota."""
+        """Atomically grows one Voice item within shared LIVE byte quota.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+            expected_bytes (int): The expected bytes input.
+            retained_bytes (int): The retained bytes input.
+            payload (str): The payload input.
+            byte_limit (int): The byte limit input.
+
+        Returns:
+            PendingLiveAdmission: The resulting value.
+        """
         return self._messages.grow_pending_live_voice_if_capacity(
             contact_onion,
             msg_id,
@@ -375,11 +478,27 @@ class MessageManager:
         )
 
     def commit_voice_draft(self, contact_onion: str, msg_id: str) -> bool:
-        """Publishes one finalized DROP Voice draft to the durable outbox."""
+        """Publishes one finalized DROP Voice draft to the durable outbox.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         return self._messages.commit_voice_draft(contact_onion, msg_id)
 
     def cancel_voice_draft(self, contact_onion: str, msg_id: str) -> Optional[str]:
-        """Deletes one unsent DROP Voice draft and returns its metadata."""
+        """Deletes one unsent DROP Voice draft and returns its metadata.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            Optional[str]: The resulting value.
+        """
         return self._messages.cancel_voice_draft(contact_onion, msg_id)
 
     def promote_pending_live_to_drop(
@@ -622,7 +741,17 @@ class MessageManager:
         msg_id: Optional[str] = None,
         direction: Optional[MessageDirection] = None,
     ) -> List[str]:
-        """Returns metadata for persistent Voice blobs eligible for local removal."""
+        """Returns metadata for persistent Voice blobs eligible for local removal.
+
+        Args:
+            onion (Optional[str]): The onion input.
+            non_contacts_only (bool): The non contacts only input.
+            msg_id (Optional[str]): The msg id input.
+            direction (Optional[MessageDirection]): The direction input.
+
+        Returns:
+            List[str]: The resulting value.
+        """
         return self._messages.get_drop_voice_payloads(
             onion=onion,
             non_contacts_only=non_contacts_only,
@@ -631,7 +760,15 @@ class MessageManager:
         )
 
     def has_drop_payload(self, contact_onion: str, msg_id: str) -> bool:
-        """Reports whether a DROP receipt still owns local archive payload."""
+        """Reports whether a DROP receipt still owns local archive payload.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         return self._messages.has_drop_payload(contact_onion, msg_id)
 
     def clear_messages(

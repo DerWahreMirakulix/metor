@@ -109,7 +109,15 @@ class StateTracker(
         self._peer_writer_failure_callback = callback
 
     def _writer_exited(self, conn: socket.socket, writer: BoundedSocketWriter) -> None:
-        """Drops an exited writer; idle writers retain sole admission ownership."""
+        """Drops an exited writer; idle writers retain sole admission ownership.
+
+        Args:
+            conn (socket.socket): The conn input.
+            writer (BoundedSocketWriter): The writer input.
+
+        Returns:
+            None
+        """
         with self._lock:
             if self._socket_writers.get(conn) is writer:
                 self._socket_writers.pop(conn, None)
@@ -188,7 +196,14 @@ class StateTracker(
             raise
 
     def _peer_writer_failed(self, conn: socket.socket) -> None:
-        """Retires transport ownership when an asynchronous peer write fails."""
+        """Retires transport ownership when an asynchronous peer write fails.
+
+        Args:
+            conn (socket.socket): The conn input.
+
+        Returns:
+            None
+        """
         with self._lock:
             writer = self._socket_writers.get(conn)
             self._socket_write_locks.pop(conn, None)
@@ -252,7 +267,15 @@ class StateTracker(
             raise
 
     def live_generation(self, onion: str, msg_id: str) -> int:
-        """Admits and returns a generation for a newly retained LIVE identity."""
+        """Admits and returns a generation for a newly retained LIVE identity.
+
+        Args:
+            onion (str): The onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            int: The resulting integer value.
+        """
         with self._lock:
             key = (onion, msg_id)
             generation = self._live_generations.get(key)
@@ -276,14 +299,31 @@ class StateTracker(
             return self._live_generations.get((onion, msg_id))
 
     def is_live_generation(self, onion: str, msg_id: str, generation: int) -> bool:
-        """Checks a queued LIVE frame claim at the writer boundary."""
+        """Checks a queued LIVE frame claim at the writer boundary.
+
+        Args:
+            onion (str): The onion input.
+            msg_id (str): The msg id input.
+            generation (int): The generation input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
         with self._lock:
             return self._live_generations.get((onion, msg_id)) == generation
 
     def invalidate_live_generations(
         self, onion: str, msg_ids: Optional[List[str]] = None
     ) -> None:
-        """Invalidates queued LIVE frames for selected durable identities."""
+        """Invalidates queued LIVE frames for selected durable identities.
+
+        Args:
+            onion (str): The onion input.
+            msg_ids (Optional[List[str]]): The msg ids input.
+
+        Returns:
+            None
+        """
         with self._lock:
             selected = (
                 msg_ids
@@ -296,12 +336,26 @@ class StateTracker(
                 self._live_generations.pop((onion, msg_id), None)
 
     def invalidate_all_live_generations(self) -> None:
-        """Invalidates all queued LIVE work at a destructive/runtime fence."""
+        """Invalidates all queued LIVE work at a destructive/runtime fence.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         with self._lock:
             self._live_generations.clear()
 
     def snapshot_token(self) -> Tuple[object, ...]:
-        """Returns an atomic content-free fingerprint of projected LIVE state."""
+        """Returns an atomic content-free fingerprint of projected LIVE state.
+
+        Args:
+            None
+
+        Returns:
+            Tuple[object, ...]: The resulting value.
+        """
         with self._lock:
             return (
                 tuple(

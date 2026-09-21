@@ -78,7 +78,15 @@ class _AccessAllowedAce(ctypes.Structure):
 
 
 def _configure_apis(kernel32: Any, advapi32: Any) -> None:
-    """Declare pointer-width-safe signatures for the Win32 calls used below."""
+    """Declare pointer-width-safe signatures for the Win32 calls used below.
+
+    Args:
+        kernel32 (Any): The kernel32 input.
+        advapi32 (Any): The advapi32 input.
+
+    Returns:
+        None
+    """
     kernel32.CreateFileW.argtypes = [
         wintypes.LPCWSTR,
         wintypes.DWORD,
@@ -152,12 +160,27 @@ def _configure_apis(kernel32: Any, advapi32: Any) -> None:
 
 
 def _last_error() -> int:
-    """Return the thread-local Win32 error without importing Windows-only stubs."""
+    """Return the thread-local Win32 error without importing Windows-only stubs.
+
+    Args:
+        None
+
+    Returns:
+        int: The resulting integer value.
+    """
     return int(getattr(ctypes, 'get_last_error')())
 
 
 def _current_user_sid(kernel32: Any, advapi32: Any) -> tuple[Any, Any]:
-    """Return a live token and buffer containing its user SID."""
+    """Return a live token and buffer containing its user SID.
+
+    Args:
+        kernel32 (Any): The kernel32 input.
+        advapi32 (Any): The advapi32 input.
+
+    Returns:
+        tuple[Any, Any]: The resulting value.
+    """
     token = wintypes.HANDLE()
     if not advapi32.OpenProcessToken(
         kernel32.GetCurrentProcess(), _TOKEN_QUERY, ctypes.byref(token)
@@ -184,7 +207,16 @@ def _current_user_sid(kernel32: Any, advapi32: Any) -> tuple[Any, Any]:
 
 
 def _acl_is_private(handle: Any, kernel32: Any, advapi32: Any) -> bool:
-    """Require current-user ownership and no foreign writable allow ACE."""
+    """Require current-user ownership and no foreign writable allow ACE.
+
+    Args:
+        handle (Any): The handle input.
+        kernel32 (Any): The kernel32 input.
+        advapi32 (Any): The advapi32 input.
+
+    Returns:
+        bool: Whether the documented condition holds.
+    """
     token, token_buffer = _current_user_sid(kernel32, advapi32)
     descriptor = wintypes.LPVOID()
     owner = wintypes.LPVOID()
@@ -255,7 +287,14 @@ def _acl_is_private(handle: Any, kernel32: Any, advapi32: Any) -> bool:
 
 
 def open_windows_configuration(path: Path) -> int:
-    """Open one non-reparse file and validate the ACL on that exact handle."""
+    """Open one non-reparse file and validate the ACL on that exact handle.
+
+    Args:
+        path (Path): The path input.
+
+    Returns:
+        int: The resulting integer value.
+    """
     if os.name != 'nt':
         raise OSError('Windows secure opener is unavailable on this platform')
     import msvcrt

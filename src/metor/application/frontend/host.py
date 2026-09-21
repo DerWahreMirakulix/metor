@@ -442,7 +442,14 @@ class LocalFrontendHost:
     def _bootstrap_attempt(
         self, interactions: FrontendInteractions
     ) -> FrontendBootstrapResult:
-        """Resolves one attempt; credentials never survive a failed attempt."""
+        """Resolves one attempt; credentials never survive a failed attempt.
+
+        Args:
+            interactions (FrontendInteractions): The interactions input.
+
+        Returns:
+            FrontendBootstrapResult: The resulting value.
+        """
         profile = self._profile
         if not profile.exists():
             raise FrontendBootstrapError(

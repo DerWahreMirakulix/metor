@@ -881,3 +881,101 @@ generation, or application version.
 | `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
 | Voice method-owner and physical-size inventory | PASS; receive only in `inbound.py`, begin/append/finalize only in `capture.py`, every production module below 800 physical lines |
 | `git diff --check` | PASS |
+
+## A20 verification
+
+The ordered production-source audit covered all 446 tracked Python modules,
+excluding ignored build products rather than treating them as source. Every
+file received an ownership/header/documentation decision in the required
+order. The table records how many files needed callable-contract work and how
+many were reviewed unchanged; a changed file remains counted in its one owning
+group.
+
+| Owner group | Audited | Updated | Unchanged |
+| ----------- | ------: | ------: | --------: |
+| SDK, shared contract, and versioning | 63 | 9 | 54 |
+| Base, application, CLI, and root entry points | 55 | 12 | 43 |
+| Core and storage | 155 | 34 | 121 |
+| Terminal frontend | 36 | 4 | 32 |
+| GUI frontend | 137 | 12 | 125 |
+| **Total** | **446** | **71** | **375** |
+
+All 446 modules have a top-level role header. The one materially incorrect
+header was `metor.cli.entry`: it described the general CLI as the Terminal
+frontend even though it owns Base command dispatch and selects either frontend
+through the public client contract. Its header and `run_cli` description now
+state that boundary and its configuration side effect honestly. Historical or
+prototype wording was not added to current code, and accurate compatibility
+or migration descriptions were retained where they describe live behavior.
+
+A repository test now parses every tracked production module. It requires a
+meaningful callable description and explicit `Args:` and `Returns:` sections
+for implementations, nested callbacks, Protocol methods, and `TYPE_CHECKING`
+signatures alike. The first executable-code form of the test failed on 271
+callables; expanding it to declaration signatures exposed the remaining 42.
+After correction, all 2,595 functions and methods satisfy the complete rule,
+and no module header is missing. Existing behavior descriptions were preserved;
+security-sensitive outcomes were made explicit for authenticated IPC connect,
+pending-call grants, quick-unlock ACL/owner checks, startup-secret handling,
+and frontend credential mode.
+
+The CLI and Terminal presentation trees were compared file by file and through
+their import consumers. Both adapters are live: Base commands consume
+`metor.cli` presenters/prompts/translations, while interactive chat consumes
+`metor.ui.terminal` equivalents. Even the intentionally parallel content and
+prompt adapters are independently imported and tested by their distribution.
+Removing one copy or introducing a generic UI package would either remove a
+live command surface or create the prohibited Base-to-frontend dependency, so
+no presentation owner was redirected or merged.
+
+Every one of the 100 pass-only exception handlers was inspected in its owning
+operation: 23 are bounded `OSError` descriptor/file cleanup paths, 13 are
+typed validation or platform fallbacks, and the remainder are isolated socket
+shutdown, rollback-after-primary-failure, optional callback/notification,
+hardware-feedback, or best-effort encrypted-object cleanup paths. Mandatory
+profile release and destruction do not rely on those passes: database close,
+runtime-key release, persistent-key destruction, and cleanup phase failures
+are recorded and propagated by `destroy_profile_storage`; file-lock cleanup
+also preserves paired acquisition/cleanup failures. No broad catch was changed
+merely for style, and optional failures remain bounded and documented.
+
+The repository-control review found no tracked `.env`, `.metor` state,
+bytecode, cache, build, distribution, egg-info, virtual environment, private
+key, credential, or secret file. `.gitignore` covers those local products
+without hiding tracked fixtures or generated references. `.gitattributes`
+keeps generated references reproducible and GUI assets byte-exact.
+`.env.example` contains only the documented data-parent and optional Tor path,
+with no credential value. Python and Node dependency locks are exact-version
+inputs and `package-lock.json` resolves cleanly. VS Code settings are valid
+JSON; `extensions.json` is editor-owned JSONC and its trailing comma is accepted
+by that owner. No tracked data was removed by an ignore-rule change, and no
+repository-control file required modification.
+
+The complete suite exposed an earlier safe-settings wire defect unrelated to
+the documentation edits. The same two failures reproduced against an untouched
+archive of A19 commit `36fa264`: integer registry bounds were placed into DTO
+fields whose existing public type is `Optional[float]`, so the strict SDK
+discarded the entire descriptor event and the request timed out. The narrow
+fix converts present bounds to `float` at the descriptor boundary. It changes
+no field, schema, registry value, setting behavior, compatibility generation,
+or application version; it makes emitted data conform to the already published
+DTO contract.
+
+| Command | Result |
+| ------- | ------ |
+| `python -m unittest tests.test_source_documentation` before callable corrections | EXPECTED FAIL; 271 executable callables lacked a description or complete sections before declaration signatures were added to the same rule |
+| Final AST inventory of tracked production Python | PASS; 446 module headers, 2,595 callable docstrings, zero missing `Args:`/`Returns:` contracts |
+| `python -m unittest tests.test_source_documentation tests.test_terminal_rendering_security tests.test_message_architecture_contract tests.test_closure_architecture` | PASS; 26 documentation, independent-adapter, rendering-security, and owner-boundary tests |
+| First full `python -m unittest discover -s tests -p 'test_*.py'` outside the socket sandbox | 786 PASS, 1 FAIL, 1 ERROR; isolated the safe-descriptor timeout |
+| The two failing GUI settings tests against temporary archive of A19 `36fa264` | EXPECTED BASELINE FAIL/ERROR; identical timeout and unloaded state reproduced before A20 |
+| Direct production DTO round trip before correction | EXPECTED FAIL; `min_value` declared `Optional[float]` but emitted as `int` |
+| `PYTHONPATH=tests python -m unittest test_gui_settings -v` after correction | PASS; 5 covered, stale, unknown-result, and descriptor IPC tests |
+| Final `python -m unittest discover -s tests -p 'test_*.py'` outside the socket sandbox | PASS; 788 tests in 662.623 seconds |
+| `ruff check src packaging tests/test_source_documentation.py` | PASS |
+| `ruff format --check src packaging tests/test_source_documentation.py` | PASS; 447 files formatted |
+| `mypy src` | PASS; strict project configuration, 444 source files |
+| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
+| `python scripts/versioning.py validate` | PASS; version registry unchanged and valid |
+| `python scripts/validate_generated_docs.py` | PASS; generated references fresh and reproducible |
+| `npm ls --package-lock-only --ignore-scripts --depth=0` | PASS; locked Prettier dependency resolves locally |
+| `git diff --check` | PASS |

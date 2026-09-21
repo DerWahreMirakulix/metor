@@ -335,8 +335,25 @@ class Action(FocusBehavior, ButtonBehavior, Panel):
 class KeyboardOwner(Protocol):
     """Native field-to-dock boundary without any profile or content persistence."""
 
-    def focused(self, field: 'TextField') -> None: ...
-    def show(self, field: 'TextField') -> None: ...
+    def focused(self, field: 'TextField') -> None:
+        """Reports the native field that currently owns keyboard focus.
+
+        Args:
+            field: Focused text field.
+        Returns:
+            None
+        """
+        ...
+
+    def show(self, field: 'TextField') -> None:
+        """Shows the native keyboard for one focused field.
+
+        Args:
+            field: Focused text field.
+        Returns:
+            None
+        """
+        ...
 
 
 class TextField(TextInput):

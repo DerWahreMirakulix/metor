@@ -54,7 +54,18 @@ class MessageRepository(
         owner_token: Optional[str] = None,
         msg_id: Optional[str] = None,
     ) -> tuple[str, list[SqlParam], str]:
-        """Builds the bounded inventory predicate and stable filter identity."""
+        """Builds the bounded inventory predicate and stable filter identity.
+
+        Args:
+            contact_onion (Optional[str]): The contact onion input.
+            delivery (Optional[Delivery]): The delivery input.
+            direction (Optional[MessageDirection]): The direction input.
+            owner_token (Optional[str]): The owner token input.
+            msg_id (Optional[str]): The msg id input.
+
+        Returns:
+            tuple[str, list[SqlParam], str]: The resulting value.
+        """
         clauses = [
             "((r.direction = 'out' AND r.status IN ('pending', 'draft')) "
             "OR (r.direction = 'in' AND r.content_type = 'voice' "
@@ -106,7 +117,14 @@ class MessageRepository(
 
     @staticmethod
     def _decode_retained_cursor(cursor: str) -> dict[str, object]:
-        """Decodes one opaque bounded inventory cursor."""
+        """Decodes one opaque bounded inventory cursor.
+
+        Args:
+            cursor (str): The cursor input.
+
+        Returns:
+            dict[str, object]: The resulting value.
+        """
         if not cursor or len(cursor) > 1024:
             raise ValueError('Invalid retained-message cursor.')
         try:
@@ -125,7 +143,17 @@ class MessageRepository(
     def _encode_retained_cursor(
         last_id: int, ceiling_id: int, version: str, fingerprint: str
     ) -> str:
-        """Encodes one content-free inventory continuation token."""
+        """Encodes one content-free inventory continuation token.
+
+        Args:
+            last_id (int): The last id input.
+            ceiling_id (int): The ceiling id input.
+            version (str): The version input.
+            fingerprint (str): The fingerprint input.
+
+        Returns:
+            str: The resulting text value.
+        """
         raw = json.dumps(
             {
                 'v': 1,
@@ -141,7 +169,14 @@ class MessageRepository(
 
     @staticmethod
     def _retained_record(row: Tuple[SqlParam, ...]) -> RetainedMessageRecord:
-        """Converts a retained receipt row without returning serialized content."""
+        """Converts a retained receipt row without returning serialized content.
+
+        Args:
+            row (Tuple[SqlParam, ...]): The row input.
+
+        Returns:
+            RetainedMessageRecord: The resulting value.
+        """
         content_type = ContentType(str(row[4]))
         retained_bytes = int(str(row[7]))
         finalized = content_type is ContentType.TEXT
@@ -189,6 +224,18 @@ class MessageRepository(
 
         Continuations are rejected if any matching receipt changed between pages,
         forcing clients to restart instead of merging a torn inventory.
+
+        Args:
+            contact_onion (Optional[str]): The contact onion input.
+            delivery (Optional[Delivery]): The delivery input.
+            direction (Optional[MessageDirection]): The direction input.
+            cursor (Optional[str]): The cursor input.
+            limit (int): The limit input.
+            owner_token (Optional[str]): The owner token input.
+            msg_id (Optional[str]): The msg id input.
+
+        Returns:
+            RetainedMessagePage: The resulting value.
         """
         if type(limit) is not int or not 1 <= limit <= Constants.MAX_RETAINED_PAGE_SIZE:
             raise ValueError('Invalid retained-message page size.')

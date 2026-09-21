@@ -28,7 +28,14 @@ class _RuntimeStateSnapshot:
 
     @property
     def had_runtime_state(self) -> bool:
-        """Indicates whether the snapshot contained any daemon runtime-state files."""
+        """Indicates whether the snapshot contained any daemon runtime-state files.
+
+        Args:
+            None
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
 
         return self.had_pid_file or self.had_port_file
 

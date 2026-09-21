@@ -15,7 +15,14 @@ _MESSAGE_ID_PATTERN = re.compile(
 
 
 def is_valid_message_id(msg_id: str) -> bool:
-    """Checks the bounded wire/storage identity grammar."""
+    """Checks the bounded wire/storage identity grammar.
+
+    Args:
+        msg_id (str): The msg id input.
+
+    Returns:
+        bool: Whether the documented condition holds.
+    """
     return _MESSAGE_ID_PATTERN.fullmatch(msg_id) is not None
 
 

@@ -120,7 +120,14 @@ class HeadlessDaemon:
 
     @cached_property
     def _blobs(self) -> BlobStore:
-        """Lazily opens the profile object store for explicit payload cleanup."""
+        """Lazily opens the profile object store for explicit payload cleanup.
+
+        Args:
+            None
+
+        Returns:
+            BlobStore: The resulting value.
+        """
         if self._pm.uses_encrypted_storage():
             return EncryptedBlobStore(
                 self._pm.paths.get_persistent_blob_dir(),

@@ -71,8 +71,12 @@ def setting_descriptors(pm: ProfileManager) -> list[SettingSnapshotEntry]:
                 description=description,
                 constraints=spec.constraints,
                 security_note=spec.security_note or '',
-                min_value=spec.min_value,
-                max_value=spec.max_value,
+                min_value=(
+                    float(spec.min_value) if spec.min_value is not None else None
+                ),
+                max_value=(
+                    float(spec.max_value) if spec.max_value is not None else None
+                ),
                 editable=spec.allow_profile_override
                 and row['source'] != 'plaintext_forced',
                 scope='profile',

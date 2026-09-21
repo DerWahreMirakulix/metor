@@ -318,9 +318,25 @@ def confirm(
     """
 
     def build(body: BoxLayout) -> None:
+        """Builds the destructive-action explanation inside the sheet.
+
+        Args:
+            body (BoxLayout): The body input.
+
+        Returns:
+            None
+        """
         body.add_widget(Label(explanation, tone='textSecondary'))
 
     def accept() -> None:
+        """Closes the sheet and runs the authorized action while uncovered.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         sheet.dismiss(animation=False)
         if not controller.state.covered:
             action()

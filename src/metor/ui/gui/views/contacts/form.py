@@ -44,6 +44,16 @@ def contact_form(
     body.add_widget(alias)
 
     def edit(field: str, widget: TextField, value: str) -> None:
+        """Copies a bounded field value into the pending contact form.
+
+        Args:
+            field (str): The field input.
+            widget (TextField): The widget input.
+            value (str): The value input.
+
+        Returns:
+            None
+        """
         if len(value.encode('utf-8')) <= GuiLimits.CONTACT_BYTES:
             setattr(form, field, value)
         else:
@@ -53,6 +63,14 @@ def contact_form(
     alias.bind(text=partial(edit, 'alias'))
 
     def submit(recheck: bool = False) -> None:
+        """Runs the selected contact action and refreshes its presentation.
+
+        Args:
+            recheck (bool): The recheck input.
+
+        Returns:
+            None
+        """
         if recheck:
             controller.contacts.recheck()
         else:

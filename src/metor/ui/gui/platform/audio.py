@@ -68,10 +68,45 @@ class PcmVoice:
 class AudioStream(Protocol):
     """Minimal native stream operations kept outside presentation state."""
 
-    def start(self) -> None: ...
-    def stop(self) -> None: ...
-    def close(self) -> None: ...
-    def write(self, data: bytes) -> bool: ...
+    def start(self) -> None:
+        """Starts the native stream.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        ...
+
+    def stop(self) -> None:
+        """Stops the native stream without disposing it.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        ...
+
+    def close(self) -> None:
+        """Releases the native stream.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        ...
+
+    def write(self, data: bytes) -> bool:
+        """Writes one bounded PCM segment.
+
+        Args:
+            data: PCM bytes to play.
+        Returns:
+            bool: Whether the stream accepted the segment.
+        """
+        ...
 
 
 class HeadsetAudio:
