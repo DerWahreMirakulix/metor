@@ -61,7 +61,7 @@ ownership map. Counts sum to 763; no path is unclassified.
 | A11      | verified | Canonical daemon bootstrap/runtime preparation and regression coverage; this worklog                           | A11 gates below      | Complete                                                                    |
 | A12      | verified | Producer recovery correlation ordering and regression coverage; this worklog                                  | A12 gates below      | Complete                                                                    |
 | A13      | verified | `src/metor/ui/gui/platform/{configuration,configuration_security}.py`, `tests/test_device_configuration_security.py`, this worklog | A13 gates below | Complete |
-| A14      | in progress | `src/metor/ui/gui/{app.py,platform/lifecycle.py,runtime/controller.py}`, `tests/{test_gui_os_lifecycle.py,test_gui_lifecycle.py}`, this worklog | Windows checkpoint below | Add the separate Linux desktop lifecycle source |
+| A14      | verified | `src/metor/ui/gui/{app.py,platform/lifecycle.py,runtime/controller.py}`, `packaging/gui/setup.py`, `requirements/gui.lock`, `tests/{test_gui_os_lifecycle.py,gui_native_lifecycle.py,test_gui_lifecycle.py}`, `docs/contracts/{GUI_PLATFORM_ADR.md,gui/support.json}`, this worklog | A14 gates below | Complete |
 | A15–A25 | open     | None                                                                                                            | Not run              | A15: prove simultaneous complete GUI media path                             |
 
 ## A00 verification
@@ -591,7 +591,7 @@ claimed pass.
 | `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
 | `git diff --check` | PASS |
 
-## A14 Windows checkpoint (in progress)
+## A14 verification
 
 Windows desktop lock/unlock and suspend/resume now enter through an owned hidden
 Win32 top-level window registered for WTS session notifications and power
@@ -609,18 +609,40 @@ re-revokes input/media ownership, checks that the captured SDK transport remains
 connected, and never reconstructs a press, starts capture, starts playback, or
 unlocks. Kivy's own pause/resume callbacks use the same coordinator.
 
+Linux separately subscribes to systemd-logind `PrepareForSleep` and Session
+`Lock`/`Unlock` on the system bus, plus freedesktop, GNOME, and Cinnamon
+`ActiveChanged` screen-lock signals on the session bus. At least one bus must be
+subscribable; otherwise startup reports unavailable lifecycle integration. The
+new pure-Python `dbus-next` dependency is Linux-qualified in both the canonical
+GUI lock and wheel metadata. An isolated real session bus delivered actual
+lock/unlock signal messages through the source and bounded teardown.
+
 Native Windows execution is unavailable in the current WSL environment, so the
 numeric WTS/power mapping, bounded handoff, privacy ordering, and fail-closed
 registration code are structurally exercised without claiming an installed OS
-broadcast pass. A14 remains in progress until the separate Linux source and
-support-manifest truth update are complete.
+broadcast pass. WSL also cannot produce a real system suspend or a complete
+desktop session with native audio. Those exact Windows WTS/power, Linux logind
+suspend, compositor-variant, and simultaneous native-media event runs remain
+truthfully marked as environment gaps in the active support manifest; Windows
+and Linux x86-64 were not removed as product targets.
+
+This is local native lifecycle and dependency integration only. It changes no
+IPC route/DTO, persisted data, launcher spelling, compatibility generation, or
+application version.
 
 | Command | Result |
 | ------- | ------ |
 | `python -m unittest tests.test_gui_os_lifecycle -v` before implementation | EXPECTED ERROR; the native lifecycle module did not exist |
-| `python -m unittest tests.test_gui_os_lifecycle -v` | PASS; 5 bounded inbox, Win32 mapping, privacy-order, and resume tests |
+| `python -m unittest tests.test_gui_os_lifecycle -v` | PASS; 8 bounded inbox/factory, Win32, Linux D-Bus, privacy-order, and resume tests |
 | `PYTHONPATH=tests python -m unittest test_gui_lifecycle.NativeLifecycleTests -v` | PASS; 4 focus/suspend/resume transport and no-auto-media tests |
 | `PYTHONPATH=tests python -m unittest test_gui_lifecycle -q` outside the socket sandbox | PASS; toolkit-independent lifecycle plus real SDK/IPC/Core coverage |
-| `python -m ruff check` for the five Windows-checkpoint source/test paths | PASS |
-| `python -m ruff format --check` for the five Windows-checkpoint source/test paths | PASS |
-| `python -m mypy src/metor/ui/gui/platform/lifecycle.py src/metor/ui/gui/app.py src/metor/ui/gui/runtime/controller.py` | PASS; strict project configuration |
+| `dbus-run-session -- env PYTHONPATH=/tmp/metor-dbus-next:src python tests/gui_native_lifecycle.py` outside the socket sandbox | PASS; real isolated Linux session-bus Lock/Resume delivery and teardown |
+| `PYTHONPATH=tests python -m unittest test_gui_lifecycle test_gui_press test_gui_playback test_gui_capture -q` outside the socket sandbox | PASS; lifecycle, lost key-up, playback, and real SDK/Core capture regressions |
+| `PYTHONPATH=tests python -m unittest test_release_contract test_platform_contracts -q` | PASS; 40 distribution and platform-boundary tests |
+| GUI wheel build plus METADATA inspection | PASS; Linux-qualified `dbus-next==0.2.3` dependency present |
+| `python -m ruff check` for all A14 source, packaging, and test paths | PASS |
+| `python -m ruff format --check` for all A14 source, packaging, and test paths | PASS |
+| `python -m mypy src/metor/ui/gui/platform/lifecycle.py src/metor/ui/gui/app.py src/metor/ui/gui/runtime/controller.py tests/gui_native_lifecycle.py` | PASS; strict project configuration |
+| `python -m json.tool docs/contracts/gui/support.json` | PASS; support manifest remains valid JSON |
+| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
+| `git diff --check` | PASS |

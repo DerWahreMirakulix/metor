@@ -20,5 +20,6 @@ setup(
         'sounddevice==0.5.3',
         'qrcode==8.2',
         'accesskit==0.7.0',
+        'dbus-next==0.2.3; platform_system == "Linux"',
     ]
 )

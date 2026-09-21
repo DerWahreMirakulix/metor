@@ -15,9 +15,9 @@ from metor.ui.gui.constants import Geometry, GuiLimits
 from metor.ui.gui.platform import DeviceConfiguration
 from metor.ui.gui.platform.lifecycle import (
     DesktopLifecycleEvent,
+    DesktopLifecycleSource,
     LifecycleCoordinator,
     LifecycleInbox,
-    WindowsLifecycleSource,
     create_desktop_lifecycle_source,
 )
 from metor.ui.gui.runtime import GuiController
@@ -64,7 +64,7 @@ class MetorApp(App):
         self._prompt_identity: object = None
         self.accessibility: AccessibilityBridge | None = None
         self._lifecycle_inbox = LifecycleInbox()
-        self._lifecycle_source: WindowsLifecycleSource | None = None
+        self._lifecycle_source: DesktopLifecycleSource | None = None
         self._render_trigger = Clock.create_trigger(self._render, 0)
         self._lifecycle = LifecycleCoordinator(
             self._revoke_native_privacy,

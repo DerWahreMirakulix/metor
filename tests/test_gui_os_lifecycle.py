@@ -7,7 +7,9 @@ from metor.ui.gui.platform.lifecycle import (
     DesktopLifecycleEvent,
     LifecycleCoordinator,
     LifecycleInbox,
+    LinuxLifecycleSource,
     WindowsLifecycleSource,
+    create_desktop_lifecycle_source,
 )
 
 
@@ -27,6 +29,24 @@ class LifecycleInboxTests(unittest.TestCase):
             (DesktopLifecycleEvent.SUSPEND, DesktopLifecycleEvent.LOCK),
         )
         self.assertEqual(inbox.take_all(), ())
+
+    def test_factory_selects_only_real_supported_desktop_sources(self) -> None:
+        with patch(
+            'metor.ui.gui.platform.lifecycle.platform.system', return_value='Windows'
+        ):
+            self.assertIsInstance(
+                create_desktop_lifecycle_source(Mock()), WindowsLifecycleSource
+            )
+        with patch(
+            'metor.ui.gui.platform.lifecycle.platform.system', return_value='Linux'
+        ):
+            self.assertIsInstance(
+                create_desktop_lifecycle_source(Mock()), LinuxLifecycleSource
+            )
+        with patch(
+            'metor.ui.gui.platform.lifecycle.platform.system', return_value='Darwin'
+        ):
+            self.assertIsNone(create_desktop_lifecycle_source(Mock()))
 
 
 class WindowsLifecycleSourceTests(unittest.TestCase):
@@ -61,6 +81,52 @@ class WindowsLifecycleSourceTests(unittest.TestCase):
 
         self.assertEqual(result, 23)
         publish.assert_not_called()
+
+
+class LinuxLifecycleSourceTests(unittest.TestCase):
+    """Maps logind and desktop screen-lock D-Bus signals."""
+
+    def test_logind_sleep_and_session_signals_map_to_lifecycle(self) -> None:
+        publish = Mock()
+        source = LinuxLifecycleSource(publish)
+
+        source._dispatch('org.freedesktop.login1.Manager', 'PrepareForSleep', [True])
+        source._dispatch('org.freedesktop.login1.Manager', 'PrepareForSleep', [False])
+        source._dispatch('org.freedesktop.login1.Session', 'Lock', [])
+        source._dispatch('org.freedesktop.login1.Session', 'Unlock', [])
+
+        self.assertEqual(
+            [call.args[0] for call in publish.call_args_list],
+            [
+                DesktopLifecycleEvent.SUSPEND,
+                DesktopLifecycleEvent.RESUME,
+                DesktopLifecycleEvent.LOCK,
+                DesktopLifecycleEvent.RESUME,
+            ],
+        )
+
+    def test_screensaver_active_state_maps_without_treating_focus_as_lock(self) -> None:
+        publish = Mock()
+        source = LinuxLifecycleSource(publish)
+
+        for interface in (
+            'org.freedesktop.ScreenSaver',
+            'org.gnome.ScreenSaver',
+        ):
+            source._dispatch(interface, 'ActiveChanged', [True])
+            source._dispatch(interface, 'ActiveChanged', [False])
+        source._dispatch('org.example.Window', 'FocusChanged', [False])
+        source._dispatch('org.freedesktop.ScreenSaver', 'ActiveChanged', [])
+
+        self.assertEqual(
+            [call.args[0] for call in publish.call_args_list],
+            [
+                DesktopLifecycleEvent.LOCK,
+                DesktopLifecycleEvent.RESUME,
+                DesktopLifecycleEvent.LOCK,
+                DesktopLifecycleEvent.RESUME,
+            ],
+        )
 
 
 class ApplicationLifecycleFenceTests(unittest.TestCase):

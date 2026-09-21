@@ -79,6 +79,37 @@ the installed launcher check exposed this ordering error and verifies the fix.
 Linux registration requires a session D-Bus; no bus means unavailable native
 accessibility, not simulated platform support.
 
+## Native desktop lifecycle
+
+Desktop focus loss remains a local input/media departure only; it does not
+pretend to be an OS lock and does not hard-lock the daemon. Actual Windows
+session Lock/Unlock and system suspend/resume arrive through an owned hidden
+Win32 window registered for WTS session notifications and power broadcasts.
+That window has its own message pump and never subclasses Kivy's HWND, so it
+does not compete with or change the AccessKit/Kivy WndProc teardown order.
+
+Linux uses the pure-Python `dbus-next` 0.2.3 client. The system bus subscribes
+to systemd-logind `PrepareForSleep` and Session `Lock`/`Unlock`; the session bus
+subscribes to the standard freedesktop and implemented GNOME/Cinnamon
+`ActiveChanged` screen-saver interfaces. At least one bus must be subscribable;
+otherwise the claimed Linux desktop lifecycle integration fails explicitly.
+Desktop environments that emit none of these interfaces are untested and are
+not inferred to work merely because Kivy can open a window.
+
+Both platforms publish only three typed transitions through a four-record
+coalescing inbox. A privacy departure takes precedence over resume under
+overload. On the GUI thread, native accessibility and tooltip text are revoked
+before capture/input/playback departure and per-client restriction. Resume
+keeps the cover, verifies that the captured SDK transport is still connected,
+and never reconstructs PTT, starts the microphone, starts playback, or unlocks.
+Kivy pause/resume callbacks enter the same path but remain unit coverage rather
+than native OS-event evidence.
+
+An isolated real Linux session-D-Bus signal-delivery probe passes. This WSL
+host cannot produce a native desktop lock or system suspend and has no native
+Windows session, so logind suspend, complete compositor variants, and installed
+Windows WTS/power delivery remain explicit native acceptance gaps.
+
 Separate external OS clients verify labels, ordinary button invocation and
 retained-element revocation before repaint on both systems. Windows additionally
 verifies ordinary `ValuePattern.SetValue`; Linux verifies native editor focus.
@@ -170,7 +201,9 @@ privacy/action exposure have direct fixture evidence, including restriction.
 
 Sources: [Kivy installation](https://kivy.org/doc/stable/gettingstarted/installation.html),
 [Kivy window contract](https://kivy.org/doc/stable/api-kivy.core.window.html),
-[sounddevice installation](https://python-sounddevice.readthedocs.io/en/0.5.3/installation.html).
+[sounddevice installation](https://python-sounddevice.readthedocs.io/en/0.5.3/installation.html),
+[dbus-next package](https://pypi.org/project/dbus-next/), and
+[dbus-next low-level interface](https://github.com/altdesktop/python-dbus-next/blob/master/docs/low-level-interface/index.rst).
 
 
 The previous temporary embeddable Windows runtime was absent when validation

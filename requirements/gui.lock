@@ -5,6 +5,7 @@ Kivy-Garden==0.1.5
 sounddevice==0.5.3
 qrcode==8.2
 accesskit==0.7.0
+dbus-next==0.2.3 ; platform_system == "Linux"
 docutils==0.23
 filetype==1.2.0
 Pygments==2.21.0

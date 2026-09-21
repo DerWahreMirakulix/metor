@@ -3,10 +3,11 @@
 from collections import deque
 from collections.abc import Callable
 from enum import Enum
+import asyncio
 import importlib
 import platform
 import threading
-from typing import Any
+from typing import Any, Protocol
 
 
 class DesktopLifecycleEvent(str, Enum):
@@ -75,6 +76,16 @@ class LifecycleCoordinator:
         else:
             self._resume()
         self._refresh()
+
+
+class DesktopLifecycleSource(Protocol):
+    """Lifecycle source owned by one GUI process."""
+
+    def start(self) -> None:
+        """Begin native event delivery or fail explicitly."""
+
+    def close(self) -> None:
+        """Stop native event delivery within a fixed bound."""
 
 
 class WindowsLifecycleSource:
@@ -218,13 +229,179 @@ class WindowsLifecycleSource:
         if window is not None and self._win32gui is not None:
             self._win32gui.PostMessage(window, self._WM_CLOSE, 0, 0)
         thread.join(2.0)
-        self._thread = None
+        if not thread.is_alive():
+            self._thread = None
+
+
+class LinuxLifecycleSource:
+    """Receive logind and desktop lock signals over native D-Bus buses."""
+
+    _SYSTEM_RULES = (
+        "type='signal',sender='org.freedesktop.login1',"
+        "interface='org.freedesktop.login1.Manager',member='PrepareForSleep'",
+        "type='signal',sender='org.freedesktop.login1',"
+        "interface='org.freedesktop.login1.Session',member='Lock'",
+        "type='signal',sender='org.freedesktop.login1',"
+        "interface='org.freedesktop.login1.Session',member='Unlock'",
+    )
+    _SESSION_RULES = tuple(
+        "type='signal',interface='" + interface + "',member='ActiveChanged'"
+        for interface in (
+            'org.freedesktop.ScreenSaver',
+            'org.gnome.ScreenSaver',
+            'org.cinnamon.ScreenSaver',
+        )
+    )
+
+    def __init__(self, publish: Callable[[DesktopLifecycleEvent], None]) -> None:
+        """Create an inert source; D-Bus imports remain Linux-runtime-only."""
+        self._publish = publish
+        self._thread: threading.Thread | None = None
+        self._ready = threading.Event()
+        self._closing = threading.Event()
+        self._startup_error: BaseException | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._stop: asyncio.Event | None = None
+
+    def start(self) -> None:
+        """Subscribe at least one native bus or reject unsupported sessions."""
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(
+            target=self._run,
+            name='metor-linux-lifecycle',
+            daemon=True,
+        )
+        self._thread.start()
+        if not self._ready.wait(3.0):
+            self.close()
+            raise RuntimeError('Linux lifecycle integration timed out')
+        if self._startup_error is not None:
+            error = self._startup_error
+            self.close()
+            raise RuntimeError('Linux lifecycle integration is unavailable') from error
+
+    def _run(self) -> None:
+        """Own asyncio and every D-Bus connection on one bounded thread."""
+        loop = asyncio.new_event_loop()
+        self._loop = loop
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._listen())
+        except BaseException as exc:
+            self._startup_error = exc
+            self._ready.set()
+        finally:
+            self._loop = None
+            loop.close()
+
+    async def _listen(self) -> None:
+        """Install low-level matches without relying on desktop proxy objects."""
+        aio = importlib.import_module('dbus_next.aio')
+        constants = importlib.import_module('dbus_next.constants')
+        message_module = importlib.import_module('dbus_next.message')
+        buses: list[Any] = []
+        for bus_type, rules in (
+            (constants.BusType.SYSTEM, self._SYSTEM_RULES),
+            (constants.BusType.SESSION, self._SESSION_RULES),
+        ):
+            bus = None
+            try:
+                bus = await aio.MessageBus(bus_type=bus_type).connect()
+                for rule in rules:
+                    reply = await bus.call(
+                        message_module.Message(
+                            destination='org.freedesktop.DBus',
+                            path='/org/freedesktop/DBus',
+                            interface='org.freedesktop.DBus',
+                            member='AddMatch',
+                            signature='s',
+                            body=[rule],
+                        )
+                    )
+                    if reply.message_type == constants.MessageType.ERROR:
+                        raise OSError('D-Bus AddMatch was rejected')
+                bus.add_message_handler(self._message)
+                buses.append(bus)
+            except Exception:
+                if bus is not None:
+                    bus.disconnect()
+        if not buses:
+            raise OSError('No supported Linux lifecycle D-Bus is available')
+        self._stop = asyncio.Event()
+        self._ready.set()
+        if self._closing.is_set():
+            self._stop.set()
+        try:
+            await self._stop.wait()
+        finally:
+            for bus in buses:
+                bus.disconnect()
+            self._stop = None
+
+    def _message(self, message: Any) -> None:
+        """Extract only the finite signal fields used by the lifecycle mapper."""
+        interface = message.interface
+        member = message.member
+        body = message.body
+        if isinstance(interface, str) and isinstance(member, str):
+            self._dispatch(interface, member, body if isinstance(body, list) else [])
+
+    def _dispatch(self, interface: str, member: str, body: list[Any]) -> None:
+        """Map supported D-Bus signals; ordinary focus is intentionally absent."""
+        event = None
+        if (
+            interface == 'org.freedesktop.login1.Manager'
+            and member == 'PrepareForSleep'
+            and len(body) == 1
+            and type(body[0]) is bool
+        ):
+            event = (
+                DesktopLifecycleEvent.SUSPEND
+                if body[0]
+                else DesktopLifecycleEvent.RESUME
+            )
+        elif interface == 'org.freedesktop.login1.Session' and not body:
+            if member == 'Lock':
+                event = DesktopLifecycleEvent.LOCK
+            elif member == 'Unlock':
+                event = DesktopLifecycleEvent.RESUME
+        elif (
+            interface
+            in {
+                'org.freedesktop.ScreenSaver',
+                'org.gnome.ScreenSaver',
+                'org.cinnamon.ScreenSaver',
+            }
+            and member == 'ActiveChanged'
+            and len(body) == 1
+            and type(body[0]) is bool
+        ):
+            event = (
+                DesktopLifecycleEvent.LOCK if body[0] else DesktopLifecycleEvent.RESUME
+            )
+        if event is not None and not self._closing.is_set():
+            self._publish(event)
+
+    def close(self) -> None:
+        """Stop publication and wake the owned asyncio loop within a fixed bound."""
+        self._closing.set()
+        thread, loop, stop = self._thread, self._loop, self._stop
+        if thread is None:
+            return
+        if loop is not None and stop is not None:
+            loop.call_soon_threadsafe(stop.set)
+        thread.join(2.0)
+        if not thread.is_alive():
+            self._thread = None
 
 
 def create_desktop_lifecycle_source(
     publish: Callable[[DesktopLifecycleEvent], None],
-) -> WindowsLifecycleSource | None:
+) -> DesktopLifecycleSource | None:
     """Construct the active supported platform source without emulation."""
     if platform.system() == 'Windows':
         return WindowsLifecycleSource(publish)
+    if platform.system() == 'Linux':
+        return LinuxLifecycleSource(publish)
     return None

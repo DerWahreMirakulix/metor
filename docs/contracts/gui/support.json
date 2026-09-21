@@ -18,6 +18,16 @@
     "linux_programmatic_text_replacement": "AT-SPI EditableText.SetTextContents not exposed by the pinned adapter in the fixture; focused keyboard input remains available",
     "complete_screen_reader_certification": false
   },
+  "desktop_lifecycle": {
+    "handoff": "four-record coalescing typed inbox; privacy departures take precedence over resume",
+    "privacy_order": "native accessibility and tooltip revocation precede GUI restriction; capture, held input and playback are stopped",
+    "resume": "cover retained; existing transport generation rechecked; no input reconstruction, microphone start, auto-play or implicit unlock",
+    "focus": "ordinary window focus loss revokes focus-owned input/media only and is not promoted to an OS lock",
+    "windows": "WTS session Lock/Unlock and WM_POWERBROADCAST suspend/resume on an owned hidden window; structurally tested, native installed delivery untested in the current WSL environment",
+    "linux": "systemd-logind PrepareForSleep and Session Lock/Unlock on the system bus plus freedesktop/GNOME/Cinnamon ActiveChanged on the session bus; real isolated session-bus delivery tested 2026-09-21",
+    "linux_variant_limit": "a desktop session must expose at least one subscribable D-Bus; compositor/session variants emitting none of the registered interfaces are untested and not claimed",
+    "native_acceptance_gap": "real Linux system suspend/locked-session media run and installed Windows WTS/power media run remain unavailable"
+  },
   "linux_x86_64": {
     "offline_install": "tested",
     "offscreen_render": "tested",
