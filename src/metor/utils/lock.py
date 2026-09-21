@@ -3,6 +3,7 @@ Module providing a cross-platform file locking mechanism via a Context Manager.
 Ensures that files are not concurrently modified by different processes.
 """
 
+import errno
 import os
 import time
 import psutil
@@ -72,7 +73,10 @@ class FileLock:
             return None, None
 
     @staticmethod
-    def _is_same_process(pid: int, create_time: Optional[float]) -> bool:
+    def _is_same_process(
+        pid: int,
+        create_time: Optional[float],
+    ) -> Optional[bool]:
         """
         Checks whether one PID still refers to the same process instance.
 
@@ -81,15 +85,42 @@ class FileLock:
             create_time (Optional[float]): The expected process create time.
 
         Returns:
-            bool: True if the process still exists and matches the expected lifetime.
+            Optional[bool]: True for the same process, False for a definite stale
+                owner, or None when ownership cannot be established safely.
         """
+        if create_time is None:
+            return None
+
         try:
             proc = psutil.Process(pid)
-            if create_time is None:
-                return bool(proc.is_running())
+            if not proc.is_running():
+                return False
             return bool(abs(proc.create_time() - create_time) < 0.01)
-        except (psutil.Error, ValueError):
+        except psutil.NoSuchProcess:
             return False
+        except (psutil.AccessDenied, psutil.Error, ValueError):
+            return None
+
+    @staticmethod
+    def _write_all(descriptor: int, payload: bytes) -> None:
+        """Writes one complete lock metadata payload.
+
+        Args:
+            descriptor (int): Owned lock descriptor.
+            payload (bytes): Metadata bytes to persist.
+
+        Returns:
+            None
+
+        Raises:
+            OSError: If writing fails or makes no progress.
+        """
+        remaining = memoryview(payload)
+        while remaining:
+            written = os.write(descriptor, remaining)
+            if written <= 0:
+                raise OSError(errno.EIO, 'Lock metadata write made no progress.')
+            remaining = remaining[written:]
 
     def _unlink_if_unchanged(self, expected_stat: os.stat_result) -> bool:
         """
@@ -102,7 +133,7 @@ class FileLock:
             bool: True if the lock path was removed.
         """
         try:
-            current_stat: os.stat_result = self.lock_path.stat()
+            current_stat: os.stat_result = self.lock_path.lstat()
         except OSError:
             return False
 
@@ -114,6 +145,33 @@ class FileLock:
 
         self.lock_path.unlink(missing_ok=True)
         return True
+
+    def _release_owned_lock(self) -> None:
+        """Closes and removes only this instance's confirmed lock file.
+
+        Args:
+            None
+
+        Returns:
+            None
+
+        Raises:
+            OSError: If descriptor inspection, close, or removal fails.
+        """
+        if self._lock_fd is None:
+            return
+
+        descriptor = self._lock_fd
+        try:
+            fd_stat = os.fstat(descriptor)
+        except OSError:
+            os.close(descriptor)
+            self._lock_fd = None
+            raise
+
+        os.close(descriptor)
+        self._lock_fd = None
+        self._unlink_if_unchanged(fd_stat)
 
     def __enter__(self) -> 'FileLock':
         """
@@ -129,35 +187,42 @@ class FileLock:
         Returns:
             FileLock: The current instance.
         """
-        start_time: float = time.time()
+        start_time: float = time.monotonic()
 
-        while (time.time() - start_time) < self.timeout:
+        while (time.monotonic() - start_time) < self.timeout:
             try:
                 # O_CREAT | O_EXCL ensures atomic creation. Fails if the file already exists.
                 fd = os.open(str(self.lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 self._lock_fd = fd
-                lock_payload: str = f'{self._pid}:{self._pid_create_time}'
-                os.write(fd, lock_payload.encode('utf-8'))
-                os.fsync(fd)
+                try:
+                    lock_payload: str = f'{self._pid}:{self._pid_create_time}'
+                    self._write_all(fd, lock_payload.encode('utf-8'))
+                    os.fsync(fd)
+                except BaseException as acquisition_error:
+                    try:
+                        self._release_owned_lock()
+                    except BaseException as cleanup_error:
+                        raise cleanup_error from acquisition_error
+                    raise
                 return self
             except FileExistsError:
                 # Check if the lock file is old (crashed process)
                 try:
-                    stat_before: os.stat_result = self.lock_path.stat()
+                    stat_before: os.stat_result = self.lock_path.lstat()
                     if time.time() - stat_before.st_mtime > self.stale_age:
                         with self.lock_path.open('r') as f:
                             pid, create_time = self._parse_lock_metadata(f.read())
 
-                        stat_after: os.stat_result = self.lock_path.stat()
+                        stat_after: os.stat_result = self.lock_path.lstat()
                         if (
                             stat_after.st_ino != stat_before.st_ino
                             or stat_after.st_dev != stat_before.st_dev
                         ):
                             continue
 
-                        if pid is not None and not self._is_same_process(
-                            pid,
-                            create_time,
+                        if (
+                            pid is not None
+                            and self._is_same_process(pid, create_time) is False
                         ):
                             if self._unlink_if_unchanged(stat_before):
                                 continue
@@ -189,26 +254,4 @@ class FileLock:
         Returns:
             None
         """
-        fd_stat: Optional[os.stat_result] = None
-        try:
-            if self._lock_fd is None:
-                return
-
-            fd_stat = os.fstat(self._lock_fd)
-        except (OSError, ValueError):
-            pass
-        finally:
-            if self._lock_fd is not None:
-                try:
-                    os.close(self._lock_fd)
-                except OSError:
-                    pass
-                self._lock_fd = None
-
-        if fd_stat is None:
-            return
-
-        try:
-            self._unlink_if_unchanged(fd_stat)
-        except (OSError, ValueError):
-            pass
+        self._release_owned_lock()

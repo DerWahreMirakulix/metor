@@ -51,7 +51,8 @@ ownership map. Counts sum to 763; no path is unclassified.
 | A02     | verified | `src/metor/core/tor.py`, `tests/test_tor_path_resolution.py`, `tests/test_closure_integration.py`, this worklog | A02 gates below      | Complete                                                                   |
 | A03     | verified | `src/metor/utils/{constants,security}.py`, `tests/test_security_contract.py`, this worklog                      | A03 gates below      | Complete                                                                   |
 | A04     | verified | `src/metor/shared/security.py`, `tests/test_security_contract.py`, this worklog                                 | A04 gates below      | Complete                                                                   |
-| A05–A25 | open     | None                                                                                                            | Not run              | A05: make lock acquisition rollback complete and monotonic                 |
+| A05     | verified | `src/metor/utils/lock.py`, `tests/test_lock_contract.py`, this worklog                                          | A05 gates below      | Complete                                                                   |
+| A06–A25 | open     | None                                                                                                            | Not run              | A06: separate public profile names from internal staging paths             |
 
 ## A00 verification
 
@@ -183,3 +184,33 @@ version changes are required.
 | `python -m mypy src/metor/shared/security.py src/metor/core/key.py src/metor/core/auth src/metor/core/daemon/managed/local_auth.py src/metor/data/blob/store.py src/metor/data/sql/manager.py src/metor/core/profile_keys.py`                                              | PASS; 9 source files                                                       |
 | `python scripts/check_boundaries.py`                                                                                                                                                                                                                                    | PASS                                                                      |
 | `git diff --check`                                                                                                                                                                                                                                                      | PASS                                                                      |
+
+## A05 verification
+
+Lock acquisition now writes the complete ownership payload, rejects zero write
+progress, and rolls back every write or sync failure after exclusive creation.
+Rollback and ordinary release close the descriptor before removing the pathname,
+retain ownership after an unconfirmed close, and remove the pathname only when
+its device/inode still identifies the created lock. A replacement lock is
+preserved in both release and failed-acquisition paths.
+
+Acquisition deadlines now use the monotonic clock. Stale-owner classification is
+tri-state: confirmed matching lifetime remains live, confirmed process absence
+or PID lifetime mismatch is stale, and missing creation metadata or
+`AccessDenied` remains unknown and is never treated as proof of a crash. Empty
+metadata therefore cannot be removed merely because it is old.
+
+The real child-process exclusion test passed on Linux. It is written using the
+same filesystem protocol on Windows, but native Windows execution is unavailable
+in this environment and is not claimed. No compatibility version changes are
+required.
+
+| Command                                                                                                                                                      | Result                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `python -m unittest -v test_lock_contract` before implementation                                                                                             | EXPECTED FAIL; 6 failures covered rollback leaks, partial writes, close hiding, wall-clock deadline, and unknown identity |
+| `python -m unittest -v test_lock_contract test_settings_contract test_profile_storage_security test_data_persistence_contract`                              | PASS; 92 tests in 11.162 seconds with local IPC socket access                  |
+| `python -m ruff check src/metor/utils/lock.py tests/test_lock_contract.py`                                                                                    | PASS                                                                            |
+| `python -m ruff format --check src/metor/utils/lock.py tests/test_lock_contract.py`                                                                           | PASS; 2 files already formatted                                                 |
+| `python -m mypy src/metor/utils/lock.py src/metor/data/settings.py src/metor/data/profile/config/config.py`                                                  | PASS; 3 source files                                                            |
+| `python scripts/check_boundaries.py`                                                                                                                         | PASS                                                                            |
+| `git diff --check`                                                                                                                                           | PASS                                                                            |
