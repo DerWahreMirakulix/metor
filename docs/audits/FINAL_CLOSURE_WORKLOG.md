@@ -48,9 +48,9 @@ ownership map. Counts sum to 763; no path is unclassified.
 | ------- | -------- | --------------------------------------------------------------------------------------------------------------- | -------------------- | -------------------------------------------------------------------------- |
 | A00     | verified | `docs/audits/FINAL_CLOSURE_WORKLOG.md`                                                                          | Baseline gates below | Complete                                                                   |
 | A01     | verified | `src/metor/data/sql/manager.py`, `tests/test_gui_purge.py`, this worklog                                        | A01 gates below      | Complete                                                                   |
-| A02     | verified | `src/metor/core/tor.py`, `tests/test_tor_path_resolution.py`, `tests/test_closure_integration.py`, this worklog | A02 gates below      | A03: bound secure cleanup and reject unsafe link/partial-write cases       |
-| A03     | open     | None                                                                                                            | Not run              | Inspect every secure-file cleanup caller and supported filesystem behavior |
-| A04–A25 | open     | None                                                                                                            | Not run              | Follow the mandated package order, including A10b                          |
+| A02     | verified | `src/metor/core/tor.py`, `tests/test_tor_path_resolution.py`, `tests/test_closure_integration.py`, this worklog | A02 gates below      | Complete                                                                   |
+| A03     | verified | `src/metor/utils/{constants,security}.py`, `tests/test_security_contract.py`, this worklog                      | A03 gates below      | Complete                                                                   |
+| A04–A25 | open     | None                                                                                                            | Not run              | A04: correct byte-length clearing for typed memory views                   |
 
 ## A00 verification
 
@@ -128,3 +128,33 @@ new subsystem or compatibility axis is introduced.
 | `python -m ruff format --check src/metor/core/tor.py tests/test_tor_path_resolution.py tests/test_closure_integration.py`                                                                                                                                                              | PASS                                                                       |
 | `python -m mypy src/metor/core/tor.py src/metor/core/daemon/managed/engine/release.py src/metor/core/daemon/managed/engine/lifecycle.py`                                                                                                                                               | PASS; 3 source files                                                       |
 | `git diff --check`                                                                                                                                                                                                                                                                     | PASS                                                                       |
+
+## A03 verification
+
+Sensitive regular files are now opened without following direct links and are
+validated through that same descriptor. Overwrites allocate at most one named
+64-KiB block, complete every partial write, reject zero progress, sync before
+removal, and preserve visible failures. Files with multiple hard links are
+rejected. The pathname is checked against the opened device/inode before unlink
+so a deterministically exchanged path is preserved rather than removed.
+
+Recursive cleanup uses `lstat()`, unlinks POSIX symlinks without traversing their
+targets, rejects Windows reparse points, and refuses unsupported file types.
+Windows file shredding opens the reparse point itself through `CreateFileW` and
+validates attributes on that handle before converting ownership to a Python file
+descriptor. The Windows-specific guard is covered structurally, but native
+Windows execution remains unavailable in this environment and is not claimed.
+
+This is best-effort logical cleanup only. It does not claim physical erasure of
+SSD or copy-on-write storage, backups, or external copies. No wire, database,
+keyslot, blob, derivation, launcher, or application version changes are required.
+
+| Command                                                                                                                                                                                                                                             | Result                                                                  |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| A03 reproduction supplied by the closure assignment                                                                                                                                                                                                 | CONFIRMED FINDING: whole-file allocation, partial-write unlink, and direct-link overwrite |
+| `python -m unittest -v test_security_contract test_profile_storage_security test_tor_path_resolution test_gui_purge test_gui_purge_observation`                                                                                                    | PASS; 70 tests in 43.923 seconds with local IPC socket access           |
+| `python -m ruff check src/metor/utils/security.py src/metor/utils/constants.py tests/test_security_contract.py`                                                                                                                                     | PASS                                                                    |
+| `python -m ruff format --check src/metor/utils/security.py src/metor/utils/constants.py tests/test_security_contract.py`                                                                                                                            | PASS; 3 files already formatted                                         |
+| `python -m mypy src/metor/utils/security.py src/metor/core/profile_keys.py src/metor/core/tor.py src/metor/core/profile_destruction.py src/metor/core/daemon/managed/engine/lifecycle.py src/metor/data/profile/lifecycle.py src/metor/data/profile/migration src/metor/data/sql/runtime_mirror.py` | PASS; 11 source files                                                    |
+| `python scripts/check_boundaries.py`                                                                                                                                                                                                                | PASS                                                                    |
+| `git diff --check`                                                                                                                                                                                                                                  | PASS                                                                    |

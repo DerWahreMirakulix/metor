@@ -44,6 +44,9 @@ class Constants(ContractConstants):
     )
     TOR_KILL_TIMEOUT_SEC: float = 2.0  # Timeout for Tor process termination
 
+    # Security-Critical File Operations
+    SECURE_SHRED_BLOCK_BYTES: int = 65536
+
     # Application & UI Constraints
     DEFAULT_COLS: int = 80  # Fallback terminal width
     UUID_MSG_BYTES: int = 8  # Byte length for persistent message UUIDs
