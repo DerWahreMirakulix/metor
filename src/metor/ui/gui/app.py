@@ -13,6 +13,13 @@ from metor.client import FrontendLaunchContext
 from metor.ui.gui.accessibility import AccessibilityBridge
 from metor.ui.gui.constants import Geometry, GuiLimits
 from metor.ui.gui.platform import DeviceConfiguration
+from metor.ui.gui.platform.lifecycle import (
+    DesktopLifecycleEvent,
+    LifecycleCoordinator,
+    LifecycleInbox,
+    WindowsLifecycleSource,
+    create_desktop_lifecycle_source,
+)
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.runtime.voice import PressSource
 from metor.ui.gui.theme import color
@@ -56,7 +63,15 @@ class MetorApp(App):
         self.continued_overlay: ContinuedOverlay | None = None
         self._prompt_identity: object = None
         self.accessibility: AccessibilityBridge | None = None
+        self._lifecycle_inbox = LifecycleInbox()
+        self._lifecycle_source: WindowsLifecycleSource | None = None
         self._render_trigger = Clock.create_trigger(self._render, 0)
+        self._lifecycle = LifecycleCoordinator(
+            self._revoke_native_privacy,
+            self.controller.suspend,
+            self.controller.resume,
+            self.refresh,
+        )
 
     def build(self) -> BoxLayout:
         """Configures one native window and its responsive inner application viewport.
@@ -72,6 +87,14 @@ class MetorApp(App):
             self.controller.security.activity,
             simulator=self.controller.simulator,
         )
+        self._lifecycle_source = create_desktop_lifecycle_source(self._queue_lifecycle)
+        if self._lifecycle_source is not None:
+            try:
+                self._lifecycle_source.start()
+            except Exception:
+                self.accessibility.close()
+                self.accessibility = None
+                raise
         Window.clearcolor = color('background')
         width, height = self.configuration.logical_size
         Window.size = (dp(width), dp(height))
@@ -304,6 +327,27 @@ class MetorApp(App):
         self.controller.native_departure()
         self.refresh()
 
+    def _queue_lifecycle(self, event: DesktopLifecycleEvent) -> None:
+        """Admit one native-thread transition and wake the GUI loop promptly."""
+        if self._lifecycle_inbox.put(event):
+            Clock.schedule_once(self._drain_lifecycle, 0)
+
+    def _drain_lifecycle(self, _elapsed: float) -> None:
+        """Apply bounded native lifecycle work on the sole GUI thread."""
+        for event in self._lifecycle_inbox.take_all():
+            self._apply_lifecycle(event)
+
+    def _apply_lifecycle(self, event: DesktopLifecycleEvent) -> None:
+        """Synchronously fence privacy before scheduling any replacement frame."""
+        self._lifecycle.apply(event)
+
+    def _revoke_native_privacy(self) -> None:
+        """Remove native and in-window auxiliary text before applying a cover."""
+        if self.accessibility is not None:
+            self.accessibility.native.focus(False)
+            self.accessibility.revoke()
+        PointerTooltip.clear_all()
+
     def on_pause(self) -> bool:
         """Covers and safely stops capture on supported native suspend notifications.
 
@@ -312,11 +356,7 @@ class MetorApp(App):
         Returns:
             bool: True retains the application behind its authorization cover.
         """
-        if self.accessibility is not None:
-            self.accessibility.native.focus(False)
-        PointerTooltip.clear_all()
-        self.controller.suspend()
-        self.refresh()
+        self._apply_lifecycle(DesktopLifecycleEvent.SUSPEND)
         return True
 
     def on_resume(self) -> None:
@@ -327,7 +367,7 @@ class MetorApp(App):
         Returns:
             None
         """
-        self.refresh()
+        self._apply_lifecycle(DesktopLifecycleEvent.RESUME)
 
     def _close(self, *_args: object, **_kwargs: object) -> bool:
         """Keeps the window responsive until this GUI's local finalization and detach finish.
@@ -351,6 +391,9 @@ class MetorApp(App):
             None
         """
         PointerTooltip.clear_all()
+        if self._lifecycle_source is not None:
+            self._lifecycle_source.close()
+            self._lifecycle_source = None
         if self.accessibility is not None:
             self.accessibility.close()
             self.accessibility = None

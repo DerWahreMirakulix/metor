@@ -61,7 +61,8 @@ ownership map. Counts sum to 763; no path is unclassified.
 | A11      | verified | Canonical daemon bootstrap/runtime preparation and regression coverage; this worklog                           | A11 gates below      | Complete                                                                    |
 | A12      | verified | Producer recovery correlation ordering and regression coverage; this worklog                                  | A12 gates below      | Complete                                                                    |
 | A13      | verified | `src/metor/ui/gui/platform/{configuration,configuration_security}.py`, `tests/test_device_configuration_security.py`, this worklog | A13 gates below | Complete |
-| A14–A25 | open     | None                                                                                                            | Not run              | A14: bind real desktop OS lifecycle events                                  |
+| A14      | in progress | `src/metor/ui/gui/{app.py,platform/lifecycle.py,runtime/controller.py}`, `tests/{test_gui_os_lifecycle.py,test_gui_lifecycle.py}`, this worklog | Windows checkpoint below | Add the separate Linux desktop lifecycle source |
+| A15–A25 | open     | None                                                                                                            | Not run              | A15: prove simultaneous complete GUI media path                             |
 
 ## A00 verification
 
@@ -589,3 +590,37 @@ claimed pass.
 | `python -m mypy src/metor/ui/gui/platform/configuration.py src/metor/ui/gui/platform/configuration_security.py` | PASS; 2 source files under strict project configuration |
 | `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
 | `git diff --check` | PASS |
+
+## A14 Windows checkpoint (in progress)
+
+Windows desktop lock/unlock and suspend/resume now enter through an owned hidden
+Win32 top-level window registered for WTS session notifications and power
+broadcasts. This deliberately does not subclass Kivy's HWND and therefore does
+not create a second chain competing with AccessKit's existing Windows subclass
+or alter its required post-input-provider teardown order. The lifecycle window
+and message pump have one bounded daemon-thread owner and a bounded close.
+
+Native callbacks publish only `LOCK`, `SUSPEND`, or `RESUME` into a four-record
+synchronized inbox. Duplicate transitions coalesce; overload drops resume
+before a privacy departure. GUI-thread application first revokes AccessKit
+nodes and tooltip text, then performs the existing input-loss, capture stop,
+playback stop, and per-client restriction path. Resume retains the cover,
+re-revokes input/media ownership, checks that the captured SDK transport remains
+connected, and never reconstructs a press, starts capture, starts playback, or
+unlocks. Kivy's own pause/resume callbacks use the same coordinator.
+
+Native Windows execution is unavailable in the current WSL environment, so the
+numeric WTS/power mapping, bounded handoff, privacy ordering, and fail-closed
+registration code are structurally exercised without claiming an installed OS
+broadcast pass. A14 remains in progress until the separate Linux source and
+support-manifest truth update are complete.
+
+| Command | Result |
+| ------- | ------ |
+| `python -m unittest tests.test_gui_os_lifecycle -v` before implementation | EXPECTED ERROR; the native lifecycle module did not exist |
+| `python -m unittest tests.test_gui_os_lifecycle -v` | PASS; 5 bounded inbox, Win32 mapping, privacy-order, and resume tests |
+| `PYTHONPATH=tests python -m unittest test_gui_lifecycle.NativeLifecycleTests -v` | PASS; 4 focus/suspend/resume transport and no-auto-media tests |
+| `PYTHONPATH=tests python -m unittest test_gui_lifecycle -q` outside the socket sandbox | PASS; toolkit-independent lifecycle plus real SDK/IPC/Core coverage |
+| `python -m ruff check` for the five Windows-checkpoint source/test paths | PASS |
+| `python -m ruff format --check` for the five Windows-checkpoint source/test paths | PASS |
+| `python -m mypy src/metor/ui/gui/platform/lifecycle.py src/metor/ui/gui/app.py src/metor/ui/gui/runtime/controller.py` | PASS; strict project configuration |

@@ -134,6 +134,20 @@ class GuiController:
         self.native_departure()
         self.security.lock()
 
+    def resume(self) -> None:
+        """Retain the cover and recheck transport without reconstructing input.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self.playback.auto.focused = False
+        self.native_departure()
+        if self.client is not None and not self.client.is_connected:
+            self.close()
+            self.state.status = 'Connection lost. Open profile to reconnect.'
+
     def submit(
         self,
         operation: str,

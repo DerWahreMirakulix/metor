@@ -138,6 +138,31 @@ class NativeLifecycleTests(unittest.TestCase):
         self.gui.playback.stop.assert_called_once_with()
         self.gui.security.lock.assert_called_once_with()
 
+    def test_resume_retains_revoked_input_and_never_unlocks_or_starts_media(
+        self,
+    ) -> None:
+        """Resume checks transport while leaving authorization user-driven."""
+        self.gui.client = Mock(is_connected=True)
+
+        self.gui.resume()
+
+        self.assertFalse(self.gui.playback.auto.focused)
+        self.gui.inputs.focus_lost.assert_called_once_with()
+        self.gui.voice.depart.assert_called_once_with()
+        self.gui.playback.stop.assert_called_once_with()
+        self.gui.security.unlock.assert_not_called()
+
+    def test_resume_disconnect_discards_old_generation_behind_cover(self) -> None:
+        """A dead transport cannot remain an apparently authorized resume target."""
+        self.gui.client = Mock(is_connected=False)
+        with patch.object(self.gui, 'close') as close:
+            self.gui.resume()
+
+        close.assert_called_once_with()
+        self.assertEqual(
+            self.gui.state.status, 'Connection lost. Open profile to reconnect.'
+        )
+
 
 class GuiLifecycleCoreTests(unittest.TestCase):
     """Uses real SDK/IPC, encrypted storage and inert local peer sockets; no hardware or Tor."""
