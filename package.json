@@ -5,11 +5,20 @@
   "scripts": {
     "format:md": "prettier --write \"**/*.md\"",
     "format:py": "python -m ruff format src/metor/ scripts/ tests/",
-    "lint": "python -m ruff check --fix src/metor/ scripts/ tests/",
-    "typecheck": "python -m mypy src scripts/",
+    "fix:py": "python -m ruff check --fix src/metor/ scripts/ tests/",
+    "generate:docs": "python scripts/generate_api_docs.py && python scripts/generate_settings_docs.py && python scripts/generate_compatibility_manifest.py",
+    "check:md": "prettier --check \"**/*.md\"",
+    "check:py": "python -m ruff check src/metor/ scripts/ tests/ && python -m ruff format --check src/metor/ scripts/ tests/",
+    "check:types": "python -m mypy src scripts/",
+    "check:boundaries": "python scripts/check_boundaries.py",
+    "check:generated": "python scripts/validate_generated_docs.py",
+    "test": "python -m unittest discover -s tests -p \"test_*.py\"",
+    "check": "npm run check:md && npm run check:py && npm run check:types && npm run check:boundaries && npm run check:generated && npm test",
+    "lint": "npm run check:py",
+    "typecheck": "npm run check:types",
     "bundle:wheelhouse": "python scripts/build_release_wheelhouse.py",
-    "docs": "python scripts/generate_api_docs.py && python scripts/generate_settings_docs.py && python scripts/generate_compatibility_manifest.py",
-    "ready": "npm run format:py && npm run format:md && npm run lint && npm run typecheck && npm run docs"
+    "docs": "npm run generate:docs",
+    "ready": "npm run check"
   },
   "repository": {
     "type": "git",

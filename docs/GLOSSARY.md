@@ -20,10 +20,10 @@ It does not imply that existing arbitrary Voice codec strings are decodable.
 The user-facing world is split into two message semantics. These terms are
 used by the UI, the IPC contract, and the message store. They do NOT change.
 
-| Term   | Meaning                                                                                   |
-| ------ | ----------------------------------------------------------------------------------------- |
+| Term   | Meaning                                                                                            |
+| ------ | -------------------------------------------------------------------------------------------------- |
 | `live` | Ephemeral, interactive. Never appears in chat history; Core payload may be shredded after consume. |
-| `drop` | Durable, mailbox-style. Persists until deletion or shred policy.                                |
+| `drop` | Durable, mailbox-style. Persists until deletion or shred policy.                                   |
 
 Examples that keep this vocabulary: `SendMessageCommand`, `Delivery.LIVE` /
 `Delivery.DROP`, `TextContent`, `ChatTransportState`, UI prompt tags
@@ -31,26 +31,26 @@ Examples that keep this vocabulary: `SendMessageCommand`, `Delivery.LIVE` /
 
 ## Message content and identity
 
-| Term | Meaning |
-| ---- | ------- |
-| `msg_id` | Stable logical message identity across retry, replay, ACK, and LIVE-to-DROP fallback. |
-| `TextContent` | UTF-8 typed message content. |
-| `VoiceContent` | Typed metadata referencing a bounded Core-owned Voice blob; never raw audio in normal message NDJSON. |
-| Voice turn | One physical PTT press, one logical message, and one stable `msg_id`, regardless of chunk count. |
-| consume | Explicit local read/unseen transition; distinct from a delivery ACK and optionally produces a remote read receipt. |
+| Term           | Meaning                                                                                                            |
+| -------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `msg_id`       | Stable logical message identity across retry, replay, ACK, and LIVE-to-DROP fallback.                              |
+| `TextContent`  | UTF-8 typed message content.                                                                                       |
+| `VoiceContent` | Typed metadata referencing a bounded Core-owned Voice blob; never raw audio in normal message NDJSON.              |
+| Voice turn     | One physical PTT press, one logical message, and one stable `msg_id`, regardless of chunk count.                   |
+| consume        | Explicit local read/unseen transition; distinct from a delivery ACK and optionally produces a remote read receipt. |
 
 ## Client access and lifecycle
 
-| Term | Meaning |
-| ---- | ------- |
-| hard lock | `LockCommand`: releases the entire active profile runtime and its key/database/Tor state. |
-| restricted client | Per-IPC-session authorization state used for device-style lock behavior while the profile runtime remains active. |
-| quick unlock | Optional challenge proof derived from a salted memory-hard PIN verifier; never a profile decryption credential. |
-| graceful profile exit | Reliability-preserving local commit/connection shutdown/hard-lock flow that does not wait for remote DROP delivery. |
+| Term                  | Meaning                                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| hard lock             | `LockCommand`: releases the entire active profile runtime and its key/database/Tor state.                                |
+| restricted client     | Per-IPC-session authorization state used for device-style lock behavior while the profile runtime remains active.        |
+| quick unlock          | Optional challenge proof derived from a salted memory-hard PIN verifier; never a profile decryption credential.          |
+| graceful profile exit | Reliability-preserving local commit/connection shutdown/hard-lock flow that does not wait for remote DROP delivery.      |
 | purge / self-destruct | Reliability-preempting destruction flow: abort communication work, destroy key access, then perform best-effort cleanup. |
-| revision | Daemon-authored monotonic sequence on IPC events used to reconcile an aggregate runtime snapshot with buffered events. |
-| frontend ID | Stable entry-point name in `metor.ui_frontends`, selected only by `metor chat`. |
-| retained inventory | Content-free, paginated discovery of pending outbound or unseen Voice identities; listing never consumes payload. |
+| revision              | Daemon-authored monotonic sequence on IPC events used to reconcile an aggregate runtime snapshot with buffered events.   |
+| frontend ID           | Stable entry-point name in `metor.ui_frontends`, selected only by `metor chat`.                                          |
+| retained inventory    | Content-free, paginated discovery of pending outbound or unseen Voice identities; listing never consumes payload.        |
 
 ## Dimension 2 — Connection Type (Backend, `transport` field)
 
@@ -78,10 +78,10 @@ field is omitted from ALL rows — uniform absence, never selective absence.
 
 ## Settings Namespaces
 
-| Prefix            | Scope                                     | Owner                                    |
-| ----------------- | ----------------------------------------- | ---------------------------------------- |
-| `client.*`        | Client-machine behavior, paradigm-neutral | Core client layer                        |
-| `daemon.*`        | Daemon-host behavior                      | Daemon (only scope the daemon validates) |
+| Prefix            | Scope                                     | Owner                                                             |
+| ----------------- | ----------------------------------------- | ----------------------------------------------------------------- |
+| `client.*`        | Client-machine behavior, paradigm-neutral | Core client layer                                                 |
+| `daemon.*`        | Daemon-host behavior                      | Daemon (only scope the daemon validates)                          |
 | `ui.<frontend>.*` | Frontend-owned presentation/behavior      | Inert official base metadata catalog; narrow frontend values view |
 
 The daemon validates only `daemon.*` keys against its own registry. Any other
@@ -89,23 +89,23 @@ prefix is client scope and rejected with `CLIENT_SCOPE_KEY_REJECTED`.
 
 ## Profile storage security
 
-| Term                  | Meaning                                                                 |
-| --------------------- | ----------------------------------------------------------------------- |
-| `PMK`                 | Random 32-byte Profile Master Key; root of encrypted profile storage.   |
-| `KEK`                 | Password-derived Key Encryption Key used only to wrap or unwrap a PMK.  |
-| `DB_KEY`              | PMK-derived SQLCipher key under the `metor/db/v1` domain.               |
-| `SECRET_KEY`          | PMK-derived identity-secret key under `metor/secrets/v1`.               |
-| `BLOB_KEY`            | PMK-derived external-object root under `metor/blobs/v1`.                |
-| `keyslot`             | Versioned protector metadata containing only an authenticated PMK wrap. |
-| `blob_id`             | Opaque identifier for an encrypted object; never a filesystem path.     |
-| `temporary blob`      | Encrypted crash-safe spool object that is not normal persisted history. |
-| unsent draft | Core-owned capture staging, not an eligible outbox message; finalization is distinct from explicit DROP commit. |
+| Term                   | Meaning                                                                                                                       |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `PMK`                  | Random 32-byte Profile Master Key; root of encrypted profile storage.                                                         |
+| `KEK`                  | Password-derived Key Encryption Key used only to wrap or unwrap a PMK.                                                        |
+| `DB_KEY`               | PMK-derived SQLCipher key under the `metor/db/v1` domain.                                                                     |
+| `SECRET_KEY`           | PMK-derived identity-secret key under `metor/secrets/v1`.                                                                     |
+| `BLOB_KEY`             | PMK-derived external-object root under `metor/blobs/v1`.                                                                      |
+| `keyslot`              | Versioned protector metadata containing only an authenticated PMK wrap.                                                       |
+| `blob_id`              | Opaque identifier for an encrypted object; never a filesystem path.                                                           |
+| `temporary blob`       | Encrypted crash-safe spool object that is not normal persisted history.                                                       |
+| unsent draft           | Core-owned capture staging, not an eligible outbox message; finalization is distinct from explicit DROP commit.               |
 | fallback repair intent | `fallback_committed` receipt payload metadata authorizes exact outbound media promotion after committed LIVE→DROP conversion. |
-| request lease | One SDK exchange's connection generation, socket and registration identity; reused wire request IDs do not transfer it. |
-| configured endpoint | Host-resolved local/forwarded port; successful SDK connect and bootstrap are separate checks. |
-| `persistent blob`     | Encrypted durable object referenced by structured database metadata.    |
-| `KeyProtector`        | Boundary that protects, unwraps, rewraps, and destroys PMK access.      |
-| `cryptographic erase` | Destruction of PMK access before best-effort ciphertext cleanup.        |
+| request lease          | One SDK exchange's connection generation, socket and registration identity; reused wire request IDs do not transfer it.       |
+| configured endpoint    | Host-resolved local/forwarded port; successful SDK connect and bootstrap are separate checks.                                 |
+| `persistent blob`      | Encrypted durable object referenced by structured database metadata.                                                          |
+| `KeyProtector`         | Boundary that protects, unwraps, rewraps, and destroys PMK access.                                                            |
+| `cryptographic erase`  | Destruction of PMK access before best-effort ciphertext cleanup.                                                              |
 
 ## Mapping (old → new)
 
@@ -152,6 +152,7 @@ this namespace under the profile database's protection and deletion boundary.
 - `GetMessageOutcomeCommand` / `MessageOutcomeEvent`: exact canonical peer, local
   direction and logical-ID receipt reconciliation, without reading content. An
   absent receipt leaves delivery unknown.
+
 ## GUI Voice producer lifecycle
 
 - `RegisterVoiceOwnerCommand` / `VoiceOwnerRegisteredEvent`: establish a Core-issued,
@@ -366,7 +367,6 @@ this namespace under the profile database's protection and deletion boundary.
   archive page (3,064 metadata identities) in uncertain-mutation reconciliation.
   Reads use original targets; later arrivals never join that batch.
 
-
 GUI volatile interaction bounds: `CONTACT_SELECTION_ITEMS` (128) and
 `CONTACT_SELECTION_BYTES` (64 KiB) bound exact selected-contact removal intent;
 `PLAYBACK_COVERAGE_PER_ITEM` (128 intervals) and
@@ -374,13 +374,11 @@ GUI volatile interaction bounds: `CONTACT_SELECTION_ITEMS` (128) and
 bound current-runtime drained PCM coverage. Exceeding coverage limits forgets
 ranges conservatively; it never fabricates heard content or a Core Read receipt.
 
-
 `WAVEFORM_BINS` is the 64-bin maximum for one retained GUI PCM amplitude summary.
 `SEEK_FRACTION_STEP` is the 0.05 fraction used by deliberate Left/Right selection
 in the native audio-position control; Enter/Space applies the selected position.
 These are volatile presentation/input constants, not Core receipt or media-format
 parameters. `PcmEnvelope` contains real sample peaks and explicit unknown bins.
-
 
 `FrontendAddressManagement` is an optional public base host extension for offline
 address operations. `FrontendProfileAddressRequest` captures `profile`, original
@@ -410,17 +408,17 @@ The operation preserves existing identity keys according to Core semantics.
 `metor.client.platform` owns typed local interfaces in the SDK. These are not
 IPC payloads, settings keys or a combined notification hook.
 
-| Term | Meaning |
-| --- | --- |
-| `HardwareStatusPort` / `HardwareStatus` | Nonblocking cached hardware observations with monotonic `observed_at` and exclusive `valid_until` bounds. |
-| `BatteryStatus` | Optional `charge_fraction` in [0, 1], `charging` and `external_power` facts. Unknown is distinct from empty, disconnected or not charging. |
-| `HardwareAvailability` | Unknown, available, unavailable, permission-denied or failed observation; only available observations carry current facts. |
-| `HardwareInputPort` / `InputSubscription` | Ordered physical observation delivery with explicit subscription ownership and close. |
-| `ButtonSample` | One sequence-qualified, timestamped complete PTT/Power observation with a validity flag; neither a semantic action nor an authorization grant. |
-| `CapturePort` / `OutputPort` | Separate bounded streaming audio interfaces; stopping one direction does not stop the other. |
-| `AudioCapabilities` / `AudioEndpoint` | Observed native directions and route metadata; no acoustic/AEC proof follows from enumeration. |
-| `IndicatorPort` / `IndicatorState` | Content-free, privacy-filtered indicator requests with finite semantic states. |
-| `HapticsPort` / `HapticPattern` | Optional finite capture-admitted, capture-rejected or purge-arming feedback requests. |
-| `ShutdownPort` | Separate privileged local actuator used only after lifecycle authorization and host preparation. |
-| `PlatformActionResult` | Accepted, unavailable, denied, failed or unknown local action outcome. Accepted does not prove completed shutdown or authorize Core destruction. |
-| `PlatformBindings` | One validated adapter identity and separately typed status, input, optional indicator, haptic and shutdown ports injected through `FrontendLaunchContext`; composition does not merge authority, and device configuration gates each optional action port. |
+| Term                                      | Meaning                                                                                                                                                                                                                                                    |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HardwareStatusPort` / `HardwareStatus`   | Nonblocking cached hardware observations with monotonic `observed_at` and exclusive `valid_until` bounds.                                                                                                                                                  |
+| `BatteryStatus`                           | Optional `charge_fraction` in [0, 1], `charging` and `external_power` facts. Unknown is distinct from empty, disconnected or not charging.                                                                                                                 |
+| `HardwareAvailability`                    | Unknown, available, unavailable, permission-denied or failed observation; only available observations carry current facts.                                                                                                                                 |
+| `HardwareInputPort` / `InputSubscription` | Ordered physical observation delivery with explicit subscription ownership and close.                                                                                                                                                                      |
+| `ButtonSample`                            | One sequence-qualified, timestamped complete PTT/Power observation with a validity flag; neither a semantic action nor an authorization grant.                                                                                                             |
+| `CapturePort` / `OutputPort`              | Separate bounded streaming audio interfaces; stopping one direction does not stop the other.                                                                                                                                                               |
+| `AudioCapabilities` / `AudioEndpoint`     | Observed native directions and route metadata; no acoustic/AEC proof follows from enumeration.                                                                                                                                                             |
+| `IndicatorPort` / `IndicatorState`        | Content-free, privacy-filtered indicator requests with finite semantic states.                                                                                                                                                                             |
+| `HapticsPort` / `HapticPattern`           | Optional finite capture-admitted, capture-rejected or purge-arming feedback requests.                                                                                                                                                                      |
+| `ShutdownPort`                            | Separate privileged local actuator used only after lifecycle authorization and host preparation.                                                                                                                                                           |
+| `PlatformActionResult`                    | Accepted, unavailable, denied, failed or unknown local action outcome. Accepted does not prove completed shutdown or authorize Core destruction.                                                                                                           |
+| `PlatformBindings`                        | One validated adapter identity and separately typed status, input, optional indicator, haptic and shutdown ports injected through `FrontendLaunchContext`; composition does not merge authority, and device configuration gates each optional action port. |

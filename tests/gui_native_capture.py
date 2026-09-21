@@ -76,7 +76,7 @@ from metor.ui.gui.runtime.voice.controller import VoiceReview
 from metor.ui.gui.runtime.voice.press import CaptureBinding
 from metor.ui.gui.platform.audio import PcmVoice
 from gui_native_render import capture_viewport
-from gui_native_lifecycle import exercise_live_controls
+from gui_native_live_controls import exercise_live_controls
 from gui_native_settings import exercise_setting_editor, exercise_setting_keyboard
 from gui_native_history import configure_history, exercise_history
 from gui_native_timeout import exercise_timeout
@@ -1207,7 +1207,8 @@ def main() -> None:
     if args.view == 'keyboard':
         Clock.schedule_once(open_keyboard, 0.5)
     Clock.schedule_once(capture, 1)
-    app.run()
+    with patch('metor.ui.gui.app.create_desktop_lifecycle_source', return_value=None):
+        app.run()
 
 
 if __name__ == '__main__':

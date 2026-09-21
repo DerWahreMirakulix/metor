@@ -417,10 +417,10 @@ Metor has three configuration classes with different responsibilities:
 
 Settings keys live in exactly three namespaces (see [GLOSSARY.md](./GLOSSARY.md)):
 
-| Prefix            | Scope                                                                   | Validated by                 |
-| ----------------- | ----------------------------------------------------------------------- | ---------------------------- |
-| `client.*`        | Client-machine behavior, paradigm-neutral (e.g. `client.history_limit`) | Client registry              |
-| `daemon.*`        | Daemon-host behavior                                                    | Daemon `SettingKey` registry |
+| Prefix            | Scope                                                                   | Validated by                               |
+| ----------------- | ----------------------------------------------------------------------- | ------------------------------------------ |
+| `client.*`        | Client-machine behavior, paradigm-neutral (e.g. `client.history_limit`) | Client registry                            |
+| `daemon.*`        | Daemon-host behavior                                                    | Daemon `SettingKey` registry               |
 | `ui.<frontend>.*` | Frontend-owned presentation and behavior                                | Inert base-owned official metadata catalog |
 
 Validation is a two-registry rule: the daemon accepts only `daemon.*` keys that

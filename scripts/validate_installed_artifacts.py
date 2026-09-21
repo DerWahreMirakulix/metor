@@ -51,7 +51,23 @@ assert "dotenv" not in sys.modules and "metor.data" not in sys.modules
 assert "metor.core.daemon" not in sys.modules
 from importlib.util import find_spec
 assert find_spec("metor.data") is None and find_spec("metor.cli") is None
+for toolkit in ("accesskit", "kivy", "sounddevice"):
+    assert toolkit not in sys.modules and find_spec(toolkit) is None
 print("SDK_ONLY_INERT_OK", metor.client.__file__)
+"""
+SDK_REIMPORT_PROBE = SDK_PROBE.replace(
+    'assert toolkit not in sys.modules and find_spec(toolkit) is None',
+    'assert toolkit not in sys.modules',
+).replace('SDK_ONLY_INERT_OK', 'SDK_REIMPORT_AFTER_UI_REMOVAL_OK')
+BASE_PROBE = """import sys
+from importlib.metadata import entry_points
+from importlib.util import find_spec
+import metor.application, metor.cli, metor.data
+assert find_spec("metor.ui") is None
+assert not list(entry_points(group="metor.ui_frontends"))
+for toolkit in ("accesskit", "kivy", "sounddevice"):
+    assert toolkit not in sys.modules and find_spec(toolkit) is None
+print("BASE_ONLY_WITHOUT_UI_OK", metor.cli.__file__)
 """
 FAKE_FRONTEND = """from metor.client import MetorClient
 def launch(context):
@@ -253,6 +269,7 @@ def run_acceptance(bundle_root: Path) -> None:
             )
         print('EXTERNAL_SDK_TYPING_POSITIVE_AND_NEGATIVE_OK')
         install('metor')
+        run([str(executable), '-I', '-c', BASE_PROBE])
         for module, arguments in (
             ('metor', ['--help']),
             ('metor', ['--version']),
@@ -322,6 +339,10 @@ py-modules = ["closure_fake"]
         )
         run([str(executable), '-I', '-c', gui_probe])
         run([str(executable), '-I', '-m', 'metor', 'chat', '--ui', 'gui', '--help'])
+        gui_inventory = run([str(executable), '-I', '-m', 'metor', 'chat', '--list-ui'])
+        if 'gui' not in gui_inventory or 'terminal' in gui_inventory:
+            raise RuntimeError('GUI-only installation inventory was not isolated.')
+        print('GUI_ONLY_INSTALLATION_OK')
         install('metor-ui-terminal')
         terminal_output = run([str(executable), '-I', '-c', TERMINAL_HARNESS])
         if (
@@ -366,7 +387,7 @@ py-modules = ["closure_fake"]
                 'metor',
             ]
         )
-        run([str(executable), '-I', '-c', SDK_PROBE])
+        run([str(executable), '-I', '-c', SDK_REIMPORT_PROBE])
         run([str(executable), '-m', 'pip', 'check'])
         print('ALL_ISOLATED_ARTIFACT_SCENARIOS_OK')
 

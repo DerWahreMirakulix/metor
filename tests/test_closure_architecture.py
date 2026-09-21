@@ -55,6 +55,7 @@ class ClosureArchitectureTests(unittest.TestCase):
                 'from ...data.profile.manager import ProfileManager as Innocent',
             ),
             ('metor.ui.terminal.launcher', 'from ..gui import launch'),
+            ('metor.client.session', 'from ..ui.gui import launch'),
             (
                 'metor.client.session',
                 'from metor.application import create_local_frontend_host',
@@ -67,6 +68,39 @@ class ClosureArchitectureTests(unittest.TestCase):
         for module, source in cases:
             with self.subTest(module=module, source=source):
                 self.assertTrue(check_source(source, module))
+
+    def test_sdk_rejects_toolkits_constant_dynamic_imports_and_lazy_exports(
+        self,
+    ) -> None:
+        """Covers dependency spellings that an ordinary import-only scan misses."""
+        cases = (
+            'import kivy',
+            'from sounddevice import InputStream',
+            'import accesskit as accessibility',
+            'import importlib\nimportlib.import_module("kivy")',
+            'from importlib import import_module as load\nload("sounddevice")',
+            '__import__("accesskit")',
+            ('_LAZY_EXPORTS = {\n    "Gui": ("metor.ui.gui", "launch"),\n}'),
+        )
+        for source in cases:
+            with self.subTest(source=source):
+                self.assertTrue(check_source(source, 'metor.client.facade'))
+
+    def test_sdk_allows_owned_and_standard_library_import_forms(self) -> None:
+        """Prevents the negative guard from rejecting valid SDK dependencies."""
+        cases = (
+            'from pathlib import Path',
+            'from metor.core.api import IpcEvent',
+            'import importlib\nimportlib.import_module("metor.client.session")',
+            (
+                '_LAZY_EXPORTS = {\n'
+                '    "Client": ("metor.client.session", "MetorClient"),\n'
+                '}'
+            ),
+        )
+        for source in cases:
+            with self.subTest(source=source):
+                self.assertEqual(check_source(source, 'metor.client.facade'), ())
 
     def test_security_primitives_have_one_owner_and_known_answers(self) -> None:
         self.assertIs(build_session_auth_proof_from_key, canonical_proof)

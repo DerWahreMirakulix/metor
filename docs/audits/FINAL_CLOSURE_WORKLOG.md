@@ -44,30 +44,30 @@ ownership map. Counts sum to 763; no path is unclassified.
 
 ## Package status
 
-| Package | State    | Changed files                                                                                                   | Verification         | Next step                                                                  |
-| ------- | -------- | --------------------------------------------------------------------------------------------------------------- | -------------------- | -------------------------------------------------------------------------- |
-| A00     | verified | `docs/audits/FINAL_CLOSURE_WORKLOG.md`                                                                          | Baseline gates below | Complete                                                                   |
-| A01     | verified | `src/metor/data/sql/manager.py`, `tests/test_gui_purge.py`, this worklog                                        | A01 gates below      | Complete                                                                   |
-| A02     | verified | `src/metor/core/tor.py`, `tests/test_tor_path_resolution.py`, `tests/test_closure_integration.py`, this worklog | A02 gates below      | Complete                                                                   |
-| A03     | verified | `src/metor/utils/{constants,security}.py`, `tests/test_security_contract.py`, this worklog                      | A03 gates below      | Complete                                                                   |
-| A04     | verified | `src/metor/shared/security.py`, `tests/test_security_contract.py`, this worklog                                 | A04 gates below      | Complete                                                                   |
-| A05     | verified | `src/metor/utils/lock.py`, `tests/test_lock_contract.py`, this worklog                                          | A05 gates below      | Complete                                                                   |
-| A06     | verified | `src/metor/data/profile/{support,paths,manager,catalog,lifecycle}.py`, `src/metor/data/profile/migration/{journal,orchestrator}.py`, `tests/test_profile_path_security.py`, this worklog | A06 gates below | Complete |
-| A07     | verified | `src/metor/{utils/process.py,data/profile/manager.py,application/runtime/maintenance.py,application/frontend/host.py,core/tor.py}`, `tests/test_application_runtime_contract.py`, this worklog | A07 gates below | Complete |
-| A08     | verified | `src/metor/core/api/{base.py,events/shared.py,events/entries.py}`, `tests/test_ipc_type_validation.py`, this worklog | A08 gates below | Complete |
-| A09     | verified | `scripts/{generate_api_docs.py,release/compatibility.py}`, `docs/generated/{API.md,api.schema.json,compatibility.json}`, `tests/test_api_generation_contract.py`, this worklog | A09 gates below | Complete |
-| A10     | verified | `src/metor/cli/{parser,entry}.py`, `tests/test_refactor2_cli_contract.py`, this worklog | A10 gates below | Complete |
-| A10b     | verified | Terminal renderer/presenter hardening and regression coverage; this worklog                                    | A10b gates below     | Complete                                                                    |
-| A11      | verified | Canonical daemon bootstrap/runtime preparation and regression coverage; this worklog                           | A11 gates below      | Complete                                                                    |
-| A12      | verified | Producer recovery correlation ordering and regression coverage; this worklog                                  | A12 gates below      | Complete                                                                    |
-| A13      | verified | `src/metor/ui/gui/platform/{configuration,configuration_security}.py`, `tests/test_device_configuration_security.py`, this worklog | A13 gates below | Complete |
-| A14      | verified | `src/metor/ui/gui/{app.py,platform/lifecycle.py,runtime/controller.py}`, `packaging/gui/setup.py`, `requirements/gui.lock`, `tests/{test_gui_os_lifecycle.py,gui_native_lifecycle.py,test_gui_lifecycle.py}`, `docs/contracts/{GUI_PLATFORM_ADR.md,gui/support.json}`, this worklog | A14 gates below | Complete |
-| A15      | verified | `tests/{test_gui_capture.py,test_gui_audio.py,gui_native_voice.py}`, `docs/contracts/{GUI_PLATFORM_ADR.md,gui/support.json}`, this worklog | A15 gates below | Complete |
-| A16      | verified | `src/metor/core/daemon/managed/{notify/notification.py,notify/sinks.py,ipc.py,engine/daemon.py}`, `tests/{test_notification_delivery.py,test_gui_capture.py}`, this worklog | A16 gates below | Complete |
-| A17      | verified | Removed `src/metor/ui/embedded/**` and `tests/test_embedded_contract.py`; `tests/{test_ui_boundaries.py,test_contact_qr.py}`, this worklog | A17 gates below | Complete |
-| A18      | verified | `scripts/{build_release_wheelhouse.py,release/bundle.py}`, Base/shared/Core owner imports, `src/metor/utils/{__init__,constants}.py`, `tests/{test_release_contract.py,test_closure_architecture.py}`, `docs/ARCHITECTURE.md`, this worklog | A18 gates below | Complete |
-| A19      | verified | `src/metor/core/daemon/managed/network/voice/{manager,inbound,retained,capture,outbound}.py`, `tests/{test_voice_contract.py,test_gui_producers.py}`, `docs/ARCHITECTURE.md`, this worklog | A19 gates below | Complete |
-| A20–A25 | open     | None                                                                                                            | Not run              | A20: audit the complete production tree                                      |
+| Package | State    | Changed files                                                                                                                                                                                                                                                                       | Verification         | Next step                               |
+| ------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- | --------------------------------------- |
+| A00     | verified | `docs/audits/FINAL_CLOSURE_WORKLOG.md`                                                                                                                                                                                                                                              | Baseline gates below | Complete                                |
+| A01     | verified | `src/metor/data/sql/manager.py`, `tests/test_gui_purge.py`, this worklog                                                                                                                                                                                                            | A01 gates below      | Complete                                |
+| A02     | verified | `src/metor/core/tor.py`, `tests/test_tor_path_resolution.py`, `tests/test_closure_integration.py`, this worklog                                                                                                                                                                     | A02 gates below      | Complete                                |
+| A03     | verified | `src/metor/utils/{constants,security}.py`, `tests/test_security_contract.py`, this worklog                                                                                                                                                                                          | A03 gates below      | Complete                                |
+| A04     | verified | `src/metor/shared/security.py`, `tests/test_security_contract.py`, this worklog                                                                                                                                                                                                     | A04 gates below      | Complete                                |
+| A05     | verified | `src/metor/utils/lock.py`, `tests/test_lock_contract.py`, this worklog                                                                                                                                                                                                              | A05 gates below      | Complete                                |
+| A06     | verified | `src/metor/data/profile/{support,paths,manager,catalog,lifecycle}.py`, `src/metor/data/profile/migration/{journal,orchestrator}.py`, `tests/test_profile_path_security.py`, this worklog                                                                                            | A06 gates below      | Complete                                |
+| A07     | verified | `src/metor/{utils/process.py,data/profile/manager.py,application/runtime/maintenance.py,application/frontend/host.py,core/tor.py}`, `tests/test_application_runtime_contract.py`, this worklog                                                                                      | A07 gates below      | Complete                                |
+| A08     | verified | `src/metor/core/api/{base.py,events/shared.py,events/entries.py}`, `tests/test_ipc_type_validation.py`, this worklog                                                                                                                                                                | A08 gates below      | Complete                                |
+| A09     | verified | `scripts/{generate_api_docs.py,release/compatibility.py}`, `docs/generated/{API.md,api.schema.json,compatibility.json}`, `tests/test_api_generation_contract.py`, this worklog                                                                                                      | A09 gates below      | Complete                                |
+| A10     | verified | `src/metor/cli/{parser,entry}.py`, `tests/test_refactor2_cli_contract.py`, this worklog                                                                                                                                                                                             | A10 gates below      | Complete                                |
+| A10b    | verified | Terminal renderer/presenter hardening and regression coverage; this worklog                                                                                                                                                                                                         | A10b gates below     | Complete                                |
+| A11     | verified | Canonical daemon bootstrap/runtime preparation and regression coverage; this worklog                                                                                                                                                                                                | A11 gates below      | Complete                                |
+| A12     | verified | Producer recovery correlation ordering and regression coverage; this worklog                                                                                                                                                                                                        | A12 gates below      | Complete                                |
+| A13     | verified | `src/metor/ui/gui/platform/{configuration,configuration_security}.py`, `tests/test_device_configuration_security.py`, this worklog                                                                                                                                                  | A13 gates below      | Complete                                |
+| A14     | verified | `src/metor/ui/gui/{app.py,platform/lifecycle.py,runtime/controller.py}`, `packaging/gui/setup.py`, `requirements/gui.lock`, `tests/{test_gui_os_lifecycle.py,gui_native_lifecycle.py,test_gui_lifecycle.py}`, `docs/contracts/{GUI_PLATFORM_ADR.md,gui/support.json}`, this worklog | A14 gates below      | Complete                                |
+| A15     | verified | `tests/{test_gui_capture.py,test_gui_audio.py,gui_native_voice.py}`, `docs/contracts/{GUI_PLATFORM_ADR.md,gui/support.json}`, this worklog                                                                                                                                          | A15 gates below      | Complete                                |
+| A16     | verified | `src/metor/core/daemon/managed/{notify/notification.py,notify/sinks.py,ipc.py,engine/daemon.py}`, `tests/{test_notification_delivery.py,test_gui_capture.py}`, this worklog                                                                                                         | A16 gates below      | Complete                                |
+| A17     | verified | Removed `src/metor/ui/embedded/**` and `tests/test_embedded_contract.py`; `tests/{test_ui_boundaries.py,test_contact_qr.py}`, this worklog                                                                                                                                          | A17 gates below      | Complete                                |
+| A18     | verified | `scripts/{build_release_wheelhouse.py,release/bundle.py}`, Base/shared/Core owner imports, `src/metor/utils/{__init__,constants}.py`, `tests/{test_release_contract.py,test_closure_architecture.py}`, `docs/ARCHITECTURE.md`, this worklog                                         | A18 gates below      | Complete                                |
+| A19     | verified | `src/metor/core/daemon/managed/network/voice/{manager,inbound,retained,capture,outbound}.py`, `tests/{test_voice_contract.py,test_gui_producers.py}`, `docs/ARCHITECTURE.md`, this worklog                                                                                          | A19 gates below      | Complete                                |
+| A20–A25 | open     | None                                                                                                                                                                                                                                                                                | Not run              | A20: audit the complete production tree |
 
 ## A00 verification
 
@@ -166,15 +166,15 @@ This is best-effort logical cleanup only. It does not claim physical erasure of
 SSD or copy-on-write storage, backups, or external copies. No wire, database,
 keyslot, blob, derivation, launcher, or application version changes are required.
 
-| Command                                                                                                                                                                                                                                             | Result                                                                  |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| A03 reproduction supplied by the closure assignment                                                                                                                                                                                                 | CONFIRMED FINDING: whole-file allocation, partial-write unlink, and direct-link overwrite |
-| `python -m unittest -v test_security_contract test_profile_storage_security test_tor_path_resolution test_gui_purge test_gui_purge_observation`                                                                                                    | PASS; 70 tests in 43.923 seconds with local IPC socket access           |
-| `python -m ruff check src/metor/utils/security.py src/metor/utils/constants.py tests/test_security_contract.py`                                                                                                                                     | PASS                                                                    |
-| `python -m ruff format --check src/metor/utils/security.py src/metor/utils/constants.py tests/test_security_contract.py`                                                                                                                            | PASS; 3 files already formatted                                         |
-| `python -m mypy src/metor/utils/security.py src/metor/core/profile_keys.py src/metor/core/tor.py src/metor/core/profile_destruction.py src/metor/core/daemon/managed/engine/lifecycle.py src/metor/data/profile/lifecycle.py src/metor/data/profile/migration src/metor/data/sql/runtime_mirror.py` | PASS; 11 source files                                                    |
-| `python scripts/check_boundaries.py`                                                                                                                                                                                                                | PASS                                                                    |
-| `git diff --check`                                                                                                                                                                                                                                  | PASS                                                                    |
+| Command                                                                                                                                                                                                                                                                                             | Result                                                                                    |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| A03 reproduction supplied by the closure assignment                                                                                                                                                                                                                                                 | CONFIRMED FINDING: whole-file allocation, partial-write unlink, and direct-link overwrite |
+| `python -m unittest -v test_security_contract test_profile_storage_security test_tor_path_resolution test_gui_purge test_gui_purge_observation`                                                                                                                                                     | PASS; 70 tests in 43.923 seconds with local IPC socket access                             |
+| `python -m ruff check src/metor/utils/security.py src/metor/utils/constants.py tests/test_security_contract.py`                                                                                                                                                                                     | PASS                                                                                      |
+| `python -m ruff format --check src/metor/utils/security.py src/metor/utils/constants.py tests/test_security_contract.py`                                                                                                                                                                            | PASS; 3 files already formatted                                                           |
+| `python -m mypy src/metor/utils/security.py src/metor/core/profile_keys.py src/metor/core/tor.py src/metor/core/profile_destruction.py src/metor/core/daemon/managed/engine/lifecycle.py src/metor/data/profile/lifecycle.py src/metor/data/profile/migration src/metor/data/sql/runtime_mirror.py` | PASS; 11 source files                                                                     |
+| `python scripts/check_boundaries.py`                                                                                                                                                                                                                                                                | PASS                                                                                      |
+| `git diff --check`                                                                                                                                                                                                                                                                                  | PASS                                                                                      |
 
 ## A04 verification
 
@@ -190,15 +190,15 @@ clearing of the caller-owned mutable view only; it does not claim to remove
 immutable Python copies or independently owned native buffers. No compatibility
 version changes are required.
 
-| Command                                                                                                                                                                                                                                                                | Result                                                                    |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Three focused `secure_clear_buffer` regressions before implementation                                                                                                                                                                                                   | EXPECTED FAIL; typed view raised `ValueError` and strided view had no explicit `BufferError` contract |
-| `python -m unittest -v test_security_contract test_session_auth_contract test_profile_storage_security test_data_persistence_contract test_closure_architecture`                                                                                                       | PASS; 87 tests in 34.664 seconds with local IPC socket access             |
-| `python -m ruff check src/metor/shared/security.py tests/test_security_contract.py`                                                                                                                                                                                     | PASS                                                                      |
-| `python -m ruff format --check src/metor/shared/security.py tests/test_security_contract.py`                                                                                                                                                                            | PASS; 2 files already formatted                                           |
-| `python -m mypy src/metor/shared/security.py src/metor/core/key.py src/metor/core/auth src/metor/core/daemon/managed/local_auth.py src/metor/data/blob/store.py src/metor/data/sql/manager.py src/metor/core/profile_keys.py`                                              | PASS; 9 source files                                                       |
-| `python scripts/check_boundaries.py`                                                                                                                                                                                                                                    | PASS                                                                      |
-| `git diff --check`                                                                                                                                                                                                                                                      | PASS                                                                      |
+| Command                                                                                                                                                                                                                       | Result                                                                                                |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Three focused `secure_clear_buffer` regressions before implementation                                                                                                                                                         | EXPECTED FAIL; typed view raised `ValueError` and strided view had no explicit `BufferError` contract |
+| `python -m unittest -v test_security_contract test_session_auth_contract test_profile_storage_security test_data_persistence_contract test_closure_architecture`                                                              | PASS; 87 tests in 34.664 seconds with local IPC socket access                                         |
+| `python -m ruff check src/metor/shared/security.py tests/test_security_contract.py`                                                                                                                                           | PASS                                                                                                  |
+| `python -m ruff format --check src/metor/shared/security.py tests/test_security_contract.py`                                                                                                                                  | PASS; 2 files already formatted                                                                       |
+| `python -m mypy src/metor/shared/security.py src/metor/core/key.py src/metor/core/auth src/metor/core/daemon/managed/local_auth.py src/metor/data/blob/store.py src/metor/data/sql/manager.py src/metor/core/profile_keys.py` | PASS; 9 source files                                                                                  |
+| `python scripts/check_boundaries.py`                                                                                                                                                                                          | PASS                                                                                                  |
+| `git diff --check`                                                                                                                                                                                                            | PASS                                                                                                  |
 
 ## A05 verification
 
@@ -220,15 +220,15 @@ same filesystem protocol on Windows, but native Windows execution is unavailable
 in this environment and is not claimed. No compatibility version changes are
 required.
 
-| Command                                                                                                                                                      | Result                                                                          |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
-| `python -m unittest -v test_lock_contract` before implementation                                                                                             | EXPECTED FAIL; 6 failures covered rollback leaks, partial writes, close hiding, wall-clock deadline, and unknown identity |
-| `python -m unittest -v test_lock_contract test_settings_contract test_profile_storage_security test_data_persistence_contract`                              | PASS; 92 tests in 11.162 seconds with local IPC socket access                  |
-| `python -m ruff check src/metor/utils/lock.py tests/test_lock_contract.py`                                                                                    | PASS                                                                            |
-| `python -m ruff format --check src/metor/utils/lock.py tests/test_lock_contract.py`                                                                           | PASS; 2 files already formatted                                                 |
-| `python -m mypy src/metor/utils/lock.py src/metor/data/settings.py src/metor/data/profile/config/config.py`                                                  | PASS; 3 source files                                                            |
-| `python scripts/check_boundaries.py`                                                                                                                         | PASS                                                                            |
-| `git diff --check`                                                                                                                                           | PASS                                                                            |
+| Command                                                                                                                        | Result                                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `python -m unittest -v test_lock_contract` before implementation                                                               | EXPECTED FAIL; 6 failures covered rollback leaks, partial writes, close hiding, wall-clock deadline, and unknown identity |
+| `python -m unittest -v test_lock_contract test_settings_contract test_profile_storage_security test_data_persistence_contract` | PASS; 92 tests in 11.162 seconds with local IPC socket access                                                             |
+| `python -m ruff check src/metor/utils/lock.py tests/test_lock_contract.py`                                                     | PASS                                                                                                                      |
+| `python -m ruff format --check src/metor/utils/lock.py tests/test_lock_contract.py`                                            | PASS; 2 files already formatted                                                                                           |
+| `python -m mypy src/metor/utils/lock.py src/metor/data/settings.py src/metor/data/profile/config/config.py`                    | PASS; 3 source files                                                                                                      |
+| `python scripts/check_boundaries.py`                                                                                           | PASS                                                                                                                      |
+| `git diff --check`                                                                                                             | PASS                                                                                                                      |
 
 ## A06 verification
 
@@ -252,16 +252,16 @@ post-commit recovery, and GUI/CLI profile operations remain green. Native
 Windows reparse behavior is structurally covered but not executed on Windows in
 this environment. No compatibility version changes are required.
 
-| Command                                                                                                                                         | Result                                                                     |
-| ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `python -m unittest -v test_profile_path_security` before implementation                                                                        | EXPECTED FAIL; strict public validators and explicit staging factory did not exist |
-| `python -m unittest -v test_profile_path_security test_profile_storage_security test_gui_profiles test_application_runtime_contract test_settings_contract` | PASS; 87 tests in 11.581 seconds with local IPC socket access             |
-| `python -m unittest test_gui_purge test_profile_storage_security.ProfileStorageSecurityTests.test_profile_destruction_is_idempotent_when_files_are_missing` | PASS; 7 tests in 24.971 seconds with local IPC socket access              |
-| `python -m ruff check src/metor/data/profile tests/test_profile_path_security.py`                                                               | PASS                                                                       |
-| `python -m ruff format --check src/metor/data/profile tests/test_profile_path_security.py`                                                      | PASS; 15 files already formatted                                           |
-| `python -m mypy src/metor/data/profile`                                                                                                         | PASS; 14 source files                                                      |
-| `python scripts/check_boundaries.py`                                                                                                            | PASS                                                                       |
-| `git diff --check`                                                                                                                              | PASS                                                                       |
+| Command                                                                                                                                                     | Result                                                                             |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `python -m unittest -v test_profile_path_security` before implementation                                                                                    | EXPECTED FAIL; strict public validators and explicit staging factory did not exist |
+| `python -m unittest -v test_profile_path_security test_profile_storage_security test_gui_profiles test_application_runtime_contract test_settings_contract` | PASS; 87 tests in 11.581 seconds with local IPC socket access                      |
+| `python -m unittest test_gui_purge test_profile_storage_security.ProfileStorageSecurityTests.test_profile_destruction_is_idempotent_when_files_are_missing` | PASS; 7 tests in 24.971 seconds with local IPC socket access                       |
+| `python -m ruff check src/metor/data/profile tests/test_profile_path_security.py`                                                                           | PASS                                                                               |
+| `python -m ruff format --check src/metor/data/profile tests/test_profile_path_security.py`                                                                  | PASS; 15 files already formatted                                                   |
+| `python -m mypy src/metor/data/profile`                                                                                                                     | PASS; 14 source files                                                              |
+| `python scripts/check_boundaries.py`                                                                                                                        | PASS                                                                               |
+| `git diff --check`                                                                                                                                          | PASS                                                                               |
 
 ## A07 verification
 
@@ -287,16 +287,16 @@ unavailable and is not claimed. Runtime PID metadata is ephemeral and its legacy
 read path is retained, so no wire, storage, launcher, or application version bump
 is required.
 
-| Command                                                                                                                                                                                                       | Result                                                               |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Three focused ownership regressions before implementation                                                                                                                                                      | EXPECTED FAIL; 11 errors exposed missing profile arguments, lifetime metadata, and OS-owner validation |
-| `python -m unittest test_application_runtime_contract test_tor_path_resolution test_daemon_lock_lifecycle test_gui_profiles`                                                                                  | PASS; 36 tests in 0.738 seconds with local IPC socket access         |
-| `python -m unittest -v test_application_runtime_contract test_tor_path_resolution test_platform_contracts` plus three focused daemon-entrypoint release tests                                                 | PASS; 29 tests in 0.166 seconds                                      |
-| `python -m ruff check src/metor/utils/process.py src/metor/data/profile/manager.py src/metor/application/runtime/maintenance.py src/metor/application/frontend/host.py src/metor/core/tor.py tests/test_application_runtime_contract.py` | PASS                                                                 |
-| `python -m ruff format --check src/metor/utils/process.py src/metor/data/profile/manager.py src/metor/application/runtime/maintenance.py src/metor/application/frontend/host.py src/metor/core/tor.py tests/test_application_runtime_contract.py` | PASS; 6 files already formatted                                     |
-| `python -m mypy src/metor/utils/process.py src/metor/data/profile/manager.py src/metor/application/runtime/maintenance.py src/metor/application/frontend/host.py src/metor/core/tor.py`                      | PASS; 5 source files                                                 |
-| `python scripts/check_boundaries.py`                                                                                                                                                                           | PASS                                                                 |
-| `git diff --check`                                                                                                                                                                                             | PASS                                                                 |
+| Command                                                                                                                                                                                                                                           | Result                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Three focused ownership regressions before implementation                                                                                                                                                                                         | EXPECTED FAIL; 11 errors exposed missing profile arguments, lifetime metadata, and OS-owner validation |
+| `python -m unittest test_application_runtime_contract test_tor_path_resolution test_daemon_lock_lifecycle test_gui_profiles`                                                                                                                      | PASS; 36 tests in 0.738 seconds with local IPC socket access                                           |
+| `python -m unittest -v test_application_runtime_contract test_tor_path_resolution test_platform_contracts` plus three focused daemon-entrypoint release tests                                                                                     | PASS; 29 tests in 0.166 seconds                                                                        |
+| `python -m ruff check src/metor/utils/process.py src/metor/data/profile/manager.py src/metor/application/runtime/maintenance.py src/metor/application/frontend/host.py src/metor/core/tor.py tests/test_application_runtime_contract.py`          | PASS                                                                                                   |
+| `python -m ruff format --check src/metor/utils/process.py src/metor/data/profile/manager.py src/metor/application/runtime/maintenance.py src/metor/application/frontend/host.py src/metor/core/tor.py tests/test_application_runtime_contract.py` | PASS; 6 files already formatted                                                                        |
+| `python -m mypy src/metor/utils/process.py src/metor/data/profile/manager.py src/metor/application/runtime/maintenance.py src/metor/application/frontend/host.py src/metor/core/tor.py`                                                           | PASS; 5 source files                                                                                   |
+| `python scripts/check_boundaries.py`                                                                                                                                                                                                              | PASS                                                                                                   |
+| `git diff --check`                                                                                                                                                                                                                                | PASS                                                                                                   |
 
 ## A08 verification
 
@@ -324,19 +324,19 @@ version bump. `base.py` remains below the mandatory 500-line decomposition
 review threshold, and the added behavior is its existing cohesive
 responsibility: strict JSON-to-DTO hydration.
 
-| Command | Result |
-| ------- | ------ |
-| `python -m unittest -v test_ipc_type_validation` before implementation | EXPECTED FAIL; accepted Boolean integers, bad later list/dictionary values and arbitrary open-map objects, while valid structured content and explicit Voice null failed |
-| `python -m unittest -v test_ipc_type_validation` | PASS; 7 tests, including valid JSON roundtrips for all 66 command and 160 event registrations |
-| `python -m unittest -v test_raw_client_contract` | PASS; 3 tests in 4.316 seconds with local IPC socket access |
-| `python -m unittest -v test_gui_handoff test_gui_metadata test_ui_boundaries test_session_auth_contract test_history_contract test_gui_pages test_gui_producers test_embedded_contract test_closure_security` | PASS; 70 tests in 142.071 seconds with local IPC socket access |
-| `python -m unittest -v test_ipc_type_validation test_ui_boundaries test_history_contract test_message_architecture_contract test_ui_ipc_contract` | PASS; 62 tests |
-| Three focused `test_daemon_hardening.DaemonHardeningTests` IPC writer/rejection/dispatch tests | PASS; 3 tests in 0.008 seconds with local socket-pair access |
-| `python -m ruff check src/metor/core/api/base.py src/metor/core/api/events/shared.py src/metor/core/api/events/entries.py tests/test_ipc_type_validation.py` | PASS |
-| `python -m ruff format --check src/metor/core/api/base.py src/metor/core/api/events/shared.py src/metor/core/api/events/entries.py tests/test_ipc_type_validation.py` | PASS; 4 files already formatted |
-| `python -m mypy src/metor/core/api/base.py src/metor/core/api/events/shared.py src/metor/core/api/events/entries.py` | PASS; 3 source files |
-| `python scripts/check_boundaries.py` | PASS |
-| `git diff --check` | PASS |
+| Command                                                                                                                                                                                                       | Result                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `python -m unittest -v test_ipc_type_validation` before implementation                                                                                                                                        | EXPECTED FAIL; accepted Boolean integers, bad later list/dictionary values and arbitrary open-map objects, while valid structured content and explicit Voice null failed |
+| `python -m unittest -v test_ipc_type_validation`                                                                                                                                                              | PASS; 7 tests, including valid JSON roundtrips for all 66 command and 160 event registrations                                                                            |
+| `python -m unittest -v test_raw_client_contract`                                                                                                                                                              | PASS; 3 tests in 4.316 seconds with local IPC socket access                                                                                                              |
+| `python -m unittest -v test_gui_handoff test_gui_metadata test_ui_boundaries test_session_auth_contract test_history_contract test_gui_pages test_gui_producers test_embedded_contract test_closure_security` | PASS; 70 tests in 142.071 seconds with local IPC socket access                                                                                                           |
+| `python -m unittest -v test_ipc_type_validation test_ui_boundaries test_history_contract test_message_architecture_contract test_ui_ipc_contract`                                                             | PASS; 62 tests                                                                                                                                                           |
+| Three focused `test_daemon_hardening.DaemonHardeningTests` IPC writer/rejection/dispatch tests                                                                                                                | PASS; 3 tests in 0.008 seconds with local socket-pair access                                                                                                             |
+| `python -m ruff check src/metor/core/api/base.py src/metor/core/api/events/shared.py src/metor/core/api/events/entries.py tests/test_ipc_type_validation.py`                                                  | PASS                                                                                                                                                                     |
+| `python -m ruff format --check src/metor/core/api/base.py src/metor/core/api/events/shared.py src/metor/core/api/events/entries.py tests/test_ipc_type_validation.py`                                         | PASS; 4 files already formatted                                                                                                                                          |
+| `python -m mypy src/metor/core/api/base.py src/metor/core/api/events/shared.py src/metor/core/api/events/entries.py`                                                                                          | PASS; 3 source files                                                                                                                                                     |
+| `python scripts/check_boundaries.py`                                                                                                                                                                          | PASS                                                                                                                                                                     |
+| `git diff --check`                                                                                                                                                                                            | PASS                                                                                                                                                                     |
 
 ## A09 verification
 
@@ -371,21 +371,21 @@ and machine-readable views from the same registries; separating annotation
 resolution at this size would duplicate or obscure that shared contract. It
 remains below the exceptional 800-line ceiling and introduces no new subsystem.
 
-| Command | Result |
-| ------- | ------ |
-| `python -m unittest -v test_api_generation_contract` before implementation | EXPECTED FAIL; invalid content examples, untyped dictionary values, permissive open mappings, missing catalog semantics, and silent unknown annotations were reproduced |
-| `python -m unittest -v test_api_generation_contract` | PASS; 6 tests covering all 226 examples, complete route definitions, negative containers/discriminators, open JSON, fail-closed annotations, compatibility classification, and repeated generation |
-| `python scripts/generate_api_docs.py` and `python scripts/generate_compatibility_manifest.py` | PASS; canonical API, schema, and compatibility artifacts regenerated from source |
-| `python scripts/validate_generated_docs.py` | PASS; all four generated artifacts remained byte-identical across two generations |
-| Direct `ipc_breaking_changes()` comparison with the A08 checked-in schema | REVIEWED; only `history_data.entries` and `history_raw_data.entries` schema corrections classified as narrowed |
-| `python scripts/check_release_compatibility.py --current docs/generated/compatibility.json` | PASS; first public baseline, no automatic bump |
-| `python scripts/versioning.py validate` | PASS; application 0.2.0 and IPC generation 2 remain valid |
-| `python -m unittest -v test_api_generation_contract test_ipc_type_validation test_message_architecture_contract test_versioning_release` | PASS; 51 tests in 3.294 seconds |
-| `python -m ruff check scripts/generate_api_docs.py scripts/release/compatibility.py tests/test_api_generation_contract.py` | PASS |
-| `python -m ruff format --check scripts/generate_api_docs.py scripts/release/compatibility.py tests/test_api_generation_contract.py` | PASS; 3 files already formatted |
-| `python -m mypy scripts/generate_api_docs.py scripts/release/compatibility.py` | PASS; 2 source files |
-| `python scripts/check_boundaries.py` | PASS |
-| `git diff --check` | PASS |
+| Command                                                                                                                                  | Result                                                                                                                                                                                             |
+| ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `python -m unittest -v test_api_generation_contract` before implementation                                                               | EXPECTED FAIL; invalid content examples, untyped dictionary values, permissive open mappings, missing catalog semantics, and silent unknown annotations were reproduced                            |
+| `python -m unittest -v test_api_generation_contract`                                                                                     | PASS; 6 tests covering all 226 examples, complete route definitions, negative containers/discriminators, open JSON, fail-closed annotations, compatibility classification, and repeated generation |
+| `python scripts/generate_api_docs.py` and `python scripts/generate_compatibility_manifest.py`                                            | PASS; canonical API, schema, and compatibility artifacts regenerated from source                                                                                                                   |
+| `python scripts/validate_generated_docs.py`                                                                                              | PASS; all four generated artifacts remained byte-identical across two generations                                                                                                                  |
+| Direct `ipc_breaking_changes()` comparison with the A08 checked-in schema                                                                | REVIEWED; only `history_data.entries` and `history_raw_data.entries` schema corrections classified as narrowed                                                                                     |
+| `python scripts/check_release_compatibility.py --current docs/generated/compatibility.json`                                              | PASS; first public baseline, no automatic bump                                                                                                                                                     |
+| `python scripts/versioning.py validate`                                                                                                  | PASS; application 0.2.0 and IPC generation 2 remain valid                                                                                                                                          |
+| `python -m unittest -v test_api_generation_contract test_ipc_type_validation test_message_architecture_contract test_versioning_release` | PASS; 51 tests in 3.294 seconds                                                                                                                                                                    |
+| `python -m ruff check scripts/generate_api_docs.py scripts/release/compatibility.py tests/test_api_generation_contract.py`               | PASS                                                                                                                                                                                               |
+| `python -m ruff format --check scripts/generate_api_docs.py scripts/release/compatibility.py tests/test_api_generation_contract.py`      | PASS; 3 files already formatted                                                                                                                                                                    |
+| `python -m mypy scripts/generate_api_docs.py scripts/release/compatibility.py`                                                           | PASS; 2 source files                                                                                                                                                                               |
+| `python scripts/check_boundaries.py`                                                                                                     | PASS                                                                                                                                                                                               |
+| `git diff --check`                                                                                                                       | PASS                                                                                                                                                                                               |
 
 ## A10 verification
 
@@ -410,17 +410,17 @@ depends on the positional `parse_known_args()` behavior that differed there.
 No CLI spelling, launcher contract, wire/storage format, compatibility axis, or
 application version changed.
 
-| Command | Result |
-| ------- | ------ |
-| Four focused parser/entry regressions before implementation | EXPECTED FAIL; `chat unexpected` was dropped and proceeded into frontend launch, including in a fresh process |
-| Focused pre-initialization invalid-argument regression before entry fix | EXPECTED FAIL; profile construction occurred before invalid chat operands were reported |
-| `python -m unittest -v test_refactor2_cli_contract test_gui_contract test_ui_ipc_contract` | PASS; 59 tests in 4.725 seconds |
-| Fresh `python -m metor` subprocess matrix for `--help`, `help`, both chat-help forms, both version forms, and `chat --list-uis` | PASS; 7 processes, all exit 0 without profile/daemon/toolkit requirements |
-| `python -m ruff check src/metor/cli/parser.py src/metor/cli/entry.py tests/test_refactor2_cli_contract.py` | PASS |
-| `python -m ruff format --check src/metor/cli/parser.py src/metor/cli/entry.py tests/test_refactor2_cli_contract.py` | PASS; 3 files already formatted |
-| `python -m mypy src/metor/cli/parser.py src/metor/cli/entry.py` | PASS; 2 source files |
-| `python scripts/check_boundaries.py` | PASS |
-| `git diff --check` | PASS |
+| Command                                                                                                                         | Result                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Four focused parser/entry regressions before implementation                                                                     | EXPECTED FAIL; `chat unexpected` was dropped and proceeded into frontend launch, including in a fresh process |
+| Focused pre-initialization invalid-argument regression before entry fix                                                         | EXPECTED FAIL; profile construction occurred before invalid chat operands were reported                       |
+| `python -m unittest -v test_refactor2_cli_contract test_gui_contract test_ui_ipc_contract`                                      | PASS; 59 tests in 4.725 seconds                                                                               |
+| Fresh `python -m metor` subprocess matrix for `--help`, `help`, both chat-help forms, both version forms, and `chat --list-uis` | PASS; 7 processes, all exit 0 without profile/daemon/toolkit requirements                                     |
+| `python -m ruff check src/metor/cli/parser.py src/metor/cli/entry.py tests/test_refactor2_cli_contract.py`                      | PASS                                                                                                          |
+| `python -m ruff format --check src/metor/cli/parser.py src/metor/cli/entry.py tests/test_refactor2_cli_contract.py`             | PASS; 3 files already formatted                                                                               |
+| `python -m mypy src/metor/cli/parser.py src/metor/cli/entry.py`                                                                 | PASS; 2 source files                                                                                          |
+| `python scripts/check_boundaries.py`                                                                                            | PASS                                                                                                          |
+| `git diff --check`                                                                                                              | PASS                                                                                                          |
 
 ## A10b verification
 
@@ -451,15 +451,15 @@ format, compatibility axis, or application version changed. The shared helper
 is host-free and has one terminal-encoding responsibility; it does not create a
 general UI layer.
 
-| Command | Result |
-| ------- | ------ |
-| `python -m unittest tests.test_terminal_rendering_security -v` before completing the renderer | EXPECTED FAIL; 4 of 6 initial regressions reproduced control injection, ordinary-message placeholder substitution, unsafe translation parameters, and inconsistent wrapping |
-| `python -m unittest tests.test_terminal_rendering_security tests.test_chat_contract tests.test_ui_boundaries tests.test_history_contract tests.test_settings_contract tests.test_refactor2_cli_contract tests.test_message_architecture_contract tests.test_ui_ipc_contract -q` | PASS; 138 tests in 0.427 seconds; expected non-TTY diagnostic and plaintext-test notice were emitted by existing tests |
-| `ruff check src/metor tests/test_terminal_rendering_security.py` | PASS |
-| `ruff format --check` for all A10b-touched source and test files | PASS after canonical formatting |
-| `mypy` for all 28 A10b-touched source paths and the regression test | PASS; strict project configuration, no issues |
-| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
-| `git diff --check` | PASS |
+| Command                                                                                                                                                                                                                                                                         | Result                                                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `python -m unittest tests.test_terminal_rendering_security -v` before completing the renderer                                                                                                                                                                                   | EXPECTED FAIL; 4 of 6 initial regressions reproduced control injection, ordinary-message placeholder substitution, unsafe translation parameters, and inconsistent wrapping |
+| `python -m unittest tests.test_terminal_rendering_security tests.test_chat_contract tests.test_ui_boundaries tests.test_history_contract tests.test_settings_contract tests.test_refactor2_cli_contract tests.test_message_architecture_contract tests.test_ui_ipc_contract -q` | PASS; 138 tests in 0.427 seconds; expected non-TTY diagnostic and plaintext-test notice were emitted by existing tests                                                      |
+| `ruff check src/metor tests/test_terminal_rendering_security.py`                                                                                                                                                                                                                | PASS                                                                                                                                                                        |
+| `ruff format --check` for all A10b-touched source and test files                                                                                                                                                                                                                | PASS after canonical formatting                                                                                                                                             |
+| `mypy` for all 28 A10b-touched source paths and the regression test                                                                                                                                                                                                             | PASS; strict project configuration, no issues                                                                                                                               |
+| `python scripts/check_boundaries.py`                                                                                                                                                                                                                                            | PASS; distribution and frontend boundaries                                                                                                                                  |
+| `git diff --check`                                                                                                                                                                                                                                                              | PASS                                                                                                                                                                        |
 
 ## A11 verification
 
@@ -501,19 +501,19 @@ Linux subprocess behavior was executed; the Windows detached flags and `.exe`
 resolution are structurally covered by the existing platform matrix but no
 native Windows run is claimed here.
 
-| Command | Result |
-| ------- | ------ |
-| `python -m unittest tests.test_daemon_bootstrap_contract -v` before implementation | EXPECTED FAIL; 4 failures and 2 errors reproduced eager default/CLI loading, module-based launch, missing bounded reader, and leaked failed children |
-| `python -m unittest tests.test_daemon_bootstrap_contract tests.test_application_runtime_contract tests.test_ui_ipc_contract tests.test_release_contract tests.test_refactor2_cli_contract tests.test_closure_frontend tests.test_platform_contracts -q` | PASS; 105 tests in 2.939 seconds; expected cleanup diagnostics, plaintext notice, and temporary bundle paths were emitted |
-| Fresh subprocess imports of `metor.main` and `metor.daemon_main`, plus `python -m metor --daemon-child --help` | PASS; no CLI/UI eager import in the child graph and help exited 0 without profile access |
-| Fresh `python -m metor --help`, `python -m metor daemon --help`, and installed `metor daemon --help` | PASS; canonical help paths exit without daemon/profile work |
-| `ruff check` for all A11 source, script, and test files | PASS |
-| `ruff format --check` for all A11 source, script, and test files | PASS after canonical formatting |
-| `mypy` for the 10 A11 runtime/entry/script/test paths | PASS under strict project configuration |
-| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
-| `python scripts/versioning.py validate` | PASS; application 0.2.0 and compatibility registry remain valid |
-| Active-source search for `metor-daemon` outside immutable historical/spec evidence | PASS; only an explicit negative process-detector regression remains |
-| `git diff --check` | PASS |
+| Command                                                                                                                                                                                                                                                 | Result                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `python -m unittest tests.test_daemon_bootstrap_contract -v` before implementation                                                                                                                                                                      | EXPECTED FAIL; 4 failures and 2 errors reproduced eager default/CLI loading, module-based launch, missing bounded reader, and leaked failed children |
+| `python -m unittest tests.test_daemon_bootstrap_contract tests.test_application_runtime_contract tests.test_ui_ipc_contract tests.test_release_contract tests.test_refactor2_cli_contract tests.test_closure_frontend tests.test_platform_contracts -q` | PASS; 105 tests in 2.939 seconds; expected cleanup diagnostics, plaintext notice, and temporary bundle paths were emitted                            |
+| Fresh subprocess imports of `metor.main` and `metor.daemon_main`, plus `python -m metor --daemon-child --help`                                                                                                                                          | PASS; no CLI/UI eager import in the child graph and help exited 0 without profile access                                                             |
+| Fresh `python -m metor --help`, `python -m metor daemon --help`, and installed `metor daemon --help`                                                                                                                                                    | PASS; canonical help paths exit without daemon/profile work                                                                                          |
+| `ruff check` for all A11 source, script, and test files                                                                                                                                                                                                 | PASS                                                                                                                                                 |
+| `ruff format --check` for all A11 source, script, and test files                                                                                                                                                                                        | PASS after canonical formatting                                                                                                                      |
+| `mypy` for the 10 A11 runtime/entry/script/test paths                                                                                                                                                                                                   | PASS under strict project configuration                                                                                                              |
+| `python scripts/check_boundaries.py`                                                                                                                                                                                                                    | PASS; distribution and frontend boundaries                                                                                                           |
+| `python scripts/versioning.py validate`                                                                                                                                                                                                                 | PASS; application 0.2.0 and compatibility registry remain valid                                                                                      |
+| Active-source search for `metor-daemon` outside immutable historical/spec evidence                                                                                                                                                                      | PASS; only an explicit negative process-detector regression remains                                                                                  |
+| `git diff --check`                                                                                                                                                                                                                                      | PASS                                                                                                                                                 |
 
 ## A12 verification
 
@@ -542,17 +542,17 @@ remain intact. This changes neither IPC DTO shape nor protocol semantics; it
 corrects when correlation is attached, so no compatibility or application
 version bump is required.
 
-| Command | Result |
-| ------- | ------ |
-| Two focused real-IPC recovery regressions before implementation | EXPECTED FAIL; the release-barrier test timed out waiting for the requester to receive an uncorrelated observation because the premature correlated inner event had already satisfied its waiter |
-| `python -m unittest` for the release-barrier, reclaim-false, and original accepted-prefix tests | PASS; 3 tests in 18.425 seconds with local IPC sockets |
-| `python -m unittest tests.test_gui_producers -q` outside the socket sandbox | PASS; 12 real daemon/SQLCipher/blob/SDK producer tests |
-| `python -m unittest tests.test_client_demux_contract tests.test_gui_producers tests.test_gui_resend tests.test_gui_capture tests.test_gui_live` outside the socket sandbox | PASS; 21 SDK demux, producer, resend, capture, and LIVE tests |
-| `mypy src/metor/core/daemon/managed/producers/service.py src/metor/core/daemon/managed/producers/cleanup.py src/metor/core/daemon/managed/network/voice/outbound.py src/metor/client/ipc.py` | PASS; 4 source files under strict project configuration |
-| `ruff check src/metor/core/daemon/managed/producers/service.py tests/test_gui_producers.py` | PASS |
-| `ruff format --check src/metor/core/daemon/managed/producers/service.py tests/test_gui_producers.py` | PASS; 2 files already formatted |
-| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
-| `git diff --check` | PASS |
+| Command                                                                                                                                                                                      | Result                                                                                                                                                                                           |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Two focused real-IPC recovery regressions before implementation                                                                                                                              | EXPECTED FAIL; the release-barrier test timed out waiting for the requester to receive an uncorrelated observation because the premature correlated inner event had already satisfied its waiter |
+| `python -m unittest` for the release-barrier, reclaim-false, and original accepted-prefix tests                                                                                              | PASS; 3 tests in 18.425 seconds with local IPC sockets                                                                                                                                           |
+| `python -m unittest tests.test_gui_producers -q` outside the socket sandbox                                                                                                                  | PASS; 12 real daemon/SQLCipher/blob/SDK producer tests                                                                                                                                           |
+| `python -m unittest tests.test_client_demux_contract tests.test_gui_producers tests.test_gui_resend tests.test_gui_capture tests.test_gui_live` outside the socket sandbox                   | PASS; 21 SDK demux, producer, resend, capture, and LIVE tests                                                                                                                                    |
+| `mypy src/metor/core/daemon/managed/producers/service.py src/metor/core/daemon/managed/producers/cleanup.py src/metor/core/daemon/managed/network/voice/outbound.py src/metor/client/ipc.py` | PASS; 4 source files under strict project configuration                                                                                                                                          |
+| `ruff check src/metor/core/daemon/managed/producers/service.py tests/test_gui_producers.py`                                                                                                  | PASS                                                                                                                                                                                             |
+| `ruff format --check src/metor/core/daemon/managed/producers/service.py tests/test_gui_producers.py`                                                                                         | PASS; 2 files already formatted                                                                                                                                                                  |
+| `python scripts/check_boundaries.py`                                                                                                                                                         | PASS; distribution and frontend boundaries                                                                                                                                                       |
+| `git diff --check`                                                                                                                                                                           | PASS                                                                                                                                                                                             |
 
 ## A13 verification
 
@@ -585,16 +585,16 @@ and fail-closed contract are covered structurally, while a native Windows ACL
 and reparse execution remains an explicit environment gap rather than a
 claimed pass.
 
-| Command | Result |
-| ------- | ------ |
-| `python -m unittest tests.test_device_configuration_security -v` before implementation | EXPECTED FAIL; group-writable, symbolic/hard-link, path-stat race, and Windows secure-opener regressions were reproduced |
-| `python -m unittest tests.test_device_configuration_security -v` | PASS; 7 permission, read-only, link/swap, type/size, simulator, and Windows dispatch/fail-closed tests |
-| `python -m unittest tests.test_device_configuration_security tests.test_gui_contract tests.test_gui_device_lifecycle tests.test_gui_bootstrap -q` outside the socket sandbox | PASS; 36 device, lifecycle, bootstrap, and transport tests |
-| `python -m ruff check src/metor/ui/gui/platform/configuration.py src/metor/ui/gui/platform/configuration_security.py tests/test_device_configuration_security.py` | PASS |
-| `python -m ruff format --check src/metor/ui/gui/platform/configuration.py src/metor/ui/gui/platform/configuration_security.py tests/test_device_configuration_security.py` | PASS after canonical formatting |
-| `python -m mypy src/metor/ui/gui/platform/configuration.py src/metor/ui/gui/platform/configuration_security.py` | PASS; 2 source files under strict project configuration |
-| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
-| `git diff --check` | PASS |
+| Command                                                                                                                                                                      | Result                                                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `python -m unittest tests.test_device_configuration_security -v` before implementation                                                                                       | EXPECTED FAIL; group-writable, symbolic/hard-link, path-stat race, and Windows secure-opener regressions were reproduced |
+| `python -m unittest tests.test_device_configuration_security -v`                                                                                                             | PASS; 7 permission, read-only, link/swap, type/size, simulator, and Windows dispatch/fail-closed tests                   |
+| `python -m unittest tests.test_device_configuration_security tests.test_gui_contract tests.test_gui_device_lifecycle tests.test_gui_bootstrap -q` outside the socket sandbox | PASS; 36 device, lifecycle, bootstrap, and transport tests                                                               |
+| `python -m ruff check src/metor/ui/gui/platform/configuration.py src/metor/ui/gui/platform/configuration_security.py tests/test_device_configuration_security.py`            | PASS                                                                                                                     |
+| `python -m ruff format --check src/metor/ui/gui/platform/configuration.py src/metor/ui/gui/platform/configuration_security.py tests/test_device_configuration_security.py`   | PASS after canonical formatting                                                                                          |
+| `python -m mypy src/metor/ui/gui/platform/configuration.py src/metor/ui/gui/platform/configuration_security.py`                                                              | PASS; 2 source files under strict project configuration                                                                  |
+| `python scripts/check_boundaries.py`                                                                                                                                         | PASS; distribution and frontend boundaries                                                                               |
+| `git diff --check`                                                                                                                                                           | PASS                                                                                                                     |
 
 ## A14 verification
 
@@ -635,22 +635,22 @@ This is local native lifecycle and dependency integration only. It changes no
 IPC route/DTO, persisted data, launcher spelling, compatibility generation, or
 application version.
 
-| Command | Result |
-| ------- | ------ |
-| `python -m unittest tests.test_gui_os_lifecycle -v` before implementation | EXPECTED ERROR; the native lifecycle module did not exist |
-| `python -m unittest tests.test_gui_os_lifecycle -v` | PASS; 8 bounded inbox/factory, Win32, Linux D-Bus, privacy-order, and resume tests |
-| `PYTHONPATH=tests python -m unittest test_gui_lifecycle.NativeLifecycleTests -v` | PASS; 4 focus/suspend/resume transport and no-auto-media tests |
-| `PYTHONPATH=tests python -m unittest test_gui_lifecycle -q` outside the socket sandbox | PASS; toolkit-independent lifecycle plus real SDK/IPC/Core coverage |
-| `dbus-run-session -- env PYTHONPATH=/tmp/metor-dbus-next:src python tests/gui_native_lifecycle.py` outside the socket sandbox | PASS; real isolated Linux session-bus Lock/Resume delivery and teardown |
-| `PYTHONPATH=tests python -m unittest test_gui_lifecycle test_gui_press test_gui_playback test_gui_capture -q` outside the socket sandbox | PASS; lifecycle, lost key-up, playback, and real SDK/Core capture regressions |
-| `PYTHONPATH=tests python -m unittest test_release_contract test_platform_contracts -q` | PASS; 40 distribution and platform-boundary tests |
-| GUI wheel build plus METADATA inspection | PASS; Linux-qualified `dbus-next==0.2.3` dependency present |
-| `python -m ruff check` for all A14 source, packaging, and test paths | PASS |
-| `python -m ruff format --check` for all A14 source, packaging, and test paths | PASS |
-| `python -m mypy src/metor/ui/gui/platform/lifecycle.py src/metor/ui/gui/app.py src/metor/ui/gui/runtime/controller.py tests/gui_native_lifecycle.py` | PASS; strict project configuration |
-| `python -m json.tool docs/contracts/gui/support.json` | PASS; support manifest remains valid JSON |
-| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
-| `git diff --check` | PASS |
+| Command                                                                                                                                              | Result                                                                             |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `python -m unittest tests.test_gui_os_lifecycle -v` before implementation                                                                            | EXPECTED ERROR; the native lifecycle module did not exist                          |
+| `python -m unittest tests.test_gui_os_lifecycle -v`                                                                                                  | PASS; 8 bounded inbox/factory, Win32, Linux D-Bus, privacy-order, and resume tests |
+| `PYTHONPATH=tests python -m unittest test_gui_lifecycle.NativeLifecycleTests -v`                                                                     | PASS; 4 focus/suspend/resume transport and no-auto-media tests                     |
+| `PYTHONPATH=tests python -m unittest test_gui_lifecycle -q` outside the socket sandbox                                                               | PASS; toolkit-independent lifecycle plus real SDK/IPC/Core coverage                |
+| `dbus-run-session -- env PYTHONPATH=/tmp/metor-dbus-next:src python tests/gui_native_lifecycle.py` outside the socket sandbox                        | PASS; real isolated Linux session-bus Lock/Resume delivery and teardown            |
+| `PYTHONPATH=tests python -m unittest test_gui_lifecycle test_gui_press test_gui_playback test_gui_capture -q` outside the socket sandbox             | PASS; lifecycle, lost key-up, playback, and real SDK/Core capture regressions      |
+| `PYTHONPATH=tests python -m unittest test_release_contract test_platform_contracts -q`                                                               | PASS; 40 distribution and platform-boundary tests                                  |
+| GUI wheel build plus METADATA inspection                                                                                                             | PASS; Linux-qualified `dbus-next==0.2.3` dependency present                        |
+| `python -m ruff check` for all A14 source, packaging, and test paths                                                                                 | PASS                                                                               |
+| `python -m ruff format --check` for all A14 source, packaging, and test paths                                                                        | PASS                                                                               |
+| `python -m mypy src/metor/ui/gui/platform/lifecycle.py src/metor/ui/gui/app.py src/metor/ui/gui/runtime/controller.py tests/gui_native_lifecycle.py` | PASS; strict project configuration                                                 |
+| `python -m json.tool docs/contracts/gui/support.json`                                                                                                | PASS; support manifest remains valid JSON                                          |
+| `python scripts/check_boundaries.py`                                                                                                                 | PASS; distribution and frontend boundaries                                         |
+| `git diff --check`                                                                                                                                   | PASS                                                                               |
 
 ## A15 verification
 
@@ -688,20 +688,20 @@ No production semantics changed in A15; this closes an evidence gap with
 integration/native probes and permission regressions. No protocol, persistence,
 compatibility, or application version changes are required.
 
-| Command | Result |
-| ------- | ------ |
-| Pre-change review of `test_gui_playback.py` and native evidence | GAP CONFIRMED; only mocked controller eligibility plus separate port/sequential native proofs existed |
-| `PYTHONPATH=tests python -m unittest test_gui_capture.CaptureIntegrationTests.test_full_gui_capture_and_sent_playback_overlap_over_real_sdk -v` outside the socket sandbox | PASS; actual production controllers/workers, SDK, IPC, SQLCipher/blob Core, concurrent controlled ports and truthful states |
-| `PYTHONPATH=tests python -m unittest test_gui_capture test_gui_playback test_gui_producers test_gui_press test_gui_audio test_gui_lifecycle test_gui_profiles -q` outside the socket sandbox | PASS; full A15 capture/playback/recovery/input/device/profile matrix |
-| `python tests/gui_stream_pressure.py --result /tmp/metor-a15-stream-pressure.json` | PASS; 20 MiB output, 16 MiB cache peak, 64 KiB read, 640-byte frame, 42-record sampled queue peak, no overload |
-| `python -m unittest tests.test_gui_audio -v` | PASS; 5 framing, inert-open, cleanup, microphone-permission and speaker-permission tests |
-| `PYTHONPATH=tests python -m mypy tests/gui_native_voice.py` | PASS; updated concrete-route native probe is structurally typed |
-| Updated installed Windows Razer GUI full-duplex probe | NOT RUN; native Windows/Kivy/Razer route unavailable in current WSL environment |
-| `python -m ruff check tests/test_gui_capture.py tests/test_gui_audio.py tests/gui_native_voice.py` | PASS |
-| `python -m ruff format --check tests/test_gui_capture.py tests/test_gui_audio.py tests/gui_native_voice.py` | PASS |
-| `python -m json.tool docs/contracts/gui/support.json` | PASS; claims remain explicit and machine-readable |
-| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
-| `git diff --check` | PASS |
+| Command                                                                                                                                                                                      | Result                                                                                                                      |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Pre-change review of `test_gui_playback.py` and native evidence                                                                                                                              | GAP CONFIRMED; only mocked controller eligibility plus separate port/sequential native proofs existed                       |
+| `PYTHONPATH=tests python -m unittest test_gui_capture.CaptureIntegrationTests.test_full_gui_capture_and_sent_playback_overlap_over_real_sdk -v` outside the socket sandbox                   | PASS; actual production controllers/workers, SDK, IPC, SQLCipher/blob Core, concurrent controlled ports and truthful states |
+| `PYTHONPATH=tests python -m unittest test_gui_capture test_gui_playback test_gui_producers test_gui_press test_gui_audio test_gui_lifecycle test_gui_profiles -q` outside the socket sandbox | PASS; full A15 capture/playback/recovery/input/device/profile matrix                                                        |
+| `python tests/gui_stream_pressure.py --result /tmp/metor-a15-stream-pressure.json`                                                                                                           | PASS; 20 MiB output, 16 MiB cache peak, 64 KiB read, 640-byte frame, 42-record sampled queue peak, no overload              |
+| `python -m unittest tests.test_gui_audio -v`                                                                                                                                                 | PASS; 5 framing, inert-open, cleanup, microphone-permission and speaker-permission tests                                    |
+| `PYTHONPATH=tests python -m mypy tests/gui_native_voice.py`                                                                                                                                  | PASS; updated concrete-route native probe is structurally typed                                                             |
+| Updated installed Windows Razer GUI full-duplex probe                                                                                                                                        | NOT RUN; native Windows/Kivy/Razer route unavailable in current WSL environment                                             |
+| `python -m ruff check tests/test_gui_capture.py tests/test_gui_audio.py tests/gui_native_voice.py`                                                                                           | PASS                                                                                                                        |
+| `python -m ruff format --check tests/test_gui_capture.py tests/test_gui_audio.py tests/gui_native_voice.py`                                                                                  | PASS                                                                                                                        |
+| `python -m json.tool docs/contracts/gui/support.json`                                                                                                                                        | PASS; claims remain explicit and machine-readable                                                                           |
+| `python scripts/check_boundaries.py`                                                                                                                                                         | PASS; distribution and frontend boundaries                                                                                  |
+| `git diff --check`                                                                                                                                                                           | PASS                                                                                                                        |
 
 ## A16 verification
 
@@ -736,18 +736,18 @@ This is internal optional-I/O isolation and descriptor cleanup. It changes no
 notification payload schema, IPC DTO, peer behavior, persistence format,
 compatibility generation, or application version.
 
-| Command | Result |
-| ------- | ------ |
-| `python -m unittest tests.test_notification_delivery -v` before implementation | EXPECTED FAIL/ERROR; response body was read, slow dispatch was synchronous, bounded queue/stop controls were absent, and reject-send failure leaked close |
-| `python -m unittest tests.test_notification_delivery -v` outside the socket sandbox | PASS; 6 large/slow response, slow/failing/full/stop queue, and reject-close tests using only local controlled counterparts |
-| `PYTHONPATH=tests python -m unittest test_gui_capture.CaptureIntegrationTests.test_blocked_optional_notification_does_not_delay_media_progress -v` outside the socket sandbox | PASS; real SDK/Core capture finalized 640 accepted bytes while the sink remained blocked |
-| `PYTHONPATH=tests python -m unittest test_gui_producers test_closure_integration test_daemon_lock_lifecycle test_release_contract -q` outside the socket sandbox | PASS; real Voice, IPC, lifecycle release, and packaging regressions |
-| Two focused IPC client-ceiling/writer-saturation contract tests outside the socket sandbox | PASS; typed reject and interruptible finite writer behavior |
-| `python -m mypy` for the four changed daemon source files | PASS; strict project configuration |
-| `python -m ruff check` for all A16 source/test files | PASS |
-| `python -m ruff format --check` for all A16 source/test files | PASS |
-| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
-| `git diff --check` | PASS |
+| Command                                                                                                                                                                       | Result                                                                                                                                                    |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `python -m unittest tests.test_notification_delivery -v` before implementation                                                                                                | EXPECTED FAIL/ERROR; response body was read, slow dispatch was synchronous, bounded queue/stop controls were absent, and reject-send failure leaked close |
+| `python -m unittest tests.test_notification_delivery -v` outside the socket sandbox                                                                                           | PASS; 6 large/slow response, slow/failing/full/stop queue, and reject-close tests using only local controlled counterparts                                |
+| `PYTHONPATH=tests python -m unittest test_gui_capture.CaptureIntegrationTests.test_blocked_optional_notification_does_not_delay_media_progress -v` outside the socket sandbox | PASS; real SDK/Core capture finalized 640 accepted bytes while the sink remained blocked                                                                  |
+| `PYTHONPATH=tests python -m unittest test_gui_producers test_closure_integration test_daemon_lock_lifecycle test_release_contract -q` outside the socket sandbox              | PASS; real Voice, IPC, lifecycle release, and packaging regressions                                                                                       |
+| Two focused IPC client-ceiling/writer-saturation contract tests outside the socket sandbox                                                                                    | PASS; typed reject and interruptible finite writer behavior                                                                                               |
+| `python -m mypy` for the four changed daemon source files                                                                                                                     | PASS; strict project configuration                                                                                                                        |
+| `python -m ruff check` for all A16 source/test files                                                                                                                          | PASS                                                                                                                                                      |
+| `python -m ruff format --check` for all A16 source/test files                                                                                                                 | PASS                                                                                                                                                      |
+| `python scripts/check_boundaries.py`                                                                                                                                          | PASS; distribution and frontend boundaries                                                                                                                |
+| `git diff --check`                                                                                                                                                            | PASS                                                                                                                                                      |
 
 ## A17 verification
 
@@ -774,17 +774,17 @@ deliberately left for the A21 documentation move required by the closure
 sequence. This removal changes no current IPC DTO, persistence schema,
 compatibility generation, launcher, or application version.
 
-| Command | Result |
-| ------- | ------ |
-| Pre-change import and reference inventory across the five embedded files, legacy test, boundary tests, active client/platform code, and GUI ADR | PASS; namespace was self-contained except for its dedicated test and boundary assertion |
-| `PYTHONPATH=tests python -m unittest tests.test_contact_qr tests.test_ui_boundaries tests.test_platform_contracts tests.test_gui_device_lifecycle tests.test_gui_contacts tests.test_gui_contract -q` outside the socket sandbox | PASS; 58 current QR, boundary, platform, lifecycle, contact, and GUI contract tests |
-| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
-| Active source/test/packaging search for `metor.ui.embedded`, `ui/embedded`, the legacy test, and prototype-only names | PASS; no active reference, registration, or install path remains |
-| Source-package inventory below `src/metor/ui` | PASS; only `gui` and `terminal` contain production package initializers |
-| `ruff check tests/test_contact_qr.py tests/test_ui_boundaries.py` | PASS |
-| `ruff format --check tests/test_contact_qr.py tests/test_ui_boundaries.py` | PASS |
-| `mypy tests/test_contact_qr.py tests/test_ui_boundaries.py` | PASS after adding an explicit existing text-content narrowing assertion |
-| `git diff --check` | PASS |
+| Command                                                                                                                                                                                                                          | Result                                                                                  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Pre-change import and reference inventory across the five embedded files, legacy test, boundary tests, active client/platform code, and GUI ADR                                                                                  | PASS; namespace was self-contained except for its dedicated test and boundary assertion |
+| `PYTHONPATH=tests python -m unittest tests.test_contact_qr tests.test_ui_boundaries tests.test_platform_contracts tests.test_gui_device_lifecycle tests.test_gui_contacts tests.test_gui_contract -q` outside the socket sandbox | PASS; 58 current QR, boundary, platform, lifecycle, contact, and GUI contract tests     |
+| `python scripts/check_boundaries.py`                                                                                                                                                                                             | PASS; distribution and frontend boundaries                                              |
+| Active source/test/packaging search for `metor.ui.embedded`, `ui/embedded`, the legacy test, and prototype-only names                                                                                                            | PASS; no active reference, registration, or install path remains                        |
+| Source-package inventory below `src/metor/ui`                                                                                                                                                                                    | PASS; only `gui` and `terminal` contain production package initializers                 |
+| `ruff check tests/test_contact_qr.py tests/test_ui_boundaries.py`                                                                                                                                                                | PASS                                                                                    |
+| `ruff format --check tests/test_contact_qr.py tests/test_ui_boundaries.py`                                                                                                                                                       | PASS                                                                                    |
+| `mypy tests/test_contact_qr.py tests/test_ui_boundaries.py`                                                                                                                                                                      | PASS after adding an explicit existing text-content narrowing assertion                 |
+| `git diff --check`                                                                                                                                                                                                               | PASS                                                                                    |
 
 ## A18 verification
 
@@ -816,20 +816,20 @@ Core, process, or cryptographic dependency. These ownership corrections change
 no wire value, persistence format, launcher spelling, compatibility generation,
 or application version.
 
-| Command | Result |
-| ------- | ------ |
-| New A18 release-owner, Base-wheel, constants-owner, utils-facade and inert-caster regressions before implementation | EXPECTED FAIL/ERROR; `scripts.release.bundle` was absent, the Base constants remained duplicated, and the utils facade still redirected Core/shared APIs |
-| `python -m unittest tests.test_release_contract tests.test_closure_architecture tests.test_security_contract tests.test_session_auth_contract tests.test_final_remediation_contract tests.test_raw_client_contract -q` outside the socket sandbox | PASS; 89 release, ownership, security, authentication, and raw-client tests |
-| `python -m unittest tests.test_versioning_release -q` | PASS; 30 wheel metadata, compatibility, release-workflow, and generated-reference tests |
-| `python scripts/build_release_wheelhouse.py --help` | PASS; public repository command exposes `base`, `terminal`, `sdk`, `gui`, and `all` |
-| `python -m pip wheel . --no-deps --no-build-isolation -w /tmp/metor-a18-wheel` | PASS; real Base wheel built |
-| Base wheel archive/RECORD ownership inspection | PASS; no `metor/utils/release_bundle.py` and no `scripts/release` entry |
-| `ruff check` and `ruff format --check` for all 28 changed Python files | PASS |
-| `mypy` for all 28 changed Python files | PASS under strict project configuration |
-| Active source/test/tooling search for old builder and cross-owner utils imports | PASS; only the negative no-compatibility regression names the old module |
-| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
-| `python scripts/versioning.py validate` | PASS; application 0.2.0 and compatibility registry remain valid |
-| `git diff --check` | PASS |
+| Command                                                                                                                                                                                                                                           | Result                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| New A18 release-owner, Base-wheel, constants-owner, utils-facade and inert-caster regressions before implementation                                                                                                                               | EXPECTED FAIL/ERROR; `scripts.release.bundle` was absent, the Base constants remained duplicated, and the utils facade still redirected Core/shared APIs |
+| `python -m unittest tests.test_release_contract tests.test_closure_architecture tests.test_security_contract tests.test_session_auth_contract tests.test_final_remediation_contract tests.test_raw_client_contract -q` outside the socket sandbox | PASS; 89 release, ownership, security, authentication, and raw-client tests                                                                              |
+| `python -m unittest tests.test_versioning_release -q`                                                                                                                                                                                             | PASS; 30 wheel metadata, compatibility, release-workflow, and generated-reference tests                                                                  |
+| `python scripts/build_release_wheelhouse.py --help`                                                                                                                                                                                               | PASS; public repository command exposes `base`, `terminal`, `sdk`, `gui`, and `all`                                                                      |
+| `python -m pip wheel . --no-deps --no-build-isolation -w /tmp/metor-a18-wheel`                                                                                                                                                                    | PASS; real Base wheel built                                                                                                                              |
+| Base wheel archive/RECORD ownership inspection                                                                                                                                                                                                    | PASS; no `metor/utils/release_bundle.py` and no `scripts/release` entry                                                                                  |
+| `ruff check` and `ruff format --check` for all 28 changed Python files                                                                                                                                                                            | PASS                                                                                                                                                     |
+| `mypy` for all 28 changed Python files                                                                                                                                                                                                            | PASS under strict project configuration                                                                                                                  |
+| Active source/test/tooling search for old builder and cross-owner utils imports                                                                                                                                                                   | PASS; only the negative no-compatibility regression names the old module                                                                                 |
+| `python scripts/check_boundaries.py`                                                                                                                                                                                                              | PASS; distribution and frontend boundaries                                                                                                               |
+| `python scripts/versioning.py validate`                                                                                                                                                                                                           | PASS; application 0.2.0 and compatibility registry remain valid                                                                                          |
+| `git diff --check`                                                                                                                                                                                                                                | PASS                                                                                                                                                     |
 
 ## A19 verification
 
@@ -867,20 +867,20 @@ unchanged. The idempotent canonical projection closes an existing request
 completion gap without changing DTO shape, persistence format, protocol
 generation, or application version.
 
-| Command | Result |
-| ------- | ------ |
-| New inbound, retained, and capture single-owner structure regressions before each extraction | EXPECTED ERROR; each dedicated module was absent before its checkpoint |
-| `PYTHONPATH=tests python -m unittest test_voice_contract test_closure_voice_edges test_acceptance_repair_contract -q` after inbound extraction | PASS; 36 Voice admission, edge, and repair tests |
-| Same focused extraction suite after retained extraction | PASS; 37 tests including the added owner regression |
-| First full A12/A15 neighborhood run | 93 PASS, 3 ERROR; identified the omitted outbound reconciliation helper and the independently reproducible A12 repeat-finalization gap |
-| Three focused ambiguous-write/recovery regressions after correction | PASS |
-| `PYTHONPATH=tests python -m unittest test_voice_contract test_closure_voice_edges test_acceptance_repair_contract test_gui_producers test_gui_capture test_gui_playback test_closure_integration -q` outside the socket sandbox | PASS; 96 actual SDK/IPC, SQLCipher/blob, producer recovery, capture/playback, fallback, and Voice edge tests |
-| Isolated repeat-finalization test against temporary archive of A18 commit `c90b9f8` | EXPECTED BASELINE ERROR; reproduced the same timeout after canonical LIVE-to-DROP fallback |
-| `mypy` for all five Voice implementation modules and the focused contract test | PASS under strict project configuration |
-| `ruff check` and `ruff format --check` for the Voice package and changed tests | PASS |
-| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
-| Voice method-owner and physical-size inventory | PASS; receive only in `inbound.py`, begin/append/finalize only in `capture.py`, every production module below 800 physical lines |
-| `git diff --check` | PASS |
+| Command                                                                                                                                                                                                                         | Result                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| New inbound, retained, and capture single-owner structure regressions before each extraction                                                                                                                                    | EXPECTED ERROR; each dedicated module was absent before its checkpoint                                                                 |
+| `PYTHONPATH=tests python -m unittest test_voice_contract test_closure_voice_edges test_acceptance_repair_contract -q` after inbound extraction                                                                                  | PASS; 36 Voice admission, edge, and repair tests                                                                                       |
+| Same focused extraction suite after retained extraction                                                                                                                                                                         | PASS; 37 tests including the added owner regression                                                                                    |
+| First full A12/A15 neighborhood run                                                                                                                                                                                             | 93 PASS, 3 ERROR; identified the omitted outbound reconciliation helper and the independently reproducible A12 repeat-finalization gap |
+| Three focused ambiguous-write/recovery regressions after correction                                                                                                                                                             | PASS                                                                                                                                   |
+| `PYTHONPATH=tests python -m unittest test_voice_contract test_closure_voice_edges test_acceptance_repair_contract test_gui_producers test_gui_capture test_gui_playback test_closure_integration -q` outside the socket sandbox | PASS; 96 actual SDK/IPC, SQLCipher/blob, producer recovery, capture/playback, fallback, and Voice edge tests                           |
+| Isolated repeat-finalization test against temporary archive of A18 commit `c90b9f8`                                                                                                                                             | EXPECTED BASELINE ERROR; reproduced the same timeout after canonical LIVE-to-DROP fallback                                             |
+| `mypy` for all five Voice implementation modules and the focused contract test                                                                                                                                                  | PASS under strict project configuration                                                                                                |
+| `ruff check` and `ruff format --check` for the Voice package and changed tests                                                                                                                                                  | PASS                                                                                                                                   |
+| `python scripts/check_boundaries.py`                                                                                                                                                                                            | PASS; distribution and frontend boundaries                                                                                             |
+| Voice method-owner and physical-size inventory                                                                                                                                                                                  | PASS; receive only in `inbound.py`, begin/append/finalize only in `capture.py`, every production module below 800 physical lines       |
+| `git diff --check`                                                                                                                                                                                                              | PASS                                                                                                                                   |
 
 ## A20 verification
 
@@ -891,14 +891,14 @@ order. The table records how many files needed callable-contract work and how
 many were reviewed unchanged; a changed file remains counted in its one owning
 group.
 
-| Owner group | Audited | Updated | Unchanged |
-| ----------- | ------: | ------: | --------: |
-| SDK, shared contract, and versioning | 63 | 9 | 54 |
-| Base, application, CLI, and root entry points | 55 | 12 | 43 |
-| Core and storage | 155 | 34 | 121 |
-| Terminal frontend | 36 | 4 | 32 |
-| GUI frontend | 137 | 12 | 125 |
-| **Total** | **446** | **71** | **375** |
+| Owner group                                   | Audited | Updated | Unchanged |
+| --------------------------------------------- | ------: | ------: | --------: |
+| SDK, shared contract, and versioning          |      63 |       9 |        54 |
+| Base, application, CLI, and root entry points |      55 |      12 |        43 |
+| Core and storage                              |     155 |      34 |       121 |
+| Terminal frontend                             |      36 |       4 |        32 |
+| GUI frontend                                  |     137 |      12 |       125 |
+| **Total**                                     | **446** |  **71** |   **375** |
 
 All 446 modules have a top-level role header. The one materially incorrect
 header was `metor.cli.entry`: it described the general CLI as the Terminal
@@ -961,24 +961,24 @@ no field, schema, registry value, setting behavior, compatibility generation,
 or application version; it makes emitted data conform to the already published
 DTO contract.
 
-| Command | Result |
-| ------- | ------ |
-| `python -m unittest tests.test_source_documentation` before callable corrections | EXPECTED FAIL; 271 executable callables lacked a description or complete sections before declaration signatures were added to the same rule |
-| Final AST inventory of tracked production Python | PASS; 446 module headers, 2,595 callable docstrings, zero missing `Args:`/`Returns:` contracts |
-| `python -m unittest tests.test_source_documentation tests.test_terminal_rendering_security tests.test_message_architecture_contract tests.test_closure_architecture` | PASS; 26 documentation, independent-adapter, rendering-security, and owner-boundary tests |
-| First full `python -m unittest discover -s tests -p 'test_*.py'` outside the socket sandbox | 786 PASS, 1 FAIL, 1 ERROR; isolated the safe-descriptor timeout |
-| The two failing GUI settings tests against temporary archive of A19 `36fa264` | EXPECTED BASELINE FAIL/ERROR; identical timeout and unloaded state reproduced before A20 |
-| Direct production DTO round trip before correction | EXPECTED FAIL; `min_value` declared `Optional[float]` but emitted as `int` |
-| `PYTHONPATH=tests python -m unittest test_gui_settings -v` after correction | PASS; 5 covered, stale, unknown-result, and descriptor IPC tests |
-| Final `python -m unittest discover -s tests -p 'test_*.py'` outside the socket sandbox | PASS; 788 tests in 662.623 seconds |
-| `ruff check src packaging tests/test_source_documentation.py` | PASS |
-| `ruff format --check src packaging tests/test_source_documentation.py` | PASS; 447 files formatted |
-| `mypy src` | PASS; strict project configuration, 444 source files |
-| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
-| `python scripts/versioning.py validate` | PASS; version registry unchanged and valid |
-| `python scripts/validate_generated_docs.py` | PASS; generated references fresh and reproducible |
-| `npm ls --package-lock-only --ignore-scripts --depth=0` | PASS; locked Prettier dependency resolves locally |
-| `git diff --check` | PASS |
+| Command                                                                                                                                                              | Result                                                                                                                                      |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `python -m unittest tests.test_source_documentation` before callable corrections                                                                                     | EXPECTED FAIL; 271 executable callables lacked a description or complete sections before declaration signatures were added to the same rule |
+| Final AST inventory of tracked production Python                                                                                                                     | PASS; 446 module headers, 2,595 callable docstrings, zero missing `Args:`/`Returns:` contracts                                              |
+| `python -m unittest tests.test_source_documentation tests.test_terminal_rendering_security tests.test_message_architecture_contract tests.test_closure_architecture` | PASS; 26 documentation, independent-adapter, rendering-security, and owner-boundary tests                                                   |
+| First full `python -m unittest discover -s tests -p 'test_*.py'` outside the socket sandbox                                                                          | 786 PASS, 1 FAIL, 1 ERROR; isolated the safe-descriptor timeout                                                                             |
+| The two failing GUI settings tests against temporary archive of A19 `36fa264`                                                                                        | EXPECTED BASELINE FAIL/ERROR; identical timeout and unloaded state reproduced before A20                                                    |
+| Direct production DTO round trip before correction                                                                                                                   | EXPECTED FAIL; `min_value` declared `Optional[float]` but emitted as `int`                                                                  |
+| `PYTHONPATH=tests python -m unittest test_gui_settings -v` after correction                                                                                          | PASS; 5 covered, stale, unknown-result, and descriptor IPC tests                                                                            |
+| Final `python -m unittest discover -s tests -p 'test_*.py'` outside the socket sandbox                                                                               | PASS; 788 tests in 662.623 seconds                                                                                                          |
+| `ruff check src packaging tests/test_source_documentation.py`                                                                                                        | PASS                                                                                                                                        |
+| `ruff format --check src packaging tests/test_source_documentation.py`                                                                                               | PASS; 447 files formatted                                                                                                                   |
+| `mypy src`                                                                                                                                                           | PASS; strict project configuration, 444 source files                                                                                        |
+| `python scripts/check_boundaries.py`                                                                                                                                 | PASS; distribution and frontend boundaries                                                                                                  |
+| `python scripts/versioning.py validate`                                                                                                                              | PASS; version registry unchanged and valid                                                                                                  |
+| `python scripts/validate_generated_docs.py`                                                                                                                          | PASS; generated references fresh and reproducible                                                                                           |
+| `npm ls --package-lock-only --ignore-scripts --depth=0`                                                                                                              | PASS; locked Prettier dependency resolves locally                                                                                           |
+| `git diff --check`                                                                                                                                                   | PASS                                                                                                                                        |
 
 ## A21 verification
 
@@ -1035,17 +1035,86 @@ those named gates are pending. Historical dated measurements and implementation
 SHAs were preserved. The README purge command now promises key-first logical
 destruction and best-effort filesystem cleanup, not impossible physical erasure.
 
-| Command | Result |
-| ------- | ------ |
-| `python -m unittest tests.test_documentation_contract` before changes | EXPECTED FAIL/ERROR; neutral contract, Prettier protection, live governance link, and `.temp` ownership were unresolved |
-| `python -m unittest tests.test_documentation_contract tests.test_source_documentation` | PASS; 5 documentation/source ownership tests |
-| Active Markdown local file/anchor traversal | PASS; README, agent, architecture, contribution, glossary, release, governance, frontend and GUI contract links resolve |
-| `sha256sum docs/specs/METOR_GUI_SPEC.md docs/specs/METOR_GUI_LAYOUT_SPEC.md` before and after changes | PASS; exact approved hashes unchanged |
-| `node node_modules/prettier/bin/prettier.cjs --check` for new/changed focused contracts | PASS; FRONTENDS, agent, governance and GUI contract use pinned formatting |
-| Broad Prettier-write protection plus post-run hash/status inspection | PASS; specs/generated excluded; unintended authored format-only diffs reversed |
-| `python scripts/validate_generated_docs.py` | PASS; targeted formatter bypasses broad ignore and outputs remain fresh/reproducible |
-| `python -m metor --version`, `--help`, `chat --help`, and `chat --list-ui` | PASS; documented canonical nonmutating entry paths parse; installed Terminal entry point is listed |
-| `python -m json.tool docs/contracts/gui/support.json` | PASS; machine-readable status is valid and names pending gates |
-| `ruff check` and `ruff format --check` for changed Python tooling/tests | PASS |
-| `mypy scripts/format_generated_docs.py tests/test_documentation_contract.py` | PASS under strict project configuration |
-| `git diff --check` | PASS |
+| Command                                                                                               | Result                                                                                                                  |
+| ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `python -m unittest tests.test_documentation_contract` before changes                                 | EXPECTED FAIL/ERROR; neutral contract, Prettier protection, live governance link, and `.temp` ownership were unresolved |
+| `python -m unittest tests.test_documentation_contract tests.test_source_documentation`                | PASS; 5 documentation/source ownership tests                                                                            |
+| Active Markdown local file/anchor traversal                                                           | PASS; README, agent, architecture, contribution, glossary, release, governance, frontend and GUI contract links resolve |
+| `sha256sum docs/specs/METOR_GUI_SPEC.md docs/specs/METOR_GUI_LAYOUT_SPEC.md` before and after changes | PASS; exact approved hashes unchanged                                                                                   |
+| `node node_modules/prettier/bin/prettier.cjs --check` for new/changed focused contracts               | PASS; FRONTENDS, agent, governance and GUI contract use pinned formatting                                               |
+| Broad Prettier-write protection plus post-run hash/status inspection                                  | PASS; specs/generated excluded; unintended authored format-only diffs reversed                                          |
+| `python scripts/validate_generated_docs.py`                                                           | PASS; targeted formatter bypasses broad ignore and outputs remain fresh/reproducible                                    |
+| `python -m metor --version`, `--help`, `chat --help`, and `chat --list-ui`                            | PASS; documented canonical nonmutating entry paths parse; installed Terminal entry point is listed                      |
+| `python -m json.tool docs/contracts/gui/support.json`                                                 | PASS; machine-readable status is valid and names pending gates                                                          |
+| `ruff check` and `ruff format --check` for changed Python tooling/tests                               | PASS                                                                                                                    |
+| `mypy scripts/format_generated_docs.py tests/test_documentation_contract.py`                          | PASS under strict project configuration                                                                                 |
+| `git diff --check`                                                                                    | PASS                                                                                                                    |
+
+## A22 verification
+
+The executable distribution-boundary guard now covers the dependency forms
+behind the actual package promises. SDK code rejects direct imports of Kivy,
+SoundDevice, AccessKit, host configuration, SQL, Tor, and process runtimes. It
+also resolves ordinary relative imports, literal `importlib.import_module`
+calls (including imported aliases), literal `__import__` calls, and the
+repository's `_LAZY_EXPORTS`/`LAZY_EXPORTS` module tuples. Positive fixtures
+retain standard-library and SDK-owned imports. Module names assembled from
+arbitrary runtime expressions remain intentionally outside this static guard;
+the checker says so rather than claiming general dynamic-Python analysis.
+
+Installed acceptance now distinguishes source visibility from an installed
+product. A fresh SDK-only venv imports every public SDK owner under `python -I`,
+has no Base or UI module, has none of the three GUI toolkits installed or
+loaded, and changes neither the environment nor host paths. The next Base-only
+stage has no `metor.ui` namespace and no registered frontend. The GUI-only
+stage lists exactly GUI before Terminal is installed. Both UI removal orders
+still preserve the remaining frontend, and the final SDK reimport proves that
+toolkit packages left behind by pip dependency uninstall are not imported by
+the SDK. Wheel RECORD ownership and the external strict-mypy positive and
+three-error negative consumers remain part of the same isolated gate.
+
+Developer commands now separate changes from checks. `format:*`, `fix:py`, and
+`generate:docs` are explicit mutating operations. `check` and its `ready` alias
+only inspect state and include Markdown/Python format checks, Ruff, strict
+mypy, distribution boundaries, reproducible generated-reference freshness,
+and unittest discovery. Making the broad Markdown check executable exposed an
+existing eight-file authored/historical formatting backlog. Those eight files
+were intentionally normalized with the pinned Prettier; immutable specs and
+generated references remained excluded and byte-stable.
+
+CI now exercises both the minimum Python 3.11 and a newer Python 3.13 on Linux
+and Windows instead of silently treating `>=3.11` as a 3.11-only promise.
+Wheel construction runs throughout the matrix; the heavier native offline
+bundle/installed-consumer gate remains on the minimum runtime for both OSes.
+On Linux 3.11, two representative native SDL fixtures and the bounded 20 MiB
+stream-pressure fixture run in named steps outside `test_*.py` discovery, so
+their evidence cannot be mistaken for ordinary unit-test coverage.
+
+Executing those native files exposed two retained-fixture defects that normal
+discovery could not see. The synthetic capture still imported live-control
+helpers from a path that A17 had converted into the real Linux D-Bus probe;
+the helpers now have their own cohesive fixture module. The renderer also
+started the unrelated desktop lifecycle subscription, making a synthetic
+offscreen capture depend on a live session bus. Only that synthetic harness
+now substitutes no lifecycle source; the real Linux lifecycle probe remains
+unchanged and separate. The first system-Python attempt lacked Kivy, and the
+project venv initially lacked its locked `dbus-next` dependency; these were
+environment failures, not product passes. After installing the exact lock and
+fixing the fixture boundaries, both native cases exited successfully. Missing
+optional `libmtdev` and sandbox clipboard helpers produced Kivy diagnostics but
+did not affect the SDL fixture results.
+
+| Command                                                                                                               | Result                                                                                                                         |
+| --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| New toolkit/dynamic/lazy-export negative tests before guard changes                                                   | EXPECTED FAIL; all seven forbidden forms passed the import-only scanner                                                        |
+| `python -m unittest tests.test_closure_architecture tests.test_quality_gate_contract tests.test_source_documentation` | PASS; 13 boundary, command, CI-matrix, and source-contract tests                                                               |
+| `npm run check:md`, `check:py`, `check:types`, `check:boundaries`, and `check:generated`                              | PASS; nonmutating format/lint/type/architecture/freshness path                                                                 |
+| First `npm run check` test phase inside the restricted sandbox                                                        | INTERRUPTED after expected local socket errors; static phases had passed, no product result claimed                            |
+| Authorized `npm test` outside the socket sandbox                                                                      | PASS; 796 tests in 653.926 seconds                                                                                             |
+| `python scripts/validate_installed_artifacts.py <A00 Linux bundle root>` inside sandbox                               | EXPECTED ENVIRONMENT ERROR at temporary local IPC socket; SDK/Base/type stages had passed                                      |
+| Same installed-artifact acceptance outside the socket sandbox                                                         | PASS; SDK-only, Base-only, GUI-only, Terminal, both UI removal orders, external mypy positive/negative, and final SDK reimport |
+| `gui_native_capture.py --view root_refresh` and `--view setting_keyboard` at 360x640/150% with offscreen SDL          | PASS after fixture repair; explicit native renderer/widget execution outside discovery                                         |
+| `gui_stream_pressure.py --result /tmp/metor-a22-stream-pressure.json`                                                 | PASS; 20 MiB source/output, 16 MiB cache ceiling, 64 KiB maximum read, 640-byte maximum frame, 51-record sampled queue peak    |
+| `python scripts/check_boundaries.py`                                                                                  | PASS; complete current source tree plus positive/negative regression guards                                                    |
+| `ruff check`, `ruff format --check`, and strict `mypy` for changed Python                                             | PASS                                                                                                                           |
+| `git diff --check`                                                                                                    | PASS                                                                                                                           |

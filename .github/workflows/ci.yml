@@ -6,7 +6,7 @@ on:
 
 jobs:
   python-quality:
-    name: Python Quality (${{ matrix.os }})
+    name: Python Quality (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -14,6 +14,9 @@ jobs:
         os:
           - ubuntu-latest
           - windows-latest
+        python-version:
+          - "3.11"
+          - "3.13"
 
     steps:
       - name: Checkout repository
@@ -22,7 +25,7 @@ jobs:
       - name: Run Shared Python Quality Checks
         uses: ./.github/actions/python-quality
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           ruff-check-paths: "src/metor/ scripts/ tests/"
           ruff-format-paths: "src/metor/ scripts/ tests/"
           mypy-paths: "src/metor/ scripts/"
@@ -44,8 +47,25 @@ jobs:
         run: python scripts/validate_generated_docs.py
 
       - name: Build native offline bundles and test installed consumers
+        if: matrix.python-version == '3.11'
         shell: bash
         run: |
           python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir closure-bundles
           python scripts/validate_installed_artifacts.py closure-bundles
           python scripts/validate_release_installers.py closure-bundles
+
+      - name: Run native GUI fixtures outside unittest discovery
+        if: runner.os == 'Linux' && matrix.python-version == '3.11'
+        shell: bash
+        env:
+          SDL_VIDEODRIVER: offscreen
+          KIVY_WINDOW: sdl2
+          KIVY_CLIPBOARD: dummy
+        run: |
+          python tests/gui_native_capture.py --view root_refresh --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/root-refresh.png"
+          python tests/gui_native_capture.py --view setting_keyboard --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/setting-keyboard.png"
+
+      - name: Run bounded synthetic stream fixture outside unittest discovery
+        if: runner.os == 'Linux' && matrix.python-version == '3.11'
+        shell: bash
+        run: python tests/gui_stream_pressure.py --result "${RUNNER_TEMP}/stream-pressure.json"

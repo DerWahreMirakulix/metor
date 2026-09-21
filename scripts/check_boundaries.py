@@ -14,6 +14,18 @@ SDK_ROOTS = (
     'metor.shared',
     'metor.versioning',
 )
+SDK_FORBIDDEN_RUNTIME_ROOTS = frozenset(
+    {
+        'accesskit',
+        'dotenv',
+        'kivy',
+        'psutil',
+        'pysqlcipher3',
+        'sounddevice',
+        'sqlcipher3',
+        'stem',
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -33,13 +45,33 @@ def within(module: str, root: str) -> bool:
 def imports(
     source: str, module: str, *, package: bool = False
 ) -> tuple[Dependency, ...]:
-    """Resolves imports structurally, including multiline and relative forms."""
+    """Resolves static imports and explicitly constant lazy import declarations.
+
+    Variable-built module names remain runtime behavior and are intentionally not
+    presented as statically decidable by this boundary guard.
+
+    Args:
+        source: Python source to inspect.
+        module: Fully qualified name assigned to the source.
+        package: Whether the source is a package ``__init__`` module.
+
+    Returns:
+        tuple[Dependency, ...]: Resolved dependency targets with source lines.
+    """
     dependencies: list[Dependency] = []
     parent = module if package else module.rpartition('.')[0]
-    for node in ast.walk(ast.parse(source)):
+    tree = ast.parse(source)
+    importlib_names = {'importlib'}
+    import_module_names: set[str] = set()
+    for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             dependencies.extend(
                 Dependency(alias.name, None, node.lineno) for alias in node.names
+            )
+            importlib_names.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == 'importlib'
             )
         elif isinstance(node, ast.ImportFrom):
             target = node.module or ''
@@ -48,6 +80,71 @@ def imports(
             dependencies.extend(
                 Dependency(target, alias.name, node.lineno) for alias in node.names
             )
+            if node.level == 0 and node.module == 'importlib':
+                import_module_names.update(
+                    alias.asname or alias.name
+                    for alias in node.names
+                    if alias.name == 'import_module'
+                )
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            function = node.func
+            is_import_module = (
+                isinstance(function, ast.Attribute)
+                and function.attr == 'import_module'
+                and isinstance(function.value, ast.Name)
+                and function.value.id in importlib_names
+            ) or (
+                isinstance(function, ast.Name)
+                and function.id in import_module_names | {'__import__'}
+            )
+            if not is_import_module or not node.args:
+                continue
+            target_value = node.args[0]
+            if not isinstance(target_value, ast.Constant) or not isinstance(
+                target_value.value, str
+            ):
+                continue
+            target = target_value.value
+            if target.startswith('.'):
+                package_value: ast.expr | None = (
+                    node.args[1] if len(node.args) > 1 else None
+                )
+                package_value = next(
+                    (
+                        keyword.value
+                        for keyword in node.keywords
+                        if keyword.arg == 'package'
+                    ),
+                    package_value,
+                )
+                if not isinstance(package_value, ast.Constant) or not isinstance(
+                    package_value.value, str
+                ):
+                    continue
+                target = resolve_name(target, package_value.value)
+            dependencies.append(Dependency(target, None, node.lineno))
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if not any(
+                isinstance(target, ast.Name)
+                and target.id in {'_LAZY_EXPORTS', 'LAZY_EXPORTS'}
+                for target in targets
+            ):
+                continue
+            value = node.value
+            if not isinstance(value, ast.Dict):
+                continue
+            for export in value.values:
+                module_value = (
+                    export.elts[0] if isinstance(export, ast.Tuple) else export
+                )
+                if isinstance(module_value, ast.Constant) and isinstance(
+                    module_value.value, str
+                ):
+                    dependencies.append(
+                        Dependency(module_value.value, None, module_value.lineno)
+                    )
     return tuple(dependencies)
 
 
@@ -58,13 +155,7 @@ def violation(source: str, dependency: Dependency) -> str | None:
     effective = target + '.' + symbol if symbol else target
     sdk = any(within(source, root) for root in SDK_ROOTS)
     if sdk:
-        if target.split('.')[0] in {
-            'dotenv',
-            'sqlcipher3',
-            'pysqlcipher3',
-            'stem',
-            'psutil',
-        }:
+        if target.split('.')[0] in SDK_FORBIDDEN_RUNTIME_ROOTS:
             return 'SDK imports a host runtime dependency'
         if within(target, 'metor') and not any(
             within(target, root) or within(effective, root) for root in SDK_ROOTS

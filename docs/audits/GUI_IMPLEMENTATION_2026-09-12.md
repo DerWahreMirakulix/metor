@@ -12,11 +12,11 @@ as a desktop failure.
 
 The three evidence dimensions required by GUI-DONE-03 are:
 
-| Dimension | Final status | Scope |
-| --- | --- | --- |
-| Functional/design implementation | **Implemented** | Required V/A/S/L behavior, state/action ownership, responsive native views, accessibility projection, media, lifecycle and platform consumers |
-| Installed desktop support | **Installation verified; final native acceptance pending** | Current-source bundles, isolated consumers, offline installers and installed desktop/simulator launch pass; current mandatory lifecycle/media reruns remain unavailable |
-| Concrete physical appliance | **Not applicable / not claimed** | `physical_adapters` is empty; a future adapter must provide its own registered ID, schema, permissions and physical evidence before it is advertised |
+| Dimension                        | Final status                                               | Scope                                                                                                                                                                   |
+| -------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Functional/design implementation | **Implemented**                                            | Required V/A/S/L behavior, state/action ownership, responsive native views, accessibility projection, media, lifecycle and platform consumers                           |
+| Installed desktop support        | **Installation verified; final native acceptance pending** | Current-source bundles, isolated consumers, offline installers and installed desktop/simulator launch pass; current mandatory lifecycle/media reruns remain unavailable |
+| Concrete physical appliance      | **Not applicable / not claimed**                           | `physical_adapters` is empty; a future adapter must provide its own registered ID, schema, permissions and physical evidence before it is advertised                    |
 
 This closure does not weaken either approved input. Their SHA-256 values remain:
 
@@ -493,12 +493,10 @@ Canonical packaging remains `scripts/build_release_wheelhouse.py`,
 `tests/gui_stream_pressure.py`. The last uses synthetic output; the Voice probe
 requires `--headset-confirmed` and the already approved Razer route.
 
-
 ## Earlier 15 September implementation checkpoint
 
 The following checkpoint predates the final retained-root work. The pause handoff
 above controls current status and evidence scope.
-
 
 **The GUI implementation has progressed; complete functional/device acceptance remains OPEN.**
 The approved functional/layout v1.0 inputs are unchanged. This report distinguishes
@@ -649,15 +647,15 @@ was not run. SDK/base/Terminal-only variants remain available.
 
 ## Work packages
 
-| Package | Actual status | Remaining gate |
-| --- | --- | --- |
-| WP-G0 | Baseline/spec/Penpot inspection, versions, initial gates and integration map completed | No acceptance inferred from historical audits |
-| WP-G1 | Partial: independent installed native GUI, common CLI launch, strict config, simulator, graphical SDK prompt bridge, candidate audio port | Physical adapters and complete platform acceptance; installed native final-source checks recorded separately |
-| WP-G2 | Partial: generation/context identities, bounded handoff/drafts/inventory, protected preferences, Core descriptors, exact continued restriction and local text/Voice ownership | Complete overload/lifecycle/native privacy matrix; exact unknown cleanup/fallback readback is implemented |
-| WP-G3 | Partial: root/peer projections, contact intents/QR validation, incoming handles, shared context actions, qualified lifecycle and metadata history | Full native V/A/S/L acceptance; resend/message gestures and bounded contact management are implemented |
-| WP-G4 | Partial: PCM capture/playback, PTT source arbitration, owned review/commit, accepted-prefix recovery, coverage gates and fallback | Full native duplex/auto-play/driver failure matrix; GUI headset review, sample-aligned seeking and bounded large-item worker probe have evidence |
-| WP-G5 | Partial: profile switch/desktop exit, lock/setup, protected policies, continued-context revocation and bounded private notifications | Physical power/purge and complete OS/multi-client acceptance |
-| WP-G6 | Partial: earlier canonical four-package build/install checks, docs migration, tokens/assets and native compact/wide/150% probes | Final-source native checks, all layout/state families, responsiveness/accessibility and device acceptance |
+| Package | Actual status                                                                                                                                                                 | Remaining gate                                                                                                                                   |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| WP-G0   | Baseline/spec/Penpot inspection, versions, initial gates and integration map completed                                                                                        | No acceptance inferred from historical audits                                                                                                    |
+| WP-G1   | Partial: independent installed native GUI, common CLI launch, strict config, simulator, graphical SDK prompt bridge, candidate audio port                                     | Physical adapters and complete platform acceptance; installed native final-source checks recorded separately                                     |
+| WP-G2   | Partial: generation/context identities, bounded handoff/drafts/inventory, protected preferences, Core descriptors, exact continued restriction and local text/Voice ownership | Complete overload/lifecycle/native privacy matrix; exact unknown cleanup/fallback readback is implemented                                        |
+| WP-G3   | Partial: root/peer projections, contact intents/QR validation, incoming handles, shared context actions, qualified lifecycle and metadata history                             | Full native V/A/S/L acceptance; resend/message gestures and bounded contact management are implemented                                           |
+| WP-G4   | Partial: PCM capture/playback, PTT source arbitration, owned review/commit, accepted-prefix recovery, coverage gates and fallback                                             | Full native duplex/auto-play/driver failure matrix; GUI headset review, sample-aligned seeking and bounded large-item worker probe have evidence |
+| WP-G5   | Partial: profile switch/desktop exit, lock/setup, protected policies, continued-context revocation and bounded private notifications                                          | Physical power/purge and complete OS/multi-client acceptance                                                                                     |
+| WP-G6   | Partial: earlier canonical four-package build/install checks, docs migration, tokens/assets and native compact/wide/150% probes                                               | Final-source native checks, all layout/state families, responsiveness/accessibility and device acceptance                                        |
 
 ## Executed evidence
 
@@ -668,30 +666,30 @@ evidence. PortAudio reports V19.6.0-devel, revision
 `396fe4b6699ae929d3a685b3ef8a7e97396139a4`, and zero Linux audio devices.
 `/dev/snd`, `/dev/input`, GPIO and video endpoints are absent.
 
-| Command / check | Result |
-| --- | --- |
-| Initial `ruff check src/metor scripts tests` and format check | PASS; 324 files formatted |
-| Initial `mypy src/metor scripts` | PASS; 294 source files |
-| Initial full unittest discovery | PASS; 462 tests, 90.900 s |
-| Earlier slice `ruff check src/metor scripts tests` | PASS |
-| Earlier slice `ruff format --check src/metor scripts tests` | PASS |
-| Earlier slice `mypy src/metor scripts` | PASS; 317 source files |
-| `python scripts/check_boundaries.py` | PASS, including the new GUI tree |
-| `python scripts/versioning.py validate` | PASS |
-| `python scripts/validate_generated_docs.py` | PASS; initially fresh and reproducible through canonical generators |
-| `python scripts/check_release_compatibility.py --current docs/generated/compatibility.json` | PASS; no previous public release, current manifest is baseline |
-| Earlier slice full unittest discovery | PASS; 482 tests, 98.507 s; predates metadata/security extensions |
-| `python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir /tmp/metor-gui-bundles` | PASS; four Linux dependency-closed ZIPs |
-| GUI variant rebuilt after bootstrap/native fixes | PASS; same canonical builder |
-| `python scripts/validate_wheel_versions.py /tmp/metor-gui-bundles/*/wheelhouse/metor*.whl` | PASS; coordinated versions and disjoint files |
-| `python scripts/validate_installed_artifacts.py /tmp/metor-gui-bundles` | PASS; offline fresh installs, positive/negative external SDK typing, dynamic IPC, Terminal help loop, both UI removal orders, SDK-only survivor |
-| `python scripts/validate_release_installers.py /tmp/metor-gui-bundles` | PASS; actual Linux installers for SDK, base, Terminal and GUI |
-| Installed common CLI/native launch without device file | PASS in Linux offscreen desktop mode; no runtime/profile activation |
-| Installed common CLI/native launch with `--simulator` | PASS in Linux offscreen simulator mode; isolated temporary data root |
-| Native widget key-repeat and focus-loss probes | PASS using synthetic events on real Kivy widgets; not physical input proof |
-| Audio PCM frame/seek/timing and resource cleanup tests | PASS; sample framing is real, stream cleanup uses mocks |
-| Windows Razer microphone/playback | PASS: explicit endpoint duplex port probe, 33,280 captured bytes discarded, 32,000 output bytes, 1.375 seconds; GUI PTT/acoustics/AEC not verified |
-| Full GAT and L acceptance | NOT PASSED |
+| Command / check                                                                                                   | Result                                                                                                                                             |
+| ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Initial `ruff check src/metor scripts tests` and format check                                                     | PASS; 324 files formatted                                                                                                                          |
+| Initial `mypy src/metor scripts`                                                                                  | PASS; 294 source files                                                                                                                             |
+| Initial full unittest discovery                                                                                   | PASS; 462 tests, 90.900 s                                                                                                                          |
+| Earlier slice `ruff check src/metor scripts tests`                                                                | PASS                                                                                                                                               |
+| Earlier slice `ruff format --check src/metor scripts tests`                                                       | PASS                                                                                                                                               |
+| Earlier slice `mypy src/metor scripts`                                                                            | PASS; 317 source files                                                                                                                             |
+| `python scripts/check_boundaries.py`                                                                              | PASS, including the new GUI tree                                                                                                                   |
+| `python scripts/versioning.py validate`                                                                           | PASS                                                                                                                                               |
+| `python scripts/validate_generated_docs.py`                                                                       | PASS; initially fresh and reproducible through canonical generators                                                                                |
+| `python scripts/check_release_compatibility.py --current docs/generated/compatibility.json`                       | PASS; no previous public release, current manifest is baseline                                                                                     |
+| Earlier slice full unittest discovery                                                                             | PASS; 482 tests, 98.507 s; predates metadata/security extensions                                                                                   |
+| `python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir /tmp/metor-gui-bundles` | PASS; four Linux dependency-closed ZIPs                                                                                                            |
+| GUI variant rebuilt after bootstrap/native fixes                                                                  | PASS; same canonical builder                                                                                                                       |
+| `python scripts/validate_wheel_versions.py /tmp/metor-gui-bundles/*/wheelhouse/metor*.whl`                        | PASS; coordinated versions and disjoint files                                                                                                      |
+| `python scripts/validate_installed_artifacts.py /tmp/metor-gui-bundles`                                           | PASS; offline fresh installs, positive/negative external SDK typing, dynamic IPC, Terminal help loop, both UI removal orders, SDK-only survivor    |
+| `python scripts/validate_release_installers.py /tmp/metor-gui-bundles`                                            | PASS; actual Linux installers for SDK, base, Terminal and GUI                                                                                      |
+| Installed common CLI/native launch without device file                                                            | PASS in Linux offscreen desktop mode; no runtime/profile activation                                                                                |
+| Installed common CLI/native launch with `--simulator`                                                             | PASS in Linux offscreen simulator mode; isolated temporary data root                                                                               |
+| Native widget key-repeat and focus-loss probes                                                                    | PASS using synthetic events on real Kivy widgets; not physical input proof                                                                         |
+| Audio PCM frame/seek/timing and resource cleanup tests                                                            | PASS; sample framing is real, stream cleanup uses mocks                                                                                            |
+| Windows Razer microphone/playback                                                                                 | PASS: explicit endpoint duplex port probe, 33,280 captured bytes discarded, 32,000 output bytes, 1.375 seconds; GUI PTT/acoustics/AEC not verified |
+| Full GAT and L acceptance                                                                                         | NOT PASSED                                                                                                                                         |
 
 The SDK GUI bootstrap test uses a real loopback SDK transport with scripted
 strict auth/snapshot/inventory DTO responses. It proves the graphical prompt
@@ -745,12 +743,12 @@ evidence, distinct from still-unimplemented GUI PTT and Core staging integration
 
 ## Visual and memory evidence
 
-| Capture | Exact inner viewport | RSS observed | Scope |
-| --- | --- | --- | --- |
-| [Root](gui-2026-09-12/root-480x800.png) | 480×800 | 179,085,312 bytes | Synthetic published DROP rows |
-| [DROP](gui-2026-09-12/drop-360x640.png) | 360×640 | 174,698,496 bytes | Short/wrapped text, measured bubbles |
-| [Desktop LIVE](gui-2026-09-12/live-1180x760.png) | 1180×760 | 194,363,392 bytes | 360 master + 1 divider, explicit header End Live |
-| [Entry failure](gui-2026-09-12/failure-360x640.png) | 360×640 | 169,500,672 bytes | Covered bootstrap failure, no private underlying pane |
+| Capture                                             | Exact inner viewport | RSS observed      | Scope                                                 |
+| --------------------------------------------------- | -------------------- | ----------------- | ----------------------------------------------------- |
+| [Root](gui-2026-09-12/root-480x800.png)             | 480×800              | 179,085,312 bytes | Synthetic published DROP rows                         |
+| [DROP](gui-2026-09-12/drop-360x640.png)             | 360×640              | 174,698,496 bytes | Short/wrapped text, measured bubbles                  |
+| [Desktop LIVE](gui-2026-09-12/live-1180x760.png)    | 1180×760             | 194,363,392 bytes | 360 master + 1 divider, explicit header End Live      |
+| [Entry failure](gui-2026-09-12/failure-360x640.png) | 360×640              | 169,500,672 bytes | Covered bootstrap failure, no private underlying pane |
 
 JSON beside each image records the actual window/viewport and evidence type.
 The simulator surround is excluded. The figures are sampled process RSS, not
@@ -810,97 +808,97 @@ gate** unless the evidence is explicitly limited to an executed subcheck.
 An implementation location is not a pass. These groups cover all 99 named
 functional requirements without replacing their original text.
 
-| Functional IDs | Current implementation/evidence | Unresolved owner/work package |
-| --- | --- | --- |
-| GUI-PROD-01–06 | Root/peer presentation and navigation tests | Complete product/privacy semantics, G2–G5 |
-| GUI-ARCH-01–04 | `packaging/gui`, lazy launcher, common CLI and installed gates | Native platform completeness, G1/G6 |
-| GUI-START-01–06 | CLI resolution, strict parser, no-file and simulator native launch | Full desktop controls, physical registered ports, G1 |
-| GUI-API-01–04 | Integration map, stable profile instance, controller/mailbox and public SDK bootstrap | Complete inventory/media reconciliation, G2 |
-| GUI-DATA-01–04 | Bounded volatile drafts, protected preferences, Core disposable producer journal | GUI media lifecycle and full lock/purge hygiene, G2/G5 |
-| GUI-BOOT-01–03 | Entry forms, graphical prompt bridge and failed-attach cleanup | Complete startup routing, setup, typed failure handling, G1/G2 |
-| GUI-NAV-01–05 | Root/peer routes, protected pins, 64-row paging and no-call navigation | LIVE recency, full V inventory and pressure/scroll matrix, G3 |
-| GUI-ACT-01 | Explicit action submission and text identity barrier | All A actions and lifecycle-scoped identities, G2–G5 |
-| GUI-FLOW-01–03 | Intent picker, exact incoming handles, qualified End/Cancel/Change route | Complete expiry/auto-accept/native lifecycle matrix, G3/G5 |
-| GUI-INPUT-01–05 | Local keyboard, focused PTT, source ownership and held-release regressions | Full physical/duplex/restriction input matrix, G3/G4 |
-| GUI-VOICE-01–05 | Owner-qualified PTT/review, journals, interrupted recovery and explicit finalization retry | Native headset and complete owner-loss/pressure matrix, G2/G4 |
-| GUI-AUDIO-01–06 | Bounded incremental playback, manual priority, foreground auto-play and exact consume tests | Full native duplex/pressure matrix; real waveform, exact seeks and conservative coverage tests implemented, G4 |
-| GUI-MSG-01–05 | Text handoff, qualified DROP cleanup, fallback/dismissal, delivered-own resend and exact unknown-result receipt reconciliation | Full gesture/media/failure matrix, G3/G4 |
-| GUI-NOTIFY-01–05 | Bounded no-preview center, source watermarks, restricted privacy and exact call navigation | Complete pressure/staleness/privacy combination matrix, G5 |
-| GUI-LOCK-01–05 | Protected setup, same-client restriction, PIN/password, exact continued media and Core revocation | Full physical/duplex/OS-event combinations, G2/G5 |
-| GUI-CONTACT-01–04 | Saved intent flows, guarded rename/demotion/bulk removal, bounded pages and independently decoded native QR | Camera adapter and full scale/stale-action matrix; stopped-profile generation/readback implemented, G3/G5 |
-| GUI-HISTORY-01 | Bounded summary/technical Core metadata pages, retention flags and confirmed full ledger clear; real pagination/uncertain-clear tests | Complete native failure/scale matrix, G3/G5 |
-| GUI-SET-01–04 | Protected defaults/CAS, full-strength policy auth, safe Core descriptor editor, exact receive scope and stale/unknown saves | Complete GUI preference C12 and native modal keyboard/settings matrix, G2/G5 |
-| GUI-LIFE-01–04 | Profile switch, GUI-only close and injected V21 prepared-power orchestration implemented with typed phases and owner cleanup | Production physical adapter/OS shutdown and complete lifecycle failure matrix, G5 |
-| GUI-PURGE-01–03 | Existing authorization preserved; exact physical-chord initiation, actual Core scoped safe/terminal reports and one gated injected shutdown request tested | Production physical adapter/destruction-status recovery and appliance evidence, G2/G5 |
-| GUI-SAFE-01–03 | Local assets/plain labels; credential/composer export disabled | Complete clipboard/accessibility/rendering and status semantics, G3/G6 |
-| GUI-PLAT-01–06 | ADR, parser, candidate native port, support manifest/RSS samples | Physical adapters, duplex acoustics, latency/buffer stress/indicators, G1/G4 |
-| GUI-DESIGN-01–04 | Approved copied packet, Penpot inspection, four native fixtures | Complete layout/state/asset/accessibility realization, G6 |
-| GUI-DONE-01–03 | Package/docs/report and explicit evidence levels; non-goals excluded | Full mandatory implementation and acceptance remain open |
+| Functional IDs    | Current implementation/evidence                                                                                                                            | Unresolved owner/work package                                                                                  |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| GUI-PROD-01–06    | Root/peer presentation and navigation tests                                                                                                                | Complete product/privacy semantics, G2–G5                                                                      |
+| GUI-ARCH-01–04    | `packaging/gui`, lazy launcher, common CLI and installed gates                                                                                             | Native platform completeness, G1/G6                                                                            |
+| GUI-START-01–06   | CLI resolution, strict parser, no-file and simulator native launch                                                                                         | Full desktop controls, physical registered ports, G1                                                           |
+| GUI-API-01–04     | Integration map, stable profile instance, controller/mailbox and public SDK bootstrap                                                                      | Complete inventory/media reconciliation, G2                                                                    |
+| GUI-DATA-01–04    | Bounded volatile drafts, protected preferences, Core disposable producer journal                                                                           | GUI media lifecycle and full lock/purge hygiene, G2/G5                                                         |
+| GUI-BOOT-01–03    | Entry forms, graphical prompt bridge and failed-attach cleanup                                                                                             | Complete startup routing, setup, typed failure handling, G1/G2                                                 |
+| GUI-NAV-01–05     | Root/peer routes, protected pins, 64-row paging and no-call navigation                                                                                     | LIVE recency, full V inventory and pressure/scroll matrix, G3                                                  |
+| GUI-ACT-01        | Explicit action submission and text identity barrier                                                                                                       | All A actions and lifecycle-scoped identities, G2–G5                                                           |
+| GUI-FLOW-01–03    | Intent picker, exact incoming handles, qualified End/Cancel/Change route                                                                                   | Complete expiry/auto-accept/native lifecycle matrix, G3/G5                                                     |
+| GUI-INPUT-01–05   | Local keyboard, focused PTT, source ownership and held-release regressions                                                                                 | Full physical/duplex/restriction input matrix, G3/G4                                                           |
+| GUI-VOICE-01–05   | Owner-qualified PTT/review, journals, interrupted recovery and explicit finalization retry                                                                 | Native headset and complete owner-loss/pressure matrix, G2/G4                                                  |
+| GUI-AUDIO-01–06   | Bounded incremental playback, manual priority, foreground auto-play and exact consume tests                                                                | Full native duplex/pressure matrix; real waveform, exact seeks and conservative coverage tests implemented, G4 |
+| GUI-MSG-01–05     | Text handoff, qualified DROP cleanup, fallback/dismissal, delivered-own resend and exact unknown-result receipt reconciliation                             | Full gesture/media/failure matrix, G3/G4                                                                       |
+| GUI-NOTIFY-01–05  | Bounded no-preview center, source watermarks, restricted privacy and exact call navigation                                                                 | Complete pressure/staleness/privacy combination matrix, G5                                                     |
+| GUI-LOCK-01–05    | Protected setup, same-client restriction, PIN/password, exact continued media and Core revocation                                                          | Full physical/duplex/OS-event combinations, G2/G5                                                              |
+| GUI-CONTACT-01–04 | Saved intent flows, guarded rename/demotion/bulk removal, bounded pages and independently decoded native QR                                                | Camera adapter and full scale/stale-action matrix; stopped-profile generation/readback implemented, G3/G5      |
+| GUI-HISTORY-01    | Bounded summary/technical Core metadata pages, retention flags and confirmed full ledger clear; real pagination/uncertain-clear tests                      | Complete native failure/scale matrix, G3/G5                                                                    |
+| GUI-SET-01–04     | Protected defaults/CAS, full-strength policy auth, safe Core descriptor editor, exact receive scope and stale/unknown saves                                | Complete GUI preference C12 and native modal keyboard/settings matrix, G2/G5                                   |
+| GUI-LIFE-01–04    | Profile switch, GUI-only close and injected V21 prepared-power orchestration implemented with typed phases and owner cleanup                               | Production physical adapter/OS shutdown and complete lifecycle failure matrix, G5                              |
+| GUI-PURGE-01–03   | Existing authorization preserved; exact physical-chord initiation, actual Core scoped safe/terminal reports and one gated injected shutdown request tested | Production physical adapter/destruction-status recovery and appliance evidence, G2/G5                          |
+| GUI-SAFE-01–03    | Local assets/plain labels; credential/composer export disabled                                                                                             | Complete clipboard/accessibility/rendering and status semantics, G3/G6                                         |
+| GUI-PLAT-01–06    | ADR, parser, candidate native port, support manifest/RSS samples                                                                                           | Physical adapters, duplex acoustics, latency/buffer stress/indicators, G1/G4                                   |
+| GUI-DESIGN-01–04  | Approved copied packet, Penpot inspection, four native fixtures                                                                                            | Complete layout/state/asset/accessibility realization, G6                                                      |
+| GUI-DONE-01–03    | Package/docs/report and explicit evidence levels; non-goals excluded                                                                                       | Full mandatory implementation and acceptance remain open                                                       |
 
 ### View, action and state inventories
 
-| IDs | Status and implementation location / missing behavior |
-| --- | --- |
-| V01–V03 | Partial `views/entry.py`; setup/routing/recovery incomplete |
-| V04–V05 | `views/security.py` and `runtime/security`: protected setup/restriction, PIN/password and continued strip; full native/physical matrix pending |
-| V06–V09 | `views/root/`, `views/peer/`: pins/paging, text/media, recency/resend, exact lifecycle and native continuity; complete pressure/native matrix open |
-| V10 | Incoming overlay, independent privacy, exact handles and nonmodal focus behavior; full expiry/auto-accept matrix open |
-| V11–V13 | `views/contacts/`: saved intent picker, manual/QR validation, save/rename/demotion and bounded bulk management; full state matrix open |
-| V14 | Scan QR entry and intent-preserving manual fallback implemented; no supported camera adapter |
-| V15 | Local public address/QR independently decoded; stopped-profile address generation/readback implemented |
-| V16–V17 | Bounded Notification Center, protected preferences and safe Core descriptor editors implemented; full matrix open |
-| V18–V19 | Bounded activity/technical history and platform diagnostics implemented; complete native state/scale matrix open |
-| V20 | Implemented bounded catalog/forms and phase-aware switch; full scale/failure matrix remains open; stopped-runtime address entry implemented |
-| V21 | Desktop detach plus injected-device explicit menu, Core preparation and typed shutdown outcome implemented; real OS adapter/evidence open |
-| V22 | Five-second chord, scoped initiation, exact Core milestones and safe-terminal shutdown gating implemented; real physical adapter/evidence open |
-| V23 | Partial explicit config/display errors and bootstrap error cover |
-| A01–A04, A08, A11 | Partial route/explicit command/text submission boundaries; full eligibility/reconciliation missing |
-| A05–A07, A09–A10 | Exact accept/decline/open-call, qualified route change and ended-context close implemented; complete race matrix open |
-| A12–A22 | PTT/play/review, fallback/delete/clear and application lock implemented; delivered resend implemented; full native media acceptance open |
-| A23 | GUI-only finalization/owner release/detach, one draft-loss confirmation and protected recovery exit choice implemented; full native failure matrix remains open |
-| A24–A25 | Generic typed binding and full software gating implemented; production physical adapter and actual OS/destructive validation open |
-| S01–S07 | Partial loading/empty/busy/error/unknown/stale presentation; full identity and input retention not implemented |
-| S08–S09 | Partial draft/mailbox rejection and unavailable media labels; media interruption and adapter recovery absent |
-| S10–S11 | Partial authorization restriction/challenge/cooldown; complete lifecycle families pending |
-| S12 | Local LIVE text acceptance and exact-ID reconciliation tested; complete media truth pending |
-| L01–L18 | Complete family acceptance open; expanded native matrix covers representative normal/privacy/failure/minimum cases |
+| IDs               | Status and implementation location / missing behavior                                                                                                           |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| V01–V03           | Partial `views/entry.py`; setup/routing/recovery incomplete                                                                                                     |
+| V04–V05           | `views/security.py` and `runtime/security`: protected setup/restriction, PIN/password and continued strip; full native/physical matrix pending                  |
+| V06–V09           | `views/root/`, `views/peer/`: pins/paging, text/media, recency/resend, exact lifecycle and native continuity; complete pressure/native matrix open              |
+| V10               | Incoming overlay, independent privacy, exact handles and nonmodal focus behavior; full expiry/auto-accept matrix open                                           |
+| V11–V13           | `views/contacts/`: saved intent picker, manual/QR validation, save/rename/demotion and bounded bulk management; full state matrix open                          |
+| V14               | Scan QR entry and intent-preserving manual fallback implemented; no supported camera adapter                                                                    |
+| V15               | Local public address/QR independently decoded; stopped-profile address generation/readback implemented                                                          |
+| V16–V17           | Bounded Notification Center, protected preferences and safe Core descriptor editors implemented; full matrix open                                               |
+| V18–V19           | Bounded activity/technical history and platform diagnostics implemented; complete native state/scale matrix open                                                |
+| V20               | Implemented bounded catalog/forms and phase-aware switch; full scale/failure matrix remains open; stopped-runtime address entry implemented                     |
+| V21               | Desktop detach plus injected-device explicit menu, Core preparation and typed shutdown outcome implemented; real OS adapter/evidence open                       |
+| V22               | Five-second chord, scoped initiation, exact Core milestones and safe-terminal shutdown gating implemented; real physical adapter/evidence open                  |
+| V23               | Partial explicit config/display errors and bootstrap error cover                                                                                                |
+| A01–A04, A08, A11 | Partial route/explicit command/text submission boundaries; full eligibility/reconciliation missing                                                              |
+| A05–A07, A09–A10  | Exact accept/decline/open-call, qualified route change and ended-context close implemented; complete race matrix open                                           |
+| A12–A22           | PTT/play/review, fallback/delete/clear and application lock implemented; delivered resend implemented; full native media acceptance open                        |
+| A23               | GUI-only finalization/owner release/detach, one draft-loss confirmation and protected recovery exit choice implemented; full native failure matrix remains open |
+| A24–A25           | Generic typed binding and full software gating implemented; production physical adapter and actual OS/destructive validation open                               |
+| S01–S07           | Partial loading/empty/busy/error/unknown/stale presentation; full identity and input retention not implemented                                                  |
+| S08–S09           | Partial draft/mailbox rejection and unavailable media labels; media interruption and adapter recovery absent                                                    |
+| S10–S11           | Partial authorization restriction/challenge/cooldown; complete lifecycle families pending                                                                       |
+| S12               | Local LIVE text acceptance and exact-ID reconciliation tested; complete media truth pending                                                                     |
+| L01–L18           | Complete family acceptance open; expanded native matrix covers representative normal/privacy/failure/minimum cases                                              |
 
 ### GAT test groups
 
 These are test-group statuses, not a count of passing individual unit tests.
 Existing Core regressions are not substituted for enclosing GUI scenarios.
 
-| GAT IDs | Evidence and remaining acceptance |
-| --- | --- |
-| 01 | Root/Back projection, no implicit communication, native paging and lifecycle refresh checks; complete navigation/focus matrix open |
-| 02–03 | Saved search/manual QR validation and preserved Save/Open/Start intent implemented; camera adapter open; independent native QR decode passes |
-| 04–06 | Exact pending handles, calling Cancel, explicit Accept/Open and stale lifecycle tests; complete simultaneous-peer matrix open |
-| 07–09 | Independent capture/playback workers and bounded foreground transcript implemented; real duplex/time-shift matrix open |
-| 10–12 | Actual Core owned capture/review/finalize/commit and native PTT ownership probes; full physical/media failure matrix open |
-| 13–16 | Selective/bulk fallback and ended-context dismissal tested; delivered-own resend and exact unknown-fallback readback implemented/tested; full native matrix open |
-| 17–19 | Public contact intents, stale rename guard and shared context actions implemented; bounded large-list selection/remove tested; camera/full native matrix open |
-| 20–23 | Core restricted continuation, policy authentication, anonymity and native PIN overlay tested; complete physical lock/feedback matrix open |
-| 24–27 | Profile switch/phase-aware GUI exit implemented/tested; safe physical power and purge binding open |
-| 28–30 | Owner-loss preservation, bounded foreground text handoff and metadata history implemented; complete restart/retention/playback matrix open |
-| 31–32 | Earlier Linux installed CLI/GUI and four-wheel ownership/removal checks pass; Linux/Windows co-install/removal pass; final installed native artifact evidence tracked separately |
-| 33–34 | Selection/help regressions and lazy installed GUI help checked; complete native dependency-failure permutations open |
-| 35–38 | Desktop offscreen launch, strict simulator config and scripted graphical SDK bootstrap checked; full real-profile/device/remote matrix open |
-| 39–42 | Optional route failure is explicit, simulator inert and absent output cannot consume; native adapter and complete graphical auth/loss matrix open |
-| 43–44 | Public retained inventory, bounded DROP paging, separate media/state ordering and exact context revocation tested; complete growing-media ordering matrix open |
-| 45–46 | Bounded queues, duplicate/unknown text/settings/history controls and stale lifecycle qualifiers tested; full overload catch-up and all mutations open |
-| 47–51 | Core producer isolation, owned PTT, review collision, admission/IO/finalization/commit failure and explicit recovery tested; complete process-kill and physical-input matrix open |
-| 52–55 | PCM alignment, finite range playback/cache, manual priority and coverage gates implemented; large-item/native seek/auto-play/pressure matrix open |
-| 56–60 | Restriction failure, exact continuation revocation, notification staleness/Off and anonymous-handle races tested; full simultaneous media/lock matrix open |
-| 61–62 | Protected SQLCipher metadata/CAS/migration, policy auth and stable profile identity tested; full profile-switch phase failures open |
-| 63 | Per-client detach/owner release implemented; phase-aware close UI and complete multi-client active-capture scenario open |
-| 64–66 | Pure physical arbiter and truthful scoped Core milestone view tested; authorized production platform binding/host power open |
-| 67 | Protected defaults, registry-derived safe Core descriptors, exact Receive Drops scope and stale/unknown saves tested; full native settings/policy matrix open |
-| 68 | Plain bounded rendering, local assets, strict QR parsing and clipboard restrictions implemented; full hostile-text/accessibility/allowed-clipboard matrix open |
-| 69–70 | Multiple-size native framebuffer, 150% editor/history and lifecycle/gesture probes; every V/A/S/L state and responsiveness/accessibility matrix still required |
-| 71–72 | Authorized Windows Razer duplex port probe and native GUI capture/review pass at recorded checkpoints; full acoustic/physical support matrix open |
-| 73 | Linux/Windows canonical four-ZIP installers/consumers pass; final-source native results tracked separately |
-| 74 | Runtime/map/ADR/schema/sample/support, contract migration and generated settings/API are updated; documentation must continue tracking remaining implementation |
-| 75 | Inventories map actual evidence and explicit remaining gates; complete product acceptance remains open |
+| GAT IDs | Evidence and remaining acceptance                                                                                                                                                 |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 01      | Root/Back projection, no implicit communication, native paging and lifecycle refresh checks; complete navigation/focus matrix open                                                |
+| 02–03   | Saved search/manual QR validation and preserved Save/Open/Start intent implemented; camera adapter open; independent native QR decode passes                                      |
+| 04–06   | Exact pending handles, calling Cancel, explicit Accept/Open and stale lifecycle tests; complete simultaneous-peer matrix open                                                     |
+| 07–09   | Independent capture/playback workers and bounded foreground transcript implemented; real duplex/time-shift matrix open                                                            |
+| 10–12   | Actual Core owned capture/review/finalize/commit and native PTT ownership probes; full physical/media failure matrix open                                                         |
+| 13–16   | Selective/bulk fallback and ended-context dismissal tested; delivered-own resend and exact unknown-fallback readback implemented/tested; full native matrix open                  |
+| 17–19   | Public contact intents, stale rename guard and shared context actions implemented; bounded large-list selection/remove tested; camera/full native matrix open                     |
+| 20–23   | Core restricted continuation, policy authentication, anonymity and native PIN overlay tested; complete physical lock/feedback matrix open                                         |
+| 24–27   | Profile switch/phase-aware GUI exit implemented/tested; safe physical power and purge binding open                                                                                |
+| 28–30   | Owner-loss preservation, bounded foreground text handoff and metadata history implemented; complete restart/retention/playback matrix open                                        |
+| 31–32   | Earlier Linux installed CLI/GUI and four-wheel ownership/removal checks pass; Linux/Windows co-install/removal pass; final installed native artifact evidence tracked separately  |
+| 33–34   | Selection/help regressions and lazy installed GUI help checked; complete native dependency-failure permutations open                                                              |
+| 35–38   | Desktop offscreen launch, strict simulator config and scripted graphical SDK bootstrap checked; full real-profile/device/remote matrix open                                       |
+| 39–42   | Optional route failure is explicit, simulator inert and absent output cannot consume; native adapter and complete graphical auth/loss matrix open                                 |
+| 43–44   | Public retained inventory, bounded DROP paging, separate media/state ordering and exact context revocation tested; complete growing-media ordering matrix open                    |
+| 45–46   | Bounded queues, duplicate/unknown text/settings/history controls and stale lifecycle qualifiers tested; full overload catch-up and all mutations open                             |
+| 47–51   | Core producer isolation, owned PTT, review collision, admission/IO/finalization/commit failure and explicit recovery tested; complete process-kill and physical-input matrix open |
+| 52–55   | PCM alignment, finite range playback/cache, manual priority and coverage gates implemented; large-item/native seek/auto-play/pressure matrix open                                 |
+| 56–60   | Restriction failure, exact continuation revocation, notification staleness/Off and anonymous-handle races tested; full simultaneous media/lock matrix open                        |
+| 61–62   | Protected SQLCipher metadata/CAS/migration, policy auth and stable profile identity tested; full profile-switch phase failures open                                               |
+| 63      | Per-client detach/owner release implemented; phase-aware close UI and complete multi-client active-capture scenario open                                                          |
+| 64–66   | Pure physical arbiter and truthful scoped Core milestone view tested; authorized production platform binding/host power open                                                      |
+| 67      | Protected defaults, registry-derived safe Core descriptors, exact Receive Drops scope and stale/unknown saves tested; full native settings/policy matrix open                     |
+| 68      | Plain bounded rendering, local assets, strict QR parsing and clipboard restrictions implemented; full hostile-text/accessibility/allowed-clipboard matrix open                    |
+| 69–70   | Multiple-size native framebuffer, 150% editor/history and lifecycle/gesture probes; every V/A/S/L state and responsiveness/accessibility matrix still required                    |
+| 71–72   | Authorized Windows Razer duplex port probe and native GUI capture/review pass at recorded checkpoints; full acoustic/physical support matrix open                                 |
+| 73      | Linux/Windows canonical four-ZIP installers/consumers pass; final-source native results tracked separately                                                                        |
+| 74      | Runtime/map/ADR/schema/sample/support, contract migration and generated settings/API are updated; documentation must continue tracking remaining implementation                   |
+| 75      | Inventories map actual evidence and explicit remaining gates; complete product acceptance remains open                                                                            |
 
 ## Producer lifecycle implementation checkpoint
 
@@ -991,7 +989,6 @@ Required text handoff, pagination, complete lifecycle/notification/settings view
 native media stress and the remaining acceptance rows are still open. This is an
 implementation checkpoint, not the required final completion report.
 
-
 ## Handoff, keyboard and page-navigation checkpoint
 
 The enclosing handoff/keyboard regression run passed **528 tests in 248.096
@@ -1053,7 +1050,6 @@ in 273.454 seconds (`/tmp/metor-gui-pages-contacts-regressions.log`). This remai
 implementation checkpoint; it does not close the remaining functional/layout,
 notification, lifecycle, device, resource or installed-artifact acceptance rows.
 
-
 ## Notification, confirmation and exact call checkpoint
 
 The six Notification Center tests passed in 0.050 seconds. Native compact normal
@@ -1082,7 +1078,6 @@ Native incoming-call renders are also being checked. These checkpoints do not
 close continued locked LIVE, lifecycle/device, media-pressure, installation or
 remaining functional/layout acceptance rows.
 
-
 The native 360×640 call renders passed with the actual SDL renderer:
 `/tmp/metor-gui-incoming.png` at 150% text and
 `/tmp/metor-gui-incoming-anonymous.png` at normal text. The incoming fixture
@@ -1098,7 +1093,6 @@ projection deliberately refuses to revoke a still-current replacement request;
 a new real-Core test covers that race explicitly. A replacement full run is
 required after this correction and the cohesive pending-state extraction.
 
-
 The corrected full call checkpoint passed: **551 tests in 304.508 seconds**
 (`/tmp/metor-gui-calls-final-regressions.log`), including the network pending-state
 and session-access package extractions. Generated references are fresh and
@@ -1113,7 +1107,6 @@ ACK, inventory or acceptance results. A full transcript refuses the send before
 Core mutation and retains the draft. Four focused state tests passed in 0.001
 seconds, and five real Core security/text tests passed in 40.093 seconds.
 These later text changes are not included in the preceding 551-test full run.
-
 
 ## 2026-09-14 profile and desktop lifecycle checkpoint
 
@@ -1145,7 +1138,6 @@ rewrapping storage. Its correction and focused follow-up are recorded separately
 612 passing tests must not be represented as coverage of that later change. Previous native Windows wheel artifacts are still stale.
 These additions do not complete the mandatory device, media, layout or release
 acceptance inventory above.
-
 
 Password follow-up: the failing new authentication test confirmed that the old
 password still opened a fresh session after storage rewrap. Core now installs a
@@ -1197,7 +1189,6 @@ runtime release failure; plaintext profiles receive no encrypted-access safety
 claim. No real owner profile or host power operation was involved. Physical
 Power/PTT arbitration, appliance ownership and GUI power/purge remain open.
 
-
 Native Windows GUI capture/review now passes. Evidence:
 [headset result](gui-2026-09-12/windows-gui-headset-review.json) and adjacent native
 view image. Official CPython 3.11.9 NuGet runtime, Kivy 2.3.1/SDL2/OpenGL, NVIDIA
@@ -1208,7 +1199,6 @@ SQLCipher Core were used. The canonical result remained an owned unsent DROP
 draft, with no outbox publication and no microphone audio exported. This is
 source-checkout integration evidence, not a final installed bundle, physical
 PTT, AEC/acoustic-quality or full-duplex/driver-loss acceptance claim.
-
 
 ## 14 September pause and continuation handoff
 

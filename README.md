@@ -81,12 +81,12 @@ For security reasons and to prevent supply-chain attacks, Metor **does not** bun
 
 Metor is split into four non-overlapping packages:
 
-| Package            | Contents                                                                                 | Typical Use Case                          | Install Target             |
-| :----------------- | :--------------------------------------------------------------------------------------- | :---------------------------------------- | :------------------------- |
-| **`metor-sdk`**         | IPC client, typed API/wire DTOs, proof helpers, and the public frontend launcher contract | Client integration or a third-party frontend | `pip install metor-sdk` |
-| **`metor`**             | General CLI, daemon, storage, Tor and local profile/process orchestration; no interactive UI | Headless/base installation | `pip install metor` |
-| **`metor-ui-terminal`** | Interactive Terminal chat, slash-command help, rendering, theme and frontend resources | Current interactive frontend | `pip install metor-ui-terminal` |
-| **`metor-ui-gui`** | Native Kivy desktop/simulator GUI and bundled local assets | Desktop GUI within the [declared support boundary](docs/contracts/GUI.md) | `pip install metor-ui-gui` |
+| Package                 | Contents                                                                                     | Typical Use Case                                                          | Install Target                  |
+| :---------------------- | :------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------ | :------------------------------ |
+| **`metor-sdk`**         | IPC client, typed API/wire DTOs, proof helpers, and the public frontend launcher contract    | Client integration or a third-party frontend                              | `pip install metor-sdk`         |
+| **`metor`**             | General CLI, daemon, storage, Tor and local profile/process orchestration; no interactive UI | Headless/base installation                                                | `pip install metor`             |
+| **`metor-ui-terminal`** | Interactive Terminal chat, slash-command help, rendering, theme and frontend resources       | Current interactive frontend                                              | `pip install metor-ui-terminal` |
+| **`metor-ui-gui`**      | Native Kivy desktop/simulator GUI and bundled local assets                                   | Desktop GUI within the [declared support boundary](docs/contracts/GUI.md) | `pip install metor-ui-gui`      |
 
 Official package versions are coordinated exactly. `metor` depends on the
 matching SDK; installing the Terminal UI pulls in matching base and SDK
@@ -351,8 +351,9 @@ The release bundle workflow is separate from the normal developer workflow. Day-
 
 Generated documentation is part of the project maintenance pipeline.
 
-- `npm run docs`: Regenerates the [IPC API](docs/generated/API.md), [settings](docs/generated/SETTINGS.md), and machine-readable compatibility references under `docs/generated/`.
-- `npm run ready`: Formats code and markdown, runs linting and type checking, then regenerates the generated docs.
+- `npm run generate:docs` (or `npm run docs`): Regenerates the [IPC API](docs/generated/API.md), [settings](docs/generated/SETTINGS.md), and machine-readable compatibility references under `docs/generated/`.
+- `npm run check` (or `npm run ready`): Runs nonmutating Markdown/Python format checks, linting, type checking, dependency boundaries, generated-reference freshness, and the discovered unit/integration suite.
+- `npm run format:md`, `npm run format:py`, and `npm run fix:py`: Apply intentional Markdown formatting, Python formatting, or Ruff fixes; these mutating commands are separate from readiness checks.
 
 Before changing architecture, security boundaries, or contributor-facing workflows, review the [architecture guide](docs/ARCHITECTURE.md), [audit checklist](docs/governance/AUDIT.md), and [contribution guide](docs/CONTRIBUTE.md).
 

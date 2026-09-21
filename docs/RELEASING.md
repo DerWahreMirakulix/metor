@@ -6,16 +6,16 @@ releases and compatibility generations are independent.
 
 ## Version axes
 
-| Axis                   | Meaning                                                         | Bump when                                                                  |
-| ---------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Axis                   | Meaning                                                        | Bump when                                                                  |
+| ---------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | Application            | Version of the Metor product and all four Python distributions | An explicit product release is prepared                                    |
-| IPC protocol           | Typed client-daemon NDJSON wire contract                        | A breaking command, event, field, type, or wire-semantics change is made   |
-| Peer protocol          | Daemon-to-daemon Tor wire and handshake contract                | A breaking peer-wire or peer-semantics change is made                      |
-| DB schema              | Durable SQL tables, columns, constraints, and indexes           | Any persistent SQL schema changes, including additive changes              |
-| Keyslot format         | Persisted password-protected PMK document                       | Its serialized contract becomes incompatible                               |
-| Blob format            | Authenticated encrypted-blob framing                            | Its persisted framing or authenticated interpretation becomes incompatible |
-| Profile-key derivation | PMK-to-database, identity-secret, and blob-root domains         | Those domain labels or derivation behavior become incompatible             |
-| Blob-object derivation | Per-object key domain                                           | That domain label or derivation behavior becomes incompatible              |
+| IPC protocol           | Typed client-daemon NDJSON wire contract                       | A breaking command, event, field, type, or wire-semantics change is made   |
+| Peer protocol          | Daemon-to-daemon Tor wire and handshake contract               | A breaking peer-wire or peer-semantics change is made                      |
+| DB schema              | Durable SQL tables, columns, constraints, and indexes          | Any persistent SQL schema changes, including additive changes              |
+| Keyslot format         | Persisted password-protected PMK document                      | Its serialized contract becomes incompatible                               |
+| Blob format            | Authenticated encrypted-blob framing                           | Its persisted framing or authenticated interpretation becomes incompatible |
+| Profile-key derivation | PMK-to-database, identity-secret, and blob-root domains        | Those domain labels or derivation behavior become incompatible             |
+| Blob-object derivation | Per-object key domain                                          | That domain label or derivation behavior becomes incompatible              |
 
 `*_MIN_SUPPORTED` is the oldest generation the current implementation can
 actually read or negotiate. It is independent of the current writer/protocol

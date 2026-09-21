@@ -223,7 +223,6 @@ Sources: [Kivy installation](https://kivy.org/doc/stable/gettingstarted/installa
 [dbus-next package](https://pypi.org/project/dbus-next/), and
 [dbus-next low-level interface](https://github.com/altdesktop/python-dbus-next/blob/master/docs/low-level-interface/index.rst).
 
-
 The previous temporary embeddable Windows runtime was absent when validation
 resumed. The replacement is the official CPython 3.11.9 NuGet runtime, which
 includes `venv`, `ensurepip` and pip in the downloaded package. It remains under
