@@ -2,16 +2,82 @@
 
 from dataclasses import dataclass
 import math
+import os
 from pathlib import Path
 import stat
 import tomllib
 
 from metor.client.platform import PlatformBindings
 from metor.ui.gui.constants import Geometry, GuiLimits
+from metor.ui.gui.platform.configuration_security import open_windows_configuration
 
 
 class DeviceConfigurationError(ValueError):
     """Reports a safe field/configuration error without rendering file content."""
+
+
+def _is_windows() -> bool:
+    """Return whether Windows handle trust rules apply."""
+    return os.name == 'nt'
+
+
+def _open_windows_configuration(location: Path) -> int:
+    """Expose the native opener at the parser boundary for focused verification."""
+    return open_windows_configuration(location)
+
+
+def _open_configuration(location: Path) -> int:
+    """Open a configuration without following links on the active platform."""
+    if _is_windows():
+        try:
+            return _open_windows_configuration(location)
+        except DeviceConfigurationError:
+            raise
+        except OSError as exc:
+            raise DeviceConfigurationError(
+                'Windows device configuration trust could not be established'
+            ) from exc
+    if not hasattr(os, 'O_NOFOLLOW'):
+        raise DeviceConfigurationError(
+            'POSIX device configuration trust could not be established'
+        )
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    if hasattr(os, 'O_CLOEXEC'):
+        flags |= os.O_CLOEXEC
+    return os.open(location, flags)
+
+
+def _read_trusted_configuration(location: Path) -> bytes:
+    """Validate metadata and read bounded bytes from one exact open object."""
+    descriptor = _open_configuration(location)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise DeviceConfigurationError(
+                'Device configuration must be a regular file'
+            )
+        if metadata.st_nlink != 1:
+            raise DeviceConfigurationError('Device configuration must not be linked')
+        if not _is_windows():
+            if not hasattr(os, 'getuid') or metadata.st_uid != os.getuid():
+                raise DeviceConfigurationError(
+                    'Device configuration must be owned by the current user'
+                )
+            if metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+                raise DeviceConfigurationError(
+                    'Device configuration must not be group- or world-writable'
+                )
+        if metadata.st_size > GuiLimits.DEVICE_BYTES:
+            raise DeviceConfigurationError('Device configuration exceeds 64 KiB')
+        with os.fdopen(descriptor, 'rb', closefd=True) as source:
+            descriptor = -1
+            data = source.read(GuiLimits.DEVICE_BYTES + 1)
+        if len(data) > GuiLimits.DEVICE_BYTES:
+            raise DeviceConfigurationError('Device configuration exceeds 64 KiB')
+        return data
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
 
 
 @dataclass(frozen=True)
@@ -124,18 +190,10 @@ def read_configuration(
         raise DeviceConfigurationError('Device configuration path must not be empty')
     location = Path(path)
     try:
-        metadata = location.stat()
-        if not stat.S_ISREG(metadata.st_mode):
-            raise DeviceConfigurationError(
-                'Device configuration must be a regular file'
-            )
-        if metadata.st_mode & stat.S_IWOTH:
-            raise DeviceConfigurationError('Device configuration is world-writable')
-        with location.open('rb') as source:
-            data = source.read(GuiLimits.DEVICE_BYTES + 1)
-        if len(data) > GuiLimits.DEVICE_BYTES:
-            raise DeviceConfigurationError('Device configuration exceeds 64 KiB')
+        data = _read_trusted_configuration(location)
         parsed = tomllib.loads(data.decode('utf-8'))
+    except DeviceConfigurationError:
+        raise
     except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
         raise DeviceConfigurationError(
             f'Device configuration could not be read: {location}. '

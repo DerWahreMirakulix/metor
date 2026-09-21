@@ -57,7 +57,11 @@ ownership map. Counts sum to 763; no path is unclassified.
 | A08     | verified | `src/metor/core/api/{base.py,events/shared.py,events/entries.py}`, `tests/test_ipc_type_validation.py`, this worklog | A08 gates below | Complete |
 | A09     | verified | `scripts/{generate_api_docs.py,release/compatibility.py}`, `docs/generated/{API.md,api.schema.json,compatibility.json}`, `tests/test_api_generation_contract.py`, this worklog | A09 gates below | Complete |
 | A10     | verified | `src/metor/cli/{parser,entry}.py`, `tests/test_refactor2_cli_contract.py`, this worklog | A10 gates below | Complete |
-| A10b–A25 | open    | None                                                                                                            | Not run              | A10b: render untrusted terminal text safely and verbatim                     |
+| A10b     | verified | Terminal renderer/presenter hardening and regression coverage; this worklog                                    | A10b gates below     | Complete                                                                    |
+| A11      | verified | Canonical daemon bootstrap/runtime preparation and regression coverage; this worklog                           | A11 gates below      | Complete                                                                    |
+| A12      | verified | Producer recovery correlation ordering and regression coverage; this worklog                                  | A12 gates below      | Complete                                                                    |
+| A13      | verified | `src/metor/ui/gui/platform/{configuration,configuration_security}.py`, `tests/test_device_configuration_security.py`, this worklog | A13 gates below | Complete |
+| A14–A25 | open     | None                                                                                                            | Not run              | A14: bind real desktop OS lifecycle events                                  |
 
 ## A00 verification
 
@@ -541,5 +545,47 @@ version bump is required.
 | `mypy src/metor/core/daemon/managed/producers/service.py src/metor/core/daemon/managed/producers/cleanup.py src/metor/core/daemon/managed/network/voice/outbound.py src/metor/client/ipc.py` | PASS; 4 source files under strict project configuration |
 | `ruff check src/metor/core/daemon/managed/producers/service.py tests/test_gui_producers.py` | PASS |
 | `ruff format --check src/metor/core/daemon/managed/producers/service.py tests/test_gui_producers.py` | PASS; 2 files already formatted |
+| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
+| `git diff --check` | PASS |
+
+## A13 verification
+
+Device configuration bytes are now read through one already-open object. On
+POSIX, `O_NOFOLLOW` prevents following the final symbolic link and `fstat()` on
+that descriptor verifies a regular, single-link file owned by the current user
+without group or world write access. Size is checked both from descriptor
+metadata and after a bounded read. A pathname replacement after open therefore
+cannot redirect the parser to different bytes.
+
+Windows uses `CreateFileW` with read-only sharing and
+`FILE_FLAG_OPEN_REPARSE_POINT`, rejects reparse objects using handle metadata,
+and obtains owner and DACL information from that same handle. The owner must be
+the current user and writable allow entries may name only that user or Local
+System; null DACLs and unknown ACE forms fail closed. The native handle is
+converted to a Python descriptor only after these checks, after which the same
+regular-file, single-link, size, and bounded-read path applies. Any inability
+to establish Windows trust produces a safe explicit error rather than a POSIX
+mode-bit bypass.
+
+The strict TOML tables, scalar types, limits, simulator adapter registration,
+and physical-binding checks remain unchanged. The checked-in JSON schema and
+example already label and implement only the currently registered simulator
+subset, so they were reviewed without broadening their hardware claims. This
+is local file-validation hardening and changes no wire, storage, launcher,
+compatibility, or application version.
+
+Native Windows is unavailable in this WSL environment. The Windows dispatch
+and fail-closed contract are covered structurally, while a native Windows ACL
+and reparse execution remains an explicit environment gap rather than a
+claimed pass.
+
+| Command | Result |
+| ------- | ------ |
+| `python -m unittest tests.test_device_configuration_security -v` before implementation | EXPECTED FAIL; group-writable, symbolic/hard-link, path-stat race, and Windows secure-opener regressions were reproduced |
+| `python -m unittest tests.test_device_configuration_security -v` | PASS; 7 permission, read-only, link/swap, type/size, simulator, and Windows dispatch/fail-closed tests |
+| `python -m unittest tests.test_device_configuration_security tests.test_gui_contract tests.test_gui_device_lifecycle tests.test_gui_bootstrap -q` outside the socket sandbox | PASS; 36 device, lifecycle, bootstrap, and transport tests |
+| `python -m ruff check src/metor/ui/gui/platform/configuration.py src/metor/ui/gui/platform/configuration_security.py tests/test_device_configuration_security.py` | PASS |
+| `python -m ruff format --check src/metor/ui/gui/platform/configuration.py src/metor/ui/gui/platform/configuration_security.py tests/test_device_configuration_security.py` | PASS after canonical formatting |
+| `python -m mypy src/metor/ui/gui/platform/configuration.py src/metor/ui/gui/platform/configuration_security.py` | PASS; 2 source files under strict project configuration |
 | `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
 | `git diff --check` | PASS |
