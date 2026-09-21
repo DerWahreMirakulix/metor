@@ -44,6 +44,7 @@ from metor.versioning import (
     validate_version_registry,
 )
 from scripts.release.compatibility import compare_manifests, ipc_breaking_changes
+from scripts.release.manifest import write_compatibility_manifest
 from scripts.release.paths import (
     API_DOC_PATH,
     API_SCHEMA_PATH,
@@ -52,6 +53,7 @@ from scripts.release.paths import (
     SETTINGS_DOC_PATH,
 )
 from scripts.release.semver import calculate_next_version, select_latest_stable_release
+from scripts import validate_generated_docs
 from scripts.validate_wheel_versions import validate_wheel_versions
 
 
@@ -916,7 +918,9 @@ class DocumentationReleaseArchitectureTests(unittest.TestCase):
         workflow: str = (
             root / '.github' / 'workflows' / 'generate_api_docs.yml'
         ).read_text(encoding='utf-8')
-        self.assertIn('python scripts/validate_generated_docs.py', workflow)
+        generator = workflow.index('npm run generate:docs')
+        validator = workflow.index('python scripts/validate_generated_docs.py')
+        self.assertLess(generator, validator)
         self.assertIn('"scripts/validate_generated_docs.py"', workflow)
         self.assertIn(
             'git add docs/generated/API.md docs/generated/SETTINGS.md '
@@ -924,6 +928,126 @@ class DocumentationReleaseArchitectureTests(unittest.TestCase):
             workflow,
         )
         self.assertIn('if ! git diff --cached --quiet; then', workflow)
+
+    def test_release_candidate_generates_before_tests_and_freshness_check(
+        self,
+    ) -> None:
+        """Requires candidate references before tests inspect generated state.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / '.github' / 'workflows' / 'release.yml').read_text(
+            encoding='utf-8'
+        )
+        quality = workflow.split('\n  quality:', maxsplit=1)[1].split(
+            '\n  publish:', maxsplit=1
+        )[0]
+
+        self.assertIn('run-tests: "false"', quality)
+        generator = quality.index('npm run generate:docs')
+        validator = quality.index('python scripts/validate_generated_docs.py')
+        tests = quality.index("python -m unittest discover -s tests -p 'test_*.py'")
+        self.assertLess(generator, validator)
+        self.assertLess(validator, tests)
+
+    def test_generated_freshness_restores_stale_and_unchanged_inputs(self) -> None:
+        """Keeps normal validation nonmutating while stale content still fails.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as directory:
+            artifact = Path(directory) / 'generated.json'
+            for original, generated, expected in (
+                (b'current\n', b'current\n', ()),
+                (b'stale\n', b'current\n', (artifact,)),
+            ):
+                with self.subTest(original=original):
+                    artifact.write_bytes(original)
+
+                    def generate() -> None:
+                        artifact.write_bytes(generated)
+
+                    with (
+                        patch.object(
+                            validate_generated_docs,
+                            'GENERATED_ARTIFACT_PATHS',
+                            (artifact,),
+                        ),
+                        patch.object(
+                            validate_generated_docs, 'run_generators', generate
+                        ),
+                    ):
+                        self.assertEqual(
+                            validate_generated_docs.validate_reproducibility(),
+                            expected,
+                        )
+                    self.assertEqual(artifact.read_bytes(), original)
+
+    def test_intentional_generation_leaves_a_verifiable_change(self) -> None:
+        """Separates an update write from the following nonmutating validation.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as directory:
+            artifact = Path(directory) / 'generated.json'
+            artifact.write_bytes(b'stale\n')
+
+            def generate() -> None:
+                artifact.write_bytes(b'current\n')
+
+            generate()
+            self.assertEqual(artifact.read_bytes(), b'current\n')
+            with (
+                patch.object(
+                    validate_generated_docs,
+                    'GENERATED_ARTIFACT_PATHS',
+                    (artifact,),
+                ),
+                patch.object(validate_generated_docs, 'run_generators', generate),
+            ):
+                self.assertEqual(validate_generated_docs.validate_reproducibility(), ())
+            self.assertEqual(artifact.read_bytes(), b'current\n')
+
+    def test_patch_and_minor_candidates_generate_stable_matching_manifests(
+        self,
+    ) -> None:
+        """Exercises candidate manifests without changing repository release state.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        previous = json.loads(COMPATIBILITY_MANIFEST_PATH.read_text(encoding='utf-8'))
+        with TemporaryDirectory() as directory:
+            output = Path(directory) / 'compatibility.json'
+            for release_type in ('patch', 'minor'):
+                candidate = calculate_next_version(
+                    APP_VERSION, release_type, previous_release=f'v{APP_VERSION}'
+                )
+                with self.subTest(release_type=release_type, candidate=candidate):
+                    with patch('scripts.release.manifest.APP_VERSION', candidate):
+                        write_compatibility_manifest(API_SCHEMA_PATH, output)
+                        first = output.read_bytes()
+                        write_compatibility_manifest(API_SCHEMA_PATH, output)
+                    self.assertEqual(output.read_bytes(), first)
+                    current = json.loads(first)
+                    self.assertEqual(current['application_version'], candidate)
+                    self.assertEqual(compare_manifests(previous, current).errors, ())
 
 
 if __name__ == '__main__':

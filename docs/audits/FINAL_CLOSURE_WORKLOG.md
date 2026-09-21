@@ -1118,3 +1118,55 @@ did not affect the SDL fixture results.
 | `python scripts/check_boundaries.py`                                                                                  | PASS; complete current source tree plus positive/negative regression guards                                                    |
 | `ruff check`, `ruff format --check`, and strict `mypy` for changed Python                                             | PASS                                                                                                                           |
 | `git diff --check`                                                                                                    | PASS                                                                                                                           |
+
+## A23 verification
+
+Generated-reference update and validation now have different executable
+semantics. Normal CI continues to call `validate_generated_docs.py`; the
+validator compares the checked-in bytes with two generations, reports stale
+and non-deterministic outputs independently, and restores every canonical
+artifact to its original byte state in a `finally` block. A failing generator
+therefore cannot turn an inspection into an implicit documentation update.
+
+The intentional documentation workflow performs `npm run generate:docs`
+first, then runs the nonmutating deterministic freshness check, then stages
+only the four canonical generated artifacts. A stale checked-in original still
+fails normal CI, while an intentional update remains as a reviewable staged
+change. Authored documents remain outside that allowlist.
+
+Release quality now installs and runs static gates without tests, generates all
+four references after applying the candidate application version, validates
+their determinism and the version registry, and only then runs the complete
+candidate test suite. Compatibility comparison, wheel/bundle construction,
+installed-consumer validation, and artifact preservation remain downstream of
+those gates. The publish job still requires both `prepare` and `quality` and is
+unreachable in a dry run, so a generator, compatibility, static, test, build,
+or installer failure prevents publication.
+
+Patch `0.2.1` and minor `0.3.0` candidates were exercised in separate temporary
+archives of commit `ceb0af5`, with local pinned Node tooling copied into each
+archive. In each archive the version registry was changed, all references were
+generated, deterministic freshness and the no-previous-release compatibility
+path passed, `compatibility.json` contained the exact candidate version, and a
+second explicit generation was byte-identical. No repository version, tag,
+branch, release, or generated file was changed by these simulations.
+
+First-release behavior remains explicit: `current` is accepted only without a
+stable baseline, and compatibility validation without a previous manifest
+establishes a baseline without changing any compatibility generation.
+Historical comparison tests use synthetic manifests to exercise additive and
+breaking IPC, peer classification, SQL migration, keyslot/blob, and derivation
+axes; they do not claim an earlier public Metor release or an already required
+migration. Application SemVer remains independent from those axes.
+
+| Command                                                                                                | Result                                                                                                       |
+| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Four new workflow/freshness/candidate regressions before implementation                                | EXPECTED FAIL/ERROR; workflows generated in the wrong order and stale validation left modified bytes         |
+| `python -m unittest tests.test_versioning_release`                                                     | PASS; 34 registry, SemVer, first-release, synthetic-baseline, generation-order, and candidate-manifest tests |
+| `PYTHONPATH=tests python -m unittest test_remaining_closure_contract.RemainingGeneratedReferenceTests` | PASS; stale, nondeterministic, and newline-only drift remain distinct failures                               |
+| `npm run generate:docs` followed by `python scripts/validate_generated_docs.py`                        | PASS; intentional generation then two identical validation generations                                       |
+| Temporary patch candidate `0.2.1` generation/validation/first-release compatibility/second generation  | PASS; matching manifest and byte-identical repeat, isolated under `/tmp`                                     |
+| Temporary minor candidate `0.3.0` generation/validation/first-release compatibility/second generation  | PASS; matching manifest and byte-identical repeat, isolated under `/tmp`                                     |
+| Post-validation repository status                                                                      | PASS; no generated reference or version registry change remained                                             |
+| `ruff check`, `ruff format --check`, and strict `mypy` for changed Python                              | PASS                                                                                                         |
+| `git diff --check`                                                                                     | PASS                                                                                                         |

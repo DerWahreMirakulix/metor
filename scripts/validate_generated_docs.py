@@ -64,7 +64,7 @@ def generated_artifacts() -> dict[Path, bytes]:
 
 
 def validate_reproducibility() -> tuple[Path, ...]:
-    """Reports stale originals as well as non-deterministic second-generation output.
+    """Reports stale or unstable output and restores the checked-in byte state.
 
     Args:
         None
@@ -72,29 +72,39 @@ def validate_reproducibility() -> tuple[Path, ...]:
     Returns:
         tuple[Path, ...]: Stale or non-deterministic canonical artifacts.
     """
-    original = generated_artifacts()
-    run_generators()
-    first_generation: dict[Path, bytes] = generated_artifacts()
-    run_generators()
-    second_generation: dict[Path, bytes] = generated_artifacts()
-    changed = []
-    for path in GENERATED_ARTIFACT_PATHS:
-        stale = original[path] != first_generation[path]
-        unstable = first_generation[path] != second_generation[path]
-        if stale or unstable:
-            changed.append(path)
-            print(f'{path}: stale={stale}, non-deterministic={unstable}')
-            for label, data in (
-                ('original', original[path]),
-                ('first', first_generation[path]),
-                ('second', second_generation[path]),
-            ):
-                crlf = data.count(b'\r\n')
-                print(
-                    f'  {label}: bytes={len(data)}, CRLF={crlf}, '
-                    f'sha256={hashlib.sha256(data).hexdigest()}'
-                )
-    return tuple(changed)
+    original_files = {
+        path: path.read_bytes() for path in GENERATED_ARTIFACT_PATHS if path.is_file()
+    }
+    try:
+        original = generated_artifacts()
+        run_generators()
+        first_generation: dict[Path, bytes] = generated_artifacts()
+        run_generators()
+        second_generation: dict[Path, bytes] = generated_artifacts()
+        changed = []
+        for path in GENERATED_ARTIFACT_PATHS:
+            stale = original[path] != first_generation[path]
+            unstable = first_generation[path] != second_generation[path]
+            if stale or unstable:
+                changed.append(path)
+                print(f'{path}: stale={stale}, non-deterministic={unstable}')
+                for label, data in (
+                    ('original', original[path]),
+                    ('first', first_generation[path]),
+                    ('second', second_generation[path]),
+                ):
+                    crlf = data.count(b'\r\n')
+                    print(
+                        f'  {label}: bytes={len(data)}, CRLF={crlf}, '
+                        f'sha256={hashlib.sha256(data).hexdigest()}'
+                    )
+        return tuple(changed)
+    finally:
+        for path in GENERATED_ARTIFACT_PATHS:
+            if path in original_files:
+                path.write_bytes(original_files[path])
+            elif path.exists():
+                path.unlink()
 
 
 def main(argv: Sequence[str] | None = None) -> int:

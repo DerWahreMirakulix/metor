@@ -54,6 +54,9 @@ jobs:
         run: npm ci
 
       - name: Execute Documentation Generators
+        run: npm run generate:docs
+
+      - name: Validate generated documentation determinism
         run: python scripts/validate_generated_docs.py
 
       - name: Commit and Push Changes
