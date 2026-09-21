@@ -163,11 +163,12 @@ entry point.
 Offline installers select the intended distribution by name from the
 wheelhouse, allowing pip to resolve only its exact dependencies.
 
-The developing `metor-ui-gui` distribution uses `requirements/gui.lock`. The
-canonical `all` builder, CI and release workflow include its package, dependency
-closure, installed-consumer and ZIP-installer checks. GUI security, media,
-Windows and native-input acceptance gates remain open; workflow inclusion is
-not release approval. [GUI.md](./contracts/GUI.md) records the actual status.
+The `metor-ui-gui` distribution uses `requirements/gui.lock`. The canonical
+`all` builder, CI and release workflow include its package, dependency closure,
+installed-consumer and ZIP-installer checks. Functional desktop/simulator scope
+is implemented, while the support manifest still names mandatory native
+lifecycle/media reruns. Workflow inclusion is not release approval.
+[GUI.md](./contracts/GUI.md) records the current status.
 Wheel metadata validation checks GUI ownership and matching versions whenever
 a GUI wheel is supplied. Full installed-artifact acceptance requires all four.
 

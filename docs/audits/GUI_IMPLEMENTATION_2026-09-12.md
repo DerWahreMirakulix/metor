@@ -2,20 +2,20 @@
 
 ## Final GUI implementation closure — 20 September 2026
 
-The GUI implementation is **100% complete at its declared support boundary**.
-This statement covers the functional/layout v1.0 requirements, the common GUI,
-desktop and simulator behavior, and consumption of the frontend-independent,
-typed platform contracts. It does not claim that an unimplemented GPIO board,
-display controller, battery driver or privileged shutdown driver works. The
-support manifest registers no production physical adapter, so physical-appliance
-acceptance is **not applicable**, rather than a failed or missing GUI percentage.
+The functional desktop/simulator implementation is complete, but final GUI
+acceptance remains **pending**. The current support manifest records unavailable
+mandatory native Windows lifecycle/media, real Linux suspend/lock media, and
+updated full-GUI Razer duplex reruns. No percentage is inferred from automated
+coverage. The repository registers no production physical adapter, so appliance
+acceptance remains outside the claimed product scope rather than being counted
+as a desktop failure.
 
 The three evidence dimensions required by GUI-DONE-03 are:
 
 | Dimension | Final status | Scope |
 | --- | --- | --- |
-| Functional/design implementation | **Complete — 100%** | Required V/A/S/L behavior, state/action ownership, responsive native views, accessibility projection, media, lifecycle and platform consumers |
-| Installed desktop support | **Accepted for Linux x86_64 and Windows x86_64** | Current-source bundles, isolated consumers, offline installers and installed desktop/simulator launch; Windows Razer validation route recorded separately |
+| Functional/design implementation | **Implemented** | Required V/A/S/L behavior, state/action ownership, responsive native views, accessibility projection, media, lifecycle and platform consumers |
+| Installed desktop support | **Installation verified; final native acceptance pending** | Current-source bundles, isolated consumers, offline installers and installed desktop/simulator launch pass; current mandatory lifecycle/media reruns remain unavailable |
 | Concrete physical appliance | **Not applicable / not claimed** | `physical_adapters` is empty; a future adapter must provide its own registered ID, schema, permissions and physical evidence before it is advertised |
 
 This closure does not weaken either approved input. Their SHA-256 values remain:
@@ -30,8 +30,8 @@ contracts`). The earlier device-lifecycle implementation is
 `b581144fd4f16ba4f0bcf14b1dd08e4c822b620f`. Documentation-only commits after
 the implementation SHA do not change the tested runtime source.
 
-The final continuation closes the two remaining GUI-owned lifecycle/media
-questions. Native focus loss and OS suspend now share one toolkit-independent
+The final implementation continuation closes the two remaining GUI-owned
+lifecycle/media code questions. Native focus loss and OS suspend now share one toolkit-independent
 input/media revocation path. Suspend disables auto-play, cancels held input,
 stops capture and playback, requests the Core privacy cover, and resume only
 repaints; it cannot synthesize focus, unlock or a new PTT press. A controller
@@ -72,11 +72,11 @@ that boundary. The adapter owns platform privilege, atomic exclusive-host
 coordination and device-specific acknowledgements.
 
 Later sections retain chronological checkpoints and earlier estimates as audit
-history. Statements there that the implementation was 78%/90%, that V21/V22 were
-unimplemented, or that absent physical hardware was a GUI completion gate are
-superseded by this closure and the final support manifest. Product publication,
-signing/tagging and support for any future physical adapter were not requested
-and were not performed.
+history. Statements there that V21/V22 were unimplemented are superseded by the
+current source. Their dated measurements and open-gate records remain historical
+evidence, while the current native blockers are authoritative in the support
+manifest. Product publication, signing/tagging and support for any future
+physical adapter were not requested and were not performed.
 
 ## 20 September continuation
 

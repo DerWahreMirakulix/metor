@@ -979,3 +979,73 @@ DTO contract.
 | `python scripts/validate_generated_docs.py` | PASS; generated references fresh and reproducible |
 | `npm ls --package-lock-only --ignore-scripts --depth=0` | PASS; locked Prettier dependency resolves locally |
 | `git diff --check` | PASS |
+
+## A21 verification
+
+The documentation now has one human entry point and one active owner for each
+contract class. `README.md` describes the framework, the four independently
+owned distributions, release-bundle versus source installation, and canonical
+`metor` frontend selection. Root `AGENTS.md` remains the short coding-agent
+router; `docs/AGENTS.md` sends GUI work to the GUI contract, approved specs, and
+the shared frontend boundary. No `docs/README.md` or third product specification
+was introduced.
+
+The still-current neutral content formerly named `EMBEDDED_UI.md` now lives only
+at `docs/contracts/FRONTENDS.md`. Its introduction describes Terminal, GUI, and
+third-party clients of the shared Core/SDK contract without promising a future
+Embedded product. Active README, agent, architecture, and GUI-contract links
+use the new name. The old path has no redirect or compatibility copy. Historical
+source names inside immutable specs and dated audit evidence remain historical
+provenance, not active contract links.
+
+The two owner-approved GUI inputs remain byte-identical at their durable
+`docs/specs/` paths: functional SHA-256
+`8907c510aeb7cf9272816e60bd1c09a2f38c31c7d340d67859163254f2c8cca7`
+and layout SHA-256
+`3202019b3fd3e7aef472d281006cdb35c1caf073dbaaf2ee75bf691eeaadf5b0`.
+The active integration map names those durable inputs. Their byte-identical
+`docs/.temp` copies and the now-empty directory are removed; immutable spec
+links to older repository history were not edited.
+
+`.prettierignore` protects `docs/specs/` and `docs/generated/` from a broad
+Markdown write. Generated Markdown retains its dedicated owner: the generator
+formatter supplies an explicit empty ignore file and therefore still formats
+only the selected generated target. Repeated generated-reference validation
+passes. During verification, the existing mutating `format:md` command was
+accidentally invoked with a trailing `--check`; its eight authored/historical
+format-only diffs were immediately reversed before semantic edits were
+reapplied. The protected specs and generated files never changed, and no
+historical evidence rewrite remains in the final diff.
+
+The governance audit now names the actual version registry package and links
+to this closure worklog instead of a removed remediation file. Its frontend
+review criterion uses typed IPC plus the narrow public host/settings contracts,
+not direct profile/process access or a required ephemeral executor. Shared
+logic, key cleanup, and thread-failure criteria now preserve owner boundaries,
+best-effort physical-erasure limits, and observable mandatory release failures.
+
+Active status text follows the evidence rather than a percentage. Functional
+desktop/simulator code is implemented and Linux/Windows installation evidence
+is retained, but the current installed Windows WTS/power media, real Linux
+suspend/lock media, and updated full-GUI Razer duplex reruns remain mandatory
+native acceptance blockers. `GUI.md`, `RELEASING.md`, the current header of the
+dated GUI report, and `gui/support.json` agree on that boundary. The machine
+manifest contains no completion percentage and reports acceptance false while
+those named gates are pending. Historical dated measurements and implementation
+SHAs were preserved. The README purge command now promises key-first logical
+destruction and best-effort filesystem cleanup, not impossible physical erasure.
+
+| Command | Result |
+| ------- | ------ |
+| `python -m unittest tests.test_documentation_contract` before changes | EXPECTED FAIL/ERROR; neutral contract, Prettier protection, live governance link, and `.temp` ownership were unresolved |
+| `python -m unittest tests.test_documentation_contract tests.test_source_documentation` | PASS; 5 documentation/source ownership tests |
+| Active Markdown local file/anchor traversal | PASS; README, agent, architecture, contribution, glossary, release, governance, frontend and GUI contract links resolve |
+| `sha256sum docs/specs/METOR_GUI_SPEC.md docs/specs/METOR_GUI_LAYOUT_SPEC.md` before and after changes | PASS; exact approved hashes unchanged |
+| `node node_modules/prettier/bin/prettier.cjs --check` for new/changed focused contracts | PASS; FRONTENDS, agent, governance and GUI contract use pinned formatting |
+| Broad Prettier-write protection plus post-run hash/status inspection | PASS; specs/generated excluded; unintended authored format-only diffs reversed |
+| `python scripts/validate_generated_docs.py` | PASS; targeted formatter bypasses broad ignore and outputs remain fresh/reproducible |
+| `python -m metor --version`, `--help`, `chat --help`, and `chat --list-ui` | PASS; documented canonical nonmutating entry paths parse; installed Terminal entry point is listed |
+| `python -m json.tool docs/contracts/gui/support.json` | PASS; machine-readable status is valid and names pending gates |
+| `ruff check` and `ruff format --check` for changed Python tooling/tests | PASS |
+| `mypy scripts/format_generated_docs.py tests/test_documentation_contract.py` | PASS under strict project configuration |
+| `git diff --check` | PASS |

@@ -29,7 +29,7 @@ Load the minimum relevant context for the task:
 - Settings work: generated [SETTINGS.md](./generated/SETTINGS.md), [GLOSSARY.md](./GLOSSARY.md), and the settings implementation.
 - Release/versioning work: [RELEASING.md](./RELEASING.md), `src/metor/versioning/__init__.py`, and generated [compatibility.json](./generated/compatibility.json) where relevant.
 - GUI work: [GUI.md](./contracts/GUI.md), its approved functional/layout inputs,
-  and the frontend-neutral [EMBEDDED_UI.md](./contracts/EMBEDDED_UI.md) boundary.
+  and the frontend-neutral [FRONTENDS.md](./contracts/FRONTENDS.md) boundary.
 - Security, persistence, concurrency, or audit work: [AUDIT.md](./governance/AUDIT.md).
 
 For work affecting release automation, packaging, version values, wire

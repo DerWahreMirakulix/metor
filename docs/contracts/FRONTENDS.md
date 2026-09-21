@@ -1,20 +1,18 @@
-# Embedded UI Core Contract
+# Frontend Core Contract
 
-The official graphical frontend is now `gui` / `metor-ui-gui`. Its current
-implementation contract and approved v1.0 inputs are routed through
-[GUI.md](GUI.md). The former `docs/.temp/EMBEDDED_UI_SPEC.md` assignment is
-historical and must not be merged into the active GUI requirements. The
-frontend-neutral Core content below remains useful; GUI-specific behavior and
-unresolved differences are recorded in [GUI_INTEGRATION_MAP.md](GUI_INTEGRATION_MAP.md).
+This document defines the shared Core and SDK boundary for every Metor
+frontend. The official frontends are `terminal` / `metor-ui-terminal` and
+`gui` / `metor-ui-gui`. The GUI's presentation contract and approved v1.0
+inputs are routed through [GUI.md](GUI.md); GUI-specific implementation facts
+remain in [GUI_INTEGRATION_MAP.md](GUI_INTEGRATION_MAP.md).
 
-This document defines the frontend-neutral Core boundary that a future Embedded
-UI must consume. It does not define or implement screens, navigation, playback,
-hardware drivers, or other presentation behavior. The Terminal remains an equal
-client of the same typed contract.
+This contract does not define screens, navigation, playback, hardware drivers,
+or other presentation behavior. Terminal, GUI, and third-party clients consume
+the same typed boundary without gaining storage, transport, key, or host-process
+ownership.
 
-The owner-accepted starting repository revision is recorded in the GUI
-integration map; the former closure report has been removed from this checkout.
-This integration contract does not approve or replace GUI/layout specifications.
+The owner-accepted GUI starting revision is recorded in the integration map.
+This frontend contract does not approve or replace GUI/layout specifications.
 
 ## Ownership boundary
 

@@ -1,9 +1,9 @@
 {
-  "status": "gui_implementation_complete",
+  "status": "gui_implemented_acceptance_pending",
   "completion": {
-    "gui_implementation_percent": 100,
-    "gui_contract_and_design": "complete at the declared desktop and simulator support level",
+    "gui_contract_and_design": "implemented for the declared desktop and simulator scope",
     "desktop_installation": "tested on Linux x86_64 and Windows x86_64",
+    "mandatory_native_acceptance": "pending installed Windows WTS/power media, real Linux suspend/lock media, and current full-GUI Razer duplex reruns",
     "physical_appliance": "not applicable: no production physical adapter is registered or claimed",
     "release_publication": "not performed"
   },
@@ -94,6 +94,6 @@
   "purge": "bounded physical-input composition, scoped grant, exact initiation and safe-terminal shutdown gating tested; no production hardware driver or real destruction/shutdown tested",
   "pause_checkpoint": "2026-09-15: retained root source has targeted native/static validation; installed artifacts/headset evidence predates final RootPanel/RootRow changes",
   "current_checkpoint": "2026-09-21: real Linux session-D-Bus lifecycle delivery and software full-GUI capture/playback overlap through SDK/encrypted Core pass; native Windows lifecycle and updated full-GUI Razer duplex reruns remain unavailable; earlier installed/bundle/native evidence retains its recorded source scope",
-  "acceptance_at_claimed_support_level": true,
+  "acceptance_at_claimed_support_level": false,
   "physical_appliance_acceptance": "not applicable until a production adapter is registered and claimed"
 }

@@ -1,7 +1,8 @@
 # Metor GUI runtime contract
 
-**Implementation status: complete at the declared desktop/simulator support
-level. No physical-appliance adapter is claimed.**
+**Implementation status: functional desktop/simulator scope implemented; final
+acceptance remains pending on the native lifecycle and media reruns named in
+the support manifest. No physical-appliance adapter is claimed.**
 This is the current GUI entry point. The approved
 [functional v1.0](../specs/METOR_GUI_SPEC.md) and
 [layout v1.0](../specs/METOR_GUI_LAYOUT_SPEC.md) remain the implementation
@@ -200,8 +201,8 @@ Simulator descriptions never gain real destructive or shutdown access.
 - [Support manifest](gui/support.json): renderer/install evidence versus untested targets.
 - [Acceptance report](../audits/GUI_IMPLEMENTATION_2026-09-12.md): final closure,
   work packages, GAT/view/action coverage, exact checks and evidence limits.
-- [Frontend-neutral Core boundary](EMBEDDED_UI.md): still-current shared Core
-  behavior; historical Embedded naming does not define another official GUI.
+- [Frontend-neutral Core boundary](FRONTENDS.md): shared Core/SDK behavior for
+  Terminal, GUI, and third-party clients.
 
 Assets and their license/revision/SHA-256 records live in
 `src/metor/ui/gui/assets/manifest.json`. Native captures use synthetic identities
@@ -213,5 +214,5 @@ checks. Clipboard export is disabled in composer and credential fields.
 
 This code's RAM lifetime is not an OS secure-erasure guarantee. Hardened
 swap/crash-dump/screenshot policy and certification of a future concrete device
-belong to its deployment/support profile; they do not change the completed GUI
-contract implementation.
+belong to its deployment/support profile. They also do not waive the explicitly
+pending native desktop acceptance gates.

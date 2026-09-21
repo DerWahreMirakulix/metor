@@ -1,6 +1,6 @@
 # GUI public integration map
 
-Implementation input: functional and layout v1.0 in `docs/.temp/`. Starting
+Implementation input: functional and layout v1.0 in `docs/specs/`. Starting
 accepted checkout: `0cfa122a47c879106b86de9578439df6ffc10b7c`, branch `embeddedui`.
 The owner supplied acceptance of this baseline. Historical closure reports are
 not a second backlog. Neither approved input is edited by implementation.

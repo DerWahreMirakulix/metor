@@ -30,6 +30,8 @@ def format_document(path: Path) -> None:
             str(package / 'bin' / 'prettier.cjs'),
             '--end-of-line',
             'lf',
+            '--ignore-path',
+            str(root / 'scripts' / 'prettier-generated.ignore'),
             '--write',
             str(path.resolve()),
         ],

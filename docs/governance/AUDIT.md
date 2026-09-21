@@ -7,17 +7,17 @@ Every Pull Request, AI code generation, or architectural change MUST be audited 
 
 ## 1. Domain-Driven Design (DDD) & Architecture
 
-- [ ] **Strict Domain Isolation:** Does the UI (Client) access data layers or cryptographic keys directly? _(It NEVER should. The UI must exclusively communicate via IPC DTOs. If offline, the UI must spin up an ephemeral headless background process to perform data operations)._
+- [ ] **Strict Domain Isolation:** Does a frontend access data layers, Tor, or cryptographic keys directly? _(It must not. Runtime work uses typed IPC. Offline profile selection/bootstrap and local frontend settings use only the narrow public host/settings contracts.)_
 - [ ] **Zero-Text Policy:** Does the Daemon send pre-formatted UI strings? _(It shouldn't. The Daemon must only emit raw Domain Codes and data. The UI layer is solely responsible for rendering text)._
 - [ ] **Configuration Routing:** Are client-side settings (`ui.*`) kept strictly local? Are server-side settings (`daemon.*`) correctly forwarded to the Daemon via IPC to prevent polluting remote instances?
-- [ ] **Centralized Logic:** Are common operations (like type coercion, path resolution, or formatting) handled by centralized utility classes rather than duplicating logic across domains?
+- [ ] **Owned Shared Logic:** Does genuinely shared behavior have one owner without coupling Base to a frontend or moving presentation text into the wire contract?
 
 ## 2. Cryptography & OPSEC
 
 - [ ] **PRNG Verification:** Are all cryptographic seeds, UUIDs, tokens, and nonces generated using a cryptographically secure module (e.g., `secrets`)? _(Reject any use of standard `random`)._
 - [ ] **Handshake Security:** Are cryptographic signatures and challenge-response mechanisms validated securely without susceptibility to timing attacks?
 - [ ] **Key Storage & Permissions:** Does Argon2id derive only the KEK that wraps a random PMK with authenticated encryption? Are keyslot files and directories strictly minimized (e.g., `0o600` or `0o700`)?
-- [ ] **Zero-Trace Policies:** Are volatile runtime keys or sensitive ephemeral data securely shredded from disk immediately upon daemon shutdown or read-receipt?
+- [ ] **Truthful Key and Retention Cleanup:** Are runtime keys cleared on lock/stop, protected-key destruction ordered before best-effort file cleanup, and retention/read-release policies applied without claiming guaranteed physical erasure?
 
 ## 3. Network, IPC & Anti-DoS
 
@@ -31,7 +31,7 @@ Every Pull Request, AI code generation, or architectural change MUST be audited 
 - [ ] **Resource Locking:** Are shared resources (e.g., dictionaries, connection pools) safely locked using `threading.Lock` before iteration or mutation?
 - [ ] **Cross-Process Sync:** Does the cross-process file locking mechanism protect critical configurations across concurrent CLI/Daemon invocations? Does it handle crashed states gracefully?
 - [ ] **Zombie Processes:** Are spawned sub-processes (like the Tor binary) properly tracked and forcefully killed if the main process shuts down unexpectedly?
-- [ ] **Silent Thread Failures:** Do all background workers contain broad `try/except` blocks to prevent a single malformed packet or unexpected state from crashing the entire Daemon?
+- [ ] **Thread Failure Isolation:** Are malformed inputs and optional callbacks isolated while mandatory release failures remain observable, bounded workers terminate cleanly, and broad catches avoid hiding authorization or persistence failures?
 
 ## 5. Data-at-Rest & Database Integrity
 
@@ -59,7 +59,7 @@ Every Pull Request, AI code generation, or architectural change MUST be audited 
 
 ## 7. Versioning and Release Integrity
 
-- [ ] **Central Authority:** Do all application and compatibility version values come from `src/metor/versioning.py`?
+- [ ] **Central Authority:** Do all application and compatibility version values come from `src/metor/versioning/__init__.py`?
 - [ ] **Persistent Schema:** Did every SQL schema change explicitly bump `DB_SCHEMA_VERSION` and provide every advertised migration step?
 - [ ] **Wire Compatibility:** Did breaking IPC or peer-wire behavior explicitly bump its protocol generation?
 - [ ] **Storage Compatibility:** Did incompatible keyslot, blob, or cryptographic derivation changes explicitly bump their own generation and address migration?
@@ -69,4 +69,4 @@ Every Pull Request, AI code generation, or architectural change MUST be audited 
 
 ## Related acceptance evidence
 
-- [Refactor 2 final remediation evidence](./REFACTOR_2_FINAL_REMEDIATION.md)
+- [Final closure worklog](../audits/FINAL_CLOSURE_WORKLOG.md)

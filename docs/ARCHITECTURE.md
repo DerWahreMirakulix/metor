@@ -324,7 +324,7 @@ Use this document when you need to answer one of these questions:
 - [API.md](./generated/API.md): Generated, first-class reference for the typed IPC contract.
 - [api.schema.json](./generated/api.schema.json): Generated JSON Schema wire contract for the typed IPC DTOs.
 - [GLOSSARY.md](./GLOSSARY.md): Canonical terminology reference for settings namespaces, transport fields, and renamed symbols.
-- [EMBEDDED_UI.md](./contracts/EMBEDDED_UI.md): Embedded frontend ownership, platform ports, projections, recovery rules, and contract matrix.
+- [FRONTENDS.md](./contracts/FRONTENDS.md): Shared frontend ownership, platform ports, projections, recovery rules, and contract matrix.
 - [GUI.md](./contracts/GUI.md): Native GUI contract, approved v1.0 inputs,
   platform decision and implementation gates.
 - [AUDIT.md](./governance/AUDIT.md): Review checklist for security, OPSEC, concurrency, and architecture risks.

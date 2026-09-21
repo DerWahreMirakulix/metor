@@ -1,6 +1,10 @@
 # A Tor Messenger Framework
 
-**Metor** is a highly secure, Tor-based terminal messenger written in Python. It provides a persistent Tor Hidden Service (.onion address) along with an interactive, multiplexed live chat and asynchronous offline messaging.
+**Metor** is a Tor-based messenger framework written in Python. It provides a
+persistent Tor Onion Service, typed SDK, general CLI and daemon, an interactive
+Terminal frontend, and a native desktop GUI. LIVE communication and
+asynchronous offline Drops share the same daemon-owned transport and durable
+state.
 
 Built on a **Client-Daemon Architecture**, frontends own interaction and presentation while the daemon owns transport, durable delivery and authorization. You can manage connections, maintain an address book, queue offline messages and view connection history locally or remotely.
 
@@ -14,7 +18,7 @@ system model, then use the focused references when you need exact contracts.
 - Build against the daemon with the generated [IPC API reference](docs/generated/API.md)
   and [settings reference](docs/generated/SETTINGS.md).
 - Work on the native GUI through the [GUI contract and development status](docs/contracts/GUI.md)
-  and the [frontend-neutral Core boundary](docs/contracts/EMBEDDED_UI.md).
+  and the [frontend-neutral Core boundary](docs/contracts/FRONTENDS.md).
 - Contribute using the [contribution guide](docs/CONTRIBUTE.md) and
   [security audit checklist](docs/governance/AUDIT.md).
 - Prepare a release with the [release and versioning guide](docs/RELEASING.md).
@@ -42,8 +46,13 @@ system model, then use the focused references when you need exact contracts.
 
 ## Supported Hosts
 
-- **Linux:** Fully supported. GitHub Releases publish a compiler-free runtime wheel bundle and the source install path uses the prebuilt `sqlcipher3-binary` wheel.
-- **Windows:** Fully supported. GitHub Releases publish a compiler-free runtime wheel bundle; source installs still build `sqlcipher3` from source.
+- **Linux x86-64:** Runtime wheel bundles and desktop/simulator GUI installation
+  are tested. Native lifecycle and media limits are listed in the
+  [GUI support manifest](docs/contracts/gui/support.json).
+- **Windows x86-64:** Runtime wheel bundles and desktop/simulator GUI
+  installation are tested. Source installs still build `sqlcipher3` from
+  source; current native lifecycle/media gaps remain explicit in the support
+  manifest.
 
 For Windows source installs from a checkout, make sure the Microsoft C++ Build Tools are available before running `pip install`.
 
@@ -77,7 +86,7 @@ Metor is split into four non-overlapping packages:
 | **`metor-sdk`**         | IPC client, typed API/wire DTOs, proof helpers, and the public frontend launcher contract | Client integration or a third-party frontend | `pip install metor-sdk` |
 | **`metor`**             | General CLI, daemon, storage, Tor and local profile/process orchestration; no interactive UI | Headless/base installation | `pip install metor` |
 | **`metor-ui-terminal`** | Interactive Terminal chat, slash-command help, rendering, theme and frontend resources | Current interactive frontend | `pip install metor-ui-terminal` |
-| **`metor-ui-gui`** | Native Kivy GUI and bundled local assets | Incomplete development slice; [acceptance status](docs/contracts/GUI.md) | `pip install metor-ui-gui` |
+| **`metor-ui-gui`** | Native Kivy desktop/simulator GUI and bundled local assets | Desktop GUI within the [declared support boundary](docs/contracts/GUI.md) | `pip install metor-ui-gui` |
 
 Official package versions are coordinated exactly. `metor` depends on the
 matching SDK; installing the Terminal UI pulls in matching base and SDK
@@ -98,10 +107,10 @@ The wheel bundle is a **release artifact**, not a normal repository file. A plai
 
 ### 2. Install From The Release Wheel Bundle
 
-The release workflow builds separate SDK, base, and base-plus-Terminal
-wheelhouses for each supported host. Each archive resolves one explicit install
-target and its pinned dependencies; installers never install every wheel by
-glob.
+The release workflow builds separate SDK, base, base-plus-Terminal, and
+base-plus-GUI wheelhouses for each supported host. Each archive resolves one
+explicit install target and its pinned dependencies; installers never install
+every wheel by glob.
 
 This path is intended for end users consuming an official release. If you cloned the repository directly, use the source checkout path below instead.
 
@@ -212,6 +221,13 @@ Open a second terminal window to start the interactive user interface:
 metor chat
 ```
 
+Select an installed frontend explicitly when needed:
+
+```bash
+metor chat --ui terminal
+metor chat --ui gui
+```
+
 Inside the Chat UI, you have access to the following slash commands:
 
 | Command                         | Description                                                          |
@@ -276,7 +292,10 @@ Want to run Metor on a server and connect securely from your laptop?
 ### 5. Emergency & Cleanup
 
 - `metor cleanup`: Kills zombie Tor processes (`tor.pid`) and clears stale ghost locks.
-- `metor purge`: **WARNING!** Permanently wipes the entire `.metor` directory, completely destroying all databases, histories, and private keys (irreversible).
+- `metor purge`: **WARNING!** Destroys protected key access for encrypted
+  profiles before best-effort removal of the `.metor` tree. Filesystem,
+  snapshot, backup, and flash-remanence limits still apply; see the
+  [architecture guide](docs/ARCHITECTURE.md#lock-versus-purge-and-self-destruct).
 
 ## ⚙️ Settings & Configuration
 
