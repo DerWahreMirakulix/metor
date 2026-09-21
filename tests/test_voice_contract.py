@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from metor.core.api import ContentType, Delivery, MessageReceivedEvent
 from metor.core.daemon.managed.network.state import StateTracker
 from metor.core.daemon.managed.network.voice import VoiceTransferManager
+from metor.core.daemon.managed.network.voice.inbound import VoiceInboundMixin
 from metor.data import ContactManager, MessageDirection, MessageManager, SettingKey
 from metor.data.blob import BlobLifecycle, PlaintextBlobStore
 from metor.data.profile import ProfileManager
@@ -64,6 +65,16 @@ class VoiceContractTests(unittest.TestCase):
             broadcast=self._events.append,
             config=self._pm.config,
         )
+
+    def test_inbound_frame_methods_have_one_dedicated_owner(self) -> None:
+        """Receive admission is inherited unchanged from the inbound component."""
+        self.assertIs(
+            VoiceTransferManager.receive_begin, VoiceInboundMixin.receive_begin
+        )
+        self.assertIs(
+            VoiceTransferManager.receive_chunk, VoiceInboundMixin.receive_chunk
+        )
+        self.assertIs(VoiceTransferManager.receive_end, VoiceInboundMixin.receive_end)
 
     def test_finalized_live_voice_falls_back_with_same_message_id(self) -> None:
         """Promotes one complete disconnected Voice turn without changing identity."""
