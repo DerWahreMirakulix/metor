@@ -48,7 +48,8 @@ from metor.data import (
 )
 from metor.data.sql import ProfileMetadataRepository
 from metor.data.blob import BlobLifecycle, BlobStore
-from metor.utils import Constants, clean_onion, secure_clear_buffer
+from metor.shared import clean_onion, secure_clear_buffer
+from metor.utils import Constants
 
 # Local Package Imports
 from metor.core.daemon.managed.crypto import Crypto

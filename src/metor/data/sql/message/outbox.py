@@ -13,7 +13,7 @@ from metor.data.message.models import (
     PendingLiveRecord,
 )
 from metor.data.sql.backends import SqlParam
-from metor.utils import clean_onion
+from metor.shared import clean_onion
 
 
 from .receipts import MessageReceiptStore

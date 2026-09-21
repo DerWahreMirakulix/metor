@@ -19,7 +19,8 @@ from metor.core.profile_keys import (
     ProtectedKeyMissingError,
 )
 from metor.data.profile import ProfileManager
-from metor.utils import Constants, secure_clear_buffer
+from metor.shared import secure_clear_buffer
+from metor.utils import Constants
 
 
 class KeyManager:

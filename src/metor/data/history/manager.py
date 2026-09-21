@@ -5,7 +5,8 @@ from pathlib import Path
 import secrets
 from typing import Dict, List, Optional
 
-from metor.utils import Constants, clean_onion
+from metor.shared import clean_onion
+from metor.utils import Constants
 
 from metor.data.history.codes import (
     HistoryActor,

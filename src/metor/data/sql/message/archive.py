@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple, cast
 from metor.core.api import Delivery
 from metor.data.message.models import MessageDirection, StoredMessageRecord
 from metor.data.sql.backends import SqlParam
-from metor.utils import clean_onion
+from metor.shared import clean_onion
 
 # Local Package Imports
 from .receipts import MessageReceiptStore

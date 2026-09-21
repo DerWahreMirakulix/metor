@@ -17,7 +17,8 @@ import nacl.utils
 from nacl.encoding import RawEncoder
 
 from metor.core.api import JsonValue
-from metor.utils import secure_clear_buffer, secure_shred_file
+from metor.shared import secure_clear_buffer
+from metor.utils import secure_shred_file
 from metor.versioning import KEYSLOT_FORMAT_VERSION, PROFILE_KEY_DERIVATION_VERSION
 
 PROFILE_MASTER_KEY_BYTES = 32

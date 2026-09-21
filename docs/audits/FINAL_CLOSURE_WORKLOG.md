@@ -65,7 +65,8 @@ ownership map. Counts sum to 763; no path is unclassified.
 | A15      | verified | `tests/{test_gui_capture.py,test_gui_audio.py,gui_native_voice.py}`, `docs/contracts/{GUI_PLATFORM_ADR.md,gui/support.json}`, this worklog | A15 gates below | Complete |
 | A16      | verified | `src/metor/core/daemon/managed/{notify/notification.py,notify/sinks.py,ipc.py,engine/daemon.py}`, `tests/{test_notification_delivery.py,test_gui_capture.py}`, this worklog | A16 gates below | Complete |
 | A17      | verified | Removed `src/metor/ui/embedded/**` and `tests/test_embedded_contract.py`; `tests/{test_ui_boundaries.py,test_contact_qr.py}`, this worklog | A17 gates below | Complete |
-| A18–A25 | open     | None                                                                                                            | Not run              | A18: continue final closure sequence                                         |
+| A18      | verified | `scripts/{build_release_wheelhouse.py,release/bundle.py}`, Base/shared/Core owner imports, `src/metor/utils/{__init__,constants}.py`, `tests/{test_release_contract.py,test_closure_architecture.py}`, `docs/ARCHITECTURE.md`, this worklog | A18 gates below | Complete |
+| A19–A25 | open     | None                                                                                                            | Not run              | A19: split oversized Voice responsibilities                                  |
 
 ## A00 verification
 
@@ -782,4 +783,49 @@ compatibility generation, launcher, or application version.
 | `ruff check tests/test_contact_qr.py tests/test_ui_boundaries.py` | PASS |
 | `ruff format --check tests/test_contact_qr.py tests/test_ui_boundaries.py` | PASS |
 | `mypy tests/test_contact_qr.py tests/test_ui_boundaries.py` | PASS after adding an explicit existing text-content narrowing assertion |
+| `git diff --check` | PASS |
+
+## A18 verification
+
+Release wheelhouse construction is now repository tooling at
+`scripts.release.bundle`. The documented
+`python scripts/build_release_wheelhouse.py` command imports that owner from the
+checkout and still exposes all four variants plus `all`. Its repository root is
+the canonical value from `scripts.release.paths`, adjusted for the builder's new
+location. The former `metor.utils.release_bundle` runtime module is removed with
+no redirect.
+
+A real Base wheel and its RECORD contain neither the old builder nor any
+`scripts/` path. Builder command-construction, bundle names, installers, locks,
+and Base/Terminal/SDK variant ownership remain covered by the release contract
+and canonical release workflow tests.
+
+`DEFAULT_COLS`, `INPUT_SELECT_TIMEOUT_SEC`, and `INPUT_SLEEP_SEC` now exist only
+in the Terminal constants owner, their sole production consumer. Shared wire
+bounds remain SDK-owned and the Base `Constants` class continues to inherit
+them without duplicating or changing protocol values.
+
+The lazy `metor.utils` facade now contains only Base-owned runtime utilities:
+runtime constants, file lock, process manager, JSON validator, secure path
+cleanup, and the intentionally retained pure human-input `TypeCaster`. Core
+session-auth primitives and shared onion/buffer helpers are imported directly
+from `metor.core.auth` and `metor.shared` by active callers. A fresh isolated
+process proves resolving `TypeCaster` performs no host path lookup and loads no
+Core, process, or cryptographic dependency. These ownership corrections change
+no wire value, persistence format, launcher spelling, compatibility generation,
+or application version.
+
+| Command | Result |
+| ------- | ------ |
+| New A18 release-owner, Base-wheel, constants-owner, utils-facade and inert-caster regressions before implementation | EXPECTED FAIL/ERROR; `scripts.release.bundle` was absent, the Base constants remained duplicated, and the utils facade still redirected Core/shared APIs |
+| `python -m unittest tests.test_release_contract tests.test_closure_architecture tests.test_security_contract tests.test_session_auth_contract tests.test_final_remediation_contract tests.test_raw_client_contract -q` outside the socket sandbox | PASS; 89 release, ownership, security, authentication, and raw-client tests |
+| `python -m unittest tests.test_versioning_release -q` | PASS; 30 wheel metadata, compatibility, release-workflow, and generated-reference tests |
+| `python scripts/build_release_wheelhouse.py --help` | PASS; public repository command exposes `base`, `terminal`, `sdk`, `gui`, and `all` |
+| `python -m pip wheel . --no-deps --no-build-isolation -w /tmp/metor-a18-wheel` | PASS; real Base wheel built |
+| Base wheel archive/RECORD ownership inspection | PASS; no `metor/utils/release_bundle.py` and no `scripts/release` entry |
+| `ruff check` and `ruff format --check` for all 28 changed Python files | PASS |
+| `mypy` for all 28 changed Python files | PASS under strict project configuration |
+| Active source/test/tooling search for old builder and cross-owner utils imports | PASS; only the negative no-compatibility regression names the old module |
+| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
+| `python scripts/versioning.py validate` | PASS; application 0.2.0 and compatibility registry remain valid |
 | `git diff --check` | PASS |

@@ -6,7 +6,8 @@ import json
 import secrets
 from typing import TYPE_CHECKING, List, Optional, Tuple, cast
 
-from metor.utils import Constants, clean_onion
+from metor.shared import clean_onion
+from metor.utils import Constants
 from metor.core.api import ContentType, Delivery, is_valid_message_id
 from metor.data.message.models import (
     MessageDirection,

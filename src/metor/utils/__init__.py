@@ -1,31 +1,14 @@
-"""
-Package initializer for the Utils layer.
-Provides a unified API for constants, file locking, process management, and security helpers.
-"""
+"""Lazy facade for Base-owned host runtime utilities."""
 
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from metor.core.auth import (  # noqa: F401
-        build_session_auth_proof,
-        build_session_auth_proof_from_key,
-        create_session_auth_salt,
-        create_session_auth_challenge,
-        derive_session_auth_proof_key,
-        verify_session_auth_proof,
-    )
     from metor.utils.caster import TypeCaster  # noqa: F401
     from metor.utils.constants import Constants  # noqa: F401
     from metor.utils.lock import FileLock  # noqa: F401
-    from metor.shared.network import (  # noqa: F401
-        clean_onion,
-        decode_tor_v3_onion_public_key,
-        ensure_onion_format,
-    )
     from metor.utils.process import ProcessManager  # noqa: F401
     from metor.utils.security import (  # noqa: F401
-        secure_clear_buffer,
         secure_remove_path,
         secure_shred_file,
     )
@@ -34,43 +17,12 @@ if TYPE_CHECKING:
 
 _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     'Constants': ('metor.utils.constants', 'Constants'),
-    'build_session_auth_proof': (
-        'metor.core.auth',
-        'build_session_auth_proof',
-    ),
-    'build_session_auth_proof_from_key': (
-        'metor.core.auth',
-        'build_session_auth_proof_from_key',
-    ),
-    'create_session_auth_salt': (
-        'metor.core.auth',
-        'create_session_auth_salt',
-    ),
-    'create_session_auth_challenge': (
-        'metor.core.auth',
-        'create_session_auth_challenge',
-    ),
-    'derive_session_auth_proof_key': (
-        'metor.core.auth',
-        'derive_session_auth_proof_key',
-    ),
     'FileLock': ('metor.utils.lock', 'FileLock'),
     'ProcessManager': ('metor.utils.process', 'ProcessManager'),
     'TypeCaster': ('metor.utils.caster', 'TypeCaster'),
     'validate_json_file': ('metor.utils.validators', 'validate_json_file'),
-    'clean_onion': ('metor.shared.network', 'clean_onion'),
-    'decode_tor_v3_onion_public_key': (
-        'metor.shared.network',
-        'decode_tor_v3_onion_public_key',
-    ),
-    'ensure_onion_format': ('metor.shared.network', 'ensure_onion_format'),
-    'secure_clear_buffer': ('metor.utils.security', 'secure_clear_buffer'),
     'secure_remove_path': ('metor.utils.security', 'secure_remove_path'),
     'secure_shred_file': ('metor.utils.security', 'secure_shred_file'),
-    'verify_session_auth_proof': (
-        'metor.core.auth',
-        'verify_session_auth_proof',
-    ),
 }
 
 
@@ -112,20 +64,10 @@ def __dir__() -> list[str]:
 
 __all__ = [
     'Constants',
-    'build_session_auth_proof',
-    'build_session_auth_proof_from_key',
-    'create_session_auth_salt',
-    'create_session_auth_challenge',
-    'derive_session_auth_proof_key',
     'FileLock',
     'ProcessManager',
     'TypeCaster',
     'validate_json_file',
-    'clean_onion',
-    'decode_tor_v3_onion_public_key',
-    'ensure_onion_format',
-    'secure_clear_buffer',
     'secure_remove_path',
     'secure_shred_file',
-    'verify_session_auth_proof',
 ]

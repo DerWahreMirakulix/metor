@@ -2,7 +2,8 @@
 
 from typing import TYPE_CHECKING, List, Optional, Tuple, cast
 
-from metor.utils import Constants, clean_onion
+from metor.shared import clean_onion
+from metor.utils import Constants
 
 from metor.data.history.codes import (
     HistoryActor,

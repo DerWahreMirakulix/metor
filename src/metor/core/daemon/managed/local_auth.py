@@ -7,14 +7,14 @@ import threading
 import time
 from typing import Dict, Optional
 
-from metor.utils import (
-    Constants,
+from metor.core.auth import (
     create_session_auth_salt,
     create_session_auth_challenge,
     derive_session_auth_proof_key,
-    secure_clear_buffer,
     verify_session_auth_proof,
 )
+from metor.shared import secure_clear_buffer
+from metor.utils import Constants
 
 
 @dataclass(frozen=True)

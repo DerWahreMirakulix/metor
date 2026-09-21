@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Optional, TYPE_CHECKING, Tuple, cast
 
-from metor.utils import secure_clear_buffer
+from metor.shared import secure_clear_buffer
 from metor.versioning import DB_SCHEMA_MIN_SUPPORTED, DB_SCHEMA_VERSION
 
 # Local Package Imports

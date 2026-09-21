@@ -16,7 +16,7 @@ from zipfile import ZipFile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
-from metor.utils.release_bundle import (
+from scripts.release.bundle import (
     PIP_VERSION,
     build_bundle_name,
     clean_packaging_artifacts,
@@ -25,6 +25,7 @@ from metor.utils.release_bundle import (
     build_install_shell_script,
     build_install_windows_script,
 )
+from scripts.release.paths import PROJECT_ROOT
 from metor.data.profile import (
     ProfileManager,
 )
@@ -613,6 +614,20 @@ class ReleaseContractTests(unittest.TestCase):
 
         self.assertEqual(bundle_name, 'metor-wheelhouse-windows-x86_64-py311')
 
+    def test_public_release_builder_command_loads_repository_tooling(self) -> None:
+        """The documented wrapper resolves its non-runtime owner from the checkout."""
+        repo_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, 'scripts/build_release_wheelhouse.py', '--help'],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('--variant {base,terminal,sdk,gui,all}', result.stdout)
+        self.assertEqual(PROJECT_ROOT, repo_root)
+
     def test_release_bundle_name_supports_terminal_and_sdk_variants(self) -> None:
         """
         Verifies that release bundle names distinguish daemon and SDK variants.
@@ -737,11 +752,11 @@ class ReleaseContractTests(unittest.TestCase):
             output_dir = Path(temp_dir)
             with (
                 patch(
-                    'metor.utils.release_bundle.run_command',
+                    'scripts.release.bundle.run_command',
                     side_effect=fake_run_command,
                 ),
                 patch(
-                    'metor.utils.release_bundle.archive_bundle',
+                    'scripts.release.bundle.archive_bundle',
                     return_value=output_dir / 'bundle.zip',
                 ),
             ):
@@ -801,11 +816,11 @@ class ReleaseContractTests(unittest.TestCase):
             output_dir = Path(temp_dir)
             with (
                 patch(
-                    'metor.utils.release_bundle.run_command',
+                    'scripts.release.bundle.run_command',
                     side_effect=fake_run_sdk,
                 ),
                 patch(
-                    'metor.utils.release_bundle.archive_bundle',
+                    'scripts.release.bundle.archive_bundle',
                     return_value=output_dir / 'bundle.zip',
                 ),
             ):
@@ -815,11 +830,11 @@ class ReleaseContractTests(unittest.TestCase):
 
             with (
                 patch(
-                    'metor.utils.release_bundle.run_command',
+                    'scripts.release.bundle.run_command',
                     side_effect=fake_run_terminal,
                 ),
                 patch(
-                    'metor.utils.release_bundle.archive_bundle',
+                    'scripts.release.bundle.archive_bundle',
                     return_value=output_dir / 'bundle.zip',
                 ),
             ):
@@ -891,9 +906,17 @@ class ReleaseContractTests(unittest.TestCase):
 
             with ZipFile(wheel_files[0]) as wheel_archive:
                 archive_names = set(wheel_archive.namelist())
+                record_name = next(
+                    name for name in archive_names if name.endswith('.dist-info/RECORD')
+                )
+                wheel_record = wheel_archive.read(record_name).decode('utf-8')
 
             self.assertIn('metor/cli/proxy/core.py', archive_names)
             self.assertNotIn('metor/ui/terminal/help.py', archive_names)
+            self.assertNotIn('metor/utils/release_bundle.py', archive_names)
+            self.assertFalse(any(name.startswith('scripts/') for name in archive_names))
+            self.assertNotIn('release_bundle', wheel_record)
+            self.assertNotIn('scripts/release', wheel_record)
 
     def test_terminal_wheel_contains_only_interactive_frontend(self) -> None:
         """Verifies the Terminal wheel owns its UI and not base runtime modules.
@@ -935,11 +958,9 @@ class ReleaseContractTests(unittest.TestCase):
             self.assertNotIn('metor/core/profile_keys.py', archive_names)
             self.assertNotIn('metor/data/blob/store.py', archive_names)
 
-    def test_release_bundle_import_avoids_optional_runtime_utils_dependencies(
-        self,
-    ) -> None:
+    def test_release_bundle_is_repository_tooling_outside_runtime_utils(self) -> None:
         """
-        Verifies that release bundle import avoids optional runtime utils dependencies.
+        Verifies release tooling imports without restoring a runtime-module copy.
 
         Args:
             None
@@ -949,7 +970,7 @@ class ReleaseContractTests(unittest.TestCase):
         """
 
         module_names: tuple[str, ...] = (
-            'metor.utils.release_bundle',
+            'scripts.release.bundle',
             'metor.utils',
             'metor.utils.auth',
             'metor.utils.lock',
@@ -1001,7 +1022,7 @@ class ReleaseContractTests(unittest.TestCase):
 
         try:
             with patch('builtins.__import__', side_effect=guarded_import):
-                imported_module = importlib.import_module('metor.utils.release_bundle')
+                imported_module = importlib.import_module('scripts.release.bundle')
         finally:
             for name in module_names:
                 sys.modules.pop(name, None)
@@ -1011,6 +1032,8 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIsNotNone(imported_module)
         assert imported_module is not None
         self.assertTrue(hasattr(imported_module, 'build_release_wheelhouse'))
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module('metor.utils.release_bundle')
 
     def test_sqlcipher_loader_prefers_sqlcipher3(self) -> None:
         """

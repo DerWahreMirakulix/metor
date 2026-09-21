@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, List, Optional, Tuple, cast
 
-from metor.utils import clean_onion
+from metor.shared import clean_onion
 
 from metor.data.sql.backends import SqlParam
 

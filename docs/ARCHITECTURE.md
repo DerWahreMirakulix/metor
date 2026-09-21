@@ -998,9 +998,14 @@ eligible finalized inbound Voice item.
 
 `metor.core.auth` owns PIN/session proof primitives; `metor.shared` owns pure
 onion/identity helpers, mutable-buffer clearing and shared contract bounds.
-Base `metor.utils` re-exports intentional public primitives and owns host paths,
-file cleanup and runtime limits. SDK imports do not inspect HOME, load dotenv,
-open profiles or start processes. Base CLI/daemon explicitly call
+Callers import those owners directly. Base `metor.utils` lazily exposes only its
+host-owned `Constants`, `FileLock`, `ProcessManager`, configuration validator,
+secure path cleanup, and the pure human-input `TypeCaster`; it does not redirect
+SDK or Core APIs. Repository-only wheelhouse assembly lives under
+`scripts.release` and remains available through
+`python scripts/build_release_wheelhouse.py`, never through the installed Base
+runtime. SDK imports do not inspect HOME, load dotenv, open profiles or start
+processes. Base CLI/daemon explicitly call
 `initialize_runtime_environment` after side-effect-free help/version gates.
 
 Frontend launch contract v2 defers host work until the selected frontend starts.

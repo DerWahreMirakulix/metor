@@ -13,7 +13,7 @@ import nacl.hash
 import nacl.utils
 from nacl.encoding import RawEncoder
 
-from metor.utils import secure_clear_buffer
+from metor.shared import secure_clear_buffer
 from metor.versioning import BLOB_FORMAT_VERSION, BLOB_OBJECT_DERIVATION_VERSION
 
 BLOB_FORMAT_MAGIC = b'METORB01'

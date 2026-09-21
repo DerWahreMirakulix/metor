@@ -61,7 +61,7 @@ from metor.data import (
     MessageDirection,
     SettingKey,
 )
-from metor.utils import clean_onion
+from metor.shared import clean_onion
 from metor.versioning import (
     IPC_PROTOCOL_MIN_SUPPORTED,
     IPC_PROTOCOL_VERSION,

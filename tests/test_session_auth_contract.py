@@ -55,7 +55,8 @@ from metor.core.daemon.managed.quick_unlock import (
     QuickUnlockStorageError,
     create_pin_verifier,
 )
-from metor.utils import Constants, build_session_auth_proof
+from metor.core.auth import build_session_auth_proof
+from metor.utils import Constants
 
 
 class SessionAuthContractTests(unittest.TestCase):

@@ -56,6 +56,7 @@ from metor.core.daemon.managed.quick_unlock import (
 from metor.core.daemon.managed.network.state import StateTracker
 from metor.core.daemon.managed.writer import BoundedSocketWriter, FrameQueueFull
 from metor.core.profile_destruction import destroy_profile_storage
+from metor.core.auth import build_session_auth_proof
 from metor.data import (
     ProfileManager,
     ProfileOperationResult,
@@ -63,7 +64,7 @@ from metor.data import (
     ProfileSecurityMode,
 )
 from metor.data.sql import SqlManager
-from metor.utils import Constants, build_session_auth_proof
+from metor.utils import Constants
 
 
 class _Interactions:

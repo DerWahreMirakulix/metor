@@ -16,7 +16,7 @@ from metor.client import (
     build_session_auth_proof,
 )
 from metor.core.api import IpcEvent
-from metor.utils import (
+from metor.core.auth import (
     create_session_auth_challenge,
     create_session_auth_salt,
 )

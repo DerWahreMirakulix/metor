@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from metor.utils import clean_onion, decode_tor_v3_onion_public_key
+from metor.shared import clean_onion, decode_tor_v3_onion_public_key
 
 from metor.data.contact.models import (
     ContactAliasChange,

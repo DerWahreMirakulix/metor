@@ -1,4 +1,4 @@
-"""Helpers for building platform-specific Metor release wheel bundles."""
+"""Repository tooling for building platform-specific release wheel bundles."""
 
 import argparse
 import hashlib
@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from textwrap import dedent
 from typing import Iterable, Sequence
+
+from scripts.release.paths import PROJECT_ROOT
 
 
 PIP_VERSION: str = '26.0.1'
@@ -377,7 +379,7 @@ def build_release_wheelhouse(
     """
     if variant not in RELEASE_VARIANTS:
         raise ValueError(f'Unsupported release variant: {variant}.')
-    repo_root: Path = Path(__file__).resolve().parents[3]
+    repo_root: Path = PROJECT_ROOT
     bundle_name: str = build_bundle_name(
         platform.system(),
         platform.machine(),

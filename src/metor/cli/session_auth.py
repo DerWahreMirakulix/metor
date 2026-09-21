@@ -4,7 +4,7 @@ from typing import Optional
 
 from metor.client.auth import extract_session_auth_prompt
 from metor.data import ProfileManager
-from metor.utils import build_session_auth_proof
+from metor.core.auth import build_session_auth_proof
 
 # Local Package Imports
 from metor.cli.prompt import prompt_hidden_optional

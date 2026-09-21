@@ -48,7 +48,6 @@ class Constants(ContractConstants):
     SECURE_SHRED_BLOCK_BYTES: int = 65536
 
     # Application & UI Constraints
-    DEFAULT_COLS: int = 80  # Fallback terminal width
     UUID_MSG_BYTES: int = 8  # Byte length for persistent message UUIDs
     UUID_CHAT_BYTES: int = 4  # Byte length for ephemeral live-chat UUIDs
     LIVE_MSG_DEDUPE_CACHE_SIZE: int = (
@@ -62,8 +61,6 @@ class Constants(ContractConstants):
     TOR_HANDSHAKE_CHALLENGE_BYTES: int = (
         32  # Random challenge length for one Tor peer-auth proof round
     )
-
-    INPUT_SELECT_TIMEOUT_SEC: float = 0.0  # Non-blocking POSIX stdin poll
 
     # Request Defaults
 
@@ -87,7 +84,6 @@ class Constants(ContractConstants):
     FILE_LOCK_STALE_AGE_SEC: float = (
         10.0  # Age threshold for considering a lock file stale
     )
-    INPUT_SLEEP_SEC: float = 0.02  # UI non-blocking input thread sleep
     TCP_CLOSE_LINGER_SEC: float = 0.2  # Socket linger before shutdown
 
     MUTUAL_CONNECT_RACE_WINDOW_SEC: float = 5.0  # Short grace window to recognize the winning inbound side of a simultaneous connect race

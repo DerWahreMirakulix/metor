@@ -22,10 +22,9 @@ from metor.data.profile import ProfileManager
 from metor.utils import (
     Constants,
     ProcessManager,
-    clean_onion,
-    ensure_onion_format,
     secure_shred_file,
 )
+from metor.shared import clean_onion, ensure_onion_format
 
 # Local Package Imports
 from metor.core.key import KeyManager
