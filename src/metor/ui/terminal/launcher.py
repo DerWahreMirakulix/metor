@@ -14,6 +14,7 @@ from metor.ui.terminal import (
     prompt_hidden,
     prompt_text,
 )
+from metor.shared import escape_terminal_text
 from metor.ui.terminal.chat import Chat
 
 
@@ -98,7 +99,7 @@ def launch(context: FrontendLaunchContext) -> int:
         bootstrap = context.host.bootstrap(interactions)
     except FrontendBootstrapError as exc:
         if str(exc):
-            print(interactions._spacer.format(str(exc)))
+            print(interactions._spacer.format(escape_terminal_text(str(exc))))
         return exc.exit_code
     chat = Chat(
         bootstrap,

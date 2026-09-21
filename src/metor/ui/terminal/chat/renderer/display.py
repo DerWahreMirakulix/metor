@@ -55,9 +55,7 @@ class Display:
             int: The number of lines the formatted message consumes.
         """
         resolved_alias: Optional[str] = self._alias_resolver(msg)
-        text: str = msg.text
-        if resolved_alias and '{alias}' in text:
-            text = text.replace('{alias}', resolved_alias)
+        text: str = ChatPresenter.render_line_text(msg, resolved_alias)
 
         clean_text: str = self._ansi_escape.sub('', text)
         prefix_len: int = ChatPresenter.get_visible_prefix_len(

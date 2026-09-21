@@ -411,3 +411,42 @@ application version changed.
 | `python -m mypy src/metor/cli/parser.py src/metor/cli/entry.py` | PASS; 2 source files |
 | `python scripts/check_boundaries.py` | PASS |
 | `git diff --check` | PASS |
+
+## A10b verification
+
+Terminal-facing untrusted text now passes through the narrowly scoped
+`shared.terminal.escape_terminal_text()` encoder. It preserves Unicode and
+intentional newlines while rendering every other C0 control, DEL, and C1
+control as visible `\\xNN` data. Message content and voice-codec labels are
+encoded only during CLI/terminal projection; the typed content object, JSON
+wire representation, and persisted source value remain unchanged.
+
+SELF and REMOTE chat lines no longer interpret `{alias}`. Only STATUS lines
+whose trusted translation selected a non-`NONE` alias policy perform dynamic
+alias substitution. The alias is encoded before substitution. The same
+rendered-text path now drives formatting and wrap accounting, and visible
+prefix length includes the expanded control notation, so redraw calculations
+match the emitted line. Renderer-owned ANSI colors and cursor commands remain
+unchanged.
+
+Translation parameters are recursively encoded before insertion into trusted
+templates. Presenter boundaries also encode peer aliases, onion/profile names,
+setting metadata, history details, transport metadata, daemon/Tor/SQL log
+lines, local runtime errors, focused prompts, startup summaries, and direct
+read-receipt aliases before adding program-owned colors. String-backed enums
+retain their enum identity so existing error-code interpretation is unchanged.
+
+This is presentation hardening only: no route, DTO, CLI spelling, stored
+format, compatibility axis, or application version changed. The shared helper
+is host-free and has one terminal-encoding responsibility; it does not create a
+general UI layer.
+
+| Command | Result |
+| ------- | ------ |
+| `python -m unittest tests.test_terminal_rendering_security -v` before completing the renderer | EXPECTED FAIL; 4 of 6 initial regressions reproduced control injection, ordinary-message placeholder substitution, unsafe translation parameters, and inconsistent wrapping |
+| `python -m unittest tests.test_terminal_rendering_security tests.test_chat_contract tests.test_ui_boundaries tests.test_history_contract tests.test_settings_contract tests.test_refactor2_cli_contract tests.test_message_architecture_contract tests.test_ui_ipc_contract -q` | PASS; 138 tests in 0.427 seconds; expected non-TTY diagnostic and plaintext-test notice were emitted by existing tests |
+| `ruff check src/metor tests/test_terminal_rendering_security.py` | PASS |
+| `ruff format --check` for all A10b-touched source and test files | PASS after canonical formatting |
+| `mypy` for all 28 A10b-touched source paths and the regression test | PASS; strict project configuration, no issues |
+| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
+| `git diff --check` | PASS |

@@ -31,6 +31,7 @@ from metor.data import (
     ProfileSecurityMode,
     SettingKey,
 )
+from metor.shared import escape_terminal_text
 from metor.cli import (
     PromptAbortedError,
     PromptOutputSpacer,
@@ -115,13 +116,16 @@ class CommandHandlers:
             message: str = str(
                 params.get('message') or 'Unexpected daemon runtime error.'
             )
-            return f'{Theme.CYAN}[DAEMON-LOG]{Theme.RESET} {message}'
+            return (
+                f'{Theme.CYAN}[DAEMON-LOG]{Theme.RESET} {escape_terminal_text(message)}'
+            )
 
         onion: str = str(params.get('onion', ''))
         port: str = str(params.get('port', 'unknown'))
         return (
-            f'Daemon active. Onion: {Theme.YELLOW}{onion}{Theme.RESET}.onion | '
-            f'IPC Port: {Theme.YELLOW}{port}{Theme.RESET}'
+            f'Daemon active. Onion: {Theme.YELLOW}'
+            f'{escape_terminal_text(onion)}{Theme.RESET}.onion | '
+            f'IPC Port: {Theme.YELLOW}{escape_terminal_text(port)}{Theme.RESET}'
         )
 
     @staticmethod
@@ -146,10 +150,15 @@ class CommandHandlers:
             print('Cannot start a daemon on a remote profile!')
             return
         if pm.is_daemon_running():
-            print(f"Daemon for profile '{pm.profile_name}' is already running!")
+            print(
+                'Daemon for profile '
+                f"'{escape_terminal_text(pm.profile_name)}' is already running!"
+            )
             return
 
-        print(f"Starting daemon for profile '{pm.profile_name}'...")
+        print(
+            f"Starting daemon for profile '{escape_terminal_text(pm.profile_name)}'..."
+        )
 
         if start_locked and pm.uses_plaintext_storage():
             print('Plaintext profiles cannot be started in locked mode.')
@@ -193,12 +202,18 @@ class CommandHandlers:
         # Inversion of Control: Define UI printing logic here and inject it into Data and Core layers
         def sql_log_cb(line: str) -> None:
             """Writes one SQLCipher diagnostic line to stdout with its log tag."""
-            sys.stdout.write(f'\r\033[K{Theme.CYAN}[SQL-LOG]{Theme.RESET} {line}\n')
+            sys.stdout.write(
+                f'\r\033[K{Theme.CYAN}[SQL-LOG]{Theme.RESET} '
+                f'{escape_terminal_text(line)}\n'
+            )
             sys.stdout.flush()
 
         def tor_log_cb(line: str) -> None:
             """Writes one Tor process diagnostic line to stdout with its log tag."""
-            sys.stdout.write(f'\r\033[K{Theme.CYAN}[TOR-LOG]{Theme.RESET} {line}\n')
+            sys.stdout.write(
+                f'\r\033[K{Theme.CYAN}[TOR-LOG]{Theme.RESET} '
+                f'{escape_terminal_text(line)}\n'
+            )
             sys.stdout.flush()
 
         def status_cb(

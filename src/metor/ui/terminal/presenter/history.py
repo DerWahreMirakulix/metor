@@ -11,6 +11,7 @@ from metor.core.api import (
     RawHistoryEntry,
     SummaryHistoryEntry,
 )
+from metor.shared import escape_terminal_text
 
 # Local Package Imports
 from metor.ui.terminal.presenter.shared import (
@@ -65,8 +66,8 @@ def _format_scope_label(
         str: The formatted scope label.
     """
     if alias:
-        return f'peer {Theme.PURPLE}{alias}{Theme.RESET}'
-    return f'profile {Theme.CYAN}{profile}{Theme.RESET}'
+        return f'peer {Theme.PURPLE}{escape_terminal_text(alias)}{Theme.RESET}'
+    return f'profile {Theme.CYAN}{escape_terminal_text(profile)}{Theme.RESET}'
 
 
 def _format_summary_peer_label(entry: SummaryHistoryEntry) -> str:
@@ -79,7 +80,7 @@ def _format_summary_peer_label(entry: SummaryHistoryEntry) -> str:
     Returns:
         str: The formatted peer label.
     """
-    alias_label: str = entry.alias or 'unknown'
+    alias_label: str = escape_terminal_text(entry.alias or 'unknown')
     return f'{Theme.PURPLE}{alias_label}{Theme.RESET}'
 
 
@@ -93,11 +94,11 @@ def _format_raw_peer_label(entry: RawHistoryEntry) -> str:
     Returns:
         str: The formatted raw peer label.
     """
-    alias_label: str = entry.alias or 'unknown'
+    alias_label: str = escape_terminal_text(entry.alias or 'unknown')
     if entry.peer_onion:
         return (
             f'{Theme.PURPLE}{alias_label}{Theme.RESET} '
-            f'[{Theme.YELLOW}{entry.peer_onion}{Theme.RESET}]'
+            f'[{Theme.YELLOW}{escape_terminal_text(entry.peer_onion)}{Theme.RESET}]'
         )
     return f'{Theme.PURPLE}{alias_label}{Theme.RESET}'
 
@@ -246,7 +247,8 @@ def format_raw_history(event: HistoryRawDataEvent) -> str:
             f'{Theme.DARK_GREY}event:{Theme.RESET} {Theme.YELLOW}{entry.event_code.value}{Theme.RESET}\n'
             f'{Theme.DARK_GREY}actor:{Theme.RESET} {Theme.GREEN}{entry.actor.value}{Theme.RESET}\n'
             f'{Theme.DARK_GREY}peer:{Theme.RESET} {peer_label}\n'
-            f'{Theme.DARK_GREY}flow:{Theme.RESET} {Theme.CYAN}{entry.flow_id}{Theme.RESET}\n'
+            f'{Theme.DARK_GREY}flow:{Theme.RESET} {Theme.CYAN}'
+            f'{escape_terminal_text(entry.flow_id)}{Theme.RESET}\n'
         )
         if entry.trigger:
             line += f'{Theme.DARK_GREY}trigger:{Theme.RESET} {Theme.CYAN}{entry.trigger.value}{Theme.RESET}\n'
@@ -258,12 +260,12 @@ def format_raw_history(event: HistoryRawDataEvent) -> str:
         if entry.detail_text:
             line += (
                 f'{Theme.DARK_GREY}detail:{Theme.RESET} '
-                f'{Theme.CYAN}{entry.detail_text}{Theme.RESET}\n'
+                f'{Theme.CYAN}{escape_terminal_text(entry.detail_text)}{Theme.RESET}\n'
             )
         if entry.transport:
             line += (
                 f'{Theme.DARK_GREY}transport:{Theme.RESET} '
-                f'{Theme.PURPLE}{entry.transport}{Theme.RESET}\n'
+                f'{Theme.PURPLE}{escape_terminal_text(entry.transport)}{Theme.RESET}\n'
             )
         out += f'{format_prefixed_message(prefix, prefix_visible, line)}\n'
     return out

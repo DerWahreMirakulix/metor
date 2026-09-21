@@ -1,5 +1,7 @@
 """Shared CLI-side helpers for sanitizing local runtime validation errors."""
 
+from metor.shared import escape_terminal_text
+
 
 def format_safe_local_runtime_error(exc: ValueError) -> str:
     """
@@ -32,4 +34,4 @@ def format_safe_local_runtime_error(exc: ValueError) -> str:
     ):
         return 'Failed to validate local daemon state.'
 
-    return message
+    return escape_terminal_text(message)

@@ -5,6 +5,7 @@ Preserves the '{alias}' placeholder according to the translation's alias policy.
 Utilizes generic status tones instead of chat-specific routing types.
 """
 
+from enum import Enum
 from typing import Dict, Tuple, Optional
 
 from metor.core.api import (
@@ -16,6 +17,7 @@ from metor.core.api import (
     RuntimeErrorCode,
 )
 from metor.utils import TypeCaster
+from metor.shared import escape_terminal_text
 
 # Local Package Imports
 from metor.ui.terminal.theme import Theme
@@ -45,6 +47,19 @@ RUNTIME_ERROR_TEXT: dict[RuntimeErrorCode, str] = {
 VALIDATION_DETAIL_CODES: set[EventType] = {
     EventType.SETTING_TYPE_ERROR,
 }
+
+
+def _escape_terminal_value(value: JsonValue) -> JsonValue:
+    """Recursively makes untrusted translation values terminal-safe."""
+    if isinstance(value, Enum):
+        return value
+    if isinstance(value, str):
+        return escape_terminal_text(value)
+    if isinstance(value, list):
+        return [_escape_terminal_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _escape_terminal_value(item) for key, item in value.items()}
+    return value
 
 
 TRANSLATIONS: Dict[EventType, TranslationDef] = {
@@ -628,7 +643,11 @@ class Translator:
         if not entry:
             return f'Unknown code: {code}', StatusTone.SYSTEM
 
-        safe_params: Dict[str, JsonValue] = params.copy() if params else {}
+        safe_params: Dict[str, JsonValue] = (
+            {key: _escape_terminal_value(value) for key, value in params.items()}
+            if params
+            else {}
+        )
 
         if code in ERROR_DETAIL_CODES:
             error_text: str = ''

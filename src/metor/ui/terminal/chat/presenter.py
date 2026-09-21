@@ -13,6 +13,8 @@ from metor.core.api import (
 )
 from metor.ui.terminal import Theme, UIPresenter
 from metor.ui.terminal.models import StatusTone
+from metor.ui.terminal.models import AliasPolicy
+from metor.shared import escape_terminal_text
 
 # Local Package Imports
 from metor.ui.terminal.chat.models import ChatMessageType, ChatLine
@@ -51,14 +53,17 @@ class ChatPresenter:
             for alias in active:
                 color: str = Theme.GREEN if alias in contacts else Theme.DARK_GREY
                 marker: str = '*' if alias == focused else ' '
-                lines.append(f' {color}{marker} {alias}{Theme.RESET}')
+                safe_alias: str = escape_terminal_text(alias)
+                lines.append(f' {color}{marker} {safe_alias}{Theme.RESET}')
             if pending:
                 lines.append('')
 
         if pending:
             lines.append('Pending session:')
             for p in pending:
-                lines.append(f'   {Theme.DARK_GREY}{p}{Theme.RESET}')
+                lines.append(
+                    f'   {Theme.DARK_GREY}{escape_terminal_text(p)}{Theme.RESET}'
+                )
 
         return '\n'.join(lines)
 
@@ -80,13 +85,20 @@ class ChatPresenter:
                 ConnectionOrigin.GRACE_RECONNECT,
                 ConnectionOrigin.RETUNNEL,
             ):
-                line = f'{entry.alias}: recovery reconnect waiting for chat attach'
+                line = (
+                    f'{escape_terminal_text(entry.alias)}: recovery reconnect '
+                    'waiting for chat attach'
+                )
             else:
                 line = (
-                    f'{entry.alias}: incoming live request retained until chat attach'
+                    f'{escape_terminal_text(entry.alias)}: incoming live request '
+                    'retained until chat attach'
                 )
         else:
-            line = f'{entry.alias}: incoming live request waiting for /accept'
+            line = (
+                f'{escape_terminal_text(entry.alias)}: incoming live request '
+                'waiting for /accept'
+            )
 
         expiry_label: str = UIPresenter.format_timestamp_label(entry.expires_at)
         if expiry_label:
@@ -116,7 +128,8 @@ class ChatPresenter:
             detail_suffix = f' ({", ".join(detail_parts)})'
 
         return (
-            f'{entry.alias}: {entry.total_unread} unread {message_word}{detail_suffix}'
+            f'{escape_terminal_text(entry.alias)}: {entry.total_unread} unread '
+            f'{message_word}{detail_suffix}'
         )
 
     @staticmethod
@@ -184,6 +197,10 @@ class ChatPresenter:
             compact=True,
         )
 
+        safe_alias: Optional[str] = (
+            escape_terminal_text(alias) if alias is not None else None
+        )
+
         if msg_type == ChatMessageType.STATUS:
             if tone == StatusTone.INFO:
                 return len(timestamp_visible) + 4 + prompt_len
@@ -194,14 +211,14 @@ class ChatPresenter:
             return 0
         if msg_type == ChatMessageType.SELF:
             return (
-                len(timestamp_visible) + len(f'To {alias}') + prompt_len
-                if alias
+                len(timestamp_visible) + len(f'To {safe_alias}') + prompt_len
+                if safe_alias
                 else len(timestamp_visible) + 4 + prompt_len
             )
         if msg_type == ChatMessageType.REMOTE:
             return (
-                len(timestamp_visible) + len(f'From {alias}') + prompt_len
-                if alias
+                len(timestamp_visible) + len(f'From {safe_alias}') + prompt_len
+                if safe_alias
                 else len(timestamp_visible) + 6 + prompt_len
             )
         return 0
@@ -218,6 +235,22 @@ class ChatPresenter:
             str: The formatted transport state lines.
         """
         return UIPresenter.format_transport_state(event)
+
+    @staticmethod
+    def render_line_text(
+        msg: ChatLine,
+        resolved_alias: Optional[str] = None,
+    ) -> str:
+        """Returns the safe visible text used by formatting and wrap accounting."""
+        if msg.msg_type in (ChatMessageType.SELF, ChatMessageType.REMOTE):
+            return escape_terminal_text(msg.text)
+        if msg.msg_type == ChatMessageType.STATUS:
+            text: str = msg.text
+            alias: Optional[str] = resolved_alias if resolved_alias else msg.alias
+            if msg.alias_policy is not AliasPolicy.NONE and alias and '{alias}' in text:
+                text = text.replace('{alias}', escape_terminal_text(alias))
+            return text
+        return msg.text
 
     @staticmethod
     def format_msg(
@@ -239,9 +272,10 @@ class ChatPresenter:
             str: The fully formatted string ready for stdout.
         """
         active_alias: Optional[str] = resolved_alias if resolved_alias else msg.alias
-        text: str = msg.text
-        if active_alias and '{alias}' in text:
-            text = text.replace('{alias}', active_alias)
+        display_alias: Optional[str] = (
+            escape_terminal_text(active_alias) if active_alias is not None else None
+        )
+        text: str = ChatPresenter.render_line_text(msg, resolved_alias)
 
         prefix: str = ''
         visible_prefix: str = ''
@@ -279,8 +313,8 @@ class ChatPresenter:
 
             if msg.msg_type == ChatMessageType.SELF:
                 prefix_raw = (
-                    f'To {active_alias}{initial_prompt}'
-                    if active_alias
+                    f'To {display_alias}{initial_prompt}'
+                    if display_alias
                     else f'self{initial_prompt}'
                 )
                 visible_prefix = f'{timestamp_visible}{prefix_raw}'
@@ -303,8 +337,8 @@ class ChatPresenter:
 
             elif msg.msg_type == ChatMessageType.REMOTE:
                 prefix_raw = (
-                    f'From {active_alias}{initial_prompt}'
-                    if active_alias
+                    f'From {display_alias}{initial_prompt}'
+                    if display_alias
                     else f'remote{initial_prompt}'
                 )
                 visible_prefix = f'{timestamp_visible}{prefix_raw}'

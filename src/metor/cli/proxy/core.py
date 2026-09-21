@@ -33,6 +33,7 @@ from metor.core.api import (
     UnlockCommand,
     LockCommand,
 )
+from metor.shared import escape_terminal_text
 from metor.data import ProfileManager, ProfileSecurityMode, SettingKey
 from metor.cli import (
     PromptAbortedError,
@@ -130,7 +131,7 @@ class CliProxy:
             self._last_error = True
 
         if params and 'alias' in params and '{alias}' in text:
-            text = text.replace('{alias}', str(params['alias']))
+            text = text.replace('{alias}', escape_terminal_text(str(params['alias'])))
         elif '{alias}' in text:
             text = text.replace('{alias}', 'unknown')
 

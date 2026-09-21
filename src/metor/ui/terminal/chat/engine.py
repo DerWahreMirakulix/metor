@@ -26,6 +26,7 @@ from metor.core.api import (
     GetConnectionsCommand,
     SwitchCommand,
 )
+from metor.shared import escape_terminal_text
 from metor.client import FrontendBootstrapResult
 from metor.client import IpcAuthExchange
 from metor.ui.terminal import (
@@ -150,7 +151,7 @@ class Chat:
         params: Dict[str, JsonValue] = self._build_prechat_event_params(event)
         text, _ = Translator.get(event.event_type, params if params else None)
         if params and 'alias' in params and '{alias}' in text:
-            text = text.replace('{alias}', str(params['alias']))
+            text = text.replace('{alias}', escape_terminal_text(str(params['alias'])))
         elif '{alias}' in text:
             text = text.replace('{alias}', 'unknown')
         print(text, flush=True)
@@ -168,7 +169,7 @@ class Chat:
         params: Dict[str, JsonValue] = self._build_prechat_event_params(event)
         text, _ = Translator.get(event.event_type, params if params else None)
         if params and 'alias' in params and '{alias}' in text:
-            return text.replace('{alias}', str(params['alias']))
+            return text.replace('{alias}', escape_terminal_text(str(params['alias'])))
         if '{alias}' in text:
             return text.replace('{alias}', 'unknown')
         return text

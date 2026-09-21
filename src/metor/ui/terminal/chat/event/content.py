@@ -30,6 +30,7 @@ from metor.core.api import (
 )
 from metor.ui.terminal.content import render_content
 from metor.ui.terminal import AliasPolicy, StatusTone, UIPresenter
+from metor.shared import escape_terminal_text
 
 # Local Package Imports
 from metor.ui.terminal.chat.models import ChatMessageType
@@ -179,7 +180,7 @@ def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool
 
     if isinstance(event, ReadReceiptEvent):
         handler._renderer.print_message(
-            f'{event.alias} read the message.',
+            f'{escape_terminal_text(event.alias)} read the message.',
             msg_type=ChatMessageType.STATUS,
             tone=StatusTone.SYSTEM,
         )

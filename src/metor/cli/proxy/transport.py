@@ -17,6 +17,7 @@ from metor.core.api import (
     SyncConfigCommand,
 )
 from metor.data import ProfileManager, SettingKey
+from metor.shared import escape_terminal_text
 from metor.cli import PromptAbortedError, PromptOutputSpacer, Theme
 from metor.cli.errors import format_safe_local_runtime_error
 from metor.cli.ipc import IpcRequestResult, IpcRequestSession
@@ -272,7 +273,7 @@ class CliProxyTransport:
         except PromptAbortedError:
             return 'Aborted.'
         except ValueError as exc:
-            return str(exc)
+            return escape_terminal_text(str(exc))
 
     def send_to_port(
         self,
@@ -348,7 +349,7 @@ class CliProxyTransport:
         except PromptAbortedError:
             return IpcRequestResult(message='Aborted.', auth_incomplete=True)
         except ValueError as exc:
-            return IpcRequestResult(message=str(exc))
+            return IpcRequestResult(message=escape_terminal_text(str(exc)))
         except Exception:
             if self._is_remote:
                 return IpcRequestResult(

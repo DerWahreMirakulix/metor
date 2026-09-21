@@ -3,6 +3,7 @@
 from typing import Dict, List, Optional
 
 from metor.core.api import JsonValue, TransportStateEvent
+from metor.shared import escape_terminal_text
 
 # Local Package Imports
 from metor.cli.theme import Theme
@@ -25,9 +26,13 @@ def _format_drop_tunnel(drop_tunnel: Optional[Dict[str, JsonValue]]) -> str:
     if drop_tunnel.get('cached'):
         parts.append('cached')
     if drop_tunnel.get('opened_at'):
-        parts.append(f'opened_at: {drop_tunnel["opened_at"]}')
+        parts.append(
+            f'opened_at: {escape_terminal_text(str(drop_tunnel["opened_at"]))}'
+        )
     if drop_tunnel.get('last_used_at'):
-        parts.append(f'last_used_at: {drop_tunnel["last_used_at"]}')
+        parts.append(
+            f'last_used_at: {escape_terminal_text(str(drop_tunnel["last_used_at"]))}'
+        )
 
     detail: str = ', '.join(parts) if parts else 'cached'
     return f'drop_tunnel: {detail}'
@@ -43,13 +48,17 @@ def format_transport_state(event: TransportStateEvent) -> str:
     Returns:
         str: The formatted transport state lines.
     """
-    header_text: str = f'Transport state for {Theme.CYAN}{event.peer}{Theme.RESET}'
+    header_text: str = (
+        f'Transport state for {Theme.CYAN}'
+        f'{escape_terminal_text(event.peer)}{Theme.RESET}'
+    )
     if not event.peer:
         return f'{Theme.YELLOW}No active sessions.{Theme.RESET}'
     lines: List[str] = [
         header_text,
         '',
-        f'session_state: {Theme.YELLOW}{event.session_state}{Theme.RESET}',
+        f'session_state: {Theme.YELLOW}'
+        f'{escape_terminal_text(event.session_state)}{Theme.RESET}',
         _format_drop_tunnel(event.drop_tunnel),
         f'focus_count: {event.focus_count}',
         f'pending_live_count: {event.pending_live_count}',

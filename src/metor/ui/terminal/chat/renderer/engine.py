@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Callable, List, Dict, Optional, TYPE_CHECKING
 
 from metor.core.api import JsonValue
+from metor.shared import escape_terminal_text
 from metor.ui.terminal.models import AliasPolicy, StatusTone
 from metor.ui.terminal.chat.models import ChatLine, ChatMessageType, ChatTransportState
 from metor.ui.terminal.chat.presenter import ChatPresenter
@@ -129,7 +130,9 @@ class Renderer:
                 state_tag: str = FOCUS_STATE_TAGS.get(transport_state, '')
                 if self._config.get_namespace_bool(UI_SHOW_TRANSPORT_STATUS_KEY):
                     state_tag = f' [Transport: {transport_state.value}]'
-                self._prompt = f'{alias}{state_tag}{self._initial_prompt}'
+                self._prompt = (
+                    f'{escape_terminal_text(alias)}{state_tag}{self._initial_prompt}'
+                )
             else:
                 self._prompt = self._initial_prompt
         self.full_redraw()
