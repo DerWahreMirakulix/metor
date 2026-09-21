@@ -283,6 +283,138 @@ class GuiProducerTests(unittest.TestCase):
         self.assertTrue(metadata['finalized'])
         self.assertEqual(metadata['size_bytes'], 640)
 
+    def test_recovery_response_waits_for_release_and_broadcasts_uncorrelated(
+        self,
+    ) -> None:
+        """The recovery request completes only after producer ownership is gone."""
+        self.capture('barrier', Delivery.LIVE)
+        with patch.object(self.messages, 'update_retained_bytes', return_value=False):
+            result = self.client.request(
+                ReleaseVoiceOwnerCommand(self.owner), VoiceOwnerReleasedEvent
+            )
+        self.assertTrue(result.cleanup_pending)
+
+        first_observed = threading.Event()
+        second_observed = threading.Event()
+        first_events: list[VoiceFinalizedEvent] = []
+        second_events: list[VoiceFinalizedEvent] = []
+
+        def observe_first(event: IpcEvent) -> None:
+            if isinstance(event, VoiceFinalizedEvent) and event.msg_id == 'barrier':
+                first_events.append(event)
+                first_observed.set()
+
+        def observe_second(event: IpcEvent) -> None:
+            if isinstance(event, VoiceFinalizedEvent) and event.msg_id == 'barrier':
+                second_events.append(event)
+                second_observed.set()
+
+        self.client._on_event = observe_first
+        self.other._on_event = observe_second
+        release_entered = threading.Event()
+        allow_release = threading.Event()
+        original_release = self.repository.release
+
+        def release_with_barrier(item: object) -> None:
+            release_entered.set()
+            if not allow_release.wait(2):
+                raise TimeoutError('test release barrier timed out')
+            original_release(item)
+
+        command = FinalizeVoiceCommand('barrier')
+        request_result: list[VoiceFinalizedEvent] = []
+        request_error: list[BaseException] = []
+
+        def recover() -> None:
+            try:
+                recovered = self.other.request(command, VoiceFinalizedEvent)
+                if recovered is not None:
+                    request_result.append(recovered)
+            except BaseException as exc:
+                request_error.append(exc)
+
+        with patch.object(
+            self.repository,
+            'release',
+            side_effect=release_with_barrier,
+        ):
+            worker = threading.Thread(target=recover)
+            worker.start()
+            self.assertTrue(release_entered.wait(2))
+            self.assertTrue(first_observed.wait(2))
+            self.assertTrue(second_observed.wait(2))
+            self.assertTrue(worker.is_alive())
+            self.assertIsNotNone(self.repository.get('barrier'))
+            allow_release.set()
+            worker.join(2)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(request_error, [])
+        self.assertEqual(len(request_result), 1)
+        self.assertEqual(request_result[0].request_id, command.request_id)
+        self.assertIsNone(self.repository.get('barrier'))
+        self.assertEqual(len(first_events), 1)
+        self.assertEqual(len(second_events), 1)
+        self.assertIsNone(first_events[0].request_id)
+        self.assertIsNone(second_events[0].request_id)
+
+        repeated = self.other.request(
+            FinalizeVoiceCommand('barrier'), VoiceFinalizedEvent
+        )
+        self.assertIsNotNone(repeated)
+        self.assertEqual(repeated.size_bytes, 640)
+        self.assertIsNone(self.repository.get('barrier'))
+
+    def test_recovery_reclaim_false_returns_no_success(self) -> None:
+        """A failed reclaim remains retryable and rejects the correlated request."""
+        self.capture('reclaim-false', Delivery.LIVE)
+        with patch.object(self.messages, 'update_retained_bytes', return_value=False):
+            result = self.client.request(
+                ReleaseVoiceOwnerCommand(self.owner), VoiceOwnerReleasedEvent
+            )
+        self.assertTrue(result.cleanup_pending)
+        service = self.daemon._command_dispatcher._producers
+        false_success = VoiceFinalizedEvent(
+            msg_id='reclaim-false',
+            onion=self.onion,
+            direction=MessageDirectionCode.OUT,
+            delivery=Delivery.LIVE,
+            size_bytes=640,
+        )
+
+        with (
+            patch.object(service._cleanup, 'reclaim', return_value=False),
+            patch.object(
+                service._cleanup,
+                'finalization_result',
+                return_value=false_success,
+            ),
+            self.assertRaises(MetorRequestRejectedError) as raised,
+        ):
+            self.other.request(
+                FinalizeVoiceCommand('reclaim-false'), VoiceFinalizedEvent
+            )
+
+        self.assertEqual(
+            raised.exception.event.reason,
+            'persistence_failed',
+        )
+        self.assertIsNotNone(self.repository.get('reclaim-false'))
+
+        with (
+            patch.object(
+                service._cleanup,
+                'reclaim',
+                side_effect=OSError('injected reclaim failure'),
+            ),
+            self.assertRaises(MetorRequestRejectedError) as failed,
+        ):
+            self.other.request(
+                FinalizeVoiceCommand('reclaim-false'), VoiceFinalizedEvent
+            )
+        self.assertEqual(failed.exception.event.reason, 'persistence_failed')
+        self.assertIsNotNone(self.repository.get('reclaim-false'))
+
     def test_prewrite_journal_retains_a_blob_after_failed_admission_and_delete(
         self,
     ) -> None:

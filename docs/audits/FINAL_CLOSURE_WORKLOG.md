@@ -504,3 +504,42 @@ native Windows run is claimed here.
 | `python scripts/versioning.py validate` | PASS; application 0.2.0 and compatibility registry remain valid |
 | Active-source search for `metor-daemon` outside immutable historical/spec evidence | PASS; only an explicit negative process-detector regression remains |
 | `git diff --check` | PASS |
+
+## A12 verification
+
+Explicit interrupted-LIVE recovery now temporarily clears the originating IPC
+request context while `ProducerCleanup.reclaim()` performs accepted-prefix
+finalization and publishes its domain event. Both the requesting SDK client and
+other authenticated observers can still receive that `VoiceFinalizedEvent`
+asynchronously, but it has no request ID and therefore cannot terminate the
+in-flight recovery exchange.
+
+After finalization, retained-object reconciliation, allocation-debris cleanup,
+and producer repository release all succeed, the outer request context is
+restored and the service sends exactly one correlated terminal projection to
+the requester. The SDK waiter therefore cannot complete while the producer
+claim still exists. A false return or exception from `reclaim()` now produces a
+correlated `PERSISTENCE_FAILED` rejection and retains the producer for retry;
+even a hypothetical success projection cannot override that result. Repeating
+finalization remains idempotent and preserves the same accepted 640-byte audio
+prefix.
+
+The deterministic regression blocks `VoiceProducerRepository.release()`
+itself, uses the real daemon, SQLCipher/blob stores, two authenticated public
+SDK clients, request demultiplexing, and observer callbacks, and contains no
+sleep-based ordering assertion. Existing journal assertions and owner binding
+remain intact. This changes neither IPC DTO shape nor protocol semantics; it
+corrects when correlation is attached, so no compatibility or application
+version bump is required.
+
+| Command | Result |
+| ------- | ------ |
+| Two focused real-IPC recovery regressions before implementation | EXPECTED FAIL; the release-barrier test timed out waiting for the requester to receive an uncorrelated observation because the premature correlated inner event had already satisfied its waiter |
+| `python -m unittest` for the release-barrier, reclaim-false, and original accepted-prefix tests | PASS; 3 tests in 18.425 seconds with local IPC sockets |
+| `python -m unittest tests.test_gui_producers -q` outside the socket sandbox | PASS; 12 real daemon/SQLCipher/blob/SDK producer tests |
+| `python -m unittest tests.test_client_demux_contract tests.test_gui_producers tests.test_gui_resend tests.test_gui_capture tests.test_gui_live` outside the socket sandbox | PASS; 21 SDK demux, producer, resend, capture, and LIVE tests |
+| `mypy src/metor/core/daemon/managed/producers/service.py src/metor/core/daemon/managed/producers/cleanup.py src/metor/core/daemon/managed/network/voice/outbound.py src/metor/client/ipc.py` | PASS; 4 source files under strict project configuration |
+| `ruff check src/metor/core/daemon/managed/producers/service.py tests/test_gui_producers.py` | PASS |
+| `ruff format --check src/metor/core/daemon/managed/producers/service.py tests/test_gui_producers.py` | PASS; 2 files already formatted |
+| `python scripts/check_boundaries.py` | PASS; distribution and frontend boundaries |
+| `git diff --check` | PASS |

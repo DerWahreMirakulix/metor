@@ -150,8 +150,16 @@ class VoiceProducerService:
             )
         ):
             try:
-                self._cleanup.reclaim(item)
-                self._send(conn, self._cleanup.finalization_result(item))
+                with request_context(None):
+                    reclaimed = self._cleanup.reclaim(item)
+                if not reclaimed:
+                    self._reject(
+                        conn,
+                        cmd.msg_id,
+                        MessageOperationReason.PERSISTENCE_FAILED,
+                    )
+                else:
+                    self._send(conn, self._cleanup.finalization_result(item))
             except Exception:
                 self._reject(
                     conn, cmd.msg_id, MessageOperationReason.PERSISTENCE_FAILED
