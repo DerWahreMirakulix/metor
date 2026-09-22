@@ -16,6 +16,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.cli.entry import run_cli
+from metor.cli.dispatcher import CliDispatcher
 from metor.cli.handlers import CommandHandlers
 from metor.cli.parser import CliParser
 from metor.client import (
@@ -130,6 +131,55 @@ class IndependentCliContractTests(unittest.TestCase):
         args, extra = CliParser.parse(['chat', 'unexpected'])
         self.assertEqual(args.subcommand, 'unexpected')
         self.assertEqual(extra, ['unexpected'])
+
+    def test_chat_daemon_start_override_is_a_tri_state_for_every_frontend(
+        self,
+    ) -> None:
+        """The real chat grammar preserves absent, positive, and negative intent."""
+        for frontend in ('terminal', 'gui'):
+            for flags, expected in (
+                ([], None),
+                (['--start-daemon'], True),
+                (['--no-start-daemon'], False),
+            ):
+                with self.subTest(frontend=frontend, flags=flags):
+                    args, extra = CliParser.parse(['chat', '--ui', frontend, *flags])
+                    self.assertIs(args.start_daemon, expected)
+                    self.assertEqual(extra, [])
+
+    def test_chat_daemon_start_flags_remain_mutually_exclusive(self) -> None:
+        """The canonical parser rejects contradictory invocation overrides."""
+        for frontend in ('terminal', 'gui'):
+            with self.subTest(frontend=frontend):
+                with self.assertRaises(SystemExit):
+                    CliParser.parse(
+                        [
+                            'chat',
+                            '--ui',
+                            frontend,
+                            '--start-daemon',
+                            '--no-start-daemon',
+                        ]
+                    )
+
+    def test_chat_daemon_start_tri_state_reaches_dispatch_unchanged(self) -> None:
+        """Parser intent reaches the frontend host construction boundary verbatim."""
+        pm = Mock(spec=ProfileManager)
+        for flags, expected in (
+            ([], None),
+            (['--start-daemon'], True),
+            (['--no-start-daemon'], False),
+        ):
+            with self.subTest(flags=flags):
+                args, extra = CliParser.parse(['chat', '--ui', 'gui', *flags])
+                with patch(
+                    'metor.cli.dispatcher.base.CommandHandlers.handle_chat',
+                    return_value=0,
+                ) as handle_chat:
+                    CliDispatcher(args, extra, pm).dispatch()
+                self.assertIs(
+                    handle_chat.call_args.kwargs['start_daemon_override'], expected
+                )
 
     def test_send_payload_preserves_ui_like_tokens_in_order(self) -> None:
         """Frontend-looking tokens remain literal free text outside chat."""

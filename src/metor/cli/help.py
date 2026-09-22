@@ -11,6 +11,9 @@ from typing import Dict, List, Optional, Tuple
 from metor.cli.theme import Theme
 
 
+OPTION_DEFAULT_UNSET = object()
+
+
 @dataclass
 class SubCommandDef:
     """
@@ -38,6 +41,7 @@ class OptionDef:
         value_type (str): Supported scalar conversion name.
         hidden (bool): Whether the option is excluded from public help.
         group (Optional[str]): Mutually exclusive option group identifier.
+        default (object): Explicit argparse default, or the internal unset marker.
 
     Returns:
         None
@@ -51,6 +55,7 @@ class OptionDef:
     value_type: str = 'str'
     hidden: bool = False
     group: Optional[str] = None
+    default: object = OPTION_DEFAULT_UNSET
 
 
 @dataclass
@@ -200,6 +205,7 @@ class Help:
                     'Start a missing local daemon.',
                     action='store_true',
                     group='daemon-start',
+                    default=None,
                 ),
                 OptionDef(
                     ('--no-start-daemon',),

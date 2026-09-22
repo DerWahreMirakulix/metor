@@ -2,10 +2,10 @@
 
 import argparse
 import sys
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # Local Package Imports
-from metor.cli.help import CommandDef, Help, OptionDef
+from metor.cli.help import OPTION_DEFAULT_UNSET, CommandDef, Help, OptionDef
 
 
 class CliParser:
@@ -26,12 +26,16 @@ class CliParser:
             None
         """
         help_text: str = argparse.SUPPRESS if option.hidden else option.description
+        default: Dict[str, Any] = {}
+        if option.default is not OPTION_DEFAULT_UNSET:
+            default['default'] = option.default
         if option.action == 'store_true':
             target.add_argument(
                 *option.flags,
                 dest=option.destination,
                 action='store_true',
                 help=help_text,
+                **default,
             )
             return
         if option.action == 'store_false':
@@ -40,6 +44,7 @@ class CliParser:
                 dest=option.destination,
                 action='store_false',
                 help=help_text,
+                **default,
             )
             return
         value_type: type[str] | type[int] = int if option.value_type == 'int' else str
@@ -49,6 +54,7 @@ class CliParser:
             metavar=option.metavar,
             type=value_type,
             help=help_text,
+            **default,
         )
 
     @classmethod
@@ -136,7 +142,6 @@ class CliParser:
         defaults: Dict[str, object] = {
             'ui': None,
             'list_uis': False,
-            'start_daemon': None,
             'device_config': None,
             'simulator': False,
             'locked': False,

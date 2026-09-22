@@ -7,8 +7,8 @@ reports remain evidence and are not competing implementation backlogs.
 
 | Package | State       | Commit                       | Tests                                                                                        | Result                                                    | Next step                                                          |
 | ------- | ----------- | ---------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------ |
-| R01     | implemented | R01 checkpoint (this commit) | `test_lock_contract` plus settings/profile/security neighbors; 103 tests; Ruff; format; mypy | PASS on Linux; Windows static typing passes for `lock.py` | Native Windows lock execution remains an R05/R07 gate              |
-| R02     | open        | —                            | —                                                                                            | —                                                         | Preserve the absent chat-autostart override                        |
+| R01     | implemented | `7e7ab8e`                    | `test_lock_contract` plus settings/profile/security neighbors; 103 tests; Ruff; format; mypy | PASS on Linux; Windows static typing passes for `lock.py` | Native Windows lock execution remains an R05/R07 gate              |
+| R02     | implemented | R02 checkpoint (this commit) | Parser/frontend/host-policy/chat/release neighbors; 78 tests; Ruff; format; mypy              | PASS on Linux                                           | Continue with the literal dispatcher boundary in R03               |
 | R03     | open        | —                            | —                                                                                            | —                                                         | Preserve the parser literal boundary through dispatch              |
 | R04     | open        | —                            | —                                                                                            | —                                                         | Keep managed children in the selected installation/venv            |
 | R05     | open        | —                            | —                                                                                            | —                                                         | Repair Windows typing and execute the native matrix when available |
@@ -34,6 +34,18 @@ unreadable objects, exchange at the native-lock boundary, partial/zero writes,
 write/fsync rollback, and unlock/close failures. All 103 direct lock,
 settings, profile-path/storage, and security neighbors pass locally. Native
 Windows behavior remains deliberately unclaimed until R05/R07.
+
+R02 makes the missing chat daemon-start override a genuine third state. The
+canonical `OptionDef` owns the single explicit `None` default; the parser no
+longer repairs that field after parsing. The real grammar now preserves
+absent/positive/negative intent as `None`/`True`/`False` for both Terminal and
+GUI, while its mutually exclusive group still rejects contradictory flags.
+Dispatcher coverage proves the value reaches the frontend-host boundary
+unchanged, and the production host resolver proves that `None` retains each
+configured `ask`/`always`/`never` policy while explicit flags override it.
+Help and frontend inventory remain profile- and daemon-side-effect free. All
+78 parser, frontend, host-policy, Terminal chat, and release neighbors pass;
+Ruff, format, and strict mypy pass for the changed production surface.
 
 ## Current follow-up status
 

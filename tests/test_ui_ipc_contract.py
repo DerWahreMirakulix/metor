@@ -15,6 +15,7 @@ import nacl.pwhash
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.application import DaemonStatus, start_managed_daemon_process
+from metor.application.frontend.host import _resolve_autostart_policy
 from metor.core.api import (
     AuthenticateSessionCommand,
     EventType,
@@ -27,7 +28,11 @@ from metor.core.api import (
     FallbackCommand,
     TransportStateEvent,
 )
-from metor.data import ProfileManager, ProfileSecurityMode
+from metor.data import (
+    ChatDaemonAutostartPolicy,
+    ProfileManager,
+    ProfileSecurityMode,
+)
 from metor.data.settings import SettingKey
 from metor.cli.ipc.request import IpcRequestSession
 from metor.cli.handlers import CommandHandlers
@@ -1093,6 +1098,33 @@ class UiIpcContractTests(unittest.TestCase):
         self.assertIn('daemon', command)
         process.stdin.write.assert_called_once_with(b'session-secret\n')
         process.stdin.close.assert_called_once_with()
+
+    def test_host_resolves_absent_and_explicit_daemon_start_policies(self) -> None:
+        """The real host resolver retains configured policy unless overridden."""
+        pm = Mock(spec=ProfileManager)
+        pm.config = Mock()
+        for configured, expected in (
+            ('ask', ChatDaemonAutostartPolicy.ASK),
+            ('always', ChatDaemonAutostartPolicy.ALWAYS),
+            ('never', ChatDaemonAutostartPolicy.NEVER),
+        ):
+            with self.subTest(configured=configured):
+                pm.config.get_str.return_value = configured
+                self.assertIs(
+                    _resolve_autostart_policy(cast(ProfileManager, pm), None),
+                    expected,
+                )
+
+        pm.config.get_str.return_value = 'never'
+        self.assertIs(
+            _resolve_autostart_policy(cast(ProfileManager, pm), True),
+            ChatDaemonAutostartPolicy.ALWAYS,
+        )
+        pm.config.get_str.return_value = 'always'
+        self.assertIs(
+            _resolve_autostart_policy(cast(ProfileManager, pm), False),
+            ChatDaemonAutostartPolicy.NEVER,
+        )
 
     def test_handle_chat_never_policy_keeps_daemon_explicit(self) -> None:
         """
