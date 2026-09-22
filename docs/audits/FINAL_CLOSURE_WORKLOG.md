@@ -10,9 +10,9 @@ reports remain evidence and are not competing implementation backlogs.
 | N01 | verified | `1834520` | CLI, daemon bootstrap, release parser, GUI parser; Ruff; mypy | Complete |
 | N02 | verified | `e033e7e` | Runtime/cleanup, Tor/Stem, live shebang; Ruff; mypy | Complete |
 | N03 | implemented | `1c50e43` | POSIX race regressions, profile/storage neighbors, Windows handle structure; Ruff; mypy | Native Windows junction/error execution remains an N11 gate |
-| N04 | verified | N04 checkpoint (this commit) | Lock modes/bounded safe reads/process generations/races/real child, settings/profile neighbors; Ruff; mypy; boundaries | Complete on Linux; native Windows ACL/error execution remains an N11 gate |
-| N05 | in progress | pending | Counterexamples being added | Make device configuration opens nonblocking and portable |
-| N06 | open | — | — | Reject non-finite numbers at both IPC boundaries |
+| N04 | verified | `c1770a0` | Lock modes/bounded safe reads/process generations/races/real child, settings/profile neighbors; Ruff; mypy; boundaries | Complete on Linux; native Windows ACL/error execution remains an N11 gate |
+| N05 | implemented | N05 checkpoint (this commit) | POSIX FIFO/link/type/size/TOML, configuration/launcher neighbors; Ruff; mypy | Native Windows 3.11/3.13 mypy and ACL/reparse execution remain N09/N11 gates |
+| N06 | in progress | pending | Counterexamples being added | Reject non-finite numbers at both IPC boundaries |
 | N07 | open | — | — | Bound lifecycle wakeups and validate Linux sources |
 | N08 | open | — | — | Extend the GUI media integration through inbound LIVE voice |
 | N09 | open | — | — | Close the CI and native renderer matrix |

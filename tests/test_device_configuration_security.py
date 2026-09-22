@@ -2,6 +2,8 @@
 
 import os
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -71,6 +73,47 @@ class DeviceConfigurationSecurityTests(unittest.TestCase):
                 ):
                     read_configuration(str(path), True)
 
+    def test_posix_fifo_is_rejected_without_waiting_for_a_writer(self) -> None:
+        """A special input is classified before any blocking content read.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if os.name == 'nt' or not hasattr(os, 'mkfifo'):
+            self.skipTest('POSIX FIFO contract')
+        with tempfile.TemporaryDirectory() as directory:
+            fifo = Path(directory) / 'device.toml'
+            os.mkfifo(fifo)
+            source_root = Path(__file__).resolve().parents[1] / 'src'
+            environment = os.environ.copy()
+            current_path = environment.get('PYTHONPATH')
+            environment['PYTHONPATH'] = (
+                f'{source_root}{os.pathsep}{current_path}'
+                if current_path
+                else str(source_root)
+            )
+            probe = (
+                'import sys\n'
+                'from metor.ui.gui.platform.configuration import ('
+                'DeviceConfigurationError, read_configuration)\n'
+                'try:\n'
+                '    read_configuration(sys.argv[1], True)\n'
+                'except DeviceConfigurationError:\n'
+                '    raise SystemExit(0)\n'
+                'raise SystemExit(1)\n'
+            )
+            result = subprocess.run(
+                [sys.executable, '-c', probe, str(fifo)],
+                capture_output=True,
+                check=False,
+                env=environment,
+                timeout=5.0,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8'))
+
     def test_validation_does_not_stat_path_before_opening(self) -> None:
         if os.name == 'nt':
             self.skipTest('POSIX descriptor contract')
@@ -119,6 +162,10 @@ class DeviceConfigurationSecurityTests(unittest.TestCase):
             path = root / 'large.toml'
             path.write_bytes(b'#' * (64 * 1024 + 1))
             with self.assertRaisesRegex(DeviceConfigurationError, '64 KiB'):
+                read_configuration(str(path), True)
+
+            path.write_text('[display', encoding='utf-8')
+            with self.assertRaisesRegex(DeviceConfigurationError, 'could not be read'):
                 read_configuration(str(path), True)
 
     def test_windows_uses_secure_opener_and_fails_closed(self) -> None:

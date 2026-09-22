@@ -58,13 +58,14 @@ def _open_configuration(location: Path) -> int:
             raise DeviceConfigurationError(
                 'Windows device configuration trust could not be established'
             ) from exc
-    if not hasattr(os, 'O_NOFOLLOW'):
+    no_follow: int | None = getattr(os, 'O_NOFOLLOW', None)
+    if no_follow is None:
         raise DeviceConfigurationError(
             'POSIX device configuration trust could not be established'
         )
-    flags = os.O_RDONLY | os.O_NOFOLLOW
-    if hasattr(os, 'O_CLOEXEC'):
-        flags |= os.O_CLOEXEC
+    close_on_exec: int = int(getattr(os, 'O_CLOEXEC', 0))
+    nonblocking: int = int(getattr(os, 'O_NONBLOCK', 0))
+    flags: int = os.O_RDONLY | no_follow | close_on_exec | nonblocking
     return os.open(location, flags)
 
 
