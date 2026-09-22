@@ -1,4 +1,4 @@
-"""Explicitly authorized native Razer GUI PTT/review probe with temporary encrypted Core data.
+"""Explicitly authorized native GUI PTT/review probe with temporary encrypted Core data.
 
 The input event is synthetic; capture, output, native widgets, SDK, IPC and storage
 are real. No audio is exported. This is not physical-key, AEC or acoustic-quality proof.
@@ -21,21 +21,41 @@ if os.name == 'nt':
     os.environ['KCFG_GRAPHICS_WINDOW_STATE'] = 'hidden'
 os.environ['KIVY_NO_FILELOG'] = '1'
 os.environ['KIVY_NO_CONFIG'] = '1'
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
+CHECKOUT = Path(__file__).resolve().parents[1]
+bootstrap = argparse.ArgumentParser(add_help=False)
+bootstrap.add_argument('--mode', choices=('source', 'installed'), required=True)
+bootstrap_args, _bootstrap_unknown = bootstrap.parse_known_args()
+if bootstrap_args.mode == 'source':
+    sys.path.insert(0, str(CHECKOUT / 'src'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import sounddevice
+
+from gui_native_route import (  # type: ignore[import-not-found]
+    select_audio_route,
+    verify_gui_module_origin,
+)
+from metor.ui.gui.platform.audio import HeadsetAudio, PcmVoice
+
+if '--list-devices' in sys.argv:
+    print(
+        json.dumps(
+            [endpoint.__dict__ for endpoint in HeadsetAudio.endpoints()], indent=2
+        )
+    )
+    raise SystemExit(0)
 
 from kivy.clock import Clock
 from kivy.core.window import Window
 import psutil
 
-import test_gui_producers as support  # type: ignore[import-untyped]
+import test_gui_producers as support  # type: ignore[import-not-found]
 from metor.client import FrontendLaunchContext
 from metor.client.platform import OutputPort
 from metor.core.api import Delivery, MessageDirectionCode
 from metor.data.message import MessageDirection
 from metor.ui.gui.app import MetorApp
 from metor.ui.gui.platform import DeviceConfiguration
-from metor.ui.gui.platform.audio import HeadsetAudio, PcmVoice
 from metor.ui.gui.state import Route
 from metor.ui.gui.views.peer import PeerView
 
@@ -43,6 +63,22 @@ from metor.ui.gui.views.peer import PeerView
 RECORD_SECONDS: float = 1.0
 PROBE_DEADLINE_SECONDS: float = 40.0
 POLL_SECONDS: float = 0.05
+
+
+def _validate_format(input_index: int, output_index: int) -> None:
+    """Checks the production PCM format on both selected backend directions."""
+    sounddevice.check_input_settings(
+        device=input_index,
+        samplerate=PcmVoice.SAMPLE_RATE,
+        channels=PcmVoice.CHANNELS,
+        dtype='int16',
+    )
+    sounddevice.check_output_settings(
+        device=output_index,
+        samplerate=PcmVoice.SAMPLE_RATE,
+        channels=PcmVoice.CHANNELS,
+        dtype='int16',
+    )
 
 
 class ObservedNativeOutput:
@@ -65,7 +101,7 @@ class ObservedNativeOutput:
 
 
 def main() -> None:
-    """Exercises one brief deliberate PTT/review cycle on the approved headset only.
+    """Exercises one brief deliberate PTT/review cycle on an explicit route.
 
     Args:
         None
@@ -73,22 +109,33 @@ def main() -> None:
         None
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--headset-confirmed', action='store_true', required=True)
+    parser.add_argument('--mode', choices=('source', 'installed'), required=True)
+    parser.add_argument('--list-devices', action='store_true')
+    parser.add_argument('--input-device', type=int, required=True)
+    parser.add_argument('--output-device', type=int, required=True)
+    parser.add_argument('--headset-confirmed', action='store_true')
     parser.add_argument('--result', type=Path, required=True)
+    parser.add_argument('--revision', required=True)
     args = parser.parse_args()
-    endpoints = HeadsetAudio.endpoints()
-    matching = [item for item in endpoints if 'razer blackshark' in item.name.lower()]
-    inputs = sorted(
-        (item for item in matching if item.input_available),
-        key=lambda item: 'mme' not in item.name.lower(),
+    route = select_audio_route(
+        HeadsetAudio.endpoints(),
+        args.input_device,
+        args.output_device,
+        headset_confirmed=args.headset_confirmed,
+        validate_format=_validate_format,
     )
-    outputs = sorted(
-        (item for item in matching if item.output_available),
-        key=lambda item: 'mme' not in item.name.lower(),
+    source, sink = route.source, route.sink
+    module_file = sys.modules[MetorApp.__module__].__file__
+    assert module_file is not None
+    verify_gui_module_origin(
+        module_file,
+        mode=args.mode,
+        checkout=CHECKOUT,
+        environment_root=Path(sys.prefix),
     )
-    if not inputs or not outputs:
-        raise RuntimeError('The approved Razer headset route is unavailable')
-    source, sink = inputs[0], outputs[0]
+    input_info = sounddevice.query_devices(source.index)
+    output_info = sounddevice.query_devices(sink.index)
+    hostapis = sounddevice.query_hostapis()
     fixture = support.GuiProducerTests()
     app: MetorApp | None = None
     try:
@@ -207,20 +254,20 @@ def main() -> None:
                 assert [row[4] for row in pending] == ['native-duplex-source']
                 args.result.parent.mkdir(parents=True, exist_ok=True)
                 app.shell.export_to_png(str(args.result.with_suffix('.png')))
-                module_file = sys.modules[MetorApp.__module__].__file__
-                assert module_file is not None
-                module_path = Path(module_file).resolve()
                 evidence = {
-                    'kind': 'native GUI synthetic-key PTT, actual headset, public SDK and temporary encrypted Core',
+                    'kind': 'native GUI synthetic-key PTT, explicit headset route, public SDK and temporary encrypted Core',
+                    'revision_or_artifact': args.revision,
+                    'mode': args.mode,
                     'system': platform.system(),
                     'python': platform.python_version(),
-                    'source_checkout': module_path.is_relative_to(
-                        Path(__file__).resolve().parents[1] / 'src'
-                    ),
-                    'installed_bundle': 'site-packages' in module_path.parts,
-                    'gui_module_path': str(module_path),
-                    'input': source.name,
-                    'output': sink.name,
+                    'module_origin_verified': True,
+                    'input_device': source.index,
+                    'output_device': sink.index,
+                    'input_backend': hostapis[input_info['hostapi']]['name'],
+                    'output_backend': hostapis[output_info['hostapi']]['name'],
+                    'input_channels_available': input_info['max_input_channels'],
+                    'output_channels_available': output_info['max_output_channels'],
+                    'codec': PcmVoice.CODEC,
                     'captured_and_played_bytes': size,
                     'simultaneous_sdk_playback_bytes': PcmVoice.FRAME_BYTES,
                     'simultaneous_capture_output_observed': observed_output.overlap,
@@ -231,6 +278,7 @@ def main() -> None:
                     'microphone_audio_exported': False,
                     'aec_or_acoustic_quality_verified': False,
                     'rss_bytes': psutil.Process().memory_info().rss,
+                    'probe_deadline_seconds': PROBE_DEADLINE_SECONDS,
                 }
                 args.result.write_text(
                     json.dumps(evidence, indent=2) + '\n', encoding='utf-8'

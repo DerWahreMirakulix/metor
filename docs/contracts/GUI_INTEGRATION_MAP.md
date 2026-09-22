@@ -213,8 +213,8 @@ that interrupted turn. DROP review remains owned and hidden behind restriction.
 Four deterministic press tests and four actual GUI-worker/Core IPC tests pass.
 The worker tests use finite synthetic microphone frames, not native audio. Native
 PTT widgets, route selection and review/playback are now connected to peer views.
-The later checkpoint below distinguishes native synthetic input from actual headset
-and complete product acceptance.
+The later checkpoint below distinguishes native synthetic input from an
+explicitly selected capability-compatible native route and complete product acceptance.
 
 DROP review mutations now keep their exact owner/peer/message ID and perform a
 bounded read-only receipt check after an uncertain result. The real lost-commit
@@ -226,7 +226,9 @@ Native route enumeration is deferred to explicit user intent and a worker. Its
 bounded typed result uses the GUI mailbox rather than an invented IPC event.
 Endpoint selection remains volatile and requires explicit headset confirmation;
 enumeration does not open the microphone or assert AEC. Settings offers separate
-input/output selectors and explicit headset confirmation.
+input/output selectors and explicit headset confirmation. Native acceptance
+harnesses use the same bounded enumeration, reject wrong direction or unsupported
+PCM, and distinguish verified source mode from installed-wheel mode.
 
 `ProfileActivation` now owns deferred host bootstrap and profile creation. The
 runtime coordinator delegates those operations and exposes one generation-checked

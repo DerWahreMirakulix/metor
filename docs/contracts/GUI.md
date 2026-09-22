@@ -77,10 +77,11 @@ stop only the affected unsafe action. Shared root/peer actions implement protect
 pins, DROP-only cleanup, selective/bulk LIVE fallback and ended-context dismissal.
 End/Cancel and Change route carry exact Core lifecycle qualifiers. Explicit Retry
 finalization rechecks the original owner's accepted audio and never sends a DROP.
-The earlier native Razer duplex probe and GUI capture/review evidence establish
-the declared headset validation route at their recorded source revisions. The
-current full-GUI route still requires its documented native rerun; neither
-result claims speaker AEC or other devices.
+The earlier named-device duplex probe and GUI capture/review evidence establish
+only that dated route at their recorded source revisions. The current generic
+full-GUI harness requires explicit capability-compatible input/output selection,
+headset confirmation and verified source/installed provenance. Its native rerun
+remains pending; neither result claims speaker AEC or universal device support.
 
 Own delivered LIVE text and complete retained PCM can be explicitly resent as a
 new DROP with a new ID. The contextual action rechecks source availability;
@@ -156,8 +157,9 @@ port. Optional unavailable capture/output must not fabricate playback or
 consume Voice. The tested environment offers SDL offscreen rendering and zero
 audio devices on Linux. An isolated native Windows Python 3.11.9 runtime also
 launched the installed GUI. A user-authorized Razer BlackShark capture/playback
-probe passed. The native GUI also passed a short focused-key PTT/review test
-against an actual temporary encrypted Core and Razer headset. This does not prove
+probe passed as dated historical evidence. The native GUI also passed a short
+focused-key PTT/review test against an actual temporary encrypted Core and that
+same recorded route. This does not prove
 physical-key input, acoustic quality, AEC, the full duplex matrix or unplug recovery.
 
 ## Everyday operation

@@ -6,7 +6,7 @@ pending. No physical-appliance support is claimed.
 Inputs: functional/layout v1.0. Integration gaps are tracked in
 [GUI_INTEGRATION_MAP.md](GUI_INTEGRATION_MAP.md).
 
-Recorded 20 September evidence includes 676 regression tests, 46
+Historical evidence recorded on 20 September includes 676 regression tests, 46
 minimum-size/150% native SDL fixtures, Linux and Windows
 bundles/consumers/installers, installed desktop/simulator launch, and an actual
 Razer capture/review run (30,720 bytes / 960 ms). On the RTX 4060 host, the
@@ -18,7 +18,9 @@ device-loss boundaries and native lifecycle privacy are covered at the declared
 GUI boundary at the recorded revisions. Current-source software and local Linux
 native-renderer evidence pass, but fresh hosted Linux/Windows × Python
 3.11/3.13 CI, installed Windows WTS/power/media, real Linux lock/suspend/media,
-and the updated full-GUI Razer duplex route remain acceptance gates.
+and a current installed full-GUI duplex run on an explicitly selected suitable
+route remain acceptance gates. The named GPU and headset above are measurement
+context for that dated run, not current selection conditions.
 Product-specific screen-reader certification and physical adapter acceptance
 are separate support dimensions; neither is claimed by this manifest.
 
@@ -96,8 +98,10 @@ does not compete with or change the AccessKit/Kivy WndProc teardown order.
 Linux uses the pure-Python `dbus-next` 0.2.3 client. The system bus subscribes
 to systemd-logind `PrepareForSleep` and Session `Lock`/`Unlock`; the session bus
 subscribes to the standard freedesktop and implemented GNOME/Cinnamon
-`ActiveChanged` screen-saver interfaces. At least one bus must be subscribable;
-otherwise the claimed Linux desktop lifecycle integration fails explicitly.
+`ActiveChanged` screen-saver interfaces. Discovery validates the logind session
+identity and the exact supported provider interface/signal before accepting a
+source; merely finding a subscribable bus is insufficient. If no validated
+provider is available, the claimed Linux desktop lifecycle integration fails explicitly.
 Desktop environments that emit none of these interfaces are untested and are
 not inferred to work merely because Kivy can open a window.
 
@@ -161,13 +165,29 @@ exactly `draft` and `pending` rather than fabricated Delivered/Read outcomes.
 The 20 MiB production playback stress remains within the 16 MiB cache and
 bounded mailbox limits.
 
-The native Razer GUI probe now also requests a synthetic Core-backed playback
-during actual headset capture and observes overlap at the real PortAudio write,
-then retains its existing captured-review playback and no-export checks. That
-updated native scenario is not runnable on this WSL host and is therefore a
-pending native rerun, not a new pass. The earlier native simultaneous port probe
-remains evidence for that exact selected route only; neither result establishes
-speaker AEC, arbitrary-headset behavior, or appliance support.
+The current generic native GUI harness requires explicit enumerated input and
+output indices, headset confirmation, PCM capability checks, and either verified
+source or installed-module provenance. It requests a synthetic Core-backed
+playback during actual capture and observes overlap at the real PortAudio write,
+then retains captured-review playback and no-export checks. That scenario is not
+runnable on this WSL host with zero enumerated endpoints and is therefore a
+pending native rerun, not a pass. The earlier dated simultaneous port probe
+remains evidence for its exact selected route only; neither result establishes
+speaker AEC or appliance support.
+
+Enumerate without opening a stream, then run only after an operator has selected
+and confirmed a suitable headset route:
+
+```sh
+python tests/gui_native_voice.py --mode source --list-devices
+python tests/gui_native_voice.py --mode source --input-device INPUT_INDEX --output-device OUTPUT_INDEX --headset-confirmed --revision COMMIT_OR_TREE --result native-gui-voice.json
+```
+
+For installed acceptance, invoke the same script from outside the checkout with
+`--mode installed` under the wheel-installed interpreter. The harness rejects a
+checkout-loaded GUI in that mode. `gui_native_audio.py` exposes the same route,
+mode, confirmation, revision and result arguments for the narrower PortAudio
+duplex diagnostic; it does not replace the full GUI/Core gate.
 
 ## Resource and safety constraints
 

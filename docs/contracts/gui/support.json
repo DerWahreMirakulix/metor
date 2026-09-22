@@ -3,7 +3,7 @@
   "completion": {
     "gui_contract_and_design": "implemented for the declared desktop and simulator scope",
     "desktop_installation": "tested on Linux x86_64 and Windows x86_64",
-    "mandatory_native_acceptance": "pending installed Windows WTS/power media, real Linux suspend/lock media, and current full-GUI Razer duplex reruns",
+    "mandatory_native_acceptance": "pending installed Windows WTS/power media, real Linux suspend/lock media, and current installed full-GUI duplex on an explicitly selected capability-compatible headset route",
     "physical_appliance": "not applicable: no production physical adapter is registered or claimed",
     "release_publication": "not performed"
   },
@@ -30,7 +30,7 @@
     "focus": "ordinary window focus loss revokes focus-owned input/media only and is not promoted to an OS lock",
     "windows": "WTS session Lock/Unlock and WM_POWERBROADCAST suspend/resume on an owned hidden window; structurally tested, native installed delivery untested in the current WSL environment",
     "linux": "systemd-logind PrepareForSleep and Session Lock/Unlock on the system bus plus freedesktop/GNOME/Cinnamon ActiveChanged on the session bus; real isolated session-bus delivery tested 2026-09-21",
-    "linux_variant_limit": "a desktop session must expose at least one subscribable D-Bus; compositor/session variants emitting none of the registered interfaces are untested and not claimed",
+    "linux_variant_limit": "the validated logind session and/or supported screen-lock provider must expose the exact registered interface and signal; an arbitrary subscribable D-Bus is insufficient, and other compositor/session variants are untested",
     "native_acceptance_gap": "real Linux system suspend/locked-session media run and installed Windows WTS/power media run remain unavailable"
   },
   "linux_x86_64": {
@@ -48,16 +48,16 @@
     "native_dependency_imports": "tested",
     "native_sdl_window": "tested",
     "root_480x800": "tested",
-    "headset_route": "Razer BlackShark V2 HS 2.4",
-    "bounded_duplex_capture_playback": "tested; captured bytes discarded",
-    "gui_ptt": "tested from current lifecycle installed packages with synthetic focused Space input, actual Razer capture/review and temporary encrypted Core; 30720 bytes / 960 ms; 2026-09-20",
-    "current_source_full_gui_duplex_probe": "implemented with synthetic Core-backed playback during actual Razer capture plus captured-review playback; native rerun unavailable in the current WSL environment",
+    "historical_headset_route_2026_09_20": "Razer BlackShark V2 HS 2.4; contextual observation, not a current device requirement",
+    "historical_bounded_duplex_capture_playback_2026_09_20": "tested on the recorded route; captured bytes discarded",
+    "historical_gui_ptt_2026_09_20": "tested from then-current lifecycle installed packages with synthetic focused Space input, actual capture/review and temporary encrypted Core; 30720 bytes / 960 ms",
+    "current_source_full_gui_duplex_probe": "generic explicit-route harness implemented with synthetic Core-backed playback during actual capture plus captured-review playback; native rerun unavailable in the current WSL environment",
     "canonical_installer": "tested offline with official full CPython 3.11.9 NuGet runtime; 2026-09-15",
     "coinstall_uninstall": "tested both UI removal orders; 2026-09-15",
     "speaker_aec": "unsupported",
     "current_validation_runtime": "official CPython 3.11.9 NuGet package with pip and venv; temporary isolated installation",
     "installed_desktop_and_simulator": "tested outside checkout with isolated interpreter; 2026-09-20",
-    "local_install_root_load": "RTX 4060; 24 synthetic queued inputs, 64 changing rows; first input 297 ms, subsequent p95 71.8 ms; excludes native audio and physical input"
+    "historical_local_install_root_load_2026_09_20": "measured on an RTX 4060 host; contextual hardware metadata only; 24 synthetic queued inputs, 64 changing rows; first input 297 ms, subsequent p95 71.8 ms; excludes native audio and physical input"
   },
   "physical_adapters": [],
   "software_media_integration": {
@@ -65,7 +65,7 @@
     "concurrent_ui_state": "text draft and bounded mailbox/controller polling remain usable during overlap",
     "truthful_outcomes": "captured media remains draft and the playback source remains pending; no Delivered, Read or Safe state is inferred",
     "pressure": "20 MiB production playback probe passes with 16 MiB cache cap, 64 KiB reads and bounded mailbox",
-    "native_scope": "prior exact Razer headset port duplex passed; updated full-GUI native duplex route requires rerun; no AEC, arbitrary-headset or appliance claim"
+    "native_scope": "current gate requires an explicitly selected capability-compatible headset route and verified installed-module origin; the prior named-device duplex is dated historical evidence only; no speaker AEC or appliance claim"
   },
   "platform_contracts": {
     "owner": "metor-sdk / metor.client.platform",
@@ -96,7 +96,7 @@
   "host_shutdown": "typed fixed-port request occurs only after local single-runtime checks plus Core preparation, or exact safe purge terminal state; the port owns atomic exclusive-host enforcement; no OS adapter registered or real shutdown tested",
   "purge": "bounded physical-input composition, scoped grant, exact initiation and safe-terminal shutdown gating tested; no production hardware driver or real destruction/shutdown tested",
   "pause_checkpoint": "2026-09-15: retained root source has targeted native/static validation; installed artifacts/headset evidence predates final RootPanel/RootRow changes",
-  "current_checkpoint": "2026-09-22: software full-GUI inbound LIVE capture/playback overlap through SDK/encrypted Core, 20 MiB pressure, local Linux 3.11 native rendering, and fresh Linux four-bundle installed-consumer validation pass; fresh hosted four-lane CI, native Windows lifecycle/batch/release execution, real Linux lock/suspend media, and updated full-GUI Razer duplex reruns remain unavailable; earlier installed/native evidence retains its recorded source scope",
+  "current_checkpoint": "2026-09-22: software full-GUI inbound LIVE capture/playback overlap through SDK/encrypted Core, 20 MiB pressure, local Linux 3.11 native rendering, and fresh Linux four-bundle installed-consumer validation pass; fresh hosted four-lane CI, native Windows lifecycle/batch/release execution, real Linux lock/suspend media, and installed full-GUI duplex on an explicitly selected suitable route remain unavailable; earlier installed/native evidence retains its recorded source scope",
   "acceptance_at_claimed_support_level": false,
   "physical_appliance_acceptance": "not applicable until a production adapter is registered and claimed"
 }

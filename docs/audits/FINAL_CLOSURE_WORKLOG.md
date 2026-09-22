@@ -11,8 +11,8 @@ reports remain evidence and are not competing implementation backlogs.
 | R02     | implemented | `5f7099e`                    | Parser/frontend/host-policy/chat/release neighbors; 78 tests; Ruff; format; mypy              | PASS on Linux                                           | Complete                                                         |
 | R03     | implemented | `96f07a3`                    | Parser/dispatcher/help/history/release neighbors; 69 tests; Ruff; format; mypy                 | PASS on Linux                                           | Complete                                                         |
 | R04     | implemented | `bb00a73`                    | 64 daemon/runtime/release neighbors; installed-wheel managed spawn; Ruff; format; mypy         | PASS on Linux; native Windows execution remains open    | Native Windows evidence remains an R05/R07 gate                     |
-| R05     | implemented | R05 checkpoint (this commit) | Normal + `--platform win32` mypy (465 sources); 91 security/process/installer tests; Ruff/format | Static PASS; 4 native Windows tests skipped locally     | Fresh hosted/native Windows execution remains an R07 gate           |
-| R06     | open        | —                            | —                                                                                            | —                                                         | Make native GUI/audio evidence capability-selected and generic     |
+| R05     | implemented | `7f64029`                    | Normal + `--platform win32` mypy (465 sources); 91 security/process/installer tests; Ruff/format | Static PASS; 4 native Windows tests skipped locally     | Fresh hosted/native Windows execution remains an R07 gate           |
+| R06     | implemented | R06 checkpoint (this commit) | 59 route/Voice/GUI/lifecycle/docs tests; generic native listings; Ruff; format; mypy            | Software PASS; native audio BLOCKED (0 endpoints)       | Run installed native route and remaining lifecycle gates in R07     |
 | R07     | open        | —                            | —                                                                                            | —                                                         | Consolidate local, CI, artifact, and native acceptance evidence    |
 
 R01 replaces path-presence ownership and rename-based stale reaping with one
@@ -119,6 +119,40 @@ workflow dispatch was authorized, so the cited Windows jobs `106779301747` and
 this checkpoint. Fresh hosted Windows quality, installed managed spawn,
 startup-secret, lock, reparse/ACL, WTS/Power, and batch execution remain
 explicit R07 gates.
+
+R06 removes active hardware-brand, fixed-index, and backend-preference gates
+without changing the generic production PortAudio adapter. Both native audio
+harnesses now enumerate without opening a stream and require explicit input and
+output indices, headset confirmation, the supported 16 kHz mono signed-PCM
+format, a result path, and a commit/tree or artifact identity. Selection is
+based only on the current bounded `HeadsetAudio.endpoints()` capabilities. The
+full GUI harness retains native widgets, production controllers/workers,
+SDK/IPC, temporary encrypted Core storage, simultaneous capture/output,
+captured-review playback, unsent-draft semantics, and no-export checks.
+
+Source and installed modes are explicit. Source mode deliberately adds the
+checkout `src`; installed mode adds no source path and rejects a GUI module from
+the checkout or outside its selected environment. Evidence records mode,
+revision/artifact, OS/Python/backend, indices and directional channel
+capabilities, codec, byte/duration/resource progress, bounded probe timeout, and
+the actual no-publication result. Endpoint and GPU names are not pass criteria
+or required evidence fields. The narrower native port probe remains diagnostic,
+not a substitute for the full GUI/Core route.
+
+Four automated selection/provenance tests cover two unrelated neutral endpoint
+pairs with changing indices, wrong capture/playback direction, unsupported
+format, missing confirmation, vanished enumeration, and wrong installed origin;
+all failures occur before stream activation. The 12 real GUI/SDK/Core capture
+neighbors pass with loopback enabled, and the remaining Voice, device lifecycle,
+OS lifecycle, and documentation neighbors bring the focused total to 59. Ruff,
+format, and strict mypy pass. Both native harnesses list zero endpoints in the
+available Linux GUI environment, so no native audio run is claimed.
+
+Active support, GUI, platform, and integration-map instructions now state the
+generic capability-selected installed gate and exact logind/provider/session
+validation. Razer/RTX values remain only explicitly dated historical context;
+they are not rewritten as generic past successes. Native installed duplex,
+Windows WTS/power/media, and real Linux lock/suspend/media remain R07 gates.
 
 ## Current follow-up status
 
