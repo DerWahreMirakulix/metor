@@ -58,6 +58,14 @@ jobs:
           python scripts/validate_installed_artifacts.py closure-bundles
           python scripts/validate_release_installers.py closure-bundles
 
+      - name: Provision and verify Linux EGL software rendering
+        if: runner.os == 'Linux' && matrix.python-version == '3.11'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri
+          python -c "import ctypes; ctypes.CDLL('libEGL.so.1')"
+
       - name: Run native GUI fixtures outside unittest discovery
         if: runner.os == 'Linux' && matrix.python-version == '3.11'
         shell: bash
@@ -66,10 +74,28 @@ jobs:
           KIVY_WINDOW: sdl2
           KIVY_CLIPBOARD: dummy
         run: |
-          python tests/gui_native_capture.py --view root_refresh --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/root-refresh.png"
-          python tests/gui_native_capture.py --view setting_keyboard --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/setting-keyboard.png"
+          set -o pipefail
+          python tests/gui_native_capture.py --view root_refresh --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/root-refresh.png" 2>&1 | tee "${RUNNER_TEMP}/root-refresh.log"
+          python tests/gui_native_capture.py --view setting_keyboard --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/setting-keyboard.png" 2>&1 | tee "${RUNNER_TEMP}/setting-keyboard.log"
 
       - name: Run bounded synthetic stream fixture outside unittest discovery
         if: runner.os == 'Linux' && matrix.python-version == '3.11'
         shell: bash
-        run: python tests/gui_stream_pressure.py --result "${RUNNER_TEMP}/stream-pressure.json"
+        run: |
+          set -o pipefail
+          python tests/gui_stream_pressure.py --result "${RUNNER_TEMP}/stream-pressure.json" 2>&1 | tee "${RUNNER_TEMP}/stream-pressure.log"
+
+      - name: Upload native GUI and stream evidence
+        if: always() && runner.os == 'Linux' && matrix.python-version == '3.11'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: gui-native-evidence-linux-py311
+          path: |
+            ${{ runner.temp }}/root-refresh.png
+            ${{ runner.temp }}/setting-keyboard.png
+            ${{ runner.temp }}/root-refresh.log
+            ${{ runner.temp }}/setting-keyboard.log
+            ${{ runner.temp }}/stream-pressure.json
+            ${{ runner.temp }}/stream-pressure.log
+          if-no-files-found: warn
+          retention-days: 14

@@ -57,6 +57,19 @@ class QualityGateContractTests(unittest.TestCase):
         self.assertIn('tests/gui_native_capture.py --view root_refresh', workflow)
         self.assertIn('tests/gui_native_capture.py --view setting_keyboard', workflow)
         self.assertIn('tests/gui_stream_pressure.py --result', workflow)
+        for runtime_package in ('libegl1', 'libegl-mesa0', 'libgl1-mesa-dri'):
+            self.assertIn(runtime_package, workflow)
+        self.assertIn("ctypes.CDLL('libEGL.so.1')", workflow)
+        self.assertIn('actions/upload-artifact@', workflow)
+        for artifact in (
+            'root-refresh.png',
+            'setting-keyboard.png',
+            'root-refresh.log',
+            'setting-keyboard.log',
+            'stream-pressure.json',
+            'stream-pressure.log',
+        ):
+            self.assertIn(artifact, workflow)
 
 
 if __name__ == '__main__':

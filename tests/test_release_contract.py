@@ -693,8 +693,9 @@ class ReleaseContractTests(unittest.TestCase):
         """
 
         script = build_install_shell_script()
+        target = f'{sys.version_info.major}.{sys.version_info.minor}'
 
-        self.assertIn('python3.11 python3 python', script)
+        self.assertIn(f'python{target} python3 python', script)
         self.assertIn('verify_bundle.py', script)
         self.assertIn('--target-only', script)
         self.assertIn('refusing to replace or delete it', script)
@@ -719,10 +720,11 @@ class ReleaseContractTests(unittest.TestCase):
         """
 
         script = build_install_windows_script()
+        target = f'{sys.version_info.major}.{sys.version_info.minor}'
 
         self.assertIn('verify_bundle.py', script)
         self.assertIn('--target-only', script)
-        self.assertIn('py -3.11 -m venv', script)
+        self.assertIn(f'py -{target} -m venv', script)
         self.assertIn('refusing to modify or delete it', script)
         self.assertNotIn('sys.version_info >=', script)
         self.assertNotIn('rd /s /q', script)

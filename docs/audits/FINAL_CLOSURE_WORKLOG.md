@@ -15,7 +15,7 @@ reports remain evidence and are not competing implementation backlogs.
 | N06     | verified    | `8ff228f`                    | All DTO factories, SDK NDJSON, real daemon socket dispatcher, generated references, IPC/auth neighbors; Ruff; mypy                                    | Complete                                                                        |
 | N07     | implemented | N07 checkpoint (this commit) | 10k coalescing, controlled logind/session/owner/loss/startup/cleanup, Windows failure paths, GUI lifecycle/security neighbors; Ruff; mypy; boundaries | Native Windows WTS/Power and real Linux lock/suspend/resume remain N11 gates    |
 | N08     | verified    | N08 checkpoint (this commit) | Real GUI/SDK/Core inbound LIVE duplex, interruption neighbors, 20 MiB pressure; Ruff                                                                  | Controlled-port software scope complete; native audio route remains an N11 gate |
-| N09     | open        | —                            | —                                                                                                                                                     | Close the CI and native renderer matrix                                         |
+| N09     | implemented | N09 checkpoint (this commit) | Dynamic 3.11/3.13 installer oracles, EGL/SDL workflow contract, local native renderer, release neighbors; Ruff; mypy                                  | Fresh four-lane hosted CI remains an N11 gate                                   |
 | N10     | open        | —                            | —                                                                                                                                                     | Repair release smoke, batch, and ref-transaction paths                          |
 | N11     | open        | —                            | —                                                                                                                                                     | Consolidate documentation and final acceptance evidence                         |
 
@@ -61,6 +61,25 @@ revocation, transport loss, and generation/profile fencing. The repeated
 64 KiB maximum reads, 640-byte frames, the 16 MiB cache ceiling, and a sampled
 60-record mailbox peak. These controlled ports are software evidence only;
 installed native audio duplex remains a mandatory N11 gate.
+
+N09 keeps 3.11 as the deliberate native bundle/installed-consumer lane while
+making the installer source assertions follow the interpreter that generated
+the bundle. The Linux 3.11 lane now installs Mesa's EGL loader/vendor/DRI
+runtime explicitly and proves `libEGL.so.1` is loadable before starting Kivy.
+Both renderer invocations and the 20 MiB pressure fixture retain their stdout
+and stderr; an always-running pinned artifact step collects both PNGs, all
+three logs, and the pressure JSON even when a later fixture fails.
+
+The new workflow contract failed before that provisioning/evidence path was
+added and passed afterward. All 40 release/quality contract tests passed, as
+did Ruff and strict mypy over the complete configured source sets. Both native
+SDL views then ran locally with CPython 3.11.15, Kivy 2.3.1, Mesa llvmpipe and
+the offscreen SDL2 provider; their 360 × 640 / 150% PNGs were inspected. The
+missing optional `libmtdev` and unavailable sandbox clipboard helpers remained
+diagnostics and did not prevent renderer completion. This host has neither
+native Windows nor Python 3.13, and this assignment forbids pushing solely to
+start CI, so a fresh hosted Linux/Windows × 3.11/3.13 run remains a precise N11
+acceptance gate rather than a claimed pass.
 
 ## Baseline
 
