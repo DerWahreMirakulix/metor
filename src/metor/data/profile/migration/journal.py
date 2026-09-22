@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import cast
 
 from metor.data import SqlManager
-from metor.utils import Constants, secure_remove_path
+from metor.utils import Constants, create_private_directory_tree, secure_remove_path
 
 # Local Package Imports
 from metor.data.profile.support import normalize_profile_name, require_profile_name
@@ -113,7 +113,7 @@ def write_migration_journal(journal_path: Path, profile_name: str, state: str) -
         sort_keys=True,
         separators=(',', ':'),
     ).encode('utf-8')
-    journal_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    create_private_directory_tree(journal_path.parent, ())
     temp_path = journal_path.parent / f'.{journal_path.name}.{secrets.token_hex(8)}.tmp'
     try:
         with temp_path.open('xb') as handle:

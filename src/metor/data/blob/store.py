@@ -14,6 +14,7 @@ import nacl.utils
 from nacl.encoding import RawEncoder
 
 from metor.shared import secure_clear_buffer
+from metor.utils import create_private_directory_tree
 from metor.versioning import BLOB_FORMAT_VERSION, BLOB_OBJECT_DERIVATION_VERSION
 
 BLOB_FORMAT_MAGIC = b'METORB01'
@@ -195,8 +196,7 @@ class EncryptedBlobStore:
         self._max_blob_bytes = max_blob_bytes
         self._closed = False
         for root in (persistent_dir, temporary_dir):
-            root.mkdir(mode=0o700, parents=True, exist_ok=True)
-            root.chmod(0o700)
+            create_private_directory_tree(root, ())
 
     @staticmethod
     def _sync_directory(path: Path) -> None:
@@ -523,8 +523,7 @@ class PlaintextBlobStore:
         self._max_blob_bytes = max_blob_bytes
         self._closed = False
         for root in (persistent_dir, temporary_dir):
-            root.mkdir(mode=0o700, parents=True, exist_ok=True)
-            root.chmod(0o700)
+            create_private_directory_tree(root, ())
 
     def _require_open(self) -> None:
         """Rejects operations after store closure.

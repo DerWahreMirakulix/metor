@@ -2,6 +2,7 @@
 
 # ruff: noqa: E402
 
+import os
 import stat
 import sys
 import unittest
@@ -159,6 +160,113 @@ class ProfilePathSecurityTests(unittest.TestCase):
                         source_name,
                         data_root / '.different.staged',
                     )
+
+    def test_profile_creation_rejects_linked_sensitive_subdirectories(self) -> None:
+        """Key, Tor, and blob directories cannot redirect creation or chmod.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            sandbox = Path(temp_dir)
+            for relative in (
+                (Constants.HIDDEN_SERVICE_DIR,),
+                (Constants.TOR_DATA_DIR,),
+                (Constants.PROTECTED_KEY_DIR,),
+                (Constants.BLOBS_DIR,),
+                (Constants.BLOBS_DIR, Constants.PERSISTENT_BLOBS_DIR),
+            ):
+                with self.subTest(relative=relative):
+                    data_root = sandbox / ('data-' + '-'.join(relative))
+                    profile = data_root / 'alpha'
+                    outside = sandbox / ('outside-' + '-'.join(relative))
+                    profile.mkdir(parents=True)
+                    outside.mkdir()
+                    sentinel = outside / 'sentinel.bin'
+                    sentinel.write_bytes(b'outside')
+                    parent = profile
+                    for component in relative[:-1]:
+                        parent = parent / component
+                        parent.mkdir()
+                    (parent / relative[-1]).symlink_to(
+                        outside,
+                        target_is_directory=True,
+                    )
+
+                    with (
+                        patch.object(Constants, 'DATA', data_root),
+                        self.assertRaises(OSError),
+                    ):
+                        ProfileManager('alpha').paths.create_directories()
+
+                    self.assertEqual(sentinel.read_bytes(), b'outside')
+
+    def test_profile_creation_detects_exchange_before_sensitive_open(self) -> None:
+        """A newly created child swapped to a link is rejected before chmod or use.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if sys.platform == 'win32':
+            self.skipTest('POSIX descriptor-relative regression.')
+        with TemporaryDirectory() as temp_dir:
+            sandbox = Path(temp_dir)
+            data_root = sandbox / 'data'
+            outside = sandbox / 'outside'
+            outside.mkdir()
+            sentinel = outside / 'sentinel.bin'
+            sentinel.write_bytes(b'outside')
+            original_open = os.open
+            exchanged = False
+
+            def exchange_before_open(
+                path: str,
+                flags: int,
+                mode: int = 0o777,
+                *,
+                dir_fd: int | None = None,
+            ) -> int:
+                """Swaps the hidden-service child immediately before validation.
+
+                Args:
+                    path (str): Direct child name.
+                    flags (int): Open flags.
+                    mode (int): Optional creation mode.
+                    dir_fd (int | None): Anchored parent descriptor.
+
+                Returns:
+                    int: Descriptor returned by the real open.
+                """
+                nonlocal exchanged
+                hidden = data_root / 'alpha' / Constants.HIDDEN_SERVICE_DIR
+                if (
+                    path == Constants.HIDDEN_SERVICE_DIR
+                    and dir_fd is not None
+                    and hidden.exists()
+                    and not exchanged
+                ):
+                    exchanged = True
+                    hidden.rmdir()
+                    hidden.symlink_to(outside, target_is_directory=True)
+                return original_open(path, flags, mode, dir_fd=dir_fd)
+
+            with (
+                patch.object(Constants, 'DATA', data_root),
+                patch(
+                    'metor.utils.security.os.open',
+                    side_effect=exchange_before_open,
+                ),
+                self.assertRaises(OSError),
+            ):
+                ProfileManager('alpha').paths.create_directories()
+
+            self.assertEqual(sentinel.read_bytes(), b'outside')
 
 
 if __name__ == '__main__':

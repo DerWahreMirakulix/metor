@@ -18,7 +18,7 @@ from nacl.encoding import RawEncoder
 
 from metor.core.api import JsonValue
 from metor.shared import secure_clear_buffer
-from metor.utils import secure_shred_file
+from metor.utils import create_private_directory_tree, secure_shred_file
 from metor.versioning import KEYSLOT_FORMAT_VERSION, PROFILE_KEY_DERIVATION_VERSION
 
 PROFILE_MASTER_KEY_BYTES = 32
@@ -382,8 +382,7 @@ class PasswordKeyProtector:
             None
         """
         parent = self._keyslot_path.parent
-        parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        parent.chmod(0o700)
+        create_private_directory_tree(parent, ())
         temp_path = parent / f'.keyslot-{secrets.token_hex(8)}.tmp'
         try:
             with temp_path.open('xb') as handle:

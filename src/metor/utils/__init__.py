@@ -9,6 +9,8 @@ if TYPE_CHECKING:
     from metor.utils.lock import FileLock  # noqa: F401
     from metor.utils.process import ProcessManager  # noqa: F401
     from metor.utils.security import (  # noqa: F401
+        create_private_directory_tree,
+        open_private_binary_file,
         secure_remove_path,
         secure_shred_file,
     )
@@ -21,6 +23,14 @@ _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     'ProcessManager': ('metor.utils.process', 'ProcessManager'),
     'TypeCaster': ('metor.utils.caster', 'TypeCaster'),
     'validate_json_file': ('metor.utils.validators', 'validate_json_file'),
+    'create_private_directory_tree': (
+        'metor.utils.security',
+        'create_private_directory_tree',
+    ),
+    'open_private_binary_file': (
+        'metor.utils.security',
+        'open_private_binary_file',
+    ),
     'secure_remove_path': ('metor.utils.security', 'secure_remove_path'),
     'secure_shred_file': ('metor.utils.security', 'secure_shred_file'),
 }
@@ -67,6 +77,8 @@ __all__ = [
     'FileLock',
     'ProcessManager',
     'TypeCaster',
+    'create_private_directory_tree',
+    'open_private_binary_file',
     'validate_json_file',
     'secure_remove_path',
     'secure_shred_file',

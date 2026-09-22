@@ -18,7 +18,7 @@ from metor.core.auth import (
     create_pin_verifier,
     derive_pin_verifier,
 )
-from metor.utils import Constants
+from metor.utils import Constants, create_private_directory_tree
 
 __all__ = [
     'PIN_SALT_BYTES',
@@ -206,7 +206,7 @@ class QuickUnlockStore:
             None
         """
         try:
-            self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            create_private_directory_tree(self._path.parent, ())
             info = self._path.parent.lstat()
             if stat.S_ISLNK(info.st_mode) or getattr(
                 info, 'st_file_attributes', 0

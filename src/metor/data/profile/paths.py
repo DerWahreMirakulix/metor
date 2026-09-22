@@ -6,7 +6,7 @@ for sensitive cryptographic and Tor data.
 
 from pathlib import Path
 
-from metor.utils import Constants
+from metor.utils import Constants, create_private_directory_tree
 
 # Local Package Imports
 from metor.data.profile.support import (
@@ -84,24 +84,28 @@ class Paths:
         Returns:
             None
         """
-        self.base_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self.base_dir.chmod(0o700)
-
-        hs_dir: Path = self.base_dir / Constants.HIDDEN_SERVICE_DIR
-        hs_dir.mkdir(mode=0o700, exist_ok=True)
-        hs_dir.chmod(0o700)
-
-        data_dir: Path = self.base_dir / Constants.TOR_DATA_DIR
-        data_dir.mkdir(mode=0o700, exist_ok=True)
-        data_dir.chmod(0o700)
-
-        for protected_dir in (
-            self.get_protected_key_dir(),
-            self.get_persistent_blob_dir(),
-            self.get_temporary_blob_dir(),
-        ):
-            protected_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-            protected_dir.chmod(0o700)
+        profile_component: str = self.base_dir.name
+        blob_component: str = Constants.BLOBS_DIR
+        create_private_directory_tree(
+            Constants.DATA,
+            (
+                (profile_component,),
+                (profile_component, Constants.HIDDEN_SERVICE_DIR),
+                (profile_component, Constants.TOR_DATA_DIR),
+                (profile_component, Constants.PROTECTED_KEY_DIR),
+                (profile_component, blob_component),
+                (
+                    profile_component,
+                    blob_component,
+                    Constants.PERSISTENT_BLOBS_DIR,
+                ),
+                (
+                    profile_component,
+                    blob_component,
+                    Constants.TEMPORARY_BLOBS_DIR,
+                ),
+            ),
+        )
 
     def get_config_dir(self) -> Path:
         """

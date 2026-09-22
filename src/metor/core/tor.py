@@ -21,6 +21,7 @@ from metor.data.profile import ProfileManager
 from metor.utils import (
     Constants,
     ProcessManager,
+    open_private_binary_file,
     secure_shred_file,
 )
 from metor.shared import clean_onion, ensure_onion_format
@@ -111,9 +112,8 @@ class TorManager:
         try:
             decrypted_tor_key: bytes = self._km.get_decrypted_tor_key()
             tor_sec_path: Path = hs_dir / Constants.TOR_SECRET_KEY
-            with tor_sec_path.open('wb') as f:
+            with open_private_binary_file(tor_sec_path) as f:
                 f.write(decrypted_tor_key)
-            tor_sec_path.chmod(0o600)
             return True, None, {}
         except nacl.exceptions.CryptoError:
             return (
@@ -376,20 +376,14 @@ class TorManager:
                 )
 
                 pid_file: Path = data_dir / 'tor.pid'
-                pid_descriptor: int = os.open(
-                    pid_file,
-                    os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-                    0o600,
-                )
-                with os.fdopen(pid_descriptor, 'w') as f:
-                    f.write(
-                        ProcessManager.process_identity_payload(
-                            self._tm_proc.pid,
-                            self._pm.profile_name,
-                            role=Constants.PROCESS_ROLE_TOR,
-                            executable=Path(tor_cmd),
-                        )
-                    )
+                identity_payload = ProcessManager.process_identity_payload(
+                    self._tm_proc.pid,
+                    self._pm.profile_name,
+                    role=Constants.PROCESS_ROLE_TOR,
+                    executable=Path(tor_cmd),
+                ).encode('utf-8')
+                with open_private_binary_file(pid_file) as f:
+                    f.write(identity_payload)
                 break
             except OSError as e:
                 if self._tm_proc is not None:

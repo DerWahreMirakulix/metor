@@ -8,9 +8,9 @@ reports remain evidence and are not competing implementation backlogs.
 | Package | State | Commit | Tests | Next step |
 | ------- | ----- | ------ | ----- | --------- |
 | N01 | verified | `1834520` | CLI, daemon bootstrap, release parser, GUI parser; Ruff; mypy | Complete |
-| N02 | verified | N02 checkpoint (this commit) | Runtime/cleanup, Tor/Stem, live shebang; Ruff; mypy | Complete |
-| N03 | in progress | pending | Counterexamples being added | Anchor directory operations to verified handles |
-| N04 | open | — | — | Harden stale-lock reads and ownership checks |
+| N02 | verified | `e033e7e` | Runtime/cleanup, Tor/Stem, live shebang; Ruff; mypy | Complete |
+| N03 | implemented | N03 checkpoint (this commit) | POSIX race regressions, profile/storage neighbors, Windows handle structure; Ruff; mypy | Native Windows junction/error execution remains an N11 gate |
+| N04 | in progress | pending | Counterexamples being added | Harden stale-lock reads and ownership checks |
 | N05 | open | — | — | Make device configuration opens nonblocking and portable |
 | N06 | open | — | — | Reject non-finite numbers at both IPC boundaries |
 | N07 | open | — | — | Bound lifecycle wakeups and validate Linux sources |
@@ -18,6 +18,14 @@ reports remain evidence and are not competing implementation backlogs.
 | N09 | open | — | — | Close the CI and native renderer matrix |
 | N10 | open | — | — | Repair release smoke, batch, and ref-transaction paths |
 | N11 | open | — | — | Consolidate documentation and final acceptance evidence |
+
+N03 cohesion review: `metor.utils.security` is now 726 physical lines because
+the POSIX descriptor and Windows handle implementations must share exact entry
+identity, reparse, overwrite, and removal rules. It remains one security-critical
+filesystem responsibility and stays below the 800-line exceptional ceiling.
+Splitting the mutually dependent native backends during the race correction
+would obscure the shared invariants; a later extraction is not part of this
+bounded remediation.
 
 ## Baseline
 

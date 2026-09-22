@@ -323,6 +323,163 @@ class SecurityContractTests(unittest.TestCase):
             self.assertFalse(link.exists())
             self.assertEqual(marker.read_bytes(), b'outside')
 
+    def test_secure_remove_path_rejects_root_exchange_before_directory_open(
+        self,
+    ) -> None:
+        """A root swap to an outside link cannot redirect recursive cleanup.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if os.name == 'nt':
+            self.skipTest('POSIX descriptor-relative regression.')
+        with TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir)
+            profile = sandbox / 'profile'
+            moved = sandbox / 'moved-profile'
+            outside = sandbox / 'outside'
+            profile.mkdir()
+            outside.mkdir()
+            (profile / 'owned.bin').write_bytes(b'owned')
+            sentinel = outside / 'sentinel.bin'
+            sentinel.write_bytes(b'outside')
+            original_open = os.open
+            exchanged = False
+
+            def exchange_before_open(
+                path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+                flags: int,
+                mode: int = 0o777,
+                *,
+                dir_fd: int | None = None,
+            ) -> int:
+                """Swaps the selected leaf immediately before its safe open.
+
+                Args:
+                    path (str | bytes | os.PathLike[str] | os.PathLike[bytes]): Open target.
+                    flags (int): Open flags.
+                    mode (int): Optional creation mode.
+                    dir_fd (int | None): Anchored parent descriptor.
+
+                Returns:
+                    int: Descriptor returned by the real open.
+                """
+                nonlocal exchanged
+                if path == 'profile' and dir_fd is not None and not exchanged:
+                    exchanged = True
+                    profile.rename(moved)
+                    profile.symlink_to(outside, target_is_directory=True)
+                return original_open(path, flags, mode, dir_fd=dir_fd)
+
+            with (
+                patch('metor.utils.security.os.open', side_effect=exchange_before_open),
+                self.assertRaises(OSError),
+            ):
+                secure_remove_path(profile)
+
+            self.assertEqual(sentinel.read_bytes(), b'outside')
+            self.assertTrue(profile.is_symlink())
+            self.assertTrue((moved / 'owned.bin').exists())
+
+    def test_secure_remove_path_keeps_outside_tree_after_opened_root_exchange(
+        self,
+    ) -> None:
+        """Recursion remains bound to its opened directory after a pathname swap.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if os.name == 'nt':
+            self.skipTest('POSIX descriptor-relative regression.')
+        with TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir)
+            profile = sandbox / 'profile'
+            moved = sandbox / 'moved-profile'
+            outside = sandbox / 'outside'
+            profile.mkdir()
+            outside.mkdir()
+            (profile / 'owned.bin').write_bytes(b'owned')
+            sentinel = outside / 'sentinel.bin'
+            sentinel.write_bytes(b'outside')
+            original_listdir = os.listdir
+            exchanged = False
+
+            def exchange_during_listdir(descriptor: int) -> list[str]:
+                """Moves the opened root and replaces its pathname with a link.
+
+                Args:
+                    descriptor (int): Opened directory descriptor.
+
+                Returns:
+                    list[str]: Real entries from the still-open directory.
+                """
+                nonlocal exchanged
+                if not exchanged:
+                    exchanged = True
+                    profile.rename(moved)
+                    profile.symlink_to(outside, target_is_directory=True)
+                return list(original_listdir(descriptor))
+
+            with (
+                patch(
+                    'metor.utils.security.os.listdir',
+                    side_effect=exchange_during_listdir,
+                ),
+                self.assertRaisesRegex(OSError, 'changed during cleanup'),
+            ):
+                secure_remove_path(profile)
+
+            self.assertEqual(sentinel.read_bytes(), b'outside')
+            self.assertTrue(profile.is_symlink())
+
+    def test_secure_remove_path_reports_partial_owned_cleanup(self) -> None:
+        """An unsupported later entry leaves a visible failure after owned work.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if os.name == 'nt' or not hasattr(os, 'mkfifo'):
+            self.skipTest('POSIX FIFO regression.')
+        with TemporaryDirectory() as tmp_dir:
+            profile = Path(tmp_dir) / 'profile'
+            profile.mkdir()
+            owned = profile / 'owned.bin'
+            owned.write_bytes(b'owned')
+            fifo = profile / 'blocked.fifo'
+            os.mkfifo(fifo)
+            original_listdir = os.listdir
+
+            def owned_first(descriptor: int) -> list[str]:
+                """Returns a deterministic partial-cleanup traversal order.
+
+                Args:
+                    descriptor (int): Open directory descriptor.
+
+                Returns:
+                    list[str]: Owned regular file before the unsupported FIFO.
+                """
+                entries = list(original_listdir(descriptor))
+                return sorted(entries, key=lambda name: name != 'owned.bin')
+
+            with (
+                patch('metor.utils.security.os.listdir', side_effect=owned_first),
+                self.assertRaisesRegex(OSError, 'unsupported file type'),
+            ):
+                secure_remove_path(profile)
+
+            self.assertFalse(owned.exists())
+            self.assertTrue(fifo.exists())
+            self.assertTrue(profile.exists())
+
     def test_secure_remove_path_rejects_windows_reparse_point(self) -> None:
         """A Windows reparse attribute produces a visible bounded failure.
 
@@ -336,11 +493,13 @@ class SecurityContractTests(unittest.TestCase):
             st_mode=stat.S_IFDIR,
             st_file_attributes=0x00000400,
         )
+        simulated_path = Path('simulated-reparse-point')
         with (
+            patch('metor.utils.security.os.name', 'nt'),
             patch('metor.utils.security.os.lstat', return_value=reparse_info),
             self.assertRaisesRegex(OSError, 'reparse point'),
         ):
-            secure_remove_path(Path('simulated-reparse-point'))
+            secure_remove_path(simulated_path)
 
 
 if __name__ == '__main__':

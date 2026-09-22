@@ -4,11 +4,10 @@ Enforces validation checks to prevent runtime operation on tampered profiles.
 """
 
 import sys
-import os
 from pathlib import Path
 from typing import List, Optional
 
-from metor.utils import Constants, ProcessManager
+from metor.utils import Constants, ProcessManager, open_private_binary_file
 
 # Local Package Imports
 from metor.data.profile.config import Config
@@ -258,24 +257,17 @@ class ProfileManager:
             self.initialize()
 
         if pid is not None:
-            pid_descriptor: int = os.open(
-                self.paths.get_daemon_pid_file(),
-                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-                0o600,
-            )
-            with os.fdopen(pid_descriptor, 'w') as f:
-                f.write(
-                    ProcessManager.process_identity_payload(
-                        pid,
-                        self.profile_name,
-                        role=Constants.PROCESS_ROLE_DAEMON,
-                        executable=Path(sys.executable),
-                    )
-                )
+            identity_payload = ProcessManager.process_identity_payload(
+                pid,
+                self.profile_name,
+                role=Constants.PROCESS_ROLE_DAEMON,
+                executable=Path(sys.executable),
+            ).encode('utf-8')
+            with open_private_binary_file(self.paths.get_daemon_pid_file()) as f:
+                f.write(identity_payload)
 
-        with self.paths.get_daemon_port_file().open('w') as f:
-            f.write(str(port))
-        self.paths.get_daemon_port_file().chmod(0o600)
+        with open_private_binary_file(self.paths.get_daemon_port_file()) as f:
+            f.write(str(port).encode('ascii'))
 
     def get_daemon_pid(self) -> Optional[int]:
         """
