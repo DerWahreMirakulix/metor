@@ -84,6 +84,7 @@ class Constants(ContractConstants):
     FILE_LOCK_STALE_AGE_SEC: float = (
         10.0  # Age threshold for considering a lock file stale
     )
+    FILE_LOCK_METADATA_MAX_BYTES: int = 128
     TCP_CLOSE_LINGER_SEC: float = 0.2  # Socket linger before shutdown
 
     MUTUAL_CONNECT_RACE_WINDOW_SEC: float = 5.0  # Short grace window to recognize the winning inbound side of a simultaneous connect race

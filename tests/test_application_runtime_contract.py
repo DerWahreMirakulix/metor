@@ -92,6 +92,7 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
         launcher = str(scripts / 'metor')
         accepted = (
             [interpreter, '-m', 'metor', '-p', 'alpha', 'daemon'],
+            [interpreter, '-m', 'metor', 'daemon', '--profile=alpha'],
             [
                 interpreter,
                 launcher,
@@ -110,6 +111,24 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
             ['/usr/bin/metor-daemon', '-p', 'alpha', '--locked', 'daemon'],
             ['/usr/bin/metor', 'chat', 'daemon'],
             [interpreter, '-m', 'metor', '-p', 'beta', 'daemon'],
+            [
+                interpreter,
+                '-m',
+                'metor',
+                '-p',
+                'alpha',
+                'daemon',
+                '--startup-session-auth-stdin',
+            ],
+            [
+                interpreter,
+                '-m',
+                'metor',
+                '-p',
+                'alpha',
+                '--profile=alpha',
+                'daemon',
+            ],
         )
         for command in accepted:
             with self.subTest(command=command):

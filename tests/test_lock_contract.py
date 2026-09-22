@@ -3,6 +3,7 @@
 # ruff: noqa: E402
 
 import os
+import stat
 import subprocess
 import sys
 import unittest
@@ -15,6 +16,7 @@ import psutil
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
+from metor.utils import Constants
 from metor.utils.lock import FileLock
 
 
@@ -75,6 +77,102 @@ class LockContractTests(unittest.TestCase):
                     expected = f'{lock._pid}:{lock._pid_create_time}'
                     self.assertEqual(lock.lock_path.read_text(), expected)
 
+    def test_file_lock_creation_uses_owner_only_mode_under_permissive_umask(
+        self,
+    ) -> None:
+        """Atomic creation supplies an explicit private POSIX mode.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if os.name == 'nt':
+            self.skipTest('POSIX permission regression.')
+        with TemporaryDirectory() as temp_dir:
+            previous_umask = os.umask(0o022)
+            try:
+                with FileLock(Path(temp_dir) / 'config.json') as lock:
+                    mode = stat.S_IMODE(lock.lock_path.stat().st_mode)
+                    self.assertEqual(mode, 0o600)
+            finally:
+                os.umask(previous_umask)
+
+    def test_stale_reader_rejects_fifo_link_and_oversized_metadata(self) -> None:
+        """Special, linked, and unbounded lock inputs remain unread and present.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / 'config.json'
+            lock = FileLock(target)
+            oversized = '7:10.0' + ('x' * Constants.FILE_LOCK_METADATA_MAX_BYTES)
+            lock.lock_path.write_text(oversized)
+            lock.lock_path.chmod(0o600)
+            pid, created, opened = lock._read_lock_metadata()
+            self.assertIsNone(pid)
+            self.assertIsNone(created)
+            self.assertIsNotNone(opened)
+            self.assertTrue(lock.lock_path.exists())
+
+            lock.lock_path.unlink()
+            real = root / 'real.lock'
+            real.write_text('7:10.0')
+            real.chmod(0o600)
+            lock.lock_path.symlink_to(real)
+            self.assertEqual(lock._read_lock_metadata(), (None, None, None))
+            self.assertEqual(real.read_text(), '7:10.0')
+
+            if hasattr(os, 'mkfifo') and os.name != 'nt':
+                lock.lock_path.unlink()
+                os.mkfifo(lock.lock_path)
+                pid, created, opened = lock._read_lock_metadata()
+                self.assertIsNone(pid)
+                self.assertIsNone(created)
+                self.assertIsNotNone(opened)
+
+    def test_stale_metadata_requires_complete_finite_positive_identity(self) -> None:
+        """Malformed and non-finite owner generations stay unknown.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        for payload in ('', '7', '7:', '0:10', '7:-1', '7:nan', '7:inf', 'x:10'):
+            with self.subTest(payload=payload):
+                self.assertEqual(FileLock._parse_lock_metadata(payload), (None, None))
+
+    def test_stale_unlink_quarantines_only_the_observed_generation(self) -> None:
+        """A replacement lock survives an ownership exchange before removal.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            lock = FileLock(Path(temp_dir) / 'config.json')
+            lock.lock_path.write_text('7:10.0')
+            lock.lock_path.chmod(0o600)
+            observed = lock.lock_path.stat()
+            displaced = Path(temp_dir) / 'observed.lock'
+            lock.lock_path.rename(displaced)
+            lock.lock_path.write_text('foreign')
+            lock.lock_path.chmod(0o600)
+
+            self.assertFalse(lock._unlink_if_unchanged(observed))
+            self.assertEqual(lock.lock_path.read_text(), 'foreign')
+            self.assertEqual(displaced.read_text(), '7:10.0')
+
     def test_file_lock_rejects_zero_progress_and_cleans_up(self) -> None:
         """A zero-length metadata write cannot become a successful lock.
 
@@ -95,8 +193,8 @@ class LockContractTests(unittest.TestCase):
             self.assertIsNone(lock._lock_fd)
             self.assertFalse(lock.lock_path.exists())
 
-    def test_file_lock_close_failure_is_visible_and_retryable(self) -> None:
-        """An unconfirmed close retains ownership and never reports release.
+    def test_file_lock_close_failure_is_visible_without_descriptor_retry(self) -> None:
+        """An unconfirmed close leaves recovery metadata but never reuses the FD.
 
         Args:
             None
@@ -116,10 +214,14 @@ class LockContractTests(unittest.TestCase):
             ):
                 lock.__exit__(None, None, None)
 
-            self.assertEqual(lock._lock_fd, descriptor)
+            self.assertIsNone(lock._lock_fd)
             self.assertTrue(lock.lock_path.exists())
-            lock.__exit__(None, None, None)
-            self.assertFalse(lock.lock_path.exists())
+            with patch('metor.utils.lock.os.close') as repeated_close:
+                lock.__exit__(None, None, None)
+            repeated_close.assert_not_called()
+
+            os.close(descriptor)
+            lock.lock_path.unlink()
 
     def test_file_lock_preserves_exchanged_foreign_lock(self) -> None:
         """Release cannot unlink a replacement created under the same pathname.

@@ -4,7 +4,10 @@ Ensures that files are not concurrently modified by different processes.
 """
 
 import errno
+import math
 import os
+import secrets
+import stat
 import time
 import psutil
 from typing import Optional, Type
@@ -13,6 +16,7 @@ from pathlib import Path
 
 # Local Package Imports
 from metor.utils.constants import Constants
+from metor.utils.security import _open_windows_file
 
 
 class FileLock:
@@ -62,13 +66,15 @@ class FileLock:
             return None, None
 
         if ':' not in content:
-            if content.isdigit():
-                return int(content), None
             return None, None
 
         pid_text, created_text = content.split(':', 1)
         try:
-            return int(pid_text), float(created_text)
+            pid = int(pid_text)
+            create_time = float(created_text)
+            if pid <= 0 or not math.isfinite(create_time) or create_time <= 0:
+                return None, None
+            return pid, create_time
         except ValueError:
             return None, None
 
@@ -88,14 +94,25 @@ class FileLock:
             Optional[bool]: True for the same process, False for a definite stale
                 owner, or None when ownership cannot be established safely.
         """
-        if create_time is None:
+        if (
+            pid <= 0
+            or create_time is None
+            or not math.isfinite(create_time)
+            or create_time <= 0
+        ):
             return None
 
         try:
             proc = psutil.Process(pid)
             if not proc.is_running():
                 return False
-            return bool(abs(proc.create_time() - create_time) < 0.01)
+            observed_create_time = float(proc.create_time())
+            if not math.isfinite(observed_create_time) or observed_create_time <= 0:
+                return None
+            return bool(
+                abs(observed_create_time - create_time)
+                < Constants.PROCESS_CREATE_TIME_TOLERANCE_SEC
+            )
         except psutil.NoSuchProcess:
             return False
         except (psutil.AccessDenied, psutil.Error, ValueError):
@@ -122,6 +139,65 @@ class FileLock:
                 raise OSError(errno.EIO, 'Lock metadata write made no progress.')
             remaining = remaining[written:]
 
+    def _read_lock_metadata(
+        self,
+    ) -> tuple[Optional[int], Optional[float], Optional[os.stat_result]]:
+        """Reads bounded metadata and identity from one safe regular descriptor.
+
+        Args:
+            None
+
+        Returns:
+            tuple[Optional[int], Optional[float], Optional[os.stat_result]]: Parsed owner metadata and exact opened-file identity, or unknown values.
+        """
+        descriptor: Optional[int] = None
+        try:
+            if os.name == 'nt':
+                descriptor = _open_windows_file(self.lock_path)
+                if descriptor is None:
+                    return None, None, None
+            else:
+                no_follow = getattr(os, 'O_NOFOLLOW', None)
+                if no_follow is None:
+                    return None, None, None
+                descriptor = os.open(
+                    self.lock_path,
+                    os.O_RDONLY
+                    | no_follow
+                    | int(getattr(os, 'O_CLOEXEC', 0))
+                    | int(getattr(os, 'O_NONBLOCK', 0)),
+                )
+            opened = os.fstat(descriptor)
+            file_attributes: int = int(getattr(opened, 'st_file_attributes', 0))
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_nlink != 1
+                or file_attributes & 0x00000400
+                or opened.st_size > Constants.FILE_LOCK_METADATA_MAX_BYTES
+            ):
+                return None, None, opened
+            if os.name != 'nt' and (
+                opened.st_uid != os.getuid() or opened.st_mode & 0o077
+            ):
+                return None, None, opened
+            raw_payload = os.read(
+                descriptor,
+                Constants.FILE_LOCK_METADATA_MAX_BYTES + 1,
+            )
+            if len(raw_payload) > Constants.FILE_LOCK_METADATA_MAX_BYTES:
+                return None, None, opened
+            try:
+                raw_text = raw_payload.decode('utf-8')
+            except UnicodeError:
+                return None, None, opened
+            pid, create_time = self._parse_lock_metadata(raw_text)
+            return pid, create_time, opened
+        except OSError:
+            return None, None, None
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
     def _unlink_if_unchanged(self, expected_stat: os.stat_result) -> bool:
         """
         Removes the lock path only if it still references the expected inode.
@@ -134,17 +210,28 @@ class FileLock:
         """
         try:
             current_stat: os.stat_result = self.lock_path.lstat()
+            if (
+                current_stat.st_ino != expected_stat.st_ino
+                or current_stat.st_dev != expected_stat.st_dev
+            ):
+                return False
+
+            quarantine = self.lock_path.with_name(
+                f'.{self.lock_path.name}.remove-{secrets.token_hex(16)}'
+            )
+            self.lock_path.rename(quarantine)
+            quarantined_stat = quarantine.lstat()
+            if (
+                quarantined_stat.st_ino != expected_stat.st_ino
+                or quarantined_stat.st_dev != expected_stat.st_dev
+            ):
+                if not self.lock_path.exists():
+                    quarantine.rename(self.lock_path)
+                return False
+            quarantine.unlink()
+            return True
         except OSError:
             return False
-
-        if (
-            current_stat.st_ino != expected_stat.st_ino
-            or current_stat.st_dev != expected_stat.st_dev
-        ):
-            return False
-
-        self.lock_path.unlink(missing_ok=True)
-        return True
 
     def _release_owned_lock(self) -> None:
         """Closes and removes only this instance's confirmed lock file.
@@ -165,12 +252,12 @@ class FileLock:
         try:
             fd_stat = os.fstat(descriptor)
         except OSError:
-            os.close(descriptor)
             self._lock_fd = None
+            os.close(descriptor)
             raise
 
-        os.close(descriptor)
         self._lock_fd = None
+        os.close(descriptor)
         self._unlink_if_unchanged(fd_stat)
 
     def __enter__(self) -> 'FileLock':
@@ -192,9 +279,15 @@ class FileLock:
         while (time.monotonic() - start_time) < self.timeout:
             try:
                 # O_CREAT | O_EXCL ensures atomic creation. Fails if the file already exists.
-                fd = os.open(str(self.lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                fd = os.open(
+                    str(self.lock_path),
+                    os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                    0o600,
+                )
                 self._lock_fd = fd
                 try:
+                    if os.name != 'nt':
+                        os.fchmod(fd, 0o600)
                     lock_payload: str = f'{self._pid}:{self._pid_create_time}'
                     self._write_all(fd, lock_payload.encode('utf-8'))
                     os.fsync(fd)
@@ -209,19 +302,14 @@ class FileLock:
                 # Check if the lock file is old (crashed process)
                 try:
                     stat_before: os.stat_result = self.lock_path.lstat()
-                    if time.time() - stat_before.st_mtime > self.stale_age:
-                        with self.lock_path.open('r') as f:
-                            pid, create_time = self._parse_lock_metadata(f.read())
-
-                        stat_after: os.stat_result = self.lock_path.lstat()
+                    lock_age = time.time() - stat_before.st_mtime
+                    if math.isfinite(lock_age) and lock_age > self.stale_age:
+                        pid, create_time, opened_stat = self._read_lock_metadata()
                         if (
-                            stat_after.st_ino != stat_before.st_ino
-                            or stat_after.st_dev != stat_before.st_dev
-                        ):
-                            continue
-
-                        if (
-                            pid is not None
+                            opened_stat is not None
+                            and opened_stat.st_ino == stat_before.st_ino
+                            and opened_stat.st_dev == stat_before.st_dev
+                            and pid is not None
                             and self._is_same_process(pid, create_time) is False
                         ):
                             if self._unlink_if_unchanged(stat_before):

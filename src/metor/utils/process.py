@@ -388,20 +388,70 @@ class ProcessManager:
         ):
             return False
 
-        from metor.cli.parser import CliParser
+        return ProcessManager._daemon_arguments_match(
+            arguments,
+            profile_name,
+            require_explicit_profile=require_explicit_profile,
+        )
 
-        parsed, extra = CliParser.parse(arguments)
-        if (
-            parsed.command != 'daemon'
-            or (parsed.profile is not None and parsed.profile != profile_name)
-            or parsed.subcommand is not None
-            or extra
-            or parsed.help_requested
-            or parsed.version
+    @staticmethod
+    def _daemon_arguments_match(
+        arguments: list[str],
+        profile_name: str,
+        *,
+        require_explicit_profile: bool,
+    ) -> bool:
+        """Validates the narrow argument forms that can own a daemon PID.
+
+        This is a security allowlist for process recognition, not a second
+        public command parser. The public grammar remains owned by
+        ``metor.cli.parser``.
+
+        Args:
+            arguments (list[str]): Candidate arguments after the trusted launcher prefix.
+            profile_name (str): Expected selected profile.
+            require_explicit_profile (bool): Whether the profile option is mandatory.
+
+        Returns:
+            bool: Whether the arguments identify one supported daemon start.
+        """
+        remaining: list[str] = []
+        selected_profile: Optional[str] = None
+        index: int = 0
+        while index < len(arguments):
+            token = arguments[index]
+            if token.startswith('--profile='):
+                if selected_profile is not None:
+                    return False
+                selected_profile = token.split('=', 1)[1]
+            elif token in ('-p', '--profile'):
+                if selected_profile is not None or index + 1 >= len(arguments):
+                    return False
+                index += 1
+                selected_profile = arguments[index]
+            else:
+                remaining.append(token)
+            index += 1
+
+        if not remaining or remaining.pop(0) != 'daemon':
+            return False
+        allowed_flags: set[str] = {
+            '--locked',
+            '--non-interactive',
+            '--startup-session-auth-stdin',
+        }
+        if len(remaining) != len(set(remaining)) or any(
+            token not in allowed_flags for token in remaining
         ):
             return False
-
-        return bool(parsed.profile) or not require_explicit_profile
+        if (
+            '--startup-session-auth-stdin' in remaining
+            and '--non-interactive' not in remaining
+        ):
+            return False
+        if selected_profile is not None and selected_profile != profile_name:
+            return False
+        return selected_profile is not None or not require_explicit_profile
 
     @staticmethod
     def _terminate_process(proc: psutil.Process) -> bool:
