@@ -1,90 +1,156 @@
-"""
-Module providing the CLI argument parser.
-Isolates argparse configuration from the application execution logic.
-"""
+"""Build the canonical Metor command-line grammar from shared definitions."""
 
 import argparse
-from typing import List, Optional, Tuple
+import sys
+from typing import Dict, List, Optional, Tuple
+
+# Local Package Imports
+from metor.cli.help import CommandDef, Help, OptionDef
 
 
 class CliParser:
-    """Constructs and executes the command-line argument parser."""
+    """Constructs and executes the public command-line parser."""
 
     @staticmethod
-    def parse(
-        argv: Optional[List[str]] = None,
-    ) -> Tuple[argparse.Namespace, List[str]]:
-        """
-        Configures the argument parser and parses the given argv inputs.
+    def _add_option(
+        target: argparse.ArgumentParser | argparse._MutuallyExclusiveGroup,
+        option: OptionDef,
+    ) -> None:
+        """Adds one canonical option definition to an argparse target.
 
         Args:
-            argv (Optional[List[str]]): The argument vector excluding the program name, or None to use sys.argv.
+            target (argparse.ArgumentParser | argparse._MutuallyExclusiveGroup): Parser or mutually exclusive group receiving the option.
+            option (OptionDef): Canonical option definition.
 
         Returns:
-            Tuple[argparse.Namespace, List[str]]: The parsed known arguments and a list of extra/unknown arguments.
+            None
         """
-        parser: argparse.ArgumentParser = argparse.ArgumentParser(
-            prog='metor', add_help=False
+        help_text: str = argparse.SUPPRESS if option.hidden else option.description
+        if option.action == 'store_true':
+            target.add_argument(
+                *option.flags,
+                dest=option.destination,
+                action='store_true',
+                help=help_text,
+            )
+            return
+        if option.action == 'store_false':
+            target.add_argument(
+                *option.flags,
+                dest=option.destination,
+                action='store_false',
+                help=help_text,
+            )
+            return
+        value_type: type[str] | type[int] = int if option.value_type == 'int' else str
+        target.add_argument(
+            *option.flags,
+            dest=option.destination,
+            metavar=option.metavar,
+            type=value_type,
+            help=help_text,
         )
-        parser.add_argument('-p', '--profile')
-        parser.add_argument(
-            '--remote', action='store_true', help='Set profile as remote client'
+
+    @classmethod
+    def _build_options_parser(
+        cls,
+        *,
+        prog: str,
+        options: Tuple[OptionDef, ...],
+    ) -> argparse.ArgumentParser:
+        """Builds an argparse parser for one canonical option collection.
+
+        Args:
+            prog (str): Program label used by argparse diagnostics.
+            options (Tuple[OptionDef, ...]): Canonical options to register.
+
+        Returns:
+            argparse.ArgumentParser: Configured parser without automatic help.
+        """
+        parser = argparse.ArgumentParser(prog=prog, add_help=False)
+        groups: Dict[str, argparse._MutuallyExclusiveGroup] = {}
+        for option in options:
+            target: argparse.ArgumentParser | argparse._MutuallyExclusiveGroup = parser
+            if option.group is not None:
+                if option.group not in groups:
+                    groups[option.group] = parser.add_mutually_exclusive_group()
+                target = groups[option.group]
+            cls._add_option(target, option)
+        return parser
+
+    @staticmethod
+    def _split_literal_arguments(argv: List[str]) -> Tuple[List[str], List[str]]:
+        """Splits argv at the first option terminator without retaining it.
+
+        Args:
+            argv (List[str]): Raw arguments excluding the executable name.
+
+        Returns:
+            Tuple[List[str], List[str]]: Grammar tokens and literal payload tokens.
+        """
+        try:
+            separator_index: int = argv.index('--')
+        except ValueError:
+            return list(argv), []
+        return list(argv[:separator_index]), list(argv[separator_index + 1 :])
+
+    @classmethod
+    def parse(
+        cls,
+        argv: Optional[List[str]] = None,
+    ) -> Tuple[argparse.Namespace, List[str]]:
+        """Parses argv through the canonical global and command definitions.
+
+        The first ``--`` ends all option interpretation. Tokens after it are
+        returned as literal command data and cannot select help, version, a
+        profile, or an execution mode.
+
+        Args:
+            argv (Optional[List[str]]): Argument vector excluding the program name, or None to use the process argv.
+
+        Returns:
+            Tuple[argparse.Namespace, List[str]]: Parsed arguments and lossless command operands after the first positional token.
+        """
+        raw_argv: List[str] = list(argv) if argv is not None else sys.argv[1:]
+        grammar_tokens, literal_tokens = cls._split_literal_arguments(raw_argv)
+        parser = cls._build_options_parser(
+            prog='metor',
+            options=Help.GLOBAL_OPTIONS,
         )
-        parser.add_argument('--port', type=int, help='Set static daemon port')
-        parser.add_argument(
-            '--locked',
-            action='store_true',
-            help='Start the daemon in locked mode until unlocked over IPC',
-        )
-        parser.add_argument(
-            '--plaintext',
-            action='store_true',
-            help='Create a local plaintext profile without password protection',
-        )
-        parser.add_argument(
-            '--startup-session-auth-stdin',
-            action='store_true',
-            help=argparse.SUPPRESS,
-        )
-        parser.add_argument('--version', action='store_true')
-        args: argparse.Namespace
-        command_tokens: List[str]
-        args, command_tokens = parser.parse_known_args(argv)
+        args, command_tokens = parser.parse_known_args(grammar_tokens)
+
         args.command = command_tokens[0] if command_tokens else 'quickstart'
-        args.subcommand = command_tokens[1] if len(command_tokens) > 1 else None
-        args.extra = command_tokens[2:]
+        command_operands: List[str] = command_tokens[1:]
+        command_definition: Optional[CommandDef] = Help.CLI_COMMANDS.get(args.command)
+        if command_definition is not None and command_definition.options:
+            command_parser = cls._build_options_parser(
+                prog=f'metor {args.command}',
+                options=command_definition.options,
+            )
+            command_args, command_operands = command_parser.parse_known_args(
+                command_operands
+            )
+            for name, value in vars(command_args).items():
+                setattr(args, name, value)
 
-        args.ui = None
-        args.list_uis = False
-        args.chat_help = False
-        args.start_daemon = None
-        args.device_config = None
-        args.simulator = False
-        if args.command == 'chat':
-            chat_parser = argparse.ArgumentParser(prog='metor chat', add_help=False)
-            chat_parser.add_argument('--ui')
-            chat_parser.add_argument('--device-config')
-            chat_parser.add_argument('--simulator', action='store_true')
-            chat_parser.add_argument('--list-uis', action='store_true')
-            start_daemon_group = chat_parser.add_mutually_exclusive_group()
-            start_daemon_group.add_argument(
-                '--start-daemon', dest='start_daemon', action='store_true'
-            )
-            start_daemon_group.add_argument(
-                '--no-start-daemon', dest='start_daemon', action='store_false'
-            )
-            chat_parser.set_defaults(start_daemon=None)
-            chat_parser.add_argument(
-                '-h', '--help', dest='chat_help', action='store_true'
-            )
-            chat_args, chat_unknown = chat_parser.parse_known_args(command_tokens[1:])
-            args.ui = chat_args.ui
-            args.list_uis = chat_args.list_uis
-            args.chat_help = chat_args.chat_help
-            args.start_daemon = chat_args.start_daemon
-            args.device_config = chat_args.device_config
-            args.simulator = chat_args.simulator
-            args.extra = chat_unknown
-            args.subcommand = chat_unknown[0] if chat_unknown else None
+        defaults: Dict[str, object] = {
+            'ui': None,
+            'list_uis': False,
+            'start_daemon': None,
+            'device_config': None,
+            'simulator': False,
+            'locked': False,
+            'non_interactive': False,
+            'startup_session_auth_stdin': False,
+            'force': False,
+        }
+        for name, value in defaults.items():
+            if not hasattr(args, name):
+                setattr(args, name, value)
 
+        operands: List[str] = command_operands + literal_tokens
+        args.literal_args = list(literal_tokens)
+        args.subcommand = operands[0] if operands else None
+        args.extra = list(operands) if args.command == 'chat' else operands[1:]
+        args.chat_help = args.command == 'chat' and args.help_requested
         return args, args.extra

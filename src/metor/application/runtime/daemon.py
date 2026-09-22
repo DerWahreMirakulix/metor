@@ -1,7 +1,6 @@
 """Application-layer helpers for managed local daemon startup and logging."""
 
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -98,27 +97,19 @@ def _build_daemon_launch_command(
     Returns:
         list[str]: The detached child-process argv.
     """
-    executable_name: str = 'metor.exe' if os.name == 'nt' else 'metor'
-    sibling_entry: Path = Path(sys.executable).with_name(executable_name)
-    resolved_entry: Optional[str]
-    if sibling_entry.is_file():
-        resolved_entry = str(sibling_entry)
-    else:
-        resolved_entry = shutil.which(executable_name)
-    if resolved_entry is None:
-        raise FileNotFoundError('The public metor executable is not installed.')
-
     command: list[str] = [
-        resolved_entry,
+        str(Path(sys.executable).resolve()),
+        '-m',
+        'metor',
         '-p',
         pm.profile_name,
+        'daemon',
+        '--non-interactive',
     ]
     if start_locked:
         command.append('--locked')
     if startup_session_auth_stdin:
         command.append('--startup-session-auth-stdin')
-    command.append('--daemon-child')
-    command.append('daemon')
     return command
 
 

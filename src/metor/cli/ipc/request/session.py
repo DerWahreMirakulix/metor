@@ -13,8 +13,8 @@ from metor.data import ProfileManager, SettingKey
 from metor.client import BufferedIpcEventReader, IpcAuthExchange
 
 # Local Package Imports
-from metor.cli import (
-    PromptOutputSpacer,
+from metor.cli.prompt import PromptOutputSpacer
+from metor.cli.session_auth import (
     get_session_auth_prompt,
     prompt_session_auth_proof,
 )

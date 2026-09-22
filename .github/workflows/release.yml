@@ -182,9 +182,9 @@ jobs:
           base_dir="$(find "$extract_dir/base" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
           sh "$base_dir/install.sh"
           "$base_dir/.venv/bin/python" -m pip check
-          "$base_dir/.venv/bin/python" -c "import metor.daemon_main; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
+          "$base_dir/.venv/bin/python" -c "import metor.cli; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
           "$base_dir/.venv/bin/metor" --help
-          "$base_dir/.venv/bin/metor-daemon" --help
+          "$base_dir/.venv/bin/python" -m metor daemon --help
           "$base_dir/.venv/bin/python" -c "
           try:
             import metor.ui.terminal
@@ -234,9 +234,9 @@ jobs:
           $baseDir = (Get-ChildItem (Join-Path $extractDir 'base') -Directory | Select-Object -First 1).FullName
           & "$baseDir\install.cmd"
           & "$baseDir\.venv\Scripts\python.exe" -m pip check
-          & "$baseDir\.venv\Scripts\python.exe" -c "import metor.daemon_main; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
+          & "$baseDir\.venv\Scripts\python.exe" -c "import metor.cli; from metor.data.sql import SQLCIPHER_BACKEND; print(SQLCIPHER_BACKEND)"
           & "$baseDir\.venv\Scripts\metor.exe" --help
-          & "$baseDir\.venv\Scripts\metor-daemon.exe" --help
+          & "$baseDir\.venv\Scripts\python.exe" -m metor daemon --help
           & "$baseDir\.venv\Scripts\python.exe" -c "try:`n    import metor.ui.terminal`n    raise SystemExit(1)`nexcept ModuleNotFoundError:`n    pass"
 
           $terminalZip = (Get-ChildItem 'dist/release' -Filter 'metor-ui-terminal-wheelhouse-*.zip' | Select-Object -First 1).FullName

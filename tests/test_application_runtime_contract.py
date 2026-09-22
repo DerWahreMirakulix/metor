@@ -436,8 +436,10 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
         cmd = _build_daemon_launch_command(
             pm, start_locked=False, startup_session_auth_stdin=False
         )
-        self.assertEqual(Path(cmd[0]).name, 'metor')
-        self.assertIn('--daemon-child', cmd)
+        self.assertEqual(Path(cmd[0]), Path(sys.executable).resolve())
+        self.assertEqual(cmd[1:3], ['-m', 'metor'])
+        self.assertIn('--non-interactive', cmd)
+        self.assertNotIn('--daemon-child', cmd)
         self.assertNotIn('metor.daemon_main', cmd)
         self.assertNotIn('metor.ui', ' '.join(cmd))
 

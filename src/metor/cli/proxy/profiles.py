@@ -12,7 +12,7 @@ from metor.core.api import (
     SetDefaultProfileCommand,
 )
 from metor.data import ProfileManager, ProfileSecurityMode
-from metor.cli import UIPresenter
+from metor.cli.presenter import UIPresenter
 
 
 class CliProxyProfileActions:

@@ -21,19 +21,21 @@ from metor.utils import Constants
 class DaemonBootstrapContractTests(unittest.TestCase):
     """Covers argument gates, secret transport, and failed-child ownership."""
 
-    def test_headless_parser_does_not_resolve_default_profile(self) -> None:
-        from metor import daemon_main
+    def test_canonical_parser_does_not_resolve_default_profile(self) -> None:
+        from metor.cli.parser import CliParser
 
         with patch.object(
             ProfileManager,
             'load_default_profile',
             side_effect=AssertionError('profile I/O during parser construction'),
         ):
-            args = daemon_main._build_parser().parse_args([])
+            args, extra = CliParser.parse(['daemon', '--non-interactive'])
 
         self.assertIsNone(args.profile)
+        self.assertTrue(args.non_interactive)
+        self.assertEqual(extra, [])
 
-    def test_autostart_uses_public_metor_entry_and_child_marker(self) -> None:
+    def test_autostart_uses_exact_interpreter_and_canonical_module(self) -> None:
         from metor.application.runtime.daemon import _build_daemon_launch_command
 
         profile = Mock(spec=ProfileManager)
@@ -45,19 +47,25 @@ class DaemonBootstrapContractTests(unittest.TestCase):
             startup_session_auth_stdin=True,
         )
 
-        self.assertEqual(Path(command[0]).name, 'metor')
+        self.assertEqual(Path(command[0]), Path(sys.executable).resolve())
+        self.assertEqual(command[1:3], ['-m', 'metor'])
         self.assertNotIn('metor.daemon_main', command)
-        self.assertIn('--daemon-child', command)
-        self.assertEqual(command[-1], 'daemon')
+        self.assertNotIn('--daemon-child', command)
+        self.assertIn('--non-interactive', command)
+        self.assertIn('daemon', command)
 
-    def test_importing_public_main_does_not_eagerly_import_cli(self) -> None:
+    def test_importing_cli_definition_is_runtime_side_effect_free(self) -> None:
         env = os.environ.copy()
         env['PYTHONPATH'] = str(Path(__file__).resolve().parents[1] / 'src')
         result = subprocess.run(
             [
                 sys.executable,
                 '-c',
-                "import sys; import metor.main; print('metor.cli' in sys.modules)",
+                (
+                    'import sys; import metor.cli; '
+                    "print(any(name.startswith(('metor.application', 'metor.data', "
+                    "'metor.ui')) for name in sys.modules))"
+                ),
             ],
             check=False,
             capture_output=True,
@@ -68,11 +76,11 @@ class DaemonBootstrapContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), 'False')
 
-    def test_child_help_needs_no_profile_or_cli_import(self) -> None:
+    def test_daemon_help_uses_canonical_cli_without_runtime_imports(self) -> None:
         env = os.environ.copy()
         env['PYTHONPATH'] = str(Path(__file__).resolve().parents[1] / 'src')
         result = subprocess.run(
-            [sys.executable, '-m', 'metor', '--daemon-child', '--help'],
+            [sys.executable, '-m', 'metor', 'daemon', '--help'],
             check=False,
             capture_output=True,
             text=True,
@@ -80,80 +88,7 @@ class DaemonBootstrapContractTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('usage: metor', result.stdout)
-
-        import_graph = subprocess.run(
-            [
-                sys.executable,
-                '-c',
-                (
-                    'import sys; import metor.daemon_main; '
-                    "print(any(name == 'metor.cli' or name.startswith('metor.ui') "
-                    'for name in sys.modules))'
-                ),
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-        self.assertEqual(import_graph.returncode, 0, import_graph.stderr)
-        self.assertEqual(import_graph.stdout.strip(), 'False')
-
-    def test_child_initializes_environment_before_resolving_default(self) -> None:
-        from metor import daemon_main
-
-        calls: list[str] = []
-
-        def load_default() -> str:
-            self.assertEqual(calls, ['environment'])
-            calls.append('default')
-            return 'alpha'
-
-        with (
-            patch(
-                'metor.application.initialize_runtime_environment',
-                side_effect=lambda: calls.append('environment'),
-            ),
-            patch.object(
-                ProfileManager,
-                'load_default_profile',
-                side_effect=load_default,
-            ),
-            patch.object(daemon_main, '_run_daemon', return_value=0) as run_daemon,
-        ):
-            result = daemon_main.run(['--daemon-child', 'daemon'])
-
-        self.assertEqual(result, 0)
-        self.assertEqual(calls, ['environment', 'default'])
-        run_daemon.assert_called_once_with(
-            profile='alpha',
-            start_locked=False,
-            startup_session_auth_stdin=False,
-        )
-
-    def test_explicit_child_profile_never_loads_default(self) -> None:
-        from metor import daemon_main
-
-        with (
-            patch('metor.application.initialize_runtime_environment'),
-            patch.object(
-                ProfileManager,
-                'load_default_profile',
-                side_effect=AssertionError('unexpected default profile read'),
-            ),
-            patch.object(daemon_main, '_run_daemon', return_value=0) as run_daemon,
-        ):
-            result = daemon_main.run(
-                ['-p', 'explicit', '--locked', '--daemon-child', 'daemon']
-            )
-
-        self.assertEqual(result, 0)
-        run_daemon.assert_called_once_with(
-            profile='explicit',
-            start_locked=True,
-            startup_session_auth_stdin=False,
-        )
+        self.assertIn('metor daemon', result.stdout)
 
     def test_environment_data_path_is_loaded_before_profile_resolution(self) -> None:
         from metor.application import environment
@@ -217,6 +152,32 @@ class DaemonBootstrapContractTests(unittest.TestCase):
         self.assertEqual(read_startup_secret(io.StringIO('Grüße\n')), 'Grüße')
         with self.assertRaisesRegex(ValueError, 'too long'):
             read_startup_secret(io.StringIO('x' * 4097 + '\n'))
+
+    def test_noninteractive_daemon_never_falls_back_to_a_prompt(self) -> None:
+        from metor.application import DaemonStartPreparation
+        from metor.cli.handlers import CommandHandlers
+
+        profile = self._spawn_profile()
+        with (
+            patch(
+                'metor.cli.handlers.prepare_managed_daemon_start',
+                return_value=DaemonStartPreparation(False, False, True),
+            ),
+            patch(
+                'metor.cli.handlers.prompt_hidden',
+                side_effect=AssertionError('interactive prompt'),
+            ),
+            patch('metor.cli.handlers.run_managed_daemon') as run_daemon,
+            patch('sys.stderr', io.StringIO()) as errors,
+        ):
+            result = CommandHandlers.handle_daemon(
+                profile,
+                non_interactive=True,
+            )
+
+        self.assertEqual(result, 1)
+        run_daemon.assert_not_called()
+        self.assertIn('--startup-session-auth-stdin', errors.getvalue())
 
     @staticmethod
     def _spawn_profile() -> ProfileManager:

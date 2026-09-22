@@ -18,7 +18,8 @@ from metor.core.api import (
 )
 from metor.data import ProfileManager, SettingKey
 from metor.shared import escape_terminal_text
-from metor.cli import PromptAbortedError, PromptOutputSpacer, Theme
+from metor.cli.prompt import PromptAbortedError, PromptOutputSpacer
+from metor.cli.theme import Theme
 from metor.cli.errors import format_safe_local_runtime_error
 from metor.cli.ipc import IpcRequestResult, IpcRequestSession
 

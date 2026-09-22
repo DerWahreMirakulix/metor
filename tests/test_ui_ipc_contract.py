@@ -1085,10 +1085,12 @@ class UiIpcContractTests(unittest.TestCase):
 
         self.assertTrue(result)
         command = popen_mock.call_args.args[0]
-        self.assertEqual(Path(command[0]).name, 'metor')
-        self.assertIn('--daemon-child', command)
+        self.assertEqual(Path(command[0]), Path(sys.executable).resolve())
+        self.assertEqual(command[1:3], ['-m', 'metor'])
+        self.assertIn('--non-interactive', command)
+        self.assertNotIn('--daemon-child', command)
         self.assertIn('--startup-session-auth-stdin', command)
-        self.assertEqual(command[-1], 'daemon')
+        self.assertIn('daemon', command)
         process.stdin.write.assert_called_once_with(b'session-secret\n')
         process.stdin.close.assert_called_once_with()
 

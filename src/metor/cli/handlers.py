@@ -37,14 +37,14 @@ from metor.data import (
     SettingKey,
 )
 from metor.shared import escape_terminal_text
-from metor.cli import (
+from metor.cli.prompt import (
     PromptAbortedError,
     PromptOutputSpacer,
-    Theme,
-    Translator,
     prompt_hidden,
     prompt_text,
 )
+from metor.cli.theme import Theme
+from metor.cli.translations import Translator
 from metor.cli.errors import format_safe_local_runtime_error
 from metor.utils import Constants, ProcessManager
 from metor.cli.proxy import CliProxy
@@ -129,7 +129,8 @@ class CommandHandlers:
         pm: ProfileManager,
         start_locked: bool = False,
         startup_session_auth_stdin: bool = False,
-    ) -> None:
+        non_interactive: bool = False,
+    ) -> int:
         """
         Authenticates the user and starts the background Daemon subsystem.
         Injects the UI logger callbacks to enforce UI-Agnostic Core domains.
@@ -138,9 +139,10 @@ class CommandHandlers:
             pm (ProfileManager): The active profile configuration.
             start_locked (bool): Whether to expose only the IPC server until unlock.
             startup_session_auth_stdin (bool): Whether plaintext session-auth input should be read from stdin instead of an interactive prompt.
+            non_interactive (bool): Whether every terminal prompt must be disabled.
 
         Returns:
-            None
+            int: Process-compatible daemon execution status.
         """
         try:
             preparation: DaemonStartPreparation = prepare_managed_daemon_start(
@@ -149,20 +151,36 @@ class CommandHandlers:
             )
         except (DaemonProfileMissingError, RemoteDaemonProfileError) as exc:
             print(escape_terminal_text(str(exc)))
-            return
+            return 1
         except PlaintextLockedDaemonError:
             print('Plaintext profiles cannot be started in locked mode.')
-            return
+            return 1
         except ValueError as exc:
             print(format_safe_local_runtime_error(exc))
-            return
+            return 1
 
         if preparation.already_running:
             print(
                 'Daemon for profile '
                 f"'{escape_terminal_text(pm.profile_name)}' is already running!"
             )
-            return
+            return 0
+
+        if non_interactive and preparation.encrypted and not start_locked:
+            sys.stderr.write(
+                "Encrypted profiles require '--locked' in non-interactive mode.\n"
+            )
+            return 1
+        if (
+            non_interactive
+            and preparation.session_auth_required
+            and not startup_session_auth_stdin
+        ):
+            sys.stderr.write(
+                'This profile requires local session auth. Pass '
+                '--startup-session-auth-stdin in non-interactive mode.\n'
+            )
+            return 1
 
         print(
             f"Starting daemon for profile '{escape_terminal_text(pm.profile_name)}'..."
@@ -178,21 +196,21 @@ class CommandHandlers:
                 )
                 output_spacer.mark_prompt()
             except PromptAbortedError:
-                return
+                return 1
 
             if password is None:
                 print(output_spacer.format('Aborted.'))
-                return
+                return 1
         elif preparation.session_auth_required:
             if startup_session_auth_stdin:
                 try:
                     session_auth_password = read_startup_secret(sys.stdin)
                 except ValueError as exc:
                     print(output_spacer.format(escape_terminal_text(str(exc))))
-                    return
+                    return 1
                 if session_auth_password is None:
                     print('Aborted.')
-                    return
+                    return 1
             else:
                 try:
                     session_auth_password = _prompt_hidden_optional(
@@ -200,11 +218,11 @@ class CommandHandlers:
                     )
                     output_spacer.mark_prompt()
                 except PromptAbortedError:
-                    return
+                    return 1
 
                 if session_auth_password is None:
                     print(output_spacer.format('Aborted.'))
-                    return
+                    return 1
 
         # Inversion of Control: Define UI printing logic here and inject it into Data and Core layers
         def sql_log_cb(line: str) -> None:
@@ -274,6 +292,7 @@ class CommandHandlers:
             except InvalidDaemonPasswordError:
                 msg, _ = Translator.get(EventType.INVALID_PASSWORD)
                 print(output_spacer.format(msg))
+                return 1
             except CorruptedDaemonStorageError:
                 msg, _ = Translator.get(EventType.DB_CORRUPTED)
                 print(
@@ -281,15 +300,18 @@ class CommandHandlers:
                         f"{msg}\nYou need to run 'metor purge' or manually delete the storage.db."
                     )
                 )
+                return 1
             except PlaintextLockedDaemonError:
                 print(
                     output_spacer.format(
                         'Plaintext profiles cannot be started in locked mode.'
                     )
                 )
+                return 1
             except ValueError as exc:
                 print(output_spacer.format(format_safe_local_runtime_error(exc)))
-            return
+                return 1
+            return 0
 
         try:
             run_managed_daemon(
@@ -303,6 +325,7 @@ class CommandHandlers:
         except InvalidDaemonPasswordError:
             msg, _ = Translator.get(EventType.INVALID_PASSWORD)
             print(output_spacer.format(msg))
+            return 1
         except CorruptedDaemonStorageError:
             msg, _ = Translator.get(EventType.DB_CORRUPTED)
             print(
@@ -310,14 +333,18 @@ class CommandHandlers:
                     f"{msg}\nYou need to run 'metor purge' or manually delete the storage.db."
                 )
             )
+            return 1
         except ValueError as exc:
             print(output_spacer.format(format_safe_local_runtime_error(exc)))
+            return 1
         except PlaintextLockedDaemonError:
             print(
                 output_spacer.format(
                     'Plaintext profiles cannot be started in locked mode.'
                 )
             )
+            return 1
+        return 0
 
     @staticmethod
     def handle_profile_security_migration(

@@ -14,12 +14,7 @@ def main() -> None:
         None
     """
     argv: list[str] = sys.argv[1:]
-    if '--daemon-child' in argv:
-        from metor.daemon_main import run
-
-        sys.exit(run(argv))
-
-    from metor.cli import run_cli
+    from metor.cli.entry import run_cli
 
     sys.exit(run_cli(argv))
 

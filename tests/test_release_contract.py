@@ -1313,9 +1313,9 @@ class ReleaseContractTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.code, 0)
 
-    def test_internal_daemon_child_unlock_guard_exits_with_code_1(self) -> None:
+    def test_retired_daemon_child_marker_is_not_an_execution_mode(self) -> None:
         """
-        Verifies that the noninteractive child rejects credential interaction.
+        Verifies that the removed marker remains ordinary command data.
 
         Args:
             None
@@ -1323,19 +1323,15 @@ class ReleaseContractTests(unittest.TestCase):
         Returns:
             None
         """
-        from metor import daemon_main
+        from metor.cli.parser import CliParser
 
-        with (
-            patch('sys.argv', ['metor', '--daemon-child', 'unlock']),
-            patch('sys.stderr'),
-            patch('sys.exit', side_effect=_raise_system_exit),
-        ):
-            with self.assertRaises(SystemExit) as ctx:
-                daemon_main.main()
+        args, extra = CliParser.parse(['send', 'alice', '--', '--daemon-child'])
+        self.assertEqual(args.command, 'send')
+        self.assertEqual(args.subcommand, 'alice')
+        self.assertEqual(extra, ['--daemon-child'])
+        self.assertFalse(args.non_interactive)
 
-        self.assertEqual(ctx.exception.code, 1)
-
-    def test_internal_daemon_child_missing_profile_exits_with_code_1(self) -> None:
+    def test_noninteractive_daemon_missing_profile_exits_with_code_1(self) -> None:
         """
         Verifies that the noninteractive child rejects a missing profile cleanly.
 
@@ -1348,34 +1344,30 @@ class ReleaseContractTests(unittest.TestCase):
         Returns:
             None
         """
-        from metor import daemon_main
+        from metor.application import DaemonProfileMissingError
+        from metor.cli.entry import run_cli
 
         with (
             patch(
-                'metor.daemon_main.ProfileManager.load_default_profile',
-                return_value='default',
+                'metor.cli.entry.initialize_runtime_environment',
             ),
             patch(
-                'sys.argv',
-                [
-                    'metor',
-                    '-p',
-                    'existiert-nicht',
-                    '--daemon-child',
-                    'daemon',
-                ],
+                'metor.cli.entry.ProfileManager',
+                return_value=cast(ProfileManager, _DummyProfileManager()),
+            ),
+            patch(
+                'metor.cli.handlers.prepare_managed_daemon_start',
+                side_effect=DaemonProfileMissingError('does not exist'),
             ),
             patch('builtins.print') as print_mock,
-            patch('sys.exit', side_effect=_raise_system_exit),
         ):
-            with self.assertRaises(SystemExit) as ctx:
-                daemon_main.main()
+            result = run_cli(['-p', 'existiert-nicht', 'daemon', '--non-interactive'])
 
-        self.assertEqual(ctx.exception.code, 1)
+        self.assertEqual(result, 1)
         printed = ' '.join(str(call) for call in print_mock.call_args_list)
         self.assertIn('does not exist', printed)
 
-    def test_daemon_child_parser_parity_with_launch_command(self) -> None:
+    def test_daemon_parser_parity_with_launch_command(self) -> None:
         """
         Verifies that the child parser supports every internal launch flag.
 
@@ -1385,27 +1377,30 @@ class ReleaseContractTests(unittest.TestCase):
         Returns:
             None
         """
-        from metor import daemon_main
+        from metor.cli.parser import CliParser
 
-        parser = daemon_main._build_parser()
         for start_locked in (True, False):
             for startup_session_auth_stdin in (True, False):
-                argv: list[str] = ['-p', 'test_profile']
+                argv: list[str] = [
+                    '-p',
+                    'test_profile',
+                    'daemon',
+                    '--non-interactive',
+                ]
                 if start_locked:
                     argv.append('--locked')
                 if startup_session_auth_stdin:
                     argv.append('--startup-session-auth-stdin')
-                argv.append('--daemon-child')
-                argv.append('daemon')
 
-                args = parser.parse_args(argv)
+                args, extra = CliParser.parse(argv)
                 self.assertEqual(args.profile, 'test_profile')
                 self.assertEqual(args.locked, start_locked)
                 self.assertEqual(
                     args.startup_session_auth_stdin, startup_session_auth_stdin
                 )
-                self.assertTrue(args.daemon_child)
+                self.assertTrue(args.non_interactive)
                 self.assertEqual(args.command, 'daemon')
+                self.assertEqual(extra, [])
 
     def test_messages_show_error_rendering_exits_nonzero(self) -> None:
         """

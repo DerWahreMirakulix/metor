@@ -24,7 +24,7 @@ from kivy.app import App
 from kivy.clock import Clock
 from kivy.metrics import dp
 
-from metor.cli import run_cli
+from metor.cli.entry import run_cli
 from metor.ui.gui.app import MetorApp
 
 

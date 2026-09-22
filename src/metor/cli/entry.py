@@ -13,8 +13,11 @@ from typing import List
 
 from metor.client import FrontendLaunchError, LoadedFrontend, load_frontend
 from metor.data import ProfileManager, SettingKey, Settings
-from metor.cli import CliDispatcher, CliParser, Help, Theme
+from metor.cli.dispatcher import CliDispatcher
 from metor.cli.handlers import CommandHandlers
+from metor.cli.help import Help
+from metor.cli.parser import CliParser
+from metor.cli.theme import Theme
 from metor.versioning import APP_VERSION
 from metor.application import initialize_runtime_environment
 
@@ -40,10 +43,7 @@ def run_cli(argv: List[str]) -> int:
         print(APP_VERSION)
         return 0
 
-    help_token: bool = args.subcommand in ('-h', '--help') or any(
-        token in ('-h', '--help') for token in extra
-    )
-    if args.command == 'chat' and getattr(args, 'chat_help', False):
+    if args.command == 'chat' and args.chat_help:
         print(Help.show_chat_launcher_help())
         return 0
     if args.command == 'chat' and extra:
@@ -52,12 +52,12 @@ def run_cli(argv: List[str]) -> int:
         return 2
     if args.command == 'chat' and getattr(args, 'list_uis', False):
         return CommandHandlers.handle_list_frontends()
-    if args.command in ('-h', '--help', 'help') or (
-        args.command == 'quickstart' and help_token
+    if args.command in ('help',) or (
+        args.command == 'quickstart' and args.help_requested
     ):
         print(Help.show_main_help())
         return 0
-    if help_token:
+    if args.help_requested:
         print(Help.show_command_help(args.command, args.subcommand))
         return 0
     if args.command == 'quickstart':
@@ -65,6 +65,11 @@ def run_cli(argv: List[str]) -> int:
         return 0
 
     initialize_runtime_environment()
+    if args.startup_session_auth_stdin and not args.non_interactive:
+        sys.stderr.write(
+            '--startup-session-auth-stdin requires daemon --non-interactive.\n'
+        )
+        return 2
     if args.command == 'chat' and not extra:
         selected_frontend: str = (
             args.ui

@@ -140,6 +140,43 @@ class IndependentCliContractTests(unittest.TestCase):
         self.assertEqual(args.subcommand, 'alice')
         self.assertEqual(extra, ['before', '--ui', 'gui', 'after'])
 
+    def test_option_terminator_preserves_all_following_message_tokens(self) -> None:
+        """Help, version, daemon, and mode tokens after ``--`` stay payload."""
+        for token in (
+            '--help',
+            '--version',
+            '--daemon-child',
+            '--non-interactive',
+        ):
+            with self.subTest(token=token):
+                args, extra = CliParser.parse(['send', 'alice', '--', token])
+                self.assertEqual(args.command, 'send')
+                self.assertEqual(args.subcommand, 'alice')
+                self.assertEqual(extra, [token])
+                self.assertFalse(args.help_requested)
+                self.assertFalse(args.version)
+                self.assertFalse(args.non_interactive)
+
+        args, extra = CliParser.parse(['send', 'alice', '--', '--', '--help'])
+        self.assertEqual(extra, ['--', '--help'])
+
+    def test_literal_help_reaches_dispatch_instead_of_help_renderer(self) -> None:
+        """The entry layer evaluates help only when the grammar parsed it."""
+        profile = Mock(spec=ProfileManager)
+        profile.profile_name = 'default'
+        profile.validate_integrity.return_value = None
+        dispatcher = Mock()
+        dispatcher.dispatch.return_value = 7
+        with (
+            patch('metor.cli.entry.initialize_runtime_environment'),
+            patch('metor.cli.entry.Settings.validate_integrity'),
+            patch('metor.cli.entry.ProfileManager', return_value=profile),
+            patch('metor.cli.entry.CliDispatcher', return_value=dispatcher),
+            patch('sys.stdout', io.StringIO()) as output,
+        ):
+            self.assertEqual(run_cli(['send', 'alice', '--', '--help']), 7)
+        self.assertNotIn('Metor - A Tor Messenger Framework', output.getvalue())
+
     def test_chat_parser_matrix_runs_in_a_fresh_interpreter(self) -> None:
         """A fresh supported interpreter observes the same lossless token boundary."""
         script = (

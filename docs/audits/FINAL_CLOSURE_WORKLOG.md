@@ -3,6 +3,22 @@
 This is the single resumable worklog for closure packages A00–A25. Historical
 reports remain evidence and are not competing implementation backlogs.
 
+## Current follow-up status
+
+| Package | State | Commit | Tests | Next step |
+| ------- | ----- | ------ | ----- | --------- |
+| N01 | verified | N01 checkpoint (this commit) | CLI, daemon bootstrap, release parser, GUI parser; Ruff; mypy | Complete |
+| N02 | in progress | pending | Counterexamples being added | Bind process identity to the canonical N01 launch form |
+| N03 | open | — | — | Anchor directory operations to verified handles |
+| N04 | open | — | — | Harden stale-lock reads and ownership checks |
+| N05 | open | — | — | Make device configuration opens nonblocking and portable |
+| N06 | open | — | — | Reject non-finite numbers at both IPC boundaries |
+| N07 | open | — | — | Bound lifecycle wakeups and validate Linux sources |
+| N08 | open | — | — | Extend the GUI media integration through inbound LIVE voice |
+| N09 | open | — | — | Close the CI and native renderer matrix |
+| N10 | open | — | — | Repair release smoke, batch, and ref-transaction paths |
+| N11 | open | — | — | Consolidate documentation and final acceptance evidence |
+
 ## Baseline
 
 - Starting SHA: `bb7ae07b5f83f8cae9ac8f38c35f9a9a757a43d7`

@@ -25,7 +25,8 @@ from metor.data import (
     SettingSnapshotRow,
     SettingValidationError,
 )
-from metor.cli import Theme, UIPresenter
+from metor.cli.presenter import UIPresenter
+from metor.cli.theme import Theme
 from metor.cli.ipc.request.models import IpcRequestResult
 from metor.utils import TypeCaster
 

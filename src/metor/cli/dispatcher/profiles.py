@@ -4,7 +4,7 @@ import argparse
 from typing import List, Optional, Protocol
 
 from metor.data import ProfileManager, ProfileSecurityMode
-from metor.cli import Help
+from metor.cli.help import Help
 from metor.cli.handlers import CommandHandlers
 from metor.cli.proxy import CliProxy
 

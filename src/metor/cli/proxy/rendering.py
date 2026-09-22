@@ -19,7 +19,7 @@ from metor.core.api import (
     TransportStateEvent,
     UnreadMessagesEvent,
 )
-from metor.cli import UIPresenter
+from metor.cli.presenter import UIPresenter
 from metor.cli.profile import format_profile_result_payload
 
 

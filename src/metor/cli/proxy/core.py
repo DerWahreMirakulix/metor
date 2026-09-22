@@ -35,13 +35,10 @@ from metor.core.api import (
 )
 from metor.shared import escape_terminal_text
 from metor.data import ProfileManager, ProfileSecurityMode, SettingKey
-from metor.cli import (
-    PromptAbortedError,
-    StatusTone,
-    Theme,
-    Translator,
-    prompt_hidden_optional,
-)
+from metor.cli.models import StatusTone
+from metor.cli.prompt import PromptAbortedError, prompt_hidden_optional
+from metor.cli.theme import Theme
+from metor.cli.translations import Translator
 from metor.cli.proxy.profiles import CliProxyProfileActions
 from metor.cli.proxy.rendering import CliProxyEventRenderer
 from metor.cli.proxy.settings import CliProxySettingsActions

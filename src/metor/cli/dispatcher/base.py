@@ -4,7 +4,7 @@ import argparse
 from typing import List, Optional, Tuple
 
 from metor.data import ProfileManager
-from metor.cli import Help
+from metor.cli.help import Help
 
 # Local Package Imports
 from metor.cli.dispatcher.history import HistoryDispatchMixin
@@ -125,22 +125,6 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
         cmd: str = self._args.command
         sub: Optional[str] = self._args.subcommand
 
-        is_help_request: bool = False
-        if cmd in ('-h', '--help'):
-            is_help_request = True
-            cmd = 'help'
-        elif sub in ('-h', '--help'):
-            is_help_request = True
-        elif '-h' in self._extra or '--help' in self._extra:
-            is_help_request = True
-
-        if is_help_request:
-            if cmd and cmd not in ('help', 'quickstart', '-h', '--help'):
-                print(self._help.show_command_help(cmd, sub))
-            else:
-                print(self._help.show_main_help())
-            return 0
-
         if cmd == 'quickstart':
             print(self._help.show_quick_start())
 
@@ -151,12 +135,17 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
             if sub or self._extra:
                 self._print_usage(cmd)
             else:
-                CommandHandlers.handle_daemon(
+                self._exit_code = CommandHandlers.handle_daemon(
                     self._pm,
                     start_locked=getattr(self._args, 'locked', False),
                     startup_session_auth_stdin=getattr(
                         self._args,
                         'startup_session_auth_stdin',
+                        False,
+                    ),
+                    non_interactive=getattr(
+                        self._args,
+                        'non_interactive',
                         False,
                     ),
                 )
@@ -221,18 +210,10 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                     )
 
         elif cmd == 'cleanup':
-            cleanup_tokens: List[str] = []
-            if sub:
-                cleanup_tokens.append(sub)
-            cleanup_tokens.extend(self._extra)
-
-            invalid_tokens: List[str] = [
-                token for token in cleanup_tokens if token != '--force'
-            ]
-            if invalid_tokens:
+            if sub or self._extra:
                 self._print_usage(cmd)
             else:
-                CommandHandlers.handle_cleanup(force='--force' in cleanup_tokens)
+                CommandHandlers.handle_cleanup(force=self._args.force)
 
         elif cmd == 'purge':
             is_nuke_remote: bool = (

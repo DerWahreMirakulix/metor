@@ -5,7 +5,7 @@ supporting nested subcommands for clean terminal alignment.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 # Local Package Imports
 from metor.cli.theme import Theme
@@ -25,6 +25,34 @@ class SubCommandDef:
     description: str
 
 
+@dataclass(frozen=True)
+class OptionDef:
+    """Defines one argparse option and its public help description.
+
+    Args:
+        flags (Tuple[str, ...]): Accepted option spellings.
+        destination (str): Namespace attribute populated by argparse.
+        description (str): Public help description.
+        metavar (Optional[str]): Display name for a required option value.
+        action (str): Argparse action name.
+        value_type (str): Supported scalar conversion name.
+        hidden (bool): Whether the option is excluded from public help.
+        group (Optional[str]): Mutually exclusive option group identifier.
+
+    Returns:
+        None
+    """
+
+    flags: Tuple[str, ...]
+    destination: str
+    description: str
+    metavar: Optional[str] = None
+    action: str = 'store'
+    value_type: str = 'str'
+    hidden: bool = False
+    group: Optional[str] = None
+
+
 @dataclass
 class CommandDef:
     """
@@ -36,6 +64,7 @@ class CommandDef:
         description (str): Explains the command behavior.
         category (str): The help menu category group.
         subcommands (List[SubCommandDef]): Optional list of sub-operations.
+        options (Tuple[OptionDef, ...]): Command-specific parser options.
     """
 
     name: str
@@ -43,6 +72,7 @@ class CommandDef:
     description: str
     category: str
     subcommands: List[SubCommandDef] = field(default_factory=list)
+    options: Tuple[OptionDef, ...] = ()
 
 
 class Help:
@@ -60,13 +90,47 @@ class Help:
         'System & Settings',
     ]
 
-    CLI_COMMANDS: Dict[str, CommandDef] = {
-        'profile': CommandDef(
-            name='profile',
-            usage='-p, --profile <name>',
-            description="Set the active profile (default: 'default').",
-            category='Global Options',
+    GLOBAL_OPTIONS: Tuple[OptionDef, ...] = (
+        OptionDef(
+            ('-p', '--profile'),
+            'profile',
+            "Set the active profile (default: 'default').",
+            'PROFILE',
         ),
+        OptionDef(
+            ('--remote',),
+            'remote',
+            'Use a remote profile where the selected command supports it.',
+            action='store_true',
+        ),
+        OptionDef(
+            ('--port',),
+            'port',
+            'Set a static daemon port where the selected command supports it.',
+            'PORT',
+            value_type='int',
+        ),
+        OptionDef(
+            ('--plaintext',),
+            'plaintext',
+            'Create a local plaintext profile where supported.',
+            action='store_true',
+        ),
+        OptionDef(
+            ('--version',),
+            'version',
+            'Show the coordinated application version.',
+            action='store_true',
+        ),
+        OptionDef(
+            ('-h', '--help'),
+            'help_requested',
+            'Show help for the selected command.',
+            action='store_true',
+        ),
+    )
+
+    CLI_COMMANDS: Dict[str, CommandDef] = {
         'help': CommandDef(
             name='help',
             usage='metor help',
@@ -81,9 +145,30 @@ class Help:
         ),
         'daemon': CommandDef(
             name='daemon',
-            usage='metor daemon [--locked]',
-            description='Start the Tor & IPC engine, optionally locked (IPC-only).',
+            usage='metor daemon [--locked] [--non-interactive]',
+            description='Start the Tor & IPC engine in the foreground.',
             category='Core Operations',
+            options=(
+                OptionDef(
+                    ('--locked',),
+                    'locked',
+                    'Start locked and expose only IPC until an authorized unlock.',
+                    action='store_true',
+                ),
+                OptionDef(
+                    ('--non-interactive',),
+                    'non_interactive',
+                    'Disable terminal prompts for managed child execution.',
+                    action='store_true',
+                ),
+                OptionDef(
+                    ('--startup-session-auth-stdin',),
+                    'startup_session_auth_stdin',
+                    'Read one bounded startup credential from standard input.',
+                    action='store_true',
+                    hidden=True,
+                ),
+            ),
         ),
         'unlock': CommandDef(
             name='unlock',
@@ -93,9 +178,49 @@ class Help:
         ),
         'chat': CommandDef(
             name='chat',
-            usage='metor chat [--start-daemon|--no-start-daemon]',
+            usage='metor chat [--ui FRONTEND] [--start-daemon|--no-start-daemon]',
             description='Enter the interactive multi-chat UI and optionally override local daemon autostart for this invocation.',
             category='Core Operations',
+            options=(
+                OptionDef(
+                    ('--ui',),
+                    'ui',
+                    'Select the installed frontend ID.',
+                    'FRONTEND',
+                ),
+                OptionDef(
+                    ('--list-uis',),
+                    'list_uis',
+                    'List installed frontend metadata.',
+                    action='store_true',
+                ),
+                OptionDef(
+                    ('--start-daemon',),
+                    'start_daemon',
+                    'Start a missing local daemon.',
+                    action='store_true',
+                    group='daemon-start',
+                ),
+                OptionDef(
+                    ('--no-start-daemon',),
+                    'start_daemon',
+                    'Do not start a missing local daemon.',
+                    action='store_false',
+                    group='daemon-start',
+                ),
+                OptionDef(
+                    ('--device-config',),
+                    'device_config',
+                    'GUI: use an explicit device description.',
+                    'PATH',
+                ),
+                OptionDef(
+                    ('--simulator',),
+                    'simulator',
+                    'GUI: isolated, non-destructive simulation.',
+                    action='store_true',
+                ),
+            ),
         ),
         'send': CommandDef(
             name='send',
@@ -233,6 +358,14 @@ class Help:
             usage='metor cleanup [--force]',
             description='Kill managed daemon/Tor processes and clear daemon state.',
             category='System & Settings',
+            options=(
+                OptionDef(
+                    ('--force',),
+                    'force',
+                    'Scan for owned managed processes when runtime metadata is absent.',
+                    action='store_true',
+                ),
+            ),
         ),
         'purge': CommandDef(
             name='purge',
@@ -291,6 +424,19 @@ class Help:
                         cls.SUBCOMMAND_DESC_COLUMN,
                     )
 
+            visible_options: Tuple[OptionDef, ...] = tuple(
+                option for option in c.options if not option.hidden
+            )
+            if visible_options:
+                out += f'\n{Theme.PURPLE}Options:{Theme.RESET}\n'
+                for option in visible_options:
+                    out += cls._format_line(
+                        '  ',
+                        cls._format_option_usage(option),
+                        option.description,
+                        cls.SUBCOMMAND_DESC_COLUMN,
+                    )
+
             return out
 
         return f"Unknown command: '{cmd}'. Use 'metor help' to see available commands."
@@ -305,41 +451,40 @@ class Help:
         Returns:
             str: Frontend-neutral chat launcher usage.
         """
-        return (
-            f'\n{Theme.GREEN}Usage:{Theme.RESET} metor chat '
-            '[--ui FRONTEND] [--list-uis] '
-            '[--start-daemon|--no-start-daemon]\n'
-            '           [--device-config PATH] [--simulator]\n'
-            f'{Theme.YELLOW}Description:{Theme.RESET} Launch one independently '
-            'installed interactive frontend.\n\n'
-            f'{Theme.PURPLE}Options:{Theme.RESET}\n'
-            + cls._format_line(
-                '  ', '--ui FRONTEND', 'Select the installed frontend ID.', 32
-            )
-            + cls._format_line(
-                '  ', '--list-uis', 'List installed frontend metadata.', 32
-            )
-            + cls._format_line(
-                '  ', '-p, --profile PROFILE', 'Select the local profile.', 32
-            )
-            + cls._format_line('  ', '--remote', 'Use the selected remote profile.', 32)
-            + cls._format_line('  ', '--port PORT', 'Override the daemon IPC port.', 32)
-            + cls._format_line(
-                '  ', '--start-daemon', 'Start a missing local daemon.', 32
-            )
-            + cls._format_line(
-                '  ', '--no-start-daemon', 'Do not start a missing local daemon.', 32
-            )
-            + cls._format_line(
+        command: CommandDef = cls.CLI_COMMANDS['chat']
+        out: str = f'\n{Theme.GREEN}Usage:{Theme.RESET} {command.usage}\n'
+        out += f'{Theme.YELLOW}Description:{Theme.RESET} {command.description}\n\n'
+        out += f'{Theme.PURPLE}Options:{Theme.RESET}\n'
+        profile_options: Tuple[OptionDef, ...] = tuple(
+            option
+            for option in cls.GLOBAL_OPTIONS
+            if option.destination in ('profile', 'remote', 'port')
+        )
+        for option in command.options + profile_options:
+            if option.hidden:
+                continue
+            out += cls._format_line(
                 '  ',
-                '--device-config PATH',
-                'GUI: use an explicit device description.',
+                cls._format_option_usage(option),
+                option.description,
                 32,
             )
-            + cls._format_line(
-                '  ', '--simulator', 'GUI: isolated, non-destructive simulation.', 32
-            )
-        )
+        return out
+
+    @staticmethod
+    def _format_option_usage(option: OptionDef) -> str:
+        """Builds one option usage label from its canonical definition.
+
+        Args:
+            option (OptionDef): Canonical option definition.
+
+        Returns:
+            str: Human-readable option spelling and value placeholder.
+        """
+        usage: str = ', '.join(option.flags)
+        if option.metavar is not None:
+            usage += f' {option.metavar}'
+        return usage
 
     @classmethod
     def show_quick_start(cls) -> str:
@@ -387,6 +532,16 @@ class Help:
 
         for cat in cls.CLI_CATEGORIES:
             out += f'{ind}{Theme.YELLOW}{cat}:{Theme.RESET}\n'
+            if cat == 'Global Options':
+                for option in cls.GLOBAL_OPTIONS:
+                    if option.hidden:
+                        continue
+                    out += cls._format_line(
+                        sub_ind,
+                        cls._format_option_usage(option),
+                        option.description,
+                        cls.DESC_COLUMN,
+                    )
             for cmd in cls.CLI_COMMANDS.values():
                 if cmd.category == cat:
                     out += cls._format_line(
