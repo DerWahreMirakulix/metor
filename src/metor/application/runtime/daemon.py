@@ -98,6 +98,7 @@ def _build_daemon_launch_command(
     """
     command: list[str] = [
         sys.executable,
+        '-I',
         '-m',
         'metor',
         '-p',

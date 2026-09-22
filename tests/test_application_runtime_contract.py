@@ -91,8 +91,8 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
         scripts = Path(sysconfig.get_path('scripts')).resolve()
         launcher = str(scripts / 'metor')
         accepted = (
-            [interpreter, '-m', 'metor', '-p', 'alpha', 'daemon'],
-            [interpreter, '-m', 'metor', 'daemon', '--profile=alpha'],
+            [interpreter, '-I', '-m', 'metor', '-p', 'alpha', 'daemon'],
+            [interpreter, '-I', '-m', 'metor', 'daemon', '--profile=alpha'],
             [
                 interpreter,
                 launcher,
@@ -107,6 +107,7 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
             [sys.executable, '/tmp/metor-helper.py', 'daemon'],
             ['/tmp/python-malware', '-m', 'metor.daemon_main', 'daemon'],
             [sys.executable, '-m', 'other.metor', 'daemon'],
+            [interpreter, '-m', 'metor', '-p', 'alpha', 'daemon'],
             [sys.executable, '-m', 'metor.daemon_main', 'daemon'],
             ['/usr/bin/metor-daemon', '-p', 'alpha', '--locked', 'daemon'],
             ['/usr/bin/metor', 'chat', 'daemon'],
@@ -687,7 +688,7 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
             pm, start_locked=False, startup_session_auth_stdin=False
         )
         self.assertEqual(cmd[0], sys.executable)
-        self.assertEqual(cmd[1:3], ['-m', 'metor'])
+        self.assertEqual(cmd[1:4], ['-I', '-m', 'metor'])
         self.assertIn('--non-interactive', cmd)
         self.assertNotIn('--daemon-child', cmd)
         self.assertNotIn('metor.daemon_main', cmd)

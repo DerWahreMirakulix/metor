@@ -386,8 +386,12 @@ class ProcessManager:
             return False
 
         arguments: list[str]
-        if argv_zero == current_interpreter and cmdline[1:3] == ['-m', 'metor']:
-            arguments = cmdline[3:]
+        if argv_zero == current_interpreter and cmdline[1:4] == [
+            '-I',
+            '-m',
+            'metor',
+        ]:
+            arguments = cmdline[4:]
         elif (
             argv_zero == current_interpreter
             and len(cmdline) >= 2

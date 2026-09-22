@@ -3,6 +3,49 @@
 This is the single resumable worklog for closure packages A00–A25. Historical
 reports remain evidence and are not competing implementation backlogs.
 
+## Current completion-correction status
+
+| Package | State | Commit | Tests | Result | Next step |
+| ------- | ----- | ------ | ----- | ------ | --------- |
+| C01 | locally verified | C01 checkpoint (this commit) | 5 focused launch/detection tests; 57 daemon/runtime/IPC neighbors; fresh four-bundle installed-consumer validation with two real managed starts | PASS on Linux: isolated locked and plaintext session-auth children ignored CWD and inherited import shadows | Native Windows installed startup remains part of C05 |
+| C02 | open | — | — | Hosted Windows failures supplied for Python 3.11; native 3.13 path also requires verification | Correct private Windows filesystem operations without weakening DACL/reparse rules |
+| C03 | open | — | — | Native fixture and checkout-byte failures supplied | Make native expectations and immutable spec bytes portable |
+| C04 | open | — | — | Four native batch branch failures supplied on both Windows lanes | Diagnose real `cmd.exe` control flow before changing installer semantics |
+| C05 | open | — | — | Hosted baseline run `35756273840`, attempt 1, applies only to `3726de4` | Reverify the exact corrected tree and retain external native blockers |
+
+The task's verified starting evidence records run `35756273840`, attempt 1, at
+`3726de443716dbdd0a2aa2316e86a0acb02015c3`: Linux 3.11 job
+`106842722391` and Linux 3.13 job `106842722952` succeeded; Windows 3.11 job
+`106842722977` ran 858 tests with 10 failures, 245 errors, and 15 skips;
+Windows 3.13 job `106842722864` ran 858 tests with 10 failures, 5 errors, and
+15 skips. Both Windows lanes passed strict mypy for 465 sources before their
+test failures. These are source-qualified baseline results, not results for
+later C checkpoints.
+
+C01 changes only managed child module selection and its exact process-role
+allowlist. The launch vector preserves the uncanonicalized `sys.executable`
+required for symlink virtual environments and adds isolated interpreter mode:
+`sys.executable -I -m metor`. The existing environment continues to supply
+application configuration, while Python ignores CWD insertion and inherited
+Python import overrides. Secrets remain on bounded stdin and never move to argv
+or environment. Process recognition accepts this exact module prefix and
+rejects the former non-isolated form; canonical installed console-script forms
+remain separately exact.
+
+Before the correction, four focused tests produced six failures and the real
+installed artifact probe executed a harmless shadow `metor` package through an
+inherited `PYTHONPATH`, writing its marker. Afterward, fresh Linux Python 3.11
+Base, Terminal, SDK, and GUI bundles passed the complete installed-consumer
+sequence. Its encrypted locked child ran from an ordinary directory and its
+plaintext session-auth child ran directly inside a second directory containing
+the shadow package while `PYTHONPATH` named that directory. Both used the
+selected venv interpreter, loaded the installed `site-packages`, persisted the
+matching profile/installation identity, published IPC readiness, and were
+cleaned up. The shadow marker remained absent, including for the public startup
+sentinel. All 57 direct daemon bootstrap, runtime ownership, UI IPC, frontend,
+and daemon-lock neighbors passed. Ruff, format, and strict mypy passed for the
+changed C01 surface. No application or compatibility generation changes.
+
 ## Current targeted follow-up status
 
 | Package | State       | Commit                       | Tests                                                                                        | Result                                                    | Next step                                                          |

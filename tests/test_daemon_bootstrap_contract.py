@@ -48,7 +48,7 @@ class DaemonBootstrapContractTests(unittest.TestCase):
         )
 
         self.assertEqual(command[0], sys.executable)
-        self.assertEqual(command[1:3], ['-m', 'metor'])
+        self.assertEqual(command[1:4], ['-I', '-m', 'metor'])
         self.assertNotIn('metor.daemon_main', command)
         self.assertNotIn('--daemon-child', command)
         self.assertIn('--non-interactive', command)

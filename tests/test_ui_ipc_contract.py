@@ -1091,7 +1091,7 @@ class UiIpcContractTests(unittest.TestCase):
         self.assertTrue(result)
         command = popen_mock.call_args.args[0]
         self.assertEqual(command[0], sys.executable)
-        self.assertEqual(command[1:3], ['-m', 'metor'])
+        self.assertEqual(command[1:4], ['-I', '-m', 'metor'])
         self.assertIn('--non-interactive', command)
         self.assertNotIn('--daemon-child', command)
         self.assertIn('--startup-session-auth-stdin', command)
