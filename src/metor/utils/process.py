@@ -25,7 +25,17 @@ logger = logging.getLogger(__name__)
 
 
 def _current_posix_uid() -> int:
-    """Returns the POSIX owner without assuming that Windows exports getuid."""
+    """Returns the POSIX owner without assuming that Windows exports getuid.
+
+    Args:
+        None
+
+    Returns:
+        int: Numeric user identifier for the current POSIX process.
+
+    Raises:
+        OSError: If the runtime does not expose POSIX ownership information.
+    """
     get_uid = getattr(os, 'getuid', None)
     if get_uid is None:
         raise OSError(errno.ENOTSUP, 'POSIX owner validation is unavailable.')

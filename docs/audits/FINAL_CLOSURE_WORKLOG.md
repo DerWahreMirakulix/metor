@@ -12,8 +12,8 @@ reports remain evidence and are not competing implementation backlogs.
 | R03     | implemented | `96f07a3`                    | Parser/dispatcher/help/history/release neighbors; 69 tests; Ruff; format; mypy                 | PASS on Linux                                           | Complete                                                         |
 | R04     | implemented | `bb00a73`                    | 64 daemon/runtime/release neighbors; installed-wheel managed spawn; Ruff; format; mypy         | PASS on Linux; native Windows execution remains open    | Native Windows evidence remains an R05/R07 gate                     |
 | R05     | implemented | `7f64029`                    | Normal + `--platform win32` mypy (465 sources); 91 security/process/installer tests; Ruff/format | Static PASS; 4 native Windows tests skipped locally     | Fresh hosted/native Windows execution remains an R07 gate           |
-| R06     | implemented | R06 checkpoint (this commit) | 59 route/Voice/GUI/lifecycle/docs tests; generic native listings; Ruff; format; mypy            | Software PASS; native audio BLOCKED (0 endpoints)       | Run installed native route and remaining lifecycle gates in R07     |
-| R07     | open        | —                            | —                                                                                            | —                                                         | Consolidate local, CI, artifact, and native acceptance evidence    |
+| R06     | implemented | `f19939a`                    | 59 route/Voice/GUI/lifecycle/docs tests; generic native listings; Ruff; format; mypy            | Software PASS; native audio BLOCKED (0 endpoints)       | Installed native route remains an R07 gate                         |
+| R07     | locally verified | R07 checkpoint (this commit) | Full static gates; 858 tests; four fresh Linux 3.11 bundles; installed-artifact and ZIP-installer validation | Local software/artifact PASS; 4 native Windows skips | Fresh hosted matrix, native OS/audio gates, and release dry run remain external |
 
 R01 replaces path-presence ownership and rename-based stale reaping with one
 persistent private lock object guarded by the operating system's exclusive file
@@ -153,6 +153,69 @@ generic capability-selected installed gate and exact logind/provider/session
 validation. Razer/RTX values remain only explicitly dated historical context;
 they are not rewritten as generic past successes. Native installed duplex,
 Windows WTS/power/media, and real Linux lock/suspend/media remain R07 gates.
+
+R07 reran the complete local acceptance chain on the current product tree. The
+first full discovery exposed only two missing `Args:`/`Returns:` contracts on
+the narrow R05 POSIX helpers; those contracts were added without changing
+runtime behavior. The next installed-artifact run exposed two validator setup
+errors: its POSIX consumer environment used `EnvBuilder`'s copy default despite
+the R04 symlink-provenance assertion, and its isolated managed-spawn data parent
+was not created. The validator now requests symlinks only on POSIX, retains the
+normal copied interpreter on Windows, and creates only its own temporary parent.
+The unchanged production path validation remains fail closed.
+
+After those corrections, Ruff checked all production, script, and test Python;
+all 566 files were format-clean; strict mypy passed for 465 sources both
+normally and with `--platform win32`; boundaries, version registry, and
+deterministic generated references passed. Full discovery passed 858 tests in
+685.597 seconds. Four native Windows batch tests skipped because this Linux host
+has no suitable native Windows Python; they are not reported as passes.
+
+Fresh Base, Terminal, SDK, and GUI Linux x86-64/Python 3.11 bundles passed
+target/integrity verification, Wheel RECORD ownership, offline install and
+`pip check`, positive/negative external SDK typing, Base/UI separation,
+frontend discovery, both UI removal directions, final SDK reimport, and all
+four ZIP installers. The installed Base also created a temporary encrypted
+profile and started the real locked managed child from the selected symlink
+venv outside the checkout. IPC became ready, the child loaded from that
+environment's `site-packages`, and only its verified PID was terminated. Final
+archive identities are:
+
+- `metor-sdk-wheelhouse-linux-x86_64-py311.zip`:
+  `de67c406ea0adb7e47802f4bb6a991d7a770b9c8b3d4ad6acfe46f8b7ed09340`
+- `metor-wheelhouse-linux-x86_64-py311.zip`:
+  `8c94063d862de092b61883b054e8bf64a8bccee2914e1ee62abb491fadfaabdc`
+- `metor-ui-terminal-wheelhouse-linux-x86_64-py311.zip`:
+  `a519b3d5b72b677d96a5047f63ffbddb54acf0919f50e7ff989495094359e41e`
+- `metor-ui-gui-wheelhouse-linux-x86_64-py311.zip`:
+  `db489bfc3a32c3cdccebfcaacd04d2614e0ed896d115d3d0b5c4957f99f3b654`
+
+The current local command results are:
+
+| Command | Exit/result |
+| ------- | ----------- |
+| `python -m ruff check src/metor/ scripts/ tests/` | 0; PASS |
+| `python -m ruff format --check src/metor/ scripts/ tests/` | 0; PASS; 566 files |
+| `python -m mypy src/metor/ scripts/` | 0; PASS; 465 sources |
+| `python -m mypy --platform win32 src/metor/ scripts/` | 0; PASS; 465 sources |
+| `python scripts/check_boundaries.py` | 0; PASS |
+| `python scripts/versioning.py validate` | 0; PASS |
+| `python scripts/validate_generated_docs.py` | 0; PASS; fresh and reproducible |
+| `python -m unittest discover -s tests` | 0; PASS; 858 tests, 4 native Windows skips |
+| `python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir /tmp/metor-r07-final-bundles` | 0 with package-download access; four bundles |
+| `python scripts/validate_installed_artifacts.py /tmp/metor-r07-final-bundles` | 0 with local loopback; all isolated scenarios and managed spawn pass |
+| `python scripts/validate_release_installers.py /tmp/metor-r07-final-bundles` | 0; all four offline ZIP installers pass |
+
+No push or workflow dispatch was authorized, so no fresh hosted run/job IDs
+exist for this checkpoint. The historical failing baseline remains run
+`35737763026` with jobs `106779301747`, `106779301260`, `106779301738`, and
+`106779302034`; it is not current pass evidence. Native installed Windows
+managed-spawn/startup-secret, lock/ACL/reparse/batch and WTS/power/media,
+real Linux lock/suspend/resume media behavior, and installed full-GUI native
+duplex on an explicitly confirmed capability-compatible route remain open.
+The current environment enumerated no native audio endpoints, so that route was
+not run and is not inferred from software ports. The release dry run also
+remains unexecuted because it requires explicit remote authorization.
 
 ## Current follow-up status
 
@@ -322,9 +385,10 @@ commit, the executable continuation is:
    and all four distributions without publication.
 3. On an authorized installed Windows 3.11 system, run the native batch branch
    tests, exercise WTS Lock/Unlock and power transitions while capture/playback
-   are active, and run the `tests/gui_native_voice.py` probe with
-   `--headset-confirmed` and an explicit `--result` path on the documented Razer
-   BlackShark V2 HS 2.4 route.
+   are active, and run `tests/gui_native_voice.py --list-devices` followed by
+   the installed-mode probe with explicit capability-compatible input/output
+   indices, `--headset-confirmed`, `--result`, and the candidate artifact
+   identity. A device name or backend brand is not a selection criterion.
 4. In an authorized real Linux desktop session, run the installed
    `tests/gui_native_lifecycle.py --expect lock,suspend,resume` while observing
    capture, playback, privacy cover, and no implicit resume. Do not suspend an

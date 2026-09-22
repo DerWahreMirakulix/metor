@@ -9,11 +9,11 @@
   },
   "frontend": "gui",
   "distribution": "metor-ui-gui",
-  "python_tested": "3.11.15",
+  "python_tested": "local quality/artifact acceptance on 3.11.4; native renderer evidence on 3.11.15",
   "renderer": "Kivy 2.3.1 / SDL2 / OpenGL",
   "continuous_integration": {
     "declared_matrix": "Linux and Windows with Python 3.11 and 3.13",
-    "current_source_status": "fresh hosted four-lane run pending; local Linux 3.11 native renderer and software gates pass",
+    "current_source_status": "fresh hosted four-lane run pending; local Linux 3.11 native renderer, software gates, four bundles, installed consumers, and offline installers pass",
     "release_bundle_lanes": "Python 3.11 on each native operating system"
   },
   "accessibility": {
@@ -34,7 +34,7 @@
     "native_acceptance_gap": "real Linux system suspend/locked-session media run and installed Windows WTS/power media run remain unavailable"
   },
   "linux_x86_64": {
-    "offline_install": "tested",
+    "offline_install": "four fresh Base, Terminal, SDK, and GUI bundles tested outside the checkout; 2026-09-22",
     "offscreen_render": "tested",
     "desktop_input": "native SDL keyboard dispatch tested offscreen; no physical-device input claim",
     "native_audio_devices_observed": 0,
@@ -96,7 +96,7 @@
   "host_shutdown": "typed fixed-port request occurs only after local single-runtime checks plus Core preparation, or exact safe purge terminal state; the port owns atomic exclusive-host enforcement; no OS adapter registered or real shutdown tested",
   "purge": "bounded physical-input composition, scoped grant, exact initiation and safe-terminal shutdown gating tested; no production hardware driver or real destruction/shutdown tested",
   "pause_checkpoint": "2026-09-15: retained root source has targeted native/static validation; installed artifacts/headset evidence predates final RootPanel/RootRow changes",
-  "current_checkpoint": "2026-09-22: software full-GUI inbound LIVE capture/playback overlap through SDK/encrypted Core, 20 MiB pressure, local Linux 3.11 native rendering, and fresh Linux four-bundle installed-consumer validation pass; fresh hosted four-lane CI, native Windows lifecycle/batch/release execution, real Linux lock/suspend media, and installed full-GUI duplex on an explicitly selected suitable route remain unavailable; earlier installed/native evidence retains its recorded source scope",
+  "current_checkpoint": "2026-09-22: local static gates pass normally and for the Win32 type target; 858 tests pass with four native-Windows skips; software full-GUI inbound LIVE overlap, 20 MiB pressure, Linux native rendering, four fresh Linux 3.11 bundles, isolated installed consumers, offline ZIP installers, and installed locked managed-child provenance pass. No fresh hosted run was authorized. Native Windows lifecycle/batch/lock/ACL/reparse/startup-secret execution, real Linux lock/suspend media, release dry run, and installed full-GUI duplex on an explicitly confirmed capability-compatible route remain unavailable; zero native audio endpoints were enumerated here. Historical device and host observations retain only their dated scope.",
   "acceptance_at_claimed_support_level": false,
   "physical_appliance_acceptance": "not applicable until a production adapter is registered and claimed"
 }

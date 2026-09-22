@@ -221,7 +221,9 @@ def run_acceptance(bundle_root: Path) -> None:
     }
     with tempfile.TemporaryDirectory(prefix='metor-artifact-') as directory:
         root = Path(directory)
-        venv.EnvBuilder(with_pip=True).create(root / 'consumer')
+        venv.EnvBuilder(with_pip=True, symlinks=os.name != 'nt').create(
+            root / 'consumer'
+        )
         executable = (
             root
             / 'consumer'
@@ -302,6 +304,7 @@ def run_acceptance(bundle_root: Path) -> None:
             Path(__file__).resolve().parents[1] / 'tests' / 'installed_managed_spawn.py'
         )
         managed_data = root / 'managed-spawn-data'
+        managed_data.mkdir()
         run(
             [
                 str(executable),

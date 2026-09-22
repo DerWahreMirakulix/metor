@@ -1397,7 +1397,9 @@ class UiIpcContractTests(unittest.TestCase):
             patch('metor.cli.handlers.configure_daemon_runtime_logging'),
             patch(
                 'metor.cli.handlers.run_managed_daemon',
-                side_effect=ValueError('/home/yoda/secret/storage.db: invalid state'),
+                side_effect=ValueError(
+                    '/home/example-user/private/storage.db: invalid state'
+                ),
             ),
             patch('builtins.print') as print_mock,
         ):

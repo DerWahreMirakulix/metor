@@ -34,7 +34,18 @@ _WINDOWS_INVALID_HANDLE_VALUE: int = ctypes.c_void_p(-1).value or -1
 
 
 def _set_descriptor_mode(descriptor: int, mode: int) -> None:
-    """Applies POSIX mode bits without assuming Windows exports fchmod."""
+    """Applies POSIX mode bits without assuming Windows exports fchmod.
+
+    Args:
+        descriptor (int): Open file descriptor whose mode must change.
+        mode (int): POSIX permission bits to apply.
+
+    Returns:
+        None
+
+    Raises:
+        OSError: If descriptor mode changes are unavailable or fail.
+    """
     change_mode = getattr(os, 'fchmod', None)
     if change_mode is None:
         raise OSError(errno.ENOTSUP, 'Descriptor permission changes are unavailable.')
