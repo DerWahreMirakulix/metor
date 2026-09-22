@@ -5,19 +5,19 @@ reports remain evidence and are not competing implementation backlogs.
 
 ## Current follow-up status
 
-| Package | State | Commit | Tests | Next step |
-| ------- | ----- | ------ | ----- | --------- |
-| N01 | verified | `1834520` | CLI, daemon bootstrap, release parser, GUI parser; Ruff; mypy | Complete |
-| N02 | verified | `e033e7e` | Runtime/cleanup, Tor/Stem, live shebang; Ruff; mypy | Complete |
-| N03 | implemented | `1c50e43` | POSIX race regressions, profile/storage neighbors, Windows handle structure; Ruff; mypy | Native Windows junction/error execution remains an N11 gate |
-| N04 | verified | `c1770a0` | Lock modes/bounded safe reads/process generations/races/real child, settings/profile neighbors; Ruff; mypy; boundaries | Complete on Linux; native Windows ACL/error execution remains an N11 gate |
-| N05 | implemented | `5b9b140` | POSIX FIFO/link/type/size/TOML, configuration/launcher neighbors; Ruff; mypy | Native Windows 3.11/3.13 mypy and ACL/reparse execution remain N09/N11 gates |
-| N06 | verified | `8ff228f` | All DTO factories, SDK NDJSON, real daemon socket dispatcher, generated references, IPC/auth neighbors; Ruff; mypy | Complete |
-| N07 | implemented | N07 checkpoint (this commit) | 10k coalescing, controlled logind/session/owner/loss/startup/cleanup, Windows failure paths, GUI lifecycle/security neighbors; Ruff; mypy; boundaries | Native Windows WTS/Power and real Linux lock/suspend/resume remain N11 gates |
-| N08 | in progress | pending | Existing overlap integration under review | Extend the GUI media integration through inbound LIVE voice |
-| N09 | open | — | — | Close the CI and native renderer matrix |
-| N10 | open | — | — | Repair release smoke, batch, and ref-transaction paths |
-| N11 | open | — | — | Consolidate documentation and final acceptance evidence |
+| Package | State       | Commit                       | Tests                                                                                                                                                 | Next step                                                                       |
+| ------- | ----------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| N01     | verified    | `1834520`                    | CLI, daemon bootstrap, release parser, GUI parser; Ruff; mypy                                                                                         | Complete                                                                        |
+| N02     | verified    | `e033e7e`                    | Runtime/cleanup, Tor/Stem, live shebang; Ruff; mypy                                                                                                   | Complete                                                                        |
+| N03     | implemented | `1c50e43`                    | POSIX race regressions, profile/storage neighbors, Windows handle structure; Ruff; mypy                                                               | Native Windows junction/error execution remains an N11 gate                     |
+| N04     | verified    | `c1770a0`                    | Lock modes/bounded safe reads/process generations/races/real child, settings/profile neighbors; Ruff; mypy; boundaries                                | Complete on Linux; native Windows ACL/error execution remains an N11 gate       |
+| N05     | implemented | `5b9b140`                    | POSIX FIFO/link/type/size/TOML, configuration/launcher neighbors; Ruff; mypy                                                                          | Native Windows 3.11/3.13 mypy and ACL/reparse execution remain N09/N11 gates    |
+| N06     | verified    | `8ff228f`                    | All DTO factories, SDK NDJSON, real daemon socket dispatcher, generated references, IPC/auth neighbors; Ruff; mypy                                    | Complete                                                                        |
+| N07     | implemented | N07 checkpoint (this commit) | 10k coalescing, controlled logind/session/owner/loss/startup/cleanup, Windows failure paths, GUI lifecycle/security neighbors; Ruff; mypy; boundaries | Native Windows WTS/Power and real Linux lock/suspend/resume remain N11 gates    |
+| N08     | verified    | N08 checkpoint (this commit) | Real GUI/SDK/Core inbound LIVE duplex, interruption neighbors, 20 MiB pressure; Ruff                                                                  | Controlled-port software scope complete; native audio route remains an N11 gate |
+| N09     | open        | —                            | —                                                                                                                                                     | Close the CI and native renderer matrix                                         |
+| N10     | open        | —                            | —                                                                                                                                                     | Repair release smoke, batch, and ref-transaction paths                          |
+| N11     | open        | —                            | —                                                                                                                                                     | Consolidate documentation and final acceptance evidence                         |
 
 N03 cohesion review: `metor.utils.security` is now 726 physical lines because
 the POSIX descriptor and Windows handle implementations must share exact entry
@@ -42,6 +42,25 @@ and signal validation moved to `platform/linux_lifecycle.py`. The 737-line
 shared lifecycle module remains below the exceptional ceiling and owns one
 bounded handoff/coordinator plus native source orchestration. A wider package
 promotion would mix structural churn into the remaining native acceptance work.
+
+N08 extends the existing combined controller/worker integration instead of
+replacing it with a synthetic controller. A separately authenticated GUI SDK
+connection subscribes to actual Core events and obtains its own producer lease;
+an active controlled socket establishes the LIVE context. During a local LIVE
+capture, Core persists and publishes an inbound Voice start/chunk/end sequence
+plus parallel text. The real transcript and autoplay path selects only the
+foreground peer, reads the exact PCM bytes through the SDK, overlaps actual
+capture/output worker progress, and releases only the completely drained
+inbound item. A second peer's distinct bytes remain retained and unheard, the
+text draft remains unpublished, and input/output termination stays independent.
+
+The direct capture, playback, lifecycle, security, continuation, and device
+lifecycle neighbors cover microphone/output failure, focus/lock/suspend
+revocation, transport loss, and generation/profile fencing. The repeated
+20 MiB production worker fixture passed with 20,971,520 exact output bytes,
+64 KiB maximum reads, 640-byte frames, the 16 MiB cache ceiling, and a sampled
+60-record mailbox peak. These controlled ports are software evidence only;
+installed native audio duplex remains a mandatory N11 gate.
 
 ## Baseline
 

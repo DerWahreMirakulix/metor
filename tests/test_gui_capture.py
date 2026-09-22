@@ -3,15 +3,27 @@
 from collections import deque
 from dataclasses import replace
 from typing import Callable
+import base64
 import json
+import socket
 import threading
+import time
 import unittest
 from unittest.mock import Mock, patch
 
 import test_gui_producers as support
-from metor.core.api import Delivery, MessageDirectionCode, VoiceFinalizedEvent
-from metor.client import FrontendLaunchContext
+from metor.core.api import (
+    Delivery,
+    GuiPreferencesEvent,
+    IpcEvent,
+    MessageDirectionCode,
+    SetGuiPreferencesCommand,
+    VoiceFinalizedEvent,
+)
+from metor.client import FrontendLaunchContext, MetorClient, build_session_auth_proof
+from metor.core.daemon.managed.network.router.admission import FrameAdmission
 from metor.data import MessageDirection
+from metor.ui.gui.platform.audio import PcmVoice
 from metor.ui.gui.runtime.voice.capture import CaptureWorker
 from metor.ui.gui.runtime.voice.press import CaptureBinding
 from metor.ui.gui.runtime.voice import PressSource
@@ -254,21 +266,56 @@ class CaptureIntegrationTests(unittest.TestCase):
         self.assertEqual(self.h.messages.get_pending_outbox(), [])
 
     def test_full_gui_capture_and_sent_playback_overlap_over_real_sdk(self) -> None:
-        """Production controllers/workers remain full-duplex through SDK/Core IO."""
+        """Incoming LIVE autoplay and local capture overlap through SDK/Core IO."""
         payload = b'\x00\x01' * 320
-        self.h.capture('duplex-source')
-        self.h.client.finalize_voice('duplex-source', 20, owner_token=self.h.owner)
-        self.h.client.commit_voice(
-            self.h.onion, 'duplex-source', owner_token=self.h.owner
-        )
+        foreign_payload = b'\x02\x03' * 320
+        local, peer = socket.socketpair()
+        foreign_local, foreign_peer = socket.socketpair()
+        for connection in (local, peer, foreign_local, foreign_peer):
+            self.addCleanup(connection.close)
+        self.h.daemon._transport_state.add_active_connection(self.h.onion, local)
+
         controller = GuiController(FrontendLaunchContext('voice-owned', Mock()))
         self.addCleanup(controller.close)
-        controller.client = self.h.client
-        controller.state.snapshot = self.h.client.runtime_snapshot()
-        controller.state.capabilities = frozenset(self.h.client.init_event.capabilities)
-        controller.voice_owner.token = self.h.owner
+        provider = Mock()
+        provider.get_session_auth_proof.side_effect = lambda challenge, salt: (
+            build_session_auth_proof('test-password', challenge, salt)
+        )
+        generation = controller.state.generation
+
+        def on_event(event: IpcEvent) -> None:
+            controller.mailbox.put(Update(generation, 'event', event))
+
+        gui_client = MetorClient(
+            self.h.daemon._ipc.port,
+            auth_provider=provider,
+            on_event=on_event,
+            timeout=2,
+        )
+        self.addCleanup(gui_client.disconnect)
+        initialized = gui_client.bootstrap()
+        self.assertIsNotNone(initialized)
+        assert initialized is not None
+        activation = controller.activation.hydrate(gui_client, initialized)
+        self.assertTrue(
+            controller.adopt_client(gui_client, controller.state.generation)
+        )
+        self.assertIsNotNone(activation.owner)
+        self.assertIsNotNone(activation.preferences)
+        assert activation.owner is not None and activation.preferences is not None
+        preferences = gui_client.request(
+            SetGuiPreferencesCommand(
+                activation.preferences.preferences_revision,
+                replace(activation.preferences.preferences, auto_play=True),
+            ),
+            GuiPreferencesEvent,
+        )
+        controller.state.snapshot = activation.snapshot
+        controller.state.capabilities = frozenset(initialized.capabilities)
+        controller.state.preferences = preferences
+        controller.voice_owner.token = activation.owner.owner_token
         controller.state.covered = False
-        controller.state.route = Route('V08', self.h.onion, Delivery.DROP)
+        controller.state.route = Route('V09', self.h.onion, Delivery.LIVE)
 
         microphone = FiniteMicrophone([payload])
         self.assertTrue(controller.voice.configure(microphone, headset_confirmed=True))
@@ -281,35 +328,138 @@ class CaptureIntegrationTests(unittest.TestCase):
 
         output = ConcurrentOutput(lambda: controller.voice.running)
         controller.playback.audio = output
-        target = controller.playback.target(
-            self.h.onion,
-            Delivery.DROP,
-            MessageDirectionCode.OUT,
-            'duplex-source',
+        controller.playback.auto.reconcile()
+        self.assertTrue(controller.playback.auto.enabled(self.h.onion))
+
+        router = self.h.daemon._network._router
+        voice = router._voice
+        self.assertIsNotNone(voice)
+        assert voice is not None
+        self.assertIs(
+            voice.receive_begin(
+                local,
+                self.h.onion,
+                {'id': 'inbound-live', 'codec': PcmVoice.CODEC},
+                Delivery.LIVE,
+            ),
+            FrameAdmission.ACCEPTED,
         )
-        self.assertIsNotNone(target)
-        assert target is not None
-        self.assertTrue(controller.playback.play(target))
-        self.assertTrue(output.entered.wait(3))
+        foreign_onion = 'c' * len(self.h.onion)
+        self.h.contacts.ensure_alias_for_onion(foreign_onion)
+        self.assertIs(
+            voice.receive_begin(
+                foreign_local,
+                foreign_onion,
+                {'id': 'foreign-live', 'codec': PcmVoice.CODEC},
+                Delivery.LIVE,
+            ),
+            FrameAdmission.ACCEPTED,
+        )
+        text_envelope = base64.b64encode(
+            json.dumps(
+                {'id': 'parallel-text', 'text': 'Incoming while talking'}
+            ).encode()
+        ).decode()
+        self.assertIs(
+            router.process_incoming_msg(
+                local, self.h.onion, 'parallel-text', text_envelope
+            ),
+            FrameAdmission.ACCEPTED,
+        )
+        self.assertIs(
+            voice.receive_chunk(
+                foreign_local,
+                foreign_onion,
+                {
+                    'id': 'foreign-live',
+                    'offset': 0,
+                    'data': base64.b64encode(foreign_payload).decode(),
+                },
+            ),
+            FrameAdmission.ACCEPTED,
+        )
+        self.assertIs(
+            voice.receive_chunk(
+                local,
+                self.h.onion,
+                {
+                    'id': 'inbound-live',
+                    'offset': 0,
+                    'data': base64.b64encode(payload).decode(),
+                },
+            ),
+            FrameAdmission.ACCEPTED,
+        )
+
+        deadline = time.monotonic() + 5
+        while not output.entered.is_set() and time.monotonic() < deadline:
+            controller.poll()
+            time.sleep(0.01)
+        self.assertTrue(output.entered.is_set())
         self.assertTrue(output.capture_was_running)
+        capture_worker = controller.voice.worker
+        self.assertIsNotNone(capture_worker)
+        assert capture_worker is not None
+        self.assertEqual(capture_worker.accepted_bytes, len(payload))
+        self.assertEqual(output.frames, [payload])
 
         controller.state.set_draft(
-            self.h.onion, Delivery.DROP, 'Typing remains responsive'
+            self.h.onion, Delivery.LIVE, 'Typing remains responsive'
         )
         controller.poll()
         self.assertEqual(
-            controller.state.drafts[(self.h.onion, Delivery.DROP)],
+            controller.state.drafts[(self.h.onion, Delivery.LIVE)],
             'Typing remains responsive',
         )
+
+        transcript = controller.transcript.items
+        voice_key = (
+            self.h.onion,
+            Delivery.LIVE,
+            MessageDirectionCode.IN,
+            'inbound-live',
+        )
+        text_key = (
+            self.h.onion,
+            Delivery.LIVE,
+            MessageDirectionCode.IN,
+            'parallel-text',
+        )
+        self.assertIn(voice_key, transcript)
+        self.assertIn(text_key, transcript)
+        self.assertLess(transcript[voice_key].order, transcript[text_key].order)
         self.assertTrue(controller.voice.running)
         self.assertTrue(controller.playback.running)
 
+        self.assertIs(
+            voice.receive_end(
+                foreign_local,
+                foreign_onion,
+                {'id': 'foreign-live', 'size': len(foreign_payload), 'duration_ms': 20},
+            ),
+            FrameAdmission.ACCEPTED,
+        )
+        self.assertIs(
+            voice.receive_end(
+                local,
+                self.h.onion,
+                {'id': 'inbound-live', 'size': len(payload), 'duration_ms': 20},
+            ),
+            FrameAdmission.ACCEPTED,
+        )
         output.release.set()
         assert controller.playback.worker is not None
         self.assertTrue(controller.playback.worker.done.wait(5))
         controller.poll()
         self.assertEqual(b''.join(output.frames), payload)
         self.assertTrue(output.stopped)
+        self.assertTrue(controller.voice.running)
+        self.assertIsNone(
+            self.h.messages.get_inbound_voice(self.h.onion, 'inbound-live')
+        )
+        self.assertIsNotNone(
+            self.h.messages.get_inbound_voice(foreign_onion, 'foreign-live')
+        )
 
         controller.voice.up(PressSource.PHYSICAL)
         assert controller.voice.worker is not None
@@ -318,14 +468,53 @@ class CaptureIntegrationTests(unittest.TestCase):
         recorded = self.h.messages.get_voice_payload(
             self.h.onion, capture_binding.msg_id, MessageDirection.OUT
         )
-        source = self.h.messages.get_voice_payload(
-            self.h.onion, 'duplex-source', MessageDirection.OUT
-        )
-        self.assertEqual(recorded.status, 'draft')
-        self.assertEqual(source.status, 'pending')
+        self.assertEqual(recorded.delivery, Delivery.LIVE.value)
+        self.assertTrue(json.loads(recorded.payload)['finalized'])
         self.assertEqual(
-            [row[4] for row in self.h.messages.get_pending_outbox()],
-            ['duplex-source'],
+            controller.state.drafts[(self.h.onion, Delivery.LIVE)],
+            'Typing remains responsive',
+        )
+
+        self.assertIs(
+            voice.receive_begin(
+                local,
+                self.h.onion,
+                {'id': 'after-lock', 'codec': PcmVoice.CODEC},
+                Delivery.LIVE,
+            ),
+            FrameAdmission.ACCEPTED,
+        )
+        self.assertIs(
+            voice.receive_chunk(
+                local,
+                self.h.onion,
+                {
+                    'id': 'after-lock',
+                    'offset': 0,
+                    'data': base64.b64encode(foreign_payload).decode(),
+                },
+            ),
+            FrameAdmission.ACCEPTED,
+        )
+        self.assertIs(
+            voice.receive_end(
+                local,
+                self.h.onion,
+                {'id': 'after-lock', 'size': len(foreign_payload), 'duration_ms': 20},
+            ),
+            FrameAdmission.ACCEPTED,
+        )
+        controller.suspend()
+        self.assertTrue(controller.state.covered)
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            controller.poll()
+            time.sleep(0.01)
+        self.assertFalse(controller.playback.running)
+        self.assertFalse(controller.playback.auto.queue)
+        self.assertEqual(output.frames, [payload])
+        self.assertIsNotNone(
+            self.h.messages.get_inbound_voice(self.h.onion, 'after-lock')
         )
 
     def test_lost_append_response_reconciles_without_repeating_the_frame(self) -> None:
@@ -345,6 +534,31 @@ class CaptureIntegrationTests(unittest.TestCase):
         self.assertTrue(
             any(update.operation == 'voice-finished:capture' for update in updates)
         )
+
+    def test_microphone_failure_finalizes_only_the_real_accepted_prefix(self) -> None:
+        """Input loss closes the port and preserves only bytes confirmed by Core."""
+        audio = FiniteMicrophone([b'\x00\x01' * 320])
+        worker = CaptureWorker(
+            self.h.client,
+            self.h.owner,
+            self.binding,
+            audio,
+            self.mailbox,
+            self.cache,
+        )
+        audio.on_empty = lambda: setattr(audio, 'failed', True)
+
+        worker.start()
+
+        self.assertTrue(worker.done.wait(10))
+        self.assertEqual(worker.accepted_bytes, 640)
+        self.assertTrue(audio.stopped)
+        record = self.h.messages.get_voice_payload(
+            self.h.onion, self.binding.msg_id, MessageDirection.OUT
+        )
+        metadata = json.loads(record.payload)
+        self.assertTrue(metadata['finalized'])
+        self.assertEqual(metadata['size_bytes'], 640)
 
     def test_gui_departure_keeps_exact_review_and_requires_release(self) -> None:
         """Navigation finalizes Alice's draft while blocking text and target theft."""
