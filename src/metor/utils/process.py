@@ -3,6 +3,7 @@ Module for managing OS-level processes and cleanup operations.
 Isolates external dependencies like psutil from the core domain logic.
 """
 
+import errno
 import json
 import logging
 import math
@@ -21,6 +22,14 @@ from metor.utils.constants import Constants
 
 
 logger = logging.getLogger(__name__)
+
+
+def _current_posix_uid() -> int:
+    """Returns the POSIX owner without assuming that Windows exports getuid."""
+    get_uid = getattr(os, 'getuid', None)
+    if get_uid is None:
+        raise OSError(errno.ENOTSUP, 'POSIX owner validation is unavailable.')
+    return int(get_uid())
 
 
 @dataclass(frozen=True)
@@ -118,7 +127,7 @@ class ProcessManager:
                     os.close(descriptor)
                     return None
                 if os.name != 'nt' and (
-                    info.st_uid != os.getuid() or info.st_mode & 0o077
+                    info.st_uid != _current_posix_uid() or info.st_mode & 0o077
                 ):
                     os.close(descriptor)
                     return None
@@ -285,8 +294,8 @@ class ProcessManager:
             Optional[bool]: Ownership match, mismatch, or unknown.
         """
         try:
-            if os.name != 'nt' and hasattr(os, 'getuid'):
-                return bool(proc.uids().real == os.getuid())
+            if os.name != 'nt':
+                return bool(proc.uids().real == _current_posix_uid())
             current_user = psutil.Process(os.getpid()).username()
             return bool(proc.username() == current_user)
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):

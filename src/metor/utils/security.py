@@ -33,6 +33,14 @@ _WINDOWS_FILE_ATTRIBUTE_TAG_INFO_CLASS: int = 9
 _WINDOWS_INVALID_HANDLE_VALUE: int = ctypes.c_void_p(-1).value or -1
 
 
+def _set_descriptor_mode(descriptor: int, mode: int) -> None:
+    """Applies POSIX mode bits without assuming Windows exports fchmod."""
+    change_mode = getattr(os, 'fchmod', None)
+    if change_mode is None:
+        raise OSError(errno.ENOTSUP, 'Descriptor permission changes are unavailable.')
+    change_mode(descriptor, mode)
+
+
 class _WindowsFileAttributeTagInfo(ctypes.Structure):
     """Carries Windows attributes for the exact opened filesystem handle."""
 
@@ -389,7 +397,7 @@ def _secure_remove_entry(parent_descriptor: int, name: str) -> None:
             raise OSError(errno.ESTALE, 'Directory path changed during cleanup.')
         for child_name in os.listdir(directory_descriptor):
             _secure_remove_entry(directory_descriptor, child_name)
-        os.fchmod(
+        _set_descriptor_mode(
             directory_descriptor,
             stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR,
         )
@@ -425,7 +433,7 @@ def _open_or_create_private_directory(
         opened = os.fstat(descriptor)
         if not stat.S_ISDIR(opened.st_mode):
             raise OSError(errno.ENOTDIR, 'Private path is not a directory.')
-        os.fchmod(descriptor, 0o700)
+        _set_descriptor_mode(descriptor, 0o700)
         if not _same_entry(parent_descriptor, name, opened):
             raise OSError(errno.ESTALE, 'Private directory changed during creation.')
         return descriptor
@@ -601,7 +609,7 @@ def open_private_binary_file(file_path: Path) -> Iterator[BinaryIO]:
             opened = os.fstat(descriptor)
             if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
                 raise OSError(errno.EINVAL, 'Private output is not a regular file.')
-            os.fchmod(descriptor, 0o600)
+            _set_descriptor_mode(descriptor, 0o600)
             if not _same_entry(parent_descriptor, name, opened):
                 raise OSError(errno.ESTALE, 'Private output path changed during open.')
             os.ftruncate(descriptor, 0)

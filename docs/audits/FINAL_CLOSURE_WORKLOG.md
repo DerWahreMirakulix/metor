@@ -10,8 +10,8 @@ reports remain evidence and are not competing implementation backlogs.
 | R01     | implemented | `7e7ab8e`                    | `test_lock_contract` plus settings/profile/security neighbors; 103 tests; Ruff; format; mypy | PASS on Linux; Windows static typing passes for `lock.py` | Native Windows lock execution remains an R05/R07 gate              |
 | R02     | implemented | `5f7099e`                    | Parser/frontend/host-policy/chat/release neighbors; 78 tests; Ruff; format; mypy              | PASS on Linux                                           | Complete                                                         |
 | R03     | implemented | `96f07a3`                    | Parser/dispatcher/help/history/release neighbors; 69 tests; Ruff; format; mypy                 | PASS on Linux                                           | Complete                                                         |
-| R04     | implemented | R04 checkpoint (this commit) | 64 daemon/runtime/release neighbors; installed-wheel managed spawn; Ruff; format; mypy         | PASS on Linux; native Windows execution remains open    | Complete R05 static/native Windows gates                            |
-| R05     | open        | —                            | —                                                                                            | —                                                         | Repair Windows typing and execute the native matrix when available |
+| R04     | implemented | `bb00a73`                    | 64 daemon/runtime/release neighbors; installed-wheel managed spawn; Ruff; format; mypy         | PASS on Linux; native Windows execution remains open    | Native Windows evidence remains an R05/R07 gate                     |
+| R05     | implemented | R05 checkpoint (this commit) | Normal + `--platform win32` mypy (465 sources); 91 security/process/installer tests; Ruff/format | Static PASS; 4 native Windows tests skipped locally     | Fresh hosted/native Windows execution remains an R07 gate           |
 | R06     | open        | —                            | —                                                                                            | —                                                         | Make native GUI/audio evidence capability-selected and generic     |
 | R07     | open        | —                            | —                                                                                            | —                                                         | Consolidate local, CI, artifact, and native acceptance evidence    |
 
@@ -97,6 +97,28 @@ neighbors pass with Ruff, format, and strict mypy. This Linux host cannot claim
 the required native Windows installed spawn/startup-secret execution; that
 remains an explicit R05/R07 gate rather than being inferred from Linux or mock
 coverage.
+
+R05 removes the four remaining non-lock Windows typing failures represented in
+hosted run `35737763026`. POSIX owner lookup and descriptor-bound mode changes
+now pass through narrow helpers that discover `getuid`/`fchmod` only where
+available and fail with `ENOTSUP` otherwise. The production POSIX paths retain
+descriptor ownership and never substitute path-based chmod. No `attr-defined`
+suppression,
+broad `Any`, or matrix reduction was added. Strict mypy over all 465 configured
+`src`/`scripts` sources passes both normally and with `--platform win32`.
+
+The 91 focused process, security, profile path/storage, lock, and Windows
+installer tests pass on this WSL2 Linux host; the four tests requiring native
+`cmd.exe` plus a standard Windows Python correctly skip. A native inventory
+found only the Microsoft Store alias and Inkscape's embedded Python 3.12.9.
+The latter creates a POSIX-shaped `bin` environment and no native
+`Scripts\\python.exe`, so it cannot represent either required Windows
+3.11/3.13 lane. Its isolated temporary probe directory was removed. No push or
+workflow dispatch was authorized, so the cited Windows jobs `106779301747` and
+`106779301260` remain historical failing-baseline evidence, not evidence for
+this checkpoint. Fresh hosted Windows quality, installed managed spawn,
+startup-secret, lock, reparse/ACL, WTS/Power, and batch execution remain
+explicit R07 gates.
 
 ## Current follow-up status
 
