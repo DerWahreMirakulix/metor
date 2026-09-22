@@ -10,6 +10,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
+import stem.process
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.core.tor import TorManager
@@ -32,16 +34,21 @@ class TorPathResolutionTests(unittest.TestCase):
             None
         """
 
-        with (
-            patch('metor.core.tor.os.name', 'nt'),
-            patch.object(Constants, 'TOR_PATH', r'C:\Tor\tor.exe'),
-            patch('metor.core.tor.shutil.which', return_value=r'C:\FromPath\tor.exe'),
-        ):
-            self.assertEqual(TorManager._resolve_tor_command(), r'C:\Tor\tor.exe')
+        with TemporaryDirectory() as temp_dir:
+            executable = Path(temp_dir) / 'tor.exe'
+            executable.touch()
+            with (
+                patch('metor.core.tor._is_windows', return_value=True),
+                patch.object(Constants, 'TOR_PATH', str(executable)),
+            ):
+                self.assertEqual(
+                    TorManager._resolve_tor_command(),
+                    str(executable.resolve()),
+                )
 
-    def test_windows_uses_path_before_data_dir_fallback(self) -> None:
+    def test_windows_ignores_path_and_uses_owned_data_binary(self) -> None:
         """
-        Verifies that windows uses path before data dir fallback.
+        Verifies that Windows never selects an unrelated PATH executable.
 
         Args:
             None
@@ -50,12 +57,21 @@ class TorPathResolutionTests(unittest.TestCase):
             None
         """
 
-        with (
-            patch('metor.core.tor.os.name', 'nt'),
-            patch.object(Constants, 'TOR_PATH', ''),
-            patch('metor.core.tor.shutil.which', return_value=r'C:\Tor\tor.exe'),
-        ):
-            self.assertEqual(TorManager._resolve_tor_command(), r'C:\Tor\tor.exe')
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / 'owned'
+            data_dir.mkdir()
+            owned = data_dir / Constants.TOR_WIN
+            owned.touch()
+            with (
+                patch('metor.core.tor._is_windows', return_value=True),
+                patch.object(Constants, 'TOR_PATH', ''),
+                patch.object(Constants, 'DATA', data_dir),
+                patch.dict('os.environ', {'PATH': str(Path(temp_dir) / 'foreign')}),
+            ):
+                self.assertEqual(
+                    TorManager._resolve_tor_command(),
+                    str(owned.resolve()),
+                )
 
     def test_windows_falls_back_to_data_dir_tor_exe(self) -> None:
         """
@@ -68,15 +84,48 @@ class TorPathResolutionTests(unittest.TestCase):
             None
         """
 
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            with (
+                patch('metor.core.tor._is_windows', return_value=True),
+                patch.object(Constants, 'TOR_PATH', ''),
+                patch.object(Constants, 'DATA', data_dir),
+                self.assertRaises(FileNotFoundError),
+            ):
+                TorManager._resolve_tor_command()
+
+    def test_stem_passes_profile_configuration_outside_process_argv(self) -> None:
+        """Pinned Stem sends modern Tor configuration through standard input.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        sentinel = Mock()
         with (
-            patch('metor.core.tor.os.name', 'nt'),
-            patch.object(Constants, 'TOR_PATH', ''),
-            patch('metor.core.tor.shutil.which', return_value=None),
+            patch(
+                'stem.version.get_system_tor_version',
+                return_value=stem.version.Requirement.TORRC_VIA_STDIN,
+            ),
+            patch('stem.process.launch_tor', return_value=sentinel) as launch,
         ):
-            self.assertEqual(
-                TorManager._resolve_tor_command(),
-                str(Constants.DATA / Constants.TOR_WIN),
+            result = stem.process.launch_tor_with_config(
+                {
+                    'DataDirectory': '/owned/data',
+                    'HiddenServiceDir': '/owned/service',
+                },
+                tor_cmd='/usr/bin/tor',
             )
+
+        self.assertIs(result, sentinel)
+        self.assertEqual(launch.call_args.args[1], ['-f', '-'])
+        self.assertIn('DataDirectory /owned/data', launch.call_args.kwargs['stdin'])
+        self.assertIn(
+            'HiddenServiceDir /owned/service',
+            launch.call_args.kwargs['stdin'],
+        )
 
 
 class TorLifecycleTests(unittest.TestCase):

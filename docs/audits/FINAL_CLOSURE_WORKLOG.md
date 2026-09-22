@@ -7,9 +7,9 @@ reports remain evidence and are not competing implementation backlogs.
 
 | Package | State | Commit | Tests | Next step |
 | ------- | ----- | ------ | ----- | --------- |
-| N01 | verified | N01 checkpoint (this commit) | CLI, daemon bootstrap, release parser, GUI parser; Ruff; mypy | Complete |
-| N02 | in progress | pending | Counterexamples being added | Bind process identity to the canonical N01 launch form |
-| N03 | open | — | — | Anchor directory operations to verified handles |
+| N01 | verified | `1834520` | CLI, daemon bootstrap, release parser, GUI parser; Ruff; mypy | Complete |
+| N02 | verified | N02 checkpoint (this commit) | Runtime/cleanup, Tor/Stem, live shebang; Ruff; mypy | Complete |
+| N03 | in progress | pending | Counterexamples being added | Anchor directory operations to verified handles |
 | N04 | open | — | — | Harden stale-lock reads and ownership checks |
 | N05 | open | — | — | Make device configuration opens nonblocking and portable |
 | N06 | open | — | — | Reject non-finite numbers at both IPC boundaries |

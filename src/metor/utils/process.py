@@ -3,13 +3,15 @@ Module for managing OS-level processes and cleanup operations.
 Isolates external dependencies like psutil from the core domain logic.
 """
 
-import os
+import json
 import logging
-import re
+import math
+import os
 import stat
+import sys
+import sysconfig
 from dataclasses import dataclass
-from functools import partial
-from typing import Callable, Optional, Set
+from typing import Callable, Optional
 
 import psutil
 from pathlib import Path
@@ -28,40 +30,41 @@ class _ProcessIdentity:
     pid: int
     create_time: float
     profile_name: str
+    role: str
+    executable: str
+    installation_root: str
 
 
 class ProcessManager:
     """Manages OS-level process discovery and termination."""
 
     @staticmethod
-    def _read_pid_file(file_path: Path) -> Optional[int]:
-        """
-        Reads one PID from disk when the file contains a valid integer.
+    def _installation_root() -> Path:
+        """Returns the exact package root for the running Metor installation.
 
         Args:
-            file_path (Path): The PID file to inspect.
+            None
 
         Returns:
-            Optional[int]: The parsed PID, or None if unavailable.
+            Path: Resolved directory containing the installed ``metor`` package.
         """
-        if not file_path.exists():
-            return None
-
-        try:
-            with file_path.open('r') as f:
-                pid_str: str = f.read().strip()
-            pid_text = pid_str.split(':', 1)[0]
-            return int(pid_text) if pid_text.isdigit() else None
-        except OSError:
-            return None
+        return Path(__file__).resolve().parents[2]
 
     @staticmethod
-    def process_identity_payload(pid: int, profile_name: str) -> str:
+    def process_identity_payload(
+        pid: int,
+        profile_name: str,
+        *,
+        role: str,
+        executable: Path,
+    ) -> str:
         """Builds persisted identity for one process owned by a profile.
 
         Args:
             pid (int): Process identifier.
             profile_name (str): Exact owning profile identity.
+            role (str): Managed process role.
+            executable (Path): Exact executable selected by the owner.
 
         Returns:
             str: PID, creation time, and profile metadata.
@@ -69,8 +72,23 @@ class ProcessManager:
         Raises:
             psutil.Error: If the process lifetime cannot be inspected.
         """
-        create_time = psutil.Process(pid).create_time()
-        return f'{pid}:{create_time}:{profile_name}'
+        create_time: float = float(psutil.Process(pid).create_time())
+        if pid <= 0 or not math.isfinite(create_time) or create_time <= 0:
+            raise ValueError('Managed process lifetime metadata is invalid.')
+        if role not in (Constants.PROCESS_ROLE_DAEMON, Constants.PROCESS_ROLE_TOR):
+            raise ValueError('Managed process role is invalid.')
+        return json.dumps(
+            {
+                'create_time': create_time,
+                'executable': str(executable.resolve()),
+                'installation_root': str(ProcessManager._installation_root()),
+                'pid': pid,
+                'profile': profile_name,
+                'role': role,
+            },
+            separators=(',', ':'),
+            sort_keys=True,
+        )
 
     @staticmethod
     def _read_process_identity(file_path: Path) -> Optional[_ProcessIdentity]:
@@ -82,19 +100,109 @@ class ProcessManager:
         Returns:
             Optional[_ProcessIdentity]: Parsed identity, or None when untrusted.
         """
+        flags: int = os.O_RDONLY
+        flags |= int(getattr(os, 'O_CLOEXEC', 0))
+        flags |= int(getattr(os, 'O_NOFOLLOW', 0))
+        flags |= int(getattr(os, 'O_NONBLOCK', 0))
         try:
-            pid_text, created_text, profile_name = (
-                file_path.read_text().strip().split(':', 2)
-            )
-            if not pid_text.isdigit() or not profile_name:
+            descriptor: int = os.open(file_path, flags)
+            try:
+                info = os.fstat(descriptor)
+                file_attributes: int = int(getattr(info, 'st_file_attributes', 0))
+                if (
+                    not stat.S_ISREG(info.st_mode)
+                    or info.st_nlink != 1
+                    or file_attributes & 0x00000400
+                    or info.st_size > Constants.PROCESS_IDENTITY_MAX_BYTES
+                ):
+                    os.close(descriptor)
+                    return None
+                if os.name != 'nt' and (
+                    info.st_uid != os.getuid() or info.st_mode & 0o077
+                ):
+                    os.close(descriptor)
+                    return None
+                with os.fdopen(descriptor, 'rb') as handle:
+                    raw_payload: bytes = handle.read(
+                        Constants.PROCESS_IDENTITY_MAX_BYTES + 1
+                    )
+            except BaseException:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+                raise
+            if len(raw_payload) > Constants.PROCESS_IDENTITY_MAX_BYTES:
+                return None
+            payload = json.loads(raw_payload.decode('utf-8'))
+            if type(payload) is not dict or set(payload) != {
+                'create_time',
+                'executable',
+                'installation_root',
+                'pid',
+                'profile',
+                'role',
+            }:
+                return None
+            pid = payload['pid']
+            create_time = payload['create_time']
+            profile_name = payload['profile']
+            role = payload['role']
+            executable = payload['executable']
+            installation_root = payload['installation_root']
+            if (
+                type(pid) is not int
+                or pid <= 0
+                or type(create_time) not in (int, float)
+                or not math.isfinite(float(create_time))
+                or float(create_time) <= 0
+                or type(profile_name) is not str
+                or not profile_name
+                or type(role) is not str
+                or role
+                not in (Constants.PROCESS_ROLE_DAEMON, Constants.PROCESS_ROLE_TOR)
+                or type(executable) is not str
+                or not executable
+                or type(installation_root) is not str
+                or not installation_root
+            ):
                 return None
             return _ProcessIdentity(
-                int(pid_text),
-                float(created_text),
-                profile_name,
+                pid=pid,
+                create_time=float(create_time),
+                profile_name=profile_name,
+                role=role,
+                executable=executable,
+                installation_root=installation_root,
             )
-        except (OSError, ValueError):
+        except (OSError, UnicodeError, ValueError, TypeError, json.JSONDecodeError):
             return None
+
+    @staticmethod
+    def managed_process_pid(
+        file_path: Path,
+        profile_name: str,
+        role: str,
+    ) -> Optional[int]:
+        """Returns a PID only from exact trusted managed-process metadata.
+
+        Args:
+            file_path (Path): Managed identity file.
+            profile_name (str): Expected owning profile.
+            role (str): Expected managed process role.
+
+        Returns:
+            Optional[int]: Bound PID, or None when metadata is untrusted.
+        """
+        identity = ProcessManager._read_process_identity(file_path)
+        if (
+            identity is None
+            or identity.profile_name != profile_name
+            or identity.role != role
+            or identity.installation_root != str(ProcessManager._installation_root())
+        ):
+            return None
+        return identity.pid
 
     @staticmethod
     def is_pid_running(pid: int) -> Optional[bool]:
@@ -135,19 +243,28 @@ class ProcessManager:
         """
         identity = ProcessManager._read_process_identity(pid_file)
         if identity is None:
-            legacy_pid = ProcessManager._read_pid_file(pid_file)
-            return (
-                ProcessManager.is_pid_running(legacy_pid)
-                if legacy_pid is not None
-                else None
-            )
-        if identity.profile_name != profile_name:
+            return None
+        if (
+            identity.profile_name != profile_name
+            or identity.role != Constants.PROCESS_ROLE_DAEMON
+            or identity.installation_root != str(ProcessManager._installation_root())
+            or identity.executable != str(Path(sys.executable).resolve())
+        ):
             return None
         try:
             proc = psutil.Process(identity.pid)
-            if abs(proc.create_time() - identity.create_time) >= 0.01:
+            if (
+                abs(proc.create_time() - identity.create_time)
+                >= Constants.PROCESS_CREATE_TIME_TOLERANCE_SEC
+            ):
                 return False
             if ProcessManager._same_os_owner(proc) is not True:
+                return None
+            if not ProcessManager._is_metor_daemon_process(
+                proc,
+                profile_name,
+                identity=identity,
+            ):
                 return None
             return bool(
                 proc.is_running() and str(proc.status()) != str(psutil.STATUS_ZOMBIE)
@@ -176,45 +293,39 @@ class ProcessManager:
             return None
 
     @staticmethod
-    def _is_tor_process(proc: psutil.Process, profile_dir: Path) -> bool:
+    def _is_tor_process(
+        proc: psutil.Process,
+        profile_dir: Path,
+        *,
+        identity: Optional[_ProcessIdentity] = None,
+    ) -> bool:
         """
         Verifies that one PID belongs to a Tor process owned by Metor.
 
         Args:
             proc (psutil.Process): The candidate process.
             profile_dir (Path): Expected owning profile directory.
+            identity (Optional[_ProcessIdentity]): Persisted owner-created process identity.
 
         Returns:
             bool: True if the process looks like Tor.
         """
         try:
-            if proc.name().lower() not in ('tor', 'tor.exe'):
+            if identity is None:
                 return False
-            cmdline = proc.cmdline()
+            if (
+                identity.role != Constants.PROCESS_ROLE_TOR
+                or identity.profile_name != profile_dir.name
+                or identity.installation_root
+                != str(ProcessManager._installation_root())
+            ):
+                return False
+            executable = Path(proc.exe()).resolve()
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             return False
-
-        def option_value(option: str) -> Optional[str]:
-            """Reads one exact option value from the inspected process command line.
-
-            Args:
-                option (str): The option input.
-
-            Returns:
-                Optional[str]: The resulting value.
-            """
-            for index, value in enumerate(cmdline):
-                if value == option and index + 1 < len(cmdline):
-                    return str(cmdline[index + 1])
-                if value.startswith(f'{option}='):
-                    return str(value.split('=', 1)[1])
-            return None
-
-        return option_value('--DataDirectory') == str(
-            profile_dir / Constants.TOR_DATA_DIR
-        ) and option_value('--HiddenServiceDir') == str(
-            profile_dir / Constants.HIDDEN_SERVICE_DIR
-        )
+        except OSError:
+            return False
+        return str(executable) == identity.executable
 
     @staticmethod
     def _is_metor_daemon_process(
@@ -222,6 +333,7 @@ class ProcessManager:
         profile_name: str,
         *,
         require_explicit_profile: bool = False,
+        identity: Optional[_ProcessIdentity] = None,
     ) -> bool:
         """
         Verifies that one PID belongs to a Metor daemon process.
@@ -230,6 +342,7 @@ class ProcessManager:
             proc (psutil.Process): The candidate process.
             profile_name (str): Expected owning profile identity.
             require_explicit_profile (bool): Whether argv must name the profile.
+            identity (Optional[_ProcessIdentity]): Persisted owner-created process identity, when available.
 
         Returns:
             bool: True if the process command line matches Metor daemon startup.
@@ -242,47 +355,53 @@ class ProcessManager:
         if not cmdline:
             return False
 
-        executable = Path(cmdline[0]).name.lower()
-        arguments = cmdline[1:]
-        python_executable = re.fullmatch(
-            r'python(?:3(?:\.\d+)*)?(?:\.exe)?',
-            executable,
-        )
-        public = executable in ('metor', 'metor.exe')
-        if python_executable is not None or not public:
+        current_interpreter: Path = Path(sys.executable).resolve()
+        scripts_value: Optional[str] = sysconfig.get_path('scripts')
+        if scripts_value is None:
+            return False
+        launcher_name: str = 'metor.exe' if os.name == 'nt' else 'metor'
+        expected_launcher: Path = Path(scripts_value).resolve() / launcher_name
+        try:
+            argv_zero: Path = Path(cmdline[0]).resolve()
+        except OSError:
             return False
 
-        explicit_profile = False
-        daemon_count = 0
-        index = 0
-        allowed_flags = {
-            '--locked',
-            '--startup-session-auth-stdin',
-            '--daemon-child',
-        }
-        while index < len(arguments):
-            argument = arguments[index]
-            if argument == 'daemon':
-                daemon_count += 1
-            elif argument in allowed_flags:
-                pass
-            if argument in ('-p', '--profile'):
-                if index + 1 >= len(arguments) or arguments[index + 1] != profile_name:
-                    return False
-                explicit_profile = True
-                index += 1
-            elif argument.startswith('--profile='):
-                if argument.split('=', 1)[1] != profile_name:
-                    return False
-                explicit_profile = True
-            elif argument != 'daemon' and argument not in allowed_flags:
-                return False
-            index += 1
+        arguments: list[str]
+        if argv_zero == current_interpreter and cmdline[1:3] == ['-m', 'metor']:
+            arguments = cmdline[3:]
+        elif (
+            argv_zero == current_interpreter
+            and len(cmdline) >= 2
+            and Path(cmdline[1]).resolve() == expected_launcher
+        ):
+            arguments = cmdline[2:]
+        elif os.name == 'nt' and argv_zero == expected_launcher:
+            arguments = cmdline[1:]
+        else:
+            return False
 
-        valid_command = daemon_count == 1
-        return valid_command and (
-            explicit_profile or (public and not require_explicit_profile)
-        )
+        if identity is not None and (
+            identity.role != Constants.PROCESS_ROLE_DAEMON
+            or identity.profile_name != profile_name
+            or identity.executable != str(current_interpreter)
+            or identity.installation_root != str(ProcessManager._installation_root())
+        ):
+            return False
+
+        from metor.cli.parser import CliParser
+
+        parsed, extra = CliParser.parse(arguments)
+        if (
+            parsed.command != 'daemon'
+            or (parsed.profile is not None and parsed.profile != profile_name)
+            or parsed.subcommand is not None
+            or extra
+            or parsed.help_requested
+            or parsed.version
+        ):
+            return False
+
+        return bool(parsed.profile) or not require_explicit_profile
 
     @staticmethod
     def _terminate_process(proc: psutil.Process) -> bool:
@@ -320,7 +439,7 @@ class ProcessManager:
     def _cleanup_pid_file_process(
         pid_file: Path,
         profile_name: str,
-        validator: Callable[[psutil.Process], bool],
+        validator: Callable[[psutil.Process, _ProcessIdentity], bool],
     ) -> int:
         """
         Terminates one managed process referenced by a PID file.
@@ -328,7 +447,7 @@ class ProcessManager:
         Args:
             pid_file (Path): The PID file to inspect.
             profile_name (str): Expected owning profile identity.
-            validator (Callable[[psutil.Process], bool]): Validates process role.
+            validator (Callable[[psutil.Process, _ProcessIdentity], bool]): Validates process role and persisted launch identity.
 
         Returns:
             int: 1 if a managed process was terminated, otherwise 0.
@@ -347,7 +466,10 @@ class ProcessManager:
         should_remove_pid_file: bool = False
         try:
             proc = psutil.Process(identity.pid)
-            if abs(proc.create_time() - identity.create_time) >= 0.01:
+            if (
+                abs(proc.create_time() - identity.create_time)
+                >= Constants.PROCESS_CREATE_TIME_TOLERANCE_SEC
+            ):
                 logger.warning('Skipping cleanup for a reused PID: %s', identity.pid)
                 return 0
             if ProcessManager._same_os_owner(proc) is not True:
@@ -355,7 +477,7 @@ class ProcessManager:
                     'Skipping cleanup with unknown or foreign owner: %s', identity.pid
                 )
                 return 0
-            if not validator(proc):
+            if not validator(proc, identity):
                 logger.warning(
                     'Skipping cleanup for an unrecognized process: %s', identity.pid
                 )
@@ -396,65 +518,18 @@ class ProcessManager:
         )
 
     @staticmethod
-    def _cleanup_untracked_daemons_force(excluded_pids: Set[int]) -> int:
-        """
-        Force-scans the current user's processes for Metor daemons when local runtime-state files are missing or corrupted.
-
-        Args:
-            excluded_pids (Set[int]): PIDs already handled through explicit state files.
-
-        Returns:
-            int: The number of extra daemon processes terminated.
-        """
-        killed: int = 0
-        current_uid: Optional[int] = os.getuid() if hasattr(os, 'getuid') else None
-
-        for proc in psutil.process_iter():
-            try:
-                if proc.pid in excluded_pids:
-                    continue
-
-                if current_uid is not None and proc.uids().real != current_uid:
-                    continue
-
-                if ProcessManager._same_os_owner(proc) is not True:
-                    continue
-                matched_profile = any(
-                    ProcessManager._is_owned_profile_directory(profile_dir)
-                    and ProcessManager._is_metor_daemon_process(
-                        proc,
-                        profile_dir.name,
-                        require_explicit_profile=True,
-                    )
-                    for profile_dir in Constants.DATA.iterdir()
-                )
-                if matched_profile and ProcessManager._terminate_process(proc):
-                    killed += 1
-            except (
-                OSError,
-                psutil.NoSuchProcess,
-                psutil.AccessDenied,
-                psutil.ZombieProcess,
-            ):
-                continue
-
-        return killed
-
-    @staticmethod
     def cleanup_processes(force: bool = False) -> int:
         """
         Kills managed Metor daemon and Tor processes by reading explicit PID files.
         Prevents killing unrelated system processes by validating each target first.
 
         Args:
-            force (bool): Enables an explicit rescue scan for untracked local Metor daemons.
+            force (bool): Reserved cleanup mode flag; process termination still requires trusted identity metadata.
 
         Returns:
             int: The number of processes successfully killed.
         """
         killed: int = 0
-        handled_daemon_pids: Set[int] = set()
-
         if Constants.DATA.exists():
             for profile_dir in Constants.DATA.iterdir():
                 if not ProcessManager._is_owned_profile_directory(
@@ -465,35 +540,60 @@ class ProcessManager:
                 ):
                     continue
 
-                daemon_pid_file: Path = profile_dir / Constants.DAEMON_PID_FILE
-                daemon_pid: Optional[int] = ProcessManager._read_pid_file(
-                    daemon_pid_file
-                )
-                if daemon_pid is not None:
-                    handled_daemon_pids.add(daemon_pid)
+                def daemon_validator(
+                    proc: psutil.Process,
+                    identity: _ProcessIdentity,
+                    profile_name: str = profile_dir.name,
+                ) -> bool:
+                    """Validates one daemon against the current profile iteration.
 
+                    Args:
+                        proc (psutil.Process): Candidate daemon process.
+                        identity (_ProcessIdentity): Trusted persisted identity.
+                        profile_name (str): Captured owning profile name.
+
+                    Returns:
+                        bool: Whether the candidate is the recorded daemon.
+                    """
+                    return ProcessManager._is_metor_daemon_process(
+                        proc,
+                        profile_name,
+                        identity=identity,
+                    )
+
+                def tor_validator(
+                    proc: psutil.Process,
+                    identity: _ProcessIdentity,
+                    owned_dir: Path = profile_dir,
+                ) -> bool:
+                    """Validates one Tor process against the current profile iteration.
+
+                    Args:
+                        proc (psutil.Process): Candidate Tor process.
+                        identity (_ProcessIdentity): Trusted persisted identity.
+                        owned_dir (Path): Captured owning profile directory.
+
+                    Returns:
+                        bool: Whether the candidate is the recorded Tor process.
+                    """
+                    return ProcessManager._is_tor_process(
+                        proc,
+                        owned_dir,
+                        identity=identity,
+                    )
+
+                daemon_pid_file: Path = profile_dir / Constants.DAEMON_PID_FILE
                 killed += ProcessManager._cleanup_pid_file_process(
                     daemon_pid_file,
                     profile_dir.name,
-                    partial(
-                        ProcessManager._is_metor_daemon_process,
-                        profile_name=profile_dir.name,
-                    ),
+                    daemon_validator,
                 )
 
                 pid_file: Path = profile_dir / Constants.TOR_DATA_DIR / 'tor.pid'
                 killed += ProcessManager._cleanup_pid_file_process(
                     pid_file,
                     profile_dir.name,
-                    partial(
-                        ProcessManager._is_tor_process,
-                        profile_dir=profile_dir,
-                    ),
+                    tor_validator,
                 )
-
-        if force:
-            killed += ProcessManager._cleanup_untracked_daemons_force(
-                handled_daemon_pids
-            )
 
         return killed

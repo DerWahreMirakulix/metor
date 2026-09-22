@@ -99,6 +99,10 @@ class Constants(ContractConstants):
     CONTACTS_FILE: str = 'contacts.json'
     DAEMON_PORT_FILE: str = 'daemon.port'
     DAEMON_PID_FILE: str = 'daemon.pid'
+    PROCESS_IDENTITY_MAX_BYTES: int = 4096
+    PROCESS_CREATE_TIME_TOLERANCE_SEC: float = 0.01
+    PROCESS_ROLE_DAEMON: str = 'daemon'
+    PROCESS_ROLE_TOR: str = 'tor'
     SETTINGS_FILE: str = 'settings.json'
 
     # Directory Names
@@ -120,6 +124,7 @@ class Constants(ContractConstants):
     HOSTNAME_FILE: str = 'hostname'
     TOR_WIN: str = 'tor.exe'
     TOR_UNIX: str = 'tor'
+    TOR_UNIX_DEFAULT_PATH: Path = Path('/usr/bin/tor')
 
     # Application Metadata
     # Uses METOR_DATA_DIR_PARENT from environment if set, otherwise falls back to the user's home directory natively via pathlib

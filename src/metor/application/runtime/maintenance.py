@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from metor.data.profile import ProfileManager
-from metor.utils import ProcessManager
+from metor.utils import Constants, ProcessManager
 
 
 @dataclass(frozen=True)
@@ -75,7 +75,11 @@ def _capture_runtime_state(profile_manager: ProfileManager) -> _RuntimeStateSnap
     daemon_port_file: Path = profile_manager.paths.get_daemon_port_file()
     return _RuntimeStateSnapshot(
         profile_name=profile_manager.profile_name,
-        daemon_pid=_read_runtime_state_file(daemon_pid_file),
+        daemon_pid=ProcessManager.managed_process_pid(
+            daemon_pid_file,
+            profile_manager.profile_name,
+            Constants.PROCESS_ROLE_DAEMON,
+        ),
         daemon_port=_read_runtime_state_file(daemon_port_file),
         had_pid_file=daemon_pid_file.exists(),
         had_port_file=daemon_port_file.exists(),

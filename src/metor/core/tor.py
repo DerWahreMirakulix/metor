@@ -4,7 +4,6 @@ Enforces strict socket timeouts, configurable network resilience, and Tor circui
 """
 
 import os
-import shutil
 import socket
 import subprocess
 import threading
@@ -28,6 +27,18 @@ from metor.shared import clean_onion, ensure_onion_format
 
 # Local Package Imports
 from metor.core.key import KeyManager
+
+
+def _is_windows() -> bool:
+    """Returns whether the running host uses the Windows process model.
+
+    Args:
+        None
+
+    Returns:
+        bool: True on Windows.
+    """
+    return os.name == 'nt'
 
 
 class TorManager:
@@ -288,18 +299,24 @@ class TorManager:
         """
         tor_cmd_override: str = Constants.TOR_PATH
         if tor_cmd_override:
-            return tor_cmd_override
+            configured_path = Path(tor_cmd_override)
+            if not configured_path.is_absolute():
+                raise FileNotFoundError('METOR_TOR_PATH must be an absolute path.')
+            candidate = configured_path.resolve()
+        elif _is_windows():
+            candidate = (Constants.DATA / Constants.TOR_WIN).resolve()
+        else:
+            candidate = Constants.TOR_UNIX_DEFAULT_PATH.resolve()
 
-        if os.name == 'nt':
-            path_tor_cmd: Optional[str] = shutil.which(Constants.TOR_WIN)
-            if path_tor_cmd:
-                return path_tor_cmd
-            return str(Constants.DATA / Constants.TOR_WIN)
-
-        path_tor_cmd = shutil.which(Constants.TOR_UNIX)
-        if path_tor_cmd:
-            return path_tor_cmd
-        return Constants.TOR_UNIX
+        if not candidate.is_file():
+            raise FileNotFoundError(
+                f'The configured Tor executable does not exist: {candidate}'
+            )
+        if not _is_windows() and not os.access(candidate, os.X_OK):
+            raise PermissionError(
+                f'The configured Tor executable is not executable: {candidate}'
+            )
+        return str(candidate)
 
     def _launch_process(self) -> Tuple[bool, Optional[EventType], Dict[str, JsonValue]]:
         """
@@ -359,16 +376,27 @@ class TorManager:
                 )
 
                 pid_file: Path = data_dir / 'tor.pid'
-                with pid_file.open('w') as f:
+                pid_descriptor: int = os.open(
+                    pid_file,
+                    os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                    0o600,
+                )
+                with os.fdopen(pid_descriptor, 'w') as f:
                     f.write(
                         ProcessManager.process_identity_payload(
                             self._tm_proc.pid,
                             self._pm.profile_name,
+                            role=Constants.PROCESS_ROLE_TOR,
+                            executable=Path(tor_cmd),
                         )
                     )
-
                 break
             except OSError as e:
+                if self._tm_proc is not None:
+                    try:
+                        self._terminate_process()
+                    except RuntimeError:
+                        pass
                 last_error = str(e).strip() or 'Unknown Tor launch error.'
                 if (
                     self._pm.config.get_bool(SettingKey.ENABLE_TOR_LOGGING)

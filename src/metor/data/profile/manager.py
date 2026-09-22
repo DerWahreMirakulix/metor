@@ -3,6 +3,8 @@ Module for managing user-profile runtime state and filesystem metadata.
 Enforces validation checks to prevent runtime operation on tampered profiles.
 """
 
+import sys
+import os
 from pathlib import Path
 from typing import List, Optional
 
@@ -256,9 +258,20 @@ class ProfileManager:
             self.initialize()
 
         if pid is not None:
-            with self.paths.get_daemon_pid_file().open('w') as f:
-                f.write(ProcessManager.process_identity_payload(pid, self.profile_name))
-            self.paths.get_daemon_pid_file().chmod(0o600)
+            pid_descriptor: int = os.open(
+                self.paths.get_daemon_pid_file(),
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                0o600,
+            )
+            with os.fdopen(pid_descriptor, 'w') as f:
+                f.write(
+                    ProcessManager.process_identity_payload(
+                        pid,
+                        self.profile_name,
+                        role=Constants.PROCESS_ROLE_DAEMON,
+                        executable=Path(sys.executable),
+                    )
+                )
 
         with self.paths.get_daemon_port_file().open('w') as f:
             f.write(str(port))
@@ -277,7 +290,11 @@ class ProfileManager:
         if self.is_remote():
             return None
 
-        return self._read_int_file(self.paths.get_daemon_pid_file())
+        return ProcessManager.managed_process_pid(
+            self.paths.get_daemon_pid_file(),
+            self.profile_name,
+            Constants.PROCESS_ROLE_DAEMON,
+        )
 
     def get_daemon_port(self) -> Optional[int]:
         """
@@ -293,16 +310,15 @@ class ProfileManager:
             return self.get_static_port()
 
         daemon_pid: Optional[int] = self.get_daemon_pid()
-        if (
-            daemon_pid is not None
-            and ProcessManager.is_managed_process_running(
+        if daemon_pid is not None:
+            process_status: Optional[bool] = ProcessManager.is_managed_process_running(
                 self.paths.get_daemon_pid_file(),
                 self.profile_name,
             )
-            is False
-        ):
-            self.clear_daemon_port(expected_pid=daemon_pid)
-            return None
+            if process_status is not True:
+                if process_status is False:
+                    self.clear_daemon_port(expected_pid=daemon_pid)
+                return None
 
         return self._read_int_file(self.paths.get_daemon_port_file())
 
