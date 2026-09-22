@@ -81,9 +81,6 @@ class Constants(ContractConstants):
     WORKER_SLEEP_SLOW_SEC: float = 2.0  # Slower background worker tick rate
     LOCK_SLEEP_SEC: float = 0.05  # Sleep interval for FileLock spinlocks
     FILE_LOCK_TIMEOUT_SEC: float = 5.0  # Maximum wait for acquiring a file lock
-    FILE_LOCK_STALE_AGE_SEC: float = (
-        10.0  # Age threshold for considering a lock file stale
-    )
     FILE_LOCK_METADATA_MAX_BYTES: int = 128
     TCP_CLOSE_LINGER_SEC: float = 0.2  # Socket linger before shutdown
 

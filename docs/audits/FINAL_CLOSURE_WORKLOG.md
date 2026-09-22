@@ -3,6 +3,38 @@
 This is the single resumable worklog for closure packages A00–A25. Historical
 reports remain evidence and are not competing implementation backlogs.
 
+## Current targeted follow-up status
+
+| Package | State       | Commit                       | Tests                                                                                        | Result                                                    | Next step                                                          |
+| ------- | ----------- | ---------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------ |
+| R01     | implemented | R01 checkpoint (this commit) | `test_lock_contract` plus settings/profile/security neighbors; 103 tests; Ruff; format; mypy | PASS on Linux; Windows static typing passes for `lock.py` | Native Windows lock execution remains an R05/R07 gate              |
+| R02     | open        | —                            | —                                                                                            | —                                                         | Preserve the absent chat-autostart override                        |
+| R03     | open        | —                            | —                                                                                            | —                                                         | Preserve the parser literal boundary through dispatch              |
+| R04     | open        | —                            | —                                                                                            | —                                                         | Keep managed children in the selected installation/venv            |
+| R05     | open        | —                            | —                                                                                            | —                                                         | Repair Windows typing and execute the native matrix when available |
+| R06     | open        | —                            | —                                                                                            | —                                                         | Make native GUI/audio evidence capability-selected and generic     |
+| R07     | open        | —                            | —                                                                                            | —                                                         | Consolidate local, CI, artifact, and native acceptance evidence    |
+
+R01 replaces path-presence ownership and rename-based stale reaping with one
+persistent private lock object guarded by the operating system's exclusive file
+lock. Normal acquisition, release, and crash recovery never rename or unlink
+that object. POSIX uses `flock`; Windows uses the standard descriptor-region
+lock while its no-reparse handle denies delete sharing. Exact descriptor/path
+identity, regular-file type, single-link ownership, bounded metadata, and
+owner-only POSIX mode remain fail-closed checks. Native unlock and close errors
+remain visible while every descriptor is closed at most once.
+
+The deterministic regression first terminates an actual lock-owning child, then
+releases two synchronized contenders against the same retained inode. Each
+contender exposes attempt/entry/release markers and shares one atomic critical
+sentinel; only one enters until explicitly released, no overlap marker appears,
+and the lock inode remains unchanged across crash and both acquisitions. Direct
+tests also cover a running owner, timeout, FIFO/symlink/hardlink/oversize and
+unreadable objects, exchange at the native-lock boundary, partial/zero writes,
+write/fsync rollback, and unlock/close failures. All 103 direct lock,
+settings, profile-path/storage, and security neighbors pass locally. Native
+Windows behavior remains deliberately unclaimed until R05/R07.
+
 ## Current follow-up status
 
 | Package | State       | Commit    | Tests                                                                                                                                                 | Next step                                                                       |

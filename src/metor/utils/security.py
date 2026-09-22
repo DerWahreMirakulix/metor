@@ -121,12 +121,15 @@ def _open_windows_directory_handle(
 def _open_windows_file(
     file_path: Path,
     creation_disposition: int = _WINDOWS_OPEN_EXISTING,
+    *,
+    share_delete: bool = True,
 ) -> int | None:
     """Opens one Windows path without traversing a reparse point.
 
     Args:
         file_path (Path): Candidate sensitive file.
         creation_disposition (int): Native create/open disposition.
+        share_delete (bool): Whether another process may rename/delete the path while this handle is open.
 
     Returns:
         int | None: Owned file descriptor, or None when the path is absent.
@@ -162,12 +165,13 @@ def _open_windows_file(
     )
     get_attributes.restype = ctypes.c_int
 
+    share_mode = _WINDOWS_FILE_SHARE_READ | _WINDOWS_FILE_SHARE_WRITE
+    if share_delete:
+        share_mode |= _WINDOWS_FILE_SHARE_DELETE
     handle = create_file(
         str(file_path),
         _WINDOWS_GENERIC_READ | _WINDOWS_GENERIC_WRITE,
-        _WINDOWS_FILE_SHARE_READ
-        | _WINDOWS_FILE_SHARE_WRITE
-        | _WINDOWS_FILE_SHARE_DELETE,
+        share_mode,
         None,
         creation_disposition,
         _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
