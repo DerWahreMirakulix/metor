@@ -77,12 +77,15 @@ def launch(context):
         def request_session_auth_secret(self): raise AssertionError("unexpected secret")
         def show_status(self, message): pass
     result = context.host.bootstrap(Interaction())
-    assert type(result.port) is int and result.port > 0
+    assert type(result.port) is int and result.port > 0, result
     client = MetorClient(result.port, timeout=2)
     try:
-        assert client.connect()
-        assert client.bootstrap() is not None
-        assert client.runtime_snapshot().profile == result.profile
+        assert client.connect(), f"connect failed: {result.port}"
+        initialized = client.bootstrap()
+        assert initialized is not None, "bootstrap failed"
+        snapshot = client.runtime_snapshot()
+        assert snapshot is not None, "snapshot failed"
+        assert snapshot.profile == result.profile, (snapshot.profile, result.profile)
         print("FAKE_DYNAMIC_IPC_OK")
     finally:
         client.disconnect()
@@ -94,6 +97,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 from metor.utils import Constants
 from metor.data import ProfileManager, ContactManager, HistoryManager, MessageManager
+from metor.data.profile.models import ProfileConfigKey
 from metor.core.key import KeyManager
 from metor.core.daemon.managed.engine import Daemon
 from metor.cli.handlers import CommandHandlers
@@ -108,7 +112,9 @@ with tempfile.TemporaryDirectory() as root:
     atexit.unregister(daemon.stop)
     try:
         daemon._ipc.start()
-        assert pm.get_static_port() is None
+        pm.config.set(ProfileConfigKey.DAEMON_PORT, daemon._ipc.port)
+        pm.config.set(ProfileConfigKey.IS_REMOTE, True, allow_mutating_structural_keys=True)
+        assert pm.get_static_port() == daemon._ipc.port
         assert CommandHandlers.handle_chat(pm, frontend_id="closure-fake") == 0
         assert "metor.ui.terminal" not in sys.modules
     finally:

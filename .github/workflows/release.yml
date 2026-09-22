@@ -201,6 +201,14 @@ jobs:
           "$terminal_dir/.venv/bin/python" -c "import metor.ui.terminal"
           "$terminal_dir/.venv/bin/metor" chat --list-uis
 
+          gui_zip="$(find dist/release -maxdepth 1 -type f -name 'metor-ui-gui-wheelhouse-*.zip' | head -n 1)"
+          python -m zipfile -e "$gui_zip" "$extract_dir/gui"
+          gui_dir="$(find "$extract_dir/gui" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          sh "$gui_dir/install.sh"
+          "$gui_dir/.venv/bin/python" -m pip check
+          "$gui_dir/.venv/bin/python" -c "from metor.client import load_frontend; assert load_frontend('gui')"
+          "$gui_dir/.venv/bin/metor" chat --ui gui --help
+
           sdk_zip="$(find dist/release -maxdepth 1 -type f -name 'metor-sdk-wheelhouse-*.zip' | head -n 1)"
           python -m zipfile -e "$sdk_zip" "$extract_dir/sdk"
           sdk_dir="$(find "$extract_dir/sdk" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
@@ -246,6 +254,14 @@ jobs:
           & "$terminalDir\.venv\Scripts\python.exe" -m pip check
           & "$terminalDir\.venv\Scripts\python.exe" -c "import metor.ui.terminal"
           & "$terminalDir\.venv\Scripts\metor.exe" chat --list-uis
+
+          $guiZip = (Get-ChildItem 'dist/release' -Filter 'metor-ui-gui-wheelhouse-*.zip' | Select-Object -First 1).FullName
+          python -m zipfile -e $guiZip (Join-Path $extractDir 'gui')
+          $guiDir = (Get-ChildItem (Join-Path $extractDir 'gui') -Directory | Select-Object -First 1).FullName
+          & "$guiDir\install.cmd"
+          & "$guiDir\.venv\Scripts\python.exe" -m pip check
+          & "$guiDir\.venv\Scripts\python.exe" -c "from metor.client import load_frontend; assert load_frontend('gui')"
+          & "$guiDir\.venv\Scripts\metor.exe" chat --ui gui --help
 
           $sdkZip = (Get-ChildItem 'dist/release' -Filter 'metor-sdk-wheelhouse-*.zip' | Select-Object -First 1).FullName
           python -m zipfile -e $sdkZip (Join-Path $extractDir 'sdk')
@@ -324,7 +340,7 @@ jobs:
             git commit -m 'release: v${{ needs.prepare.outputs.next_version }}'
           fi
           git tag -a 'v${{ needs.prepare.outputs.next_version }}' -m 'Metor v${{ needs.prepare.outputs.next_version }}'
-          git push origin HEAD:refs/heads/main 'refs/tags/v${{ needs.prepare.outputs.next_version }}'
+          python -m scripts.release.refs --remote origin --branch main --tag 'v${{ needs.prepare.outputs.next_version }}'
 
       - name: Publish GitHub release with compatibility matrix
         shell: bash

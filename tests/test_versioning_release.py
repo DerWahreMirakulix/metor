@@ -52,6 +52,7 @@ from scripts.release.paths import (
     GENERATED_DOCS_DIR,
     SETTINGS_DOC_PATH,
 )
+from scripts.release.refs import push_atomic_release_refs
 from scripts.release.semver import calculate_next_version, select_latest_stable_release
 from scripts import validate_generated_docs
 from scripts.validate_wheel_versions import validate_wheel_versions
@@ -932,9 +933,88 @@ class DocumentationReleaseArchitectureTests(unittest.TestCase):
         self.assertIn('Smoke-test Windows bundle installers', validation_jobs)
         self.assertIn('install.sh', validation_jobs)
         self.assertIn('install.cmd', validation_jobs)
+        self.assertIn('metor-ui-gui-wheelhouse-', validation_jobs)
+        self.assertIn('chat --ui gui --help', validation_jobs)
+        self.assertNotIn('metor-daemon', validation_jobs)
+        self.assertNotIn('metor.daemon_main', validation_jobs)
         self.assertIn('candidate_sha:', workflow)
         self.assertIn('main moved after release validation', publish_job)
-        self.assertIn('HEAD:refs/heads/main', publish_job)
+        self.assertIn('python -m scripts.release.refs', publish_job)
+        self.assertIn('--branch main', publish_job)
+        self.assertNotIn('git push origin HEAD:refs/heads/main', publish_job)
+        ref_publisher = (root / 'scripts' / 'release' / 'refs.py').read_text(
+            encoding='utf-8'
+        )
+        self.assertIn("'--atomic'", ref_publisher)
+        self.assertIn("f'HEAD:refs/heads/{branch}'", ref_publisher)
+
+    def test_atomic_release_ref_push_rejects_branch_and_leaves_no_tag(self) -> None:
+        """A remote branch rejection cannot publish only the release tag.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+
+        def git(repository: Path, *args: str) -> str:
+            """Runs one isolated Git command and returns its stripped stdout.
+
+            Args:
+                repository: Disposable working tree or bare repository.
+                args: Exact Git operands.
+            Returns:
+                str: Captured standard output.
+            """
+            return subprocess.run(
+                ['git', *args],
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            remote, repository = root / 'remote.git', root / 'source'
+            remote.mkdir()
+            repository.mkdir()
+            git(remote, 'init', '--bare')
+            git(repository, 'init', '-b', 'main')
+            git(repository, 'config', 'user.name', 'Release Test')
+            git(repository, 'config', 'user.email', 'release@example.invalid')
+            (repository / 'candidate.txt').write_text('initial\n', encoding='utf-8')
+            git(repository, 'add', 'candidate.txt')
+            git(repository, 'commit', '-m', 'initial')
+            git(repository, 'remote', 'add', 'origin', str(remote))
+            git(repository, 'push', 'origin', 'HEAD:refs/heads/main')
+            original = git(remote, 'rev-parse', 'refs/heads/main')
+
+            (repository / 'candidate.txt').write_text('release\n', encoding='utf-8')
+            git(repository, 'commit', '-am', 'release')
+            git(repository, 'tag', '-a', 'v9.9.9', '-m', 'release')
+            hook = remote / 'hooks' / 'pre-receive'
+            hook.write_text(
+                '#!/bin/sh\n'
+                'while read old new ref; do\n'
+                '  if [ "$ref" = refs/heads/main ]; then exit 1; fi\n'
+                'done\n'
+                'exit 0\n',
+                encoding='utf-8',
+            )
+            hook.chmod(0o755)
+
+            with self.assertRaises(subprocess.CalledProcessError):
+                push_atomic_release_refs(repository, 'origin', 'main', 'v9.9.9')
+
+            self.assertEqual(git(remote, 'rev-parse', 'refs/heads/main'), original)
+            missing_tag = subprocess.run(
+                ['git', 'rev-parse', '--verify', 'refs/tags/v9.9.9'],
+                cwd=remote,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(missing_tag.returncode, 0)
 
     def test_external_actions_are_commit_pinned_and_permissions_are_explicit(
         self,

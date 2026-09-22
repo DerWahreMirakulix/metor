@@ -242,29 +242,34 @@ def build_install_windows_script(package_name: str = 'metor') -> str:
         if exist "%VENV_DIR%" (
             if not exist "%VENV_DIR%\\Scripts\\python.exe" goto incompatible_venv
             "%VENV_DIR%\\Scripts\\python.exe" "%VERIFY%" "%SCRIPT_DIR%" --target-only >nul 2>nul
-            if not %ERRORLEVEL%==0 goto incompatible_venv
+            if errorlevel 1 goto incompatible_venv
             "%VENV_DIR%\\Scripts\\python.exe" "%VERIFY%" "%SCRIPT_DIR%" || exit /b 1
             goto install
         )
 
         where py >nul 2>nul
-        if %ERRORLEVEL%==0 (
-            py -{sys.version_info.major}.{sys.version_info.minor} "%VERIFY%" "%SCRIPT_DIR%" --target-only >nul 2>nul
-            if %ERRORLEVEL%==0 (
-                py -{sys.version_info.major}.{sys.version_info.minor} "%VERIFY%" "%SCRIPT_DIR%" || exit /b 1
-                py -{sys.version_info.major}.{sys.version_info.minor} -m venv "%VENV_DIR%" || exit /b 1
-                goto install
-            )
-        )
+        if not errorlevel 1 call :try_py
+        if not errorlevel 1 goto install
 
         where python >nul 2>nul
-        if %ERRORLEVEL%==0 (
-            python "%VERIFY%" "%SCRIPT_DIR%" --target-only >nul 2>nul
-            if not %ERRORLEVEL%==0 goto wrong_python
-            python "%VERIFY%" "%SCRIPT_DIR%" || exit /b 1
-            python -m venv "%VENV_DIR%" || exit /b 1
-            goto install
-        )
+        if errorlevel 1 goto wrong_python
+        call :try_python
+        if not errorlevel 1 goto install
+        goto wrong_python
+
+        :try_py
+        py -{sys.version_info.major}.{sys.version_info.minor} "%VERIFY%" "%SCRIPT_DIR%" --target-only >nul 2>nul
+        if errorlevel 1 exit /b 1
+        py -{sys.version_info.major}.{sys.version_info.minor} "%VERIFY%" "%SCRIPT_DIR%" || exit /b 1
+        py -{sys.version_info.major}.{sys.version_info.minor} -m venv "%VENV_DIR%" || exit /b 1
+        exit /b 0
+
+        :try_python
+        python "%VERIFY%" "%SCRIPT_DIR%" --target-only >nul 2>nul
+        if errorlevel 1 exit /b 1
+        python "%VERIFY%" "%SCRIPT_DIR%" || exit /b 1
+        python -m venv "%VENV_DIR%" || exit /b 1
+        exit /b 0
 
         :wrong_python
         echo No interpreter matches this bundle target.

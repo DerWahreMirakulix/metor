@@ -13,10 +13,10 @@ reports remain evidence and are not competing implementation backlogs.
 | N04     | verified    | `c1770a0`                    | Lock modes/bounded safe reads/process generations/races/real child, settings/profile neighbors; Ruff; mypy; boundaries                                | Complete on Linux; native Windows ACL/error execution remains an N11 gate       |
 | N05     | implemented | `5b9b140`                    | POSIX FIFO/link/type/size/TOML, configuration/launcher neighbors; Ruff; mypy                                                                          | Native Windows 3.11/3.13 mypy and ACL/reparse execution remain N09/N11 gates    |
 | N06     | verified    | `8ff228f`                    | All DTO factories, SDK NDJSON, real daemon socket dispatcher, generated references, IPC/auth neighbors; Ruff; mypy                                    | Complete                                                                        |
-| N07     | implemented | N07 checkpoint (this commit) | 10k coalescing, controlled logind/session/owner/loss/startup/cleanup, Windows failure paths, GUI lifecycle/security neighbors; Ruff; mypy; boundaries | Native Windows WTS/Power and real Linux lock/suspend/resume remain N11 gates    |
-| N08     | verified    | N08 checkpoint (this commit) | Real GUI/SDK/Core inbound LIVE duplex, interruption neighbors, 20 MiB pressure; Ruff                                                                  | Controlled-port software scope complete; native audio route remains an N11 gate |
-| N09     | implemented | N09 checkpoint (this commit) | Dynamic 3.11/3.13 installer oracles, EGL/SDL workflow contract, local native renderer, release neighbors; Ruff; mypy                                  | Fresh four-lane hosted CI remains an N11 gate                                   |
-| N10     | open        | —                            | —                                                                                                                                                     | Repair release smoke, batch, and ref-transaction paths                          |
+| N07     | implemented | `d5aeebd`                    | 10k coalescing, controlled logind/session/owner/loss/startup/cleanup, Windows failure paths, GUI lifecycle/security neighbors; Ruff; mypy; boundaries | Native Windows WTS/Power and real Linux lock/suspend/resume remain N11 gates    |
+| N08     | verified    | `725fc09`                    | Real GUI/SDK/Core inbound LIVE duplex, interruption neighbors, 20 MiB pressure; Ruff                                                                  | Controlled-port software scope complete; native audio route remains an N11 gate |
+| N09     | implemented | `bc26414`                    | Dynamic 3.11/3.13 installer oracles, EGL/SDL workflow contract, local native renderer, release neighbors; Ruff; mypy                                  | Fresh four-lane hosted CI remains an N11 gate                                   |
+| N10     | implemented | N10 checkpoint (this commit) | 79 release/batch tests (4 native Windows skips), four fresh offline bundles/installed consumers, atomic ref rejection; Ruff; mypy                     | Native Windows batch execution and release dry run remain N11 gates             |
 | N11     | open        | —                            | —                                                                                                                                                     | Consolidate documentation and final acceptance evidence                         |
 
 N03 cohesion review: `metor.utils.security` is now 726 physical lines because
@@ -80,6 +80,33 @@ diagnostics and did not prevent renderer completion. This host has neither
 native Windows nor Python 3.13, and this assignment forbids pushing solely to
 start CI, so a fresh hosted Linux/Windows × 3.11/3.13 run remains a precise N11
 acceptance gate rather than a claimed pass.
+
+N10 makes GUI installation a first-class release smoke on both operating
+systems: the workflow installs the GUI ZIP, checks its environment, resolves
+the public `gui` frontend entry point, and invokes the canonical
+`metor chat --ui gui --help` path. Fresh Linux CPython 3.11 bundles for SDK,
+Base, Terminal, and GUI passed both native offline installer validation and the
+complete isolated installed-consumer sequence. That sequence now identifies
+its intentionally in-process daemon as a static remote endpoint; it therefore
+tests the public host/SDK/frontend boundary without weakening N02's canonical
+managed-process ownership rule.
+
+The generated Windows installer no longer reads `%ERRORLEVEL%` inside a
+parenthesized block. Its `py` and `python` probes execute in subroutines and use
+execution-time `if errorlevel` checks, so an unsuitable launcher falls through
+to a suitable `python` candidate while incomplete or incompatible existing
+environments remain untouched. Native `cmd.exe` branch tests cover launcher
+match/fallback/absence, no matching interpreter, existing compatible and
+incompatible environments, and paths containing spaces and `!`. This WSL host
+exposes only Inkscape's embedded Windows Python, which cannot create or execute
+a standard child venv; those native cases remain a hosted Windows N11 gate and
+are not reported as local passes.
+
+Release publication now validates short ref names and performs one required
+`git push --atomic` for the branch and annotated tag. A disposable bare remote
+with a branch-rejecting pre-receive hook proved that the rejected transaction
+advances neither the branch nor the tag. No real remote, release, branch, or
+tag was mutated.
 
 ## Baseline
 
