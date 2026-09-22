@@ -95,13 +95,9 @@ class ProfilesDispatchMixin:
 
         if sub == 'migrate':
             profile_args: List[str] = list(self._extra)
-            target_mode_value: Optional[str] = None
-
-            if '--to' in profile_args:
-                to_index: int = profile_args.index('--to')
-                if to_index + 1 < len(profile_args):
-                    target_mode_value = profile_args[to_index + 1]
-                    del profile_args[to_index : to_index + 2]
+            target_mode_value: Optional[str] = getattr(
+                self._args, 'migration_target', None
+            )
 
             if len(profile_args) != 1 or target_mode_value is None:
                 self._print_usage('profiles', sub)
@@ -123,12 +119,12 @@ class ProfilesDispatchMixin:
             return
 
         if sub in ('rm', 'remove'):
-            if len(self._extra) < 1:
+            if len(self._extra) != 1:
                 self._print_usage('profiles')
                 return
 
             target_profile: str = self._extra[0]
-            is_nuke_remote: bool = '--nuke-remote' in self._extra
+            is_nuke_remote: bool = getattr(self._args, 'nuke_remote', False)
 
             if is_nuke_remote:
                 remotes = (

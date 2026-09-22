@@ -1,5 +1,6 @@
 """Message-specific CLI dispatch mixin."""
 
+import argparse
 from typing import List, Optional, Protocol
 
 from metor.cli.help import Help
@@ -9,6 +10,7 @@ from metor.cli.proxy import CliProxy
 class _MessagesDispatcherProtocol(Protocol):
     """Structural type for the dispatcher attributes used by the messages mixin."""
 
+    _args: argparse.Namespace
     _extra: List[str]
     _help: type[Help]
     _proxy: CliProxy
@@ -83,8 +85,8 @@ class MessagesDispatchMixin:
         Returns:
             None
         """
-        non_contacts_only: bool = '--non-contacts' in self._extra
-        clean_args: List[str] = [x for x in self._extra if x != '--non-contacts']
+        non_contacts_only: bool = getattr(self._args, 'non_contacts', False)
+        clean_args: List[str] = list(self._extra)
 
         if sub == 'clear':
             if len(clean_args) > 1:

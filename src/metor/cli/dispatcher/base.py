@@ -125,6 +125,10 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
         cmd: str = self._args.command
         sub: Optional[str] = self._args.subcommand
 
+        if getattr(self._args, 'unknown_options', []):
+            self._print_usage(cmd)
+            return self._exit_code
+
         if cmd == 'quickstart':
             print(self._help.show_quick_start())
 
@@ -216,10 +220,10 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                 CommandHandlers.handle_cleanup(force=self._args.force)
 
         elif cmd == 'purge':
-            is_nuke_remote: bool = (
-                '--nuke-remote' in self._extra or sub == '--nuke-remote'
-            )
-            CommandHandlers.handle_purge(is_nuke_remote)
+            if sub or self._extra:
+                self._print_usage(cmd)
+            else:
+                CommandHandlers.handle_purge(getattr(self._args, 'nuke_remote', False))
 
         elif cmd == 'send':
             if not sub or not self._extra:

@@ -8,8 +8,8 @@ reports remain evidence and are not competing implementation backlogs.
 | Package | State       | Commit                       | Tests                                                                                        | Result                                                    | Next step                                                          |
 | ------- | ----------- | ---------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------ |
 | R01     | implemented | `7e7ab8e`                    | `test_lock_contract` plus settings/profile/security neighbors; 103 tests; Ruff; format; mypy | PASS on Linux; Windows static typing passes for `lock.py` | Native Windows lock execution remains an R05/R07 gate              |
-| R02     | implemented | R02 checkpoint (this commit) | Parser/frontend/host-policy/chat/release neighbors; 78 tests; Ruff; format; mypy              | PASS on Linux                                           | Continue with the literal dispatcher boundary in R03               |
-| R03     | open        | —                            | —                                                                                            | —                                                         | Preserve the parser literal boundary through dispatch              |
+| R02     | implemented | `5f7099e`                    | Parser/frontend/host-policy/chat/release neighbors; 78 tests; Ruff; format; mypy              | PASS on Linux                                           | Complete                                                         |
+| R03     | implemented | R03 checkpoint (this commit) | Parser/dispatcher/help/history/release neighbors; 69 tests; Ruff; format; mypy                 | PASS on Linux                                           | Continue with installation-preserving managed spawn in R04         |
 | R04     | open        | —                            | —                                                                                            | —                                                         | Keep managed children in the selected installation/venv            |
 | R05     | open        | —                            | —                                                                                            | —                                                         | Repair Windows typing and execute the native matrix when available |
 | R06     | open        | —                            | —                                                                                            | —                                                         | Make native GUI/audio evidence capability-selected and generic     |
@@ -46,6 +46,27 @@ configured `ask`/`always`/`never` policy while explicit flags override it.
 Help and frontend inventory remain profile- and daemon-side-effect free. All
 78 parser, frontend, host-policy, Terminal chat, and release neighbors pass;
 Ruff, format, and strict mypy pass for the changed production surface.
+
+R03 preserves the first `--` boundary through execution. Purge, profile
+removal/migration, message clearing, and raw-history selection now receive
+typed values produced only by command-specific `OptionDef` entries; none of
+the modular dispatchers rescans operand strings for option spellings. Unknown
+pre-boundary options on option-bearing commands are retained as syntax errors,
+argparse abbreviation is disabled, and invalid purge operands fail before the
+purge handler. Exact argument counts similarly prevent literal profile-removal
+flags from reaching an operation.
+
+The end-to-end regression uses the real parser and dispatcher with an isolated
+temporary profile root and spies only on the final operation under test.
+`purge -- --nuke-remote`, unknown purge flags, and the unregistered `--nuke`
+abbreviation all return a syntax failure without calling purge;
+`purge --nuke-remote` calls the handler exactly once with `True`. Literal
+`--help`, `--daemon-child`, and a second `--` reach the send operation as exact
+message text. Registered and literal forms of `--non-contacts`, `--raw`,
+`--to`, and profile `--nuke-remote` prove the same boundary for all formerly
+hand-scanned nested paths. Help remains side-effect free. All 69 focused
+parser, dispatcher, help, history, and release tests pass with Ruff, format,
+and strict mypy.
 
 ## Current follow-up status
 

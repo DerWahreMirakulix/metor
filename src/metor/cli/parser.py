@@ -73,7 +73,11 @@ class CliParser:
         Returns:
             argparse.ArgumentParser: Configured parser without automatic help.
         """
-        parser = argparse.ArgumentParser(prog=prog, add_help=False)
+        parser = argparse.ArgumentParser(
+            prog=prog,
+            add_help=False,
+            allow_abbrev=False,
+        )
         groups: Dict[str, argparse._MutuallyExclusiveGroup] = {}
         for option in options:
             target: argparse.ArgumentParser | argparse._MutuallyExclusiveGroup = parser
@@ -128,6 +132,7 @@ class CliParser:
         args.command = command_tokens[0] if command_tokens else 'quickstart'
         command_operands: List[str] = command_tokens[1:]
         command_definition: Optional[CommandDef] = Help.CLI_COMMANDS.get(args.command)
+        unknown_options: List[str] = []
         if command_definition is not None and command_definition.options:
             command_parser = cls._build_options_parser(
                 prog=f'metor {args.command}',
@@ -136,6 +141,11 @@ class CliParser:
             command_args, command_operands = command_parser.parse_known_args(
                 command_operands
             )
+            unknown_options = [
+                token
+                for token in command_operands
+                if token.startswith('-') and token != '-'
+            ]
             for name, value in vars(command_args).items():
                 setattr(args, name, value)
 
@@ -155,6 +165,7 @@ class CliParser:
 
         operands: List[str] = command_operands + literal_tokens
         args.literal_args = list(literal_tokens)
+        args.unknown_options = unknown_options
         args.subcommand = operands[0] if operands else None
         args.extra = list(operands) if args.command == 'chat' else operands[1:]
         args.chat_help = args.command == 'chat' and args.help_requested

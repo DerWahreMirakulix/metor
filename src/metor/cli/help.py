@@ -255,6 +255,14 @@ class Help:
                     'Delete message history.',
                 ),
             ],
+            options=(
+                OptionDef(
+                    ('--non-contacts',),
+                    'non_contacts',
+                    'Clear messages for peers outside the saved address book.',
+                    action='store_true',
+                ),
+            ),
         ),
         'history': CommandDef(
             name='history',
@@ -268,6 +276,14 @@ class Help:
                 ),
                 SubCommandDef('clear [onion|alias]', 'Wipe the connection event log.'),
             ],
+            options=(
+                OptionDef(
+                    ('--raw',),
+                    'raw_history',
+                    'Read the raw transport ledger instead of projected history.',
+                    action='store_true',
+                ),
+            ),
         ),
         'transport': CommandDef(
             name='transport',
@@ -319,6 +335,20 @@ class Help:
                 SubCommandDef('set-default <name>', 'Set the default startup profile.'),
                 SubCommandDef('clear <name>', 'Wipe the SQLite database of a profile.'),
             ],
+            options=(
+                OptionDef(
+                    ('--to',),
+                    'migration_target',
+                    'Select the profile security mode migration target.',
+                    'MODE',
+                ),
+                OptionDef(
+                    ('--nuke-remote',),
+                    'nuke_remote',
+                    'Also destroy the remote daemon for a removed profile.',
+                    action='store_true',
+                ),
+            ),
         ),
         'address': CommandDef(
             name='address',
@@ -378,6 +408,14 @@ class Help:
             usage='metor purge [--nuke-remote]',
             description='Wipe ALL profiles, keys, and databases.',
             category='System & Settings',
+            options=(
+                OptionDef(
+                    ('--nuke-remote',),
+                    'nuke_remote',
+                    'Also destroy configured remote daemons.',
+                    action='store_true',
+                ),
+            ),
         ),
     }
 

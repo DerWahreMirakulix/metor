@@ -1,5 +1,6 @@
 """History-specific CLI dispatch mixin."""
 
+import argparse
 from typing import List, Optional, Protocol
 
 from metor.cli.help import Help
@@ -9,6 +10,7 @@ from metor.cli.proxy import CliProxy
 class _HistoryDispatcherProtocol(Protocol):
     """Structural type for the dispatcher attributes used by the history mixin."""
 
+    _args: argparse.Namespace
     _extra: List[str]
     _help: type[Help]
     _proxy: CliProxy
@@ -70,8 +72,8 @@ class HistoryDispatchMixin:
             tokens.append(sub)
         tokens.extend(self._extra)
 
-        raw_requested: bool = '--raw' in tokens
-        clean_tokens: List[str] = [token for token in tokens if token != '--raw']
+        raw_requested: bool = getattr(self._args, 'raw_history', False)
+        clean_tokens: List[str] = tokens
 
         if clean_tokens and clean_tokens[0] == 'clear':
             clear_args: List[str] = clean_tokens[1:]
