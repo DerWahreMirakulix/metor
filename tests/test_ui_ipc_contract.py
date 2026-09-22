@@ -1090,7 +1090,7 @@ class UiIpcContractTests(unittest.TestCase):
 
         self.assertTrue(result)
         command = popen_mock.call_args.args[0]
-        self.assertEqual(Path(command[0]), Path(sys.executable).resolve())
+        self.assertEqual(command[0], sys.executable)
         self.assertEqual(command[1:3], ['-m', 'metor'])
         self.assertIn('--non-interactive', command)
         self.assertNotIn('--daemon-child', command)

@@ -47,12 +47,33 @@ class DaemonBootstrapContractTests(unittest.TestCase):
             startup_session_auth_stdin=True,
         )
 
-        self.assertEqual(Path(command[0]), Path(sys.executable).resolve())
+        self.assertEqual(command[0], sys.executable)
         self.assertEqual(command[1:3], ['-m', 'metor'])
         self.assertNotIn('metor.daemon_main', command)
         self.assertNotIn('--daemon-child', command)
         self.assertIn('--non-interactive', command)
         self.assertIn('daemon', command)
+
+    def test_autostart_preserves_a_symlinked_virtualenv_interpreter(self) -> None:
+        """The child invocation retains venv selection instead of canonicalizing it."""
+        from metor.application.runtime.daemon import _build_daemon_launch_command
+
+        profile = Mock(spec=ProfileManager)
+        profile.profile_name = 'alpha'
+        with TemporaryDirectory() as temp_dir:
+            interpreter = Path(temp_dir) / 'venv' / 'bin' / 'python'
+            interpreter.parent.mkdir(parents=True)
+            interpreter.symlink_to(Path(sys.executable).resolve())
+            resolved_interpreter = interpreter.resolve()
+            with patch('sys.executable', str(interpreter)):
+                command = _build_daemon_launch_command(
+                    cast(ProfileManager, profile),
+                    start_locked=True,
+                    startup_session_auth_stdin=False,
+                )
+
+        self.assertEqual(command[0], str(interpreter))
+        self.assertNotEqual(command[0], str(resolved_interpreter))
 
     def test_importing_cli_definition_is_runtime_side_effect_free(self) -> None:
         env = os.environ.copy()

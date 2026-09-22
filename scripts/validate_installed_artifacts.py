@@ -228,11 +228,19 @@ def run_acceptance(bundle_root: Path) -> None:
             / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
         )
 
-        def run(args: list[str], *, expected: int = 0) -> str:
+        def run(
+            args: list[str],
+            *,
+            expected: int = 0,
+            extra_environment: dict[str, str] | None = None,
+        ) -> str:
+            command_environment = dict(environment)
+            if extra_environment is not None:
+                command_environment.update(extra_environment)
             result = subprocess.run(
                 args,
                 cwd=root,
-                env=environment,
+                env=command_environment,
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -289,6 +297,23 @@ def run_acceptance(bundle_root: Path) -> None:
         )
         if 'metor-ui-terminal' not in missing:
             raise RuntimeError('Missing frontend did not name its distribution.')
+
+        managed_spawn = (
+            Path(__file__).resolve().parents[1] / 'tests' / 'installed_managed_spawn.py'
+        )
+        managed_data = root / 'managed-spawn-data'
+        run(
+            [
+                str(executable),
+                '-I',
+                str(managed_spawn),
+                '--data-parent',
+                str(managed_data),
+                '--checkout',
+                str(Path(__file__).resolve().parents[1]),
+            ],
+            extra_environment={'METOR_DATA_DIR_PARENT': str(managed_data)},
+        )
 
         # A separately built, non-shipped frontend exercises installed discovery,
         # base dispatch, deferred host and a dynamic real local daemon endpoint.

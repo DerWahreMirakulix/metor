@@ -5,7 +5,6 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable, Optional, TextIO
 
 from metor.core.daemon.managed import (
@@ -98,7 +97,7 @@ def _build_daemon_launch_command(
         list[str]: The detached child-process argv.
     """
     command: list[str] = [
-        str(Path(sys.executable).resolve()),
+        sys.executable,
         '-m',
         'metor',
         '-p',

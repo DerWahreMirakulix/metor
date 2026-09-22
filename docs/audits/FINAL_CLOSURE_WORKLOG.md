@@ -9,8 +9,8 @@ reports remain evidence and are not competing implementation backlogs.
 | ------- | ----------- | ---------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------ |
 | R01     | implemented | `7e7ab8e`                    | `test_lock_contract` plus settings/profile/security neighbors; 103 tests; Ruff; format; mypy | PASS on Linux; Windows static typing passes for `lock.py` | Native Windows lock execution remains an R05/R07 gate              |
 | R02     | implemented | `5f7099e`                    | Parser/frontend/host-policy/chat/release neighbors; 78 tests; Ruff; format; mypy              | PASS on Linux                                           | Complete                                                         |
-| R03     | implemented | R03 checkpoint (this commit) | Parser/dispatcher/help/history/release neighbors; 69 tests; Ruff; format; mypy                 | PASS on Linux                                           | Continue with installation-preserving managed spawn in R04         |
-| R04     | open        | —                            | —                                                                                            | —                                                         | Keep managed children in the selected installation/venv            |
+| R03     | implemented | `96f07a3`                    | Parser/dispatcher/help/history/release neighbors; 69 tests; Ruff; format; mypy                 | PASS on Linux                                           | Complete                                                         |
+| R04     | implemented | R04 checkpoint (this commit) | 64 daemon/runtime/release neighbors; installed-wheel managed spawn; Ruff; format; mypy         | PASS on Linux; native Windows execution remains open    | Complete R05 static/native Windows gates                            |
 | R05     | open        | —                            | —                                                                                            | —                                                         | Repair Windows typing and execute the native matrix when available |
 | R06     | open        | —                            | —                                                                                            | —                                                         | Make native GUI/audio evidence capability-selected and generic     |
 | R07     | open        | —                            | —                                                                                            | —                                                         | Consolidate local, CI, artifact, and native acceptance evidence    |
@@ -67,6 +67,36 @@ message text. Registered and literal forms of `--non-contacts`, `--raw`,
 hand-scanned nested paths. Help remains side-effect free. All 69 focused
 parser, dispatcher, help, history, and release tests pass with Ruff, format,
 and strict mypy.
+
+R04 separates invocation identity from canonical process identity. Managed
+daemon launch now passes `sys.executable` unchanged to `python -m metor`, so a
+standard symlink-based virtual environment remains selected. Existing process
+ownership metadata continues to resolve executables and installation roots for
+comparison; no PATH fallback, alternate daemon module, or credential channel
+was introduced. Unit coverage uses an actual interpreter symlink and retains
+the bounded stdin-secret and failed-child cleanup checks.
+
+The installed proof built the current SDK and Base wheels, installed them with
+their pinned dependencies into a fresh standard Linux venv, changed to a
+directory outside the checkout, removed `PYTHONPATH`/`MYPYPATH`, and invoked
+the real `start_managed_daemon_process` path. A newly created encrypted profile
+started locked without Tor or credentials. The child published an IPC port,
+accepted a loopback connection, retained `/tmp/metor-r04-venv/bin/python` as
+argv[0], loaded Base from that venv's `site-packages`, and persisted matching
+installation/profile identity. Only the verified child PID was terminated and
+its runtime state was cleared. The reusable proof is now part of installed
+artifact validation on both OS families. Current local wheel identities were:
+
+- `metor-0.2.0-py3-none-any.whl`:
+  `4e65d8723a62f891509e1ef61d86f2d6c2f8b7183ffc7f38bc235cb95c6ecd73`
+- `metor_sdk-0.2.0-py3-none-any.whl`:
+  `ae6fc94740a80b2e2250faefbfa2fc6339f98ae190e3a09bee7444e0b093a13e`
+
+All 64 focused daemon-bootstrap, process-identity, hidden-secret, and release
+neighbors pass with Ruff, format, and strict mypy. This Linux host cannot claim
+the required native Windows installed spawn/startup-secret execution; that
+remains an explicit R05/R07 gate rather than being inferred from Linux or mock
+coverage.
 
 ## Current follow-up status
 
