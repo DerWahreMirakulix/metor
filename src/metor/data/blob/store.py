@@ -30,6 +30,26 @@ PER_BLOB_CONTEXT = f'metor/blob-object/v{BLOB_OBJECT_DERIVATION_VERSION}\x00'.en
 BLOB_HEADER_BYTES = len(BLOB_FORMAT_MAGIC) + 1 + BLOB_NONCE_BYTES
 
 
+def _create_blob_directories(persistent_dir: Path, temporary_dir: Path) -> None:
+    """Create sibling blob roots through one anchored private parent operation.
+
+    Args:
+        persistent_dir (Path): Persistent object root.
+        temporary_dir (Path): Temporary object root.
+
+    Returns:
+        None
+    """
+    if persistent_dir.parent == temporary_dir.parent:
+        create_private_directory_tree(
+            persistent_dir.parent,
+            ((persistent_dir.name,), (temporary_dir.name,)),
+        )
+        return
+    create_private_directory_tree(persistent_dir, ())
+    create_private_directory_tree(temporary_dir, ())
+
+
 class BlobLifecycle(str, Enum):
     """Physical lifecycle class for one encrypted blob object."""
 
@@ -195,8 +215,7 @@ class EncryptedBlobStore:
         self._blob_key = bytearray(blob_key)
         self._max_blob_bytes = max_blob_bytes
         self._closed = False
-        for root in (persistent_dir, temporary_dir):
-            create_private_directory_tree(root, ())
+        _create_blob_directories(persistent_dir, temporary_dir)
 
     @staticmethod
     def _sync_directory(path: Path) -> None:
@@ -522,8 +541,7 @@ class PlaintextBlobStore:
         self._temporary_dir = temporary_dir
         self._max_blob_bytes = max_blob_bytes
         self._closed = False
-        for root in (persistent_dir, temporary_dir):
-            create_private_directory_tree(root, ())
+        _create_blob_directories(persistent_dir, temporary_dir)
 
     def _require_open(self) -> None:
         """Rejects operations after store closure.

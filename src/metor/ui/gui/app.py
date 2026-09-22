@@ -17,7 +17,7 @@ from metor.ui.gui.platform.lifecycle import (
     DesktopLifecycleEvent,
     DesktopLifecycleSource,
     LifecycleCoordinator,
-    LifecycleInbox,
+    LifecycleHandoff,
     create_desktop_lifecycle_source,
 )
 from metor.ui.gui.runtime import GuiController
@@ -63,7 +63,6 @@ class MetorApp(App):
         self.continued_overlay: ContinuedOverlay | None = None
         self._prompt_identity: object = None
         self.accessibility: AccessibilityBridge | None = None
-        self._lifecycle_inbox = LifecycleInbox()
         self._lifecycle_source: DesktopLifecycleSource | None = None
         self._render_trigger = Clock.create_trigger(self._render, 0)
         self._lifecycle = LifecycleCoordinator(
@@ -71,6 +70,11 @@ class MetorApp(App):
             self.controller.suspend,
             self.controller.resume,
             self.refresh,
+            self._lifecycle_source_failed,
+        )
+        self._lifecycle_handoff = LifecycleHandoff(
+            lambda callback: Clock.schedule_once(callback, 0),
+            self._apply_lifecycle,
         )
 
     def build(self) -> BoxLayout:
@@ -336,8 +340,7 @@ class MetorApp(App):
         Returns:
             None
         """
-        if self._lifecycle_inbox.put(event):
-            Clock.schedule_once(self._drain_lifecycle, 0)
+        self._lifecycle_handoff.publish(event)
 
     def _drain_lifecycle(self, _elapsed: float) -> None:
         """Apply bounded native lifecycle work on the sole GUI thread.
@@ -348,8 +351,7 @@ class MetorApp(App):
         Returns:
             None
         """
-        for event in self._lifecycle_inbox.take_all():
-            self._apply_lifecycle(event)
+        self._lifecycle_handoff.drain(_elapsed)
 
     def _apply_lifecycle(self, event: DesktopLifecycleEvent) -> None:
         """Synchronously fence privacy before scheduling any replacement frame.
@@ -375,6 +377,19 @@ class MetorApp(App):
             self.accessibility.native.focus(False)
             self.accessibility.revoke()
         PointerTooltip.clear_all()
+
+    def _lifecycle_source_failed(self) -> None:
+        """Expose lost native monitoring while retaining the privacy cover.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self.controller.state.status = (
+            'Desktop lifecycle monitoring failed. Metor remains locked.'
+        )
 
     def on_pause(self) -> bool:
         """Covers and safely stops capture on supported native suspend notifications.
@@ -419,6 +434,7 @@ class MetorApp(App):
             None
         """
         PointerTooltip.clear_all()
+        self._lifecycle_handoff.close()
         if self._lifecycle_source is not None:
             self._lifecycle_source.close()
             self._lifecycle_source = None

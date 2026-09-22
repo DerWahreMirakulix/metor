@@ -66,6 +66,8 @@ class GuiLimits:
     SETTINGS_BYTES: int = 64 * 1024
     HISTORY_ANCHORS: int = 128
     SUCCESS_SECONDS: float = 3.0
+    LIFECYCLE_START_SECONDS: float = 3.0
+    LIFECYCLE_CLOSE_SECONDS: float = 2.0
 
 
 class Geometry:
