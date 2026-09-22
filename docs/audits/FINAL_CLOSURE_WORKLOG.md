@@ -5,13 +5,13 @@ reports remain evidence and are not competing implementation backlogs.
 
 ## Current completion-correction status
 
-| Package | State | Commit | Tests | Result | Next step |
-| ------- | ----- | ------ | ----- | ------ | --------- |
-| C01 | locally verified | C01 checkpoint (this commit) | 5 focused launch/detection tests; 57 daemon/runtime/IPC neighbors; fresh four-bundle installed-consumer validation with two real managed starts | PASS on Linux: isolated locked and plaintext session-auth children ignored CWD and inherited import shadows | Native Windows installed startup remains part of C05 |
-| C02 | open | — | — | Hosted Windows failures supplied for Python 3.11; native 3.13 path also requires verification | Correct private Windows filesystem operations without weakening DACL/reparse rules |
-| C03 | open | — | — | Native fixture and checkout-byte failures supplied | Make native expectations and immutable spec bytes portable |
-| C04 | open | — | — | Four native batch branch failures supplied on both Windows lanes | Diagnose real `cmd.exe` control flow before changing installer semantics |
-| C05 | open | — | — | Hosted baseline run `35756273840`, attempt 1, applies only to `3726de4` | Reverify the exact corrected tree and retain external native blockers |
+| Package | State                                      | Commit                      | Tests                                                                                                                                           | Result                                                                                                      | Next step                                                                        |
+| ------- | ------------------------------------------ | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| C01     | locally verified                           | `8312941`                   | 5 focused launch/detection tests; 57 daemon/runtime/IPC neighbors; fresh four-bundle installed-consumer validation with two real managed starts | PASS on Linux: isolated locked and plaintext session-auth children ignored CWD and inherited import shadows | Native Windows installed startup remains part of C05                             |
+| C02     | local candidate; native acceptance pending | C02 candidate (this commit) | 76 security/profile/storage/lock tests and 49 subtests; normal and `win32` strict mypy; source documentation and boundary checks                | Local PASS with 2 intentional Windows-native skips; no native Windows runtime exists on this host           | Run the prepared real Windows 3.11/3.13 ACL lifecycle tests before accepting C02 |
+| C03     | open                                       | —                           | —                                                                                                                                               | Native fixture and checkout-byte failures supplied                                                          | Make native expectations and immutable spec bytes portable                       |
+| C04     | open                                       | —                           | —                                                                                                                                               | Four native batch branch failures supplied on both Windows lanes                                            | Diagnose real `cmd.exe` control flow before changing installer semantics         |
+| C05     | open                                       | —                           | —                                                                                                                                               | Hosted baseline run `35756273840`, attempt 1, applies only to `3726de4`                                     | Reverify the exact corrected tree and retain external native blockers            |
 
 The task's verified starting evidence records run `35756273840`, attempt 1, at
 `3726de443716dbdd0a2aa2316e86a0acb02015c3`: Linux 3.11 job
@@ -21,6 +21,12 @@ Windows 3.13 job `106842722864` ran 858 tests with 10 failures, 5 errors, and
 15 skips. Both Windows lanes passed strict mypy for 465 sources before their
 test failures. These are source-qualified baseline results, not results for
 later C checkpoints.
+
+The full logs for those exact job IDs were not obtainable in this environment:
+the GitHub CLI is absent, no GitHub token is present, the unauthenticated job-log
+API returned HTTP 403, and the web reader did not expose the log archive. The
+failure counts and first-cause details below therefore remain explicitly
+owner-supplied evidence rather than a reconstructed complete log grouping.
 
 C01 changes only managed child module selection and its exact process-role
 allowlist. The launch vector preserves the uncanonicalized `sys.executable`
@@ -46,17 +52,63 @@ sentinel. All 57 direct daemon bootstrap, runtime ownership, UI IPC, frontend,
 and daemon-lock neighbors passed. Ruff, format, and strict mypy passed for the
 changed C01 surface. No application or compatibility generation changes.
 
+C02 replaces every Windows `Path.chmod(..., follow_symlinks=False)` assumption
+in private directory creation and recursive cleanup. New directories are
+created through `CreateDirectoryW` with an explicit security descriptor; new
+sensitive files pass the same kind of descriptor directly to `CreateFileW`.
+The descriptor names the current process-token user as owner and contains one
+protected full-access ACE for that SID. Directory ACEs carry object/container
+inheritance so files created internally by SQLite and other real callers remain
+inside the private parent policy.
+
+Existing objects are opened without reparse traversal and without rename
+sharing exactly as before. The stable handle additionally requests
+`READ_CONTROL` and, only where hardening is required, `WRITE_DAC`. The native
+owner is compared with the current token before any change. `SetSecurityInfo`
+then installs the protected DACL through that handle, and a fresh
+`GetSecurityInfo` result must prove the current owner, protected-DACL control
+bit, exactly one allow ACE, exact full-access mask, expected inheritance flags,
+and matching SID. Null, extra, foreign, unprotected, or denied ACL operations
+remain visible failures. Cleanup applies the same checked handle-bound policy;
+it no longer falls back to POSIX-shaped path mode bits.
+
+The concrete Win32 ACL calls were extracted to
+`src/metor/utils/windows_acl.py` because the existing security owner was already
+near the repository's 800-line hard limit. This is one narrowly named sibling
+for native DACL mechanics, not a new generic platform layer; reparse, stable
+handle, descriptor, traversal, and lifecycle policy remain in
+`src/metor/utils/security.py`.
+
+The focused denial regression forces `SetSecurityInfo` to return access denied
+and proves the exception propagates. Prepared native regressions create and
+inspect real private directories and a sensitive output, validate their actual
+DACLs through native handles, exercise recursive cleanup, and make every
+`Path.chmod` call fail to prove the lifecycle has no hidden dependency on that
+unsupported API. Locally, 76 direct security, profile-path/storage, daemon-lock,
+and ACL tests plus 49 subtests pass; the two native cases skip because this
+Linux host has no `cmd.exe`, Wine, or PowerShell runtime. Ruff, format, normal
+strict mypy, `--platform win32` strict mypy, source-documentation checks, and
+distribution boundaries pass. The immutable spec hashes remain unchanged.
+C02's focused neighbor set is the completed local runtime evidence. A subsequent
+complete `unittest discover` attempt passed the full Ruff/format and normal plus
+Windows strict-mypy pre-gates, then displayed early test errors and remained
+silent beyond the prior approximately 650-second reference duration. It was
+interrupted at the owner's request to preserve a stable checkpoint, so it has
+no final count or trustworthy failure grouping and is not recorded as a pass.
+C02 is deliberately not accepted until the same candidate executes on real
+Windows Python 3.11 and 3.13; no push or workflow dispatch was authorized.
+
 ## Current targeted follow-up status
 
-| Package | State       | Commit                       | Tests                                                                                        | Result                                                    | Next step                                                          |
-| ------- | ----------- | ---------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------ |
-| R01     | implemented | `7e7ab8e`                    | `test_lock_contract` plus settings/profile/security neighbors; 103 tests; Ruff; format; mypy | PASS on Linux; Windows static typing passes for `lock.py` | Native Windows lock execution remains an R05/R07 gate              |
-| R02     | implemented | `5f7099e`                    | Parser/frontend/host-policy/chat/release neighbors; 78 tests; Ruff; format; mypy              | PASS on Linux                                           | Complete                                                         |
-| R03     | implemented | `96f07a3`                    | Parser/dispatcher/help/history/release neighbors; 69 tests; Ruff; format; mypy                 | PASS on Linux                                           | Complete                                                         |
-| R04     | implemented | `bb00a73`                    | 64 daemon/runtime/release neighbors; installed-wheel managed spawn; Ruff; format; mypy         | PASS on Linux; native Windows execution remains open    | Native Windows evidence remains an R05/R07 gate                     |
-| R05     | implemented | `7f64029`                    | Normal + `--platform win32` mypy (465 sources); 91 security/process/installer tests; Ruff/format | Static PASS; 4 native Windows tests skipped locally     | Fresh hosted/native Windows execution remains an R07 gate           |
-| R06     | implemented | `f19939a`                    | 59 route/Voice/GUI/lifecycle/docs tests; generic native listings; Ruff; format; mypy            | Software PASS; native audio BLOCKED (0 endpoints)       | Installed native route remains an R07 gate                         |
-| R07     | locally verified | R07 checkpoint (this commit) | Full static gates; 858 tests; four fresh Linux 3.11 bundles; installed-artifact and ZIP-installer validation | Local software/artifact PASS; 4 native Windows skips | Fresh hosted matrix, native OS/audio gates, and release dry run remain external |
+| Package | State            | Commit                       | Tests                                                                                                        | Result                                                    | Next step                                                                       |
+| ------- | ---------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| R01     | implemented      | `7e7ab8e`                    | `test_lock_contract` plus settings/profile/security neighbors; 103 tests; Ruff; format; mypy                 | PASS on Linux; Windows static typing passes for `lock.py` | Native Windows lock execution remains an R05/R07 gate                           |
+| R02     | implemented      | `5f7099e`                    | Parser/frontend/host-policy/chat/release neighbors; 78 tests; Ruff; format; mypy                             | PASS on Linux                                             | Complete                                                                        |
+| R03     | implemented      | `96f07a3`                    | Parser/dispatcher/help/history/release neighbors; 69 tests; Ruff; format; mypy                               | PASS on Linux                                             | Complete                                                                        |
+| R04     | implemented      | `bb00a73`                    | 64 daemon/runtime/release neighbors; installed-wheel managed spawn; Ruff; format; mypy                       | PASS on Linux; native Windows execution remains open      | Native Windows evidence remains an R05/R07 gate                                 |
+| R05     | implemented      | `7f64029`                    | Normal + `--platform win32` mypy (465 sources); 91 security/process/installer tests; Ruff/format             | Static PASS; 4 native Windows tests skipped locally       | Fresh hosted/native Windows execution remains an R07 gate                       |
+| R06     | implemented      | `f19939a`                    | 59 route/Voice/GUI/lifecycle/docs tests; generic native listings; Ruff; format; mypy                         | Software PASS; native audio BLOCKED (0 endpoints)         | Installed native route remains an R07 gate                                      |
+| R07     | locally verified | R07 checkpoint (this commit) | Full static gates; 858 tests; four fresh Linux 3.11 bundles; installed-artifact and ZIP-installer validation | Local software/artifact PASS; 4 native Windows skips      | Fresh hosted matrix, native OS/audio gates, and release dry run remain external |
 
 R01 replaces path-presence ownership and rename-based stale reaping with one
 persistent private lock object guarded by the operating system's exclusive file
@@ -235,19 +287,19 @@ archive identities are:
 
 The current local command results are:
 
-| Command | Exit/result |
-| ------- | ----------- |
-| `python -m ruff check src/metor/ scripts/ tests/` | 0; PASS |
-| `python -m ruff format --check src/metor/ scripts/ tests/` | 0; PASS; 566 files |
-| `python -m mypy src/metor/ scripts/` | 0; PASS; 465 sources |
-| `python -m mypy --platform win32 src/metor/ scripts/` | 0; PASS; 465 sources |
-| `python scripts/check_boundaries.py` | 0; PASS |
-| `python scripts/versioning.py validate` | 0; PASS |
-| `python scripts/validate_generated_docs.py` | 0; PASS; fresh and reproducible |
-| `python -m unittest discover -s tests` | 0; PASS; 858 tests, 4 native Windows skips |
-| `python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir /tmp/metor-r07-final-bundles` | 0 with package-download access; four bundles |
-| `python scripts/validate_installed_artifacts.py /tmp/metor-r07-final-bundles` | 0 with local loopback; all isolated scenarios and managed spawn pass |
-| `python scripts/validate_release_installers.py /tmp/metor-r07-final-bundles` | 0; all four offline ZIP installers pass |
+| Command                                                                                                                 | Exit/result                                                          |
+| ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `python -m ruff check src/metor/ scripts/ tests/`                                                                       | 0; PASS                                                              |
+| `python -m ruff format --check src/metor/ scripts/ tests/`                                                              | 0; PASS; 566 files                                                   |
+| `python -m mypy src/metor/ scripts/`                                                                                    | 0; PASS; 465 sources                                                 |
+| `python -m mypy --platform win32 src/metor/ scripts/`                                                                   | 0; PASS; 465 sources                                                 |
+| `python scripts/check_boundaries.py`                                                                                    | 0; PASS                                                              |
+| `python scripts/versioning.py validate`                                                                                 | 0; PASS                                                              |
+| `python scripts/validate_generated_docs.py`                                                                             | 0; PASS; fresh and reproducible                                      |
+| `python -m unittest discover -s tests`                                                                                  | 0; PASS; 858 tests, 4 native Windows skips                           |
+| `python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir /tmp/metor-r07-final-bundles` | 0 with package-download access; four bundles                         |
+| `python scripts/validate_installed_artifacts.py /tmp/metor-r07-final-bundles`                                           | 0 with local loopback; all isolated scenarios and managed spawn pass |
+| `python scripts/validate_release_installers.py /tmp/metor-r07-final-bundles`                                            | 0; all four offline ZIP installers pass                              |
 
 No push or workflow dispatch was authorized, so no fresh hosted run/job IDs
 exist for this checkpoint. The historical failing baseline remains run

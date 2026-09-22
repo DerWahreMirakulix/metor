@@ -8,7 +8,7 @@ import errno
 import os
 import secrets
 import stat
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import BinaryIO, Callable, Iterator, cast
 
@@ -16,10 +16,17 @@ from metor.shared.security import secure_clear_buffer as secure_clear_buffer
 
 # Local Package Imports
 from metor.utils.constants import Constants
+from metor.utils.windows_acl import (
+    apply_private_windows_dacl,
+    create_private_windows_directory,
+    private_security_attributes,
+)
 
 
 _WINDOWS_GENERIC_READ: int = 0x80000000
 _WINDOWS_GENERIC_WRITE: int = 0x40000000
+_WINDOWS_READ_CONTROL: int = 0x00020000
+_WINDOWS_WRITE_DAC: int = 0x00040000
 _WINDOWS_FILE_SHARE_READ: int = 0x00000001
 _WINDOWS_FILE_SHARE_WRITE: int = 0x00000002
 _WINDOWS_FILE_SHARE_DELETE: int = 0x00000004
@@ -63,11 +70,14 @@ class _WindowsFileAttributeTagInfo(ctypes.Structure):
 
 def _open_windows_directory_handle(
     directory_path: Path,
+    *,
+    writable_dacl: bool = False,
 ) -> tuple[object, Callable[[object], int]]:
     """Opens and locks one Windows directory against rename and reparse traversal.
 
     Args:
         directory_path (Path): Directory to lock for an anchored operation.
+        writable_dacl (bool): Whether the stable handle must permit DACL replacement.
 
     Returns:
         tuple[object, Callable[[object], int]]: Native handle and configured CloseHandle callable.
@@ -101,9 +111,12 @@ def _open_windows_directory_handle(
     )
     get_attributes.restype = ctypes.c_int
 
+    desired_access = _WINDOWS_GENERIC_READ | _WINDOWS_READ_CONTROL
+    if writable_dacl:
+        desired_access |= _WINDOWS_WRITE_DAC
     handle = create_file(
         str(directory_path),
-        _WINDOWS_GENERIC_READ,
+        desired_access,
         _WINDOWS_FILE_SHARE_READ | _WINDOWS_FILE_SHARE_WRITE,
         None,
         _WINDOWS_OPEN_EXISTING,
@@ -187,15 +200,27 @@ def _open_windows_file(
     share_mode = _WINDOWS_FILE_SHARE_READ | _WINDOWS_FILE_SHARE_WRITE
     if share_delete:
         share_mode |= _WINDOWS_FILE_SHARE_DELETE
-    handle = create_file(
-        str(file_path),
-        _WINDOWS_GENERIC_READ | _WINDOWS_GENERIC_WRITE,
-        share_mode,
-        None,
-        creation_disposition,
-        _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
-        None,
+    private_creation = creation_disposition == _WINDOWS_OPEN_ALWAYS
+    desired_access = (
+        _WINDOWS_GENERIC_READ | _WINDOWS_GENERIC_WRITE | _WINDOWS_READ_CONTROL
     )
+    if private_creation:
+        desired_access |= _WINDOWS_READ_CONTROL | _WINDOWS_WRITE_DAC
+    attributes_context = (
+        private_security_attributes(directory=False)
+        if private_creation
+        else nullcontext(None)
+    )
+    with attributes_context as security_attributes:
+        handle = create_file(
+            str(file_path),
+            desired_access,
+            share_mode,
+            security_attributes,
+            creation_disposition,
+            _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
+            None,
+        )
     if handle == _WINDOWS_INVALID_HANDLE_VALUE:
         error_code = get_last_error()
         if error_code in (2, 3):
@@ -216,7 +241,14 @@ def _open_windows_file(
         raise OSError(error_code, 'Sensitive file attributes could not be read.')
     if attributes.file_attributes & _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT:
         close_handle(handle)
-        raise OSError(errno.ELOOP, 'Refusing to shred a Windows reparse point.')
+        raise OSError(errno.ELOOP, 'Refusing a sensitive Windows reparse point.')
+
+    if private_creation:
+        try:
+            apply_private_windows_dacl(handle, directory=False)
+        except BaseException:
+            close_handle(handle)
+            raise
 
     try:
         open_osfhandle = getattr(msvcrt, 'open_osfhandle')
@@ -511,10 +543,13 @@ def _create_private_directory_tree_windows(
     """
     parent_handle, close_parent = _open_windows_directory_handle(base_dir.parent)
     try:
-        base_dir.mkdir(mode=0o700, exist_ok=True)
-        base_handle, close_base = _open_windows_directory_handle(base_dir)
+        create_private_windows_directory(base_dir)
+        base_handle, close_base = _open_windows_directory_handle(
+            base_dir,
+            writable_dacl=True,
+        )
         try:
-            base_dir.chmod(0o700, follow_symlinks=False)
+            apply_private_windows_dacl(base_handle, directory=True)
             for components in relative_directories:
                 current_path = base_dir
                 handles: list[tuple[object, Callable[[object], int]]] = []
@@ -529,12 +564,13 @@ def _create_private_directory_tree_windows(
                                 'Private directory component is invalid.',
                             )
                         current_path = current_path / component
-                        current_path.mkdir(mode=0o700, exist_ok=True)
+                        create_private_windows_directory(current_path)
                         handle, close_handle = _open_windows_directory_handle(
-                            current_path
+                            current_path,
+                            writable_dacl=True,
                         )
                         handles.append((handle, close_handle))
-                        current_path.chmod(0o700, follow_symlinks=False)
+                        apply_private_windows_dacl(handle, directory=True)
                 finally:
                     for handle, close_handle in reversed(handles):
                         close_handle(handle)
@@ -727,14 +763,14 @@ def secure_remove_path(path: Path) -> None:
     if not stat.S_ISDIR(path_info.st_mode):
         raise OSError(errno.EINVAL, 'Refusing to remove an unsupported file type.')
 
-    directory_handle, close_directory = _open_windows_directory_handle(path)
+    directory_handle, close_directory = _open_windows_directory_handle(
+        path,
+        writable_dacl=True,
+    )
     try:
+        apply_private_windows_dacl(directory_handle, directory=True)
         for child in path.iterdir():
             secure_remove_path(child)
-        path.chmod(
-            stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR,
-            follow_symlinks=False,
-        )
     finally:
         close_directory(directory_handle)
 
