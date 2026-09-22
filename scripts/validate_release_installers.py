@@ -77,7 +77,9 @@ def validate_zip(archive: Path) -> None:
         )
         if not archive.name.startswith('metor-sdk-'):
             run([str(executable), '-I', '-m', 'metor', '--version'])
-            inventory = run([str(executable), '-I', '-m', 'metor', 'chat', '--list-ui'])
+            inventory = run(
+                [str(executable), '-I', '-m', 'metor', 'chat', '--list-uis']
+            )
             has_terminal = 'metor-ui-terminal' in inventory
             if has_terminal != archive.name.startswith('metor-ui-terminal-'):
                 raise RuntimeError(

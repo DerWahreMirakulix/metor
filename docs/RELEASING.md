@@ -150,6 +150,12 @@ writes. When a first `current` release already has the correct registry and
 generated outputs, no release commit is created; the validated checked-out
 commit is tagged directly.
 
+Publication updates the validated `main` branch and its annotated version tag
+in one required atomic Git push. A server that cannot perform the transaction,
+or rejects either ref, fails closed without a non-atomic fallback. GitHub
+Release creation remains a separate downstream operation and is not described
+as part of that ref transaction.
+
 The tag convention is `v0.2.0`, `v0.3.0`, or `v1.0.0`. Protocol and format
 generations are metadata in each product release, not separate tags.
 

@@ -11,6 +11,11 @@
   "distribution": "metor-ui-gui",
   "python_tested": "3.11.15",
   "renderer": "Kivy 2.3.1 / SDL2 / OpenGL",
+  "continuous_integration": {
+    "declared_matrix": "Linux and Windows with Python 3.11 and 3.13",
+    "current_source_status": "fresh hosted four-lane run pending; local Linux 3.11 native renderer and software gates pass",
+    "release_bundle_lanes": "Python 3.11 on each native operating system"
+  },
   "accessibility": {
     "bridge": "AccessKit 0.7.0; GUI-owned bounded projection and synchronous privacy fence",
     "windows_uia": "native external-client label, invocation, normal text replacement and retained-node revocation checks pass; 2026-09-20",
@@ -87,13 +92,11 @@
   "device_lifecycle_implementation_commit": "b581144fd4f16ba4f0bcf14b1dd08e4c822b620f",
   "gui_completion_implementation_commit": "da5ca681dc6a2a569688deb85f7c4fad2a0c6ba3",
   "arm_pi": "untested",
-  "simulator_description_adapters": [
-    "simulator"
-  ],
+  "simulator_description_adapters": ["simulator"],
   "host_shutdown": "typed fixed-port request occurs only after local single-runtime checks plus Core preparation, or exact safe purge terminal state; the port owns atomic exclusive-host enforcement; no OS adapter registered or real shutdown tested",
   "purge": "bounded physical-input composition, scoped grant, exact initiation and safe-terminal shutdown gating tested; no production hardware driver or real destruction/shutdown tested",
   "pause_checkpoint": "2026-09-15: retained root source has targeted native/static validation; installed artifacts/headset evidence predates final RootPanel/RootRow changes",
-  "current_checkpoint": "2026-09-21: real Linux session-D-Bus lifecycle delivery and software full-GUI capture/playback overlap through SDK/encrypted Core pass; native Windows lifecycle and updated full-GUI Razer duplex reruns remain unavailable; earlier installed/bundle/native evidence retains its recorded source scope",
+  "current_checkpoint": "2026-09-22: software full-GUI inbound LIVE capture/playback overlap through SDK/encrypted Core, 20 MiB pressure, local Linux 3.11 native rendering, and fresh Linux four-bundle installed-consumer validation pass; fresh hosted four-lane CI, native Windows lifecycle/batch/release execution, real Linux lock/suspend media, and updated full-GUI Razer duplex reruns remain unavailable; earlier installed/native evidence retains its recorded source scope",
   "acceptance_at_claimed_support_level": false,
   "physical_appliance_acceptance": "not applicable until a production adapter is registered and claimed"
 }

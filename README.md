@@ -47,12 +47,13 @@ system model, then use the focused references when you need exact contracts.
 ## Supported Hosts
 
 - **Linux x86-64:** Runtime wheel bundles and desktop/simulator GUI installation
-  are tested. Native lifecycle and media limits are listed in the
+  have dated test evidence. Native lifecycle and media limits are listed in the
   [GUI support manifest](docs/contracts/gui/support.json).
 - **Windows x86-64:** Runtime wheel bundles and desktop/simulator GUI
-  installation are tested. Source installs still build `sqlcipher3` from
-  source; current native lifecycle/media gaps remain explicit in the support
-  manifest.
+  installation have dated test evidence. Source installs still build
+  `sqlcipher3` from source; a fresh hosted Windows/Linux × Python 3.11/3.13 CI
+  run and the current native lifecycle/media reruns remain explicit acceptance
+  gates in the support manifest.
 
 For Windows source installs from a checkout, make sure the Microsoft C++ Build Tools are available before running `pip install`.
 
@@ -165,7 +166,7 @@ pip install --no-deps --no-build-isolation -e .
 pip install --no-deps --no-build-isolation -e packaging/terminal
 pip install --no-deps --no-build-isolation -e packaging/gui
 python -m pip check
-python -m metor chat --list-ui
+python -m metor chat --list-uis
 ```
 
 For deliberately base-only development omit both UI installs and GUI dependencies,
@@ -204,8 +205,8 @@ metor daemon --locked
 The base `metor` package starts daemons without installing UI code:
 
 ```bash
-# Encrypted profiles (default) require locked startup in headless mode:
-metor -p my_server --locked daemon
+# Encrypted profiles can expose IPC before any key/database access:
+metor -p my_server daemon --locked
 
 # Plaintext profiles can start unlocked directly:
 metor -p my_server daemon
@@ -255,7 +256,7 @@ Inside the Chat UI, you have access to the following slash commands:
 | `/contacts rename <old> <new>`  | Renames a saved or discovered peer.                                  |
 | `/exit`                         | Closes the UI (the daemon remains active in the background).         |
 
-### 3. Headless CLI Commands
+### 3. One-shot CLI Commands
 
 You don't need to enter the Chat UI to use Metor. It can act as an asynchronous CLI messenger (similar to email).
 
@@ -290,7 +291,7 @@ same PMK; they do not rewrite the database, secrets, or blobs.
 
 Want to run Metor on a server and connect securely from your laptop?
 
-1. **On the Server (VPS):** Install `metor`, then run `metor -p my_server --locked daemon`.
+1. **On the Server (VPS):** Install `metor`, then run `metor -p my_server daemon --locked`.
 2. **On your Laptop:** Run `metor profiles add remote_node --remote --port 50051`.
 3. **Establish SSH Tunnel:** `ssh -N -L 50051:127.0.0.1:50051 user@server_ip`.
 4. **Start Chatting:** Run `metor -p remote_node chat` (Your local UI now securely controls the remote daemon over the forwarded port).

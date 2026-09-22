@@ -60,6 +60,7 @@ from metor.core.daemon.managed.network.state import StateTracker
 from metor.core.daemon.managed.network.router.admission import FrameAdmission
 from metor.data import HistoryManager, SettingKey, MessageDirection
 from metor.data.blob import BlobLifecycle, EncryptedBlobStore
+from metor.data.profile.models import ProfileConfigKey
 from metor.utils import Constants
 
 
@@ -264,13 +265,21 @@ class ClosureDaemonTests(unittest.TestCase):
         self.assertIsNotNone(client.bootstrap())
         return client
 
-    def test_dynamic_public_host_and_real_snapshot(self) -> None:
-        """F07/V01: no static-port fixture; host result bootstraps actual daemon."""
+    def test_public_host_and_real_snapshot_over_configured_endpoint(self) -> None:
+        """F07/V01: the public host bootstraps an actual configured daemon."""
         daemon = self.daemon()
+        self.fixture.sender_pm.config.set(
+            ProfileConfigKey.DAEMON_PORT, daemon._ipc.port
+        )
+        self.fixture.sender_pm.config.set(
+            ProfileConfigKey.IS_REMOTE,
+            True,
+            allow_mutating_structural_keys=True,
+        )
         host = create_local_frontend_host(self.fixture.sender_pm, False)
         interactions = Mock()
         result = host.bootstrap(interactions)
-        self.assertIsNone(self.fixture.sender_pm.get_static_port())
+        self.assertEqual(self.fixture.sender_pm.get_static_port(), daemon._ipc.port)
         self.assertEqual(result.port, daemon._ipc.port)
         self.assertGreater(result.port, 0)
         interactions.confirm_daemon_start.assert_not_called()

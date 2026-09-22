@@ -1,21 +1,26 @@
 # GUI platform implementation decision
 
-Status: GUI implementation complete at the declared desktop/simulator support
-level; no physical-appliance support claim.
+Status: GUI software implementation complete for the declared
+desktop/simulator scope; acceptance at the claimed support level remains
+pending. No physical-appliance support is claimed.
 Inputs: functional/layout v1.0. Integration gaps are tracked in
 [GUI_INTEGRATION_MAP.md](GUI_INTEGRATION_MAP.md).
 
-Current verification (20 September): 676 regression tests, 46 minimum-size/150%
-native SDL fixtures, fresh Linux and Windows bundles/consumers/installers and
-installed desktop/simulator launch pass. Fresh Windows installed launch and
-actual Razer capture/review also pass (30,720 bytes / 960 ms). On the RTX 4060 host, the
+Recorded 20 September evidence includes 676 regression tests, 46
+minimum-size/150% native SDL fixtures, Linux and Windows
+bundles/consumers/installers, installed desktop/simulator launch, and an actual
+Razer capture/review run (30,720 bytes / 960 ms). On the RTX 4060 host, the
 64-row synthetic input load from a local Windows installation measures 297 ms
 first input and 71.8 ms subsequent p95; the WSL UNC installation measures about
 1.26 seconds subsequent p95. Deployment location is part of the measurement.
 External Windows UIA and Linux AT-SPI clients, capture/output independence,
 device-loss boundaries and native lifecycle privacy are covered at the declared
-GUI boundary. Product-specific screen-reader certification and physical adapter
-acceptance are separate support dimensions; neither is claimed by this manifest.
+GUI boundary at the recorded revisions. Current-source software and local Linux
+native-renderer evidence pass, but fresh hosted Linux/Windows × Python
+3.11/3.13 CI, installed Windows WTS/power/media, real Linux lock/suspend/media,
+and the updated full-GUI Razer duplex route remain acceptance gates.
+Product-specific screen-reader certification and physical adapter acceptance
+are separate support dimensions; neither is claimed by this manifest.
 
 ## Rendering and deployment
 

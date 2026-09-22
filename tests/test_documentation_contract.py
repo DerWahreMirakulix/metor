@@ -104,6 +104,23 @@ class DocumentationContractTests(unittest.TestCase):
         self.assertFalse(support['acceptance_at_claimed_support_level'])
         self.assertIn('pending', support['status'])
         self.assertIn('pending', support['completion']['mandatory_native_acceptance'])
+        self.assertIn(
+            'pending', support['continuous_integration']['current_source_status']
+        )
+
+    def test_readme_uses_the_canonical_cli_grammar(self) -> None:
+        """Prevents abbreviated or misplaced options in active operator examples.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        readme = (ROOT / 'README.md').read_text(encoding='utf-8')
+        self.assertNotRegex(readme, r'--list-ui(?!s)')
+        self.assertNotIn('--locked daemon', readme)
+        self.assertIn('metor -p my_server daemon --locked', readme)
 
     def test_active_markdown_file_and_anchor_links_resolve(self) -> None:
         """Checks local navigation without reclassifying historical evidence.

@@ -280,7 +280,7 @@ def run_acceptance(bundle_root: Path) -> None:
             ('metor', ['--help']),
             ('metor', ['--version']),
             ('metor', ['daemon', '--help']),
-            ('metor', ['chat', '--list-ui']),
+            ('metor', ['chat', '--list-uis']),
         ):
             run([str(executable), '-I', '-m', module, *arguments])
         missing = run(
@@ -345,7 +345,9 @@ py-modules = ["closure_fake"]
         )
         run([str(executable), '-I', '-c', gui_probe])
         run([str(executable), '-I', '-m', 'metor', 'chat', '--ui', 'gui', '--help'])
-        gui_inventory = run([str(executable), '-I', '-m', 'metor', 'chat', '--list-ui'])
+        gui_inventory = run(
+            [str(executable), '-I', '-m', 'metor', 'chat', '--list-uis']
+        )
         if 'gui' not in gui_inventory or 'terminal' in gui_inventory:
             raise RuntimeError('GUI-only installation inventory was not isolated.')
         print('GUI_ONLY_INSTALLATION_OK')
@@ -368,7 +370,7 @@ py-modules = ["closure_fake"]
         run([str(executable), '-I', '-c', gui_probe])
         run([str(executable), '-I', '-m', 'metor', '--help'])
         run([str(executable), '-m', 'pip', 'check'])
-        inventory = run([str(executable), '-I', '-m', 'metor', 'chat', '--list-ui'])
+        inventory = run([str(executable), '-I', '-m', 'metor', 'chat', '--list-uis'])
         if 'metor-ui-terminal' in inventory:
             raise RuntimeError('Uninstalled frontend remained in metadata inventory.')
         install('metor-ui-terminal')

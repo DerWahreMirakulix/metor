@@ -966,6 +966,14 @@ versioned `FrontendLaunchContext`. `metor-ui-terminal` owns
 rendering and key handling. These distributions share PEP 420 namespace paths
 but never ship the same file.
 
+The same declarative command definition drives parsing and general help for
+both `metor` and `python -m metor`. Managed daemon startup is the
+`metor daemon --non-interactive` execution mode of that CLI, not a second
+executable, parser, or help surface. Only that mode may consume the bounded
+startup credential from standard input; ordinary user arguments after the
+first `--` remain literal data. Process ownership additionally binds managed
+children to the exact interpreter and installed module or launcher identity.
+
 `metor chat` discovers metadata from the `metor.ui_frontends` entry-point group.
 Selection is explicit `--ui`, then `METOR_UI`, then `client.default_ui`. The
 base loads only the selected callable and validates its contract version before

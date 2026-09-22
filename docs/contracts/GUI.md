@@ -16,12 +16,15 @@ status, inputs and controlling actions kept separate. See the
 The owner previously paused implementation on 15 September. See the
 [implementation report](../audits/GUI_IMPLEMENTATION_2026-09-12.md#final-gui-implementation-closure--20-september-2026)
 for the final source state, exact verification checkpoints and historical audit.
-Fresh Linux/Windows package evidence and the native matrix cover the retained
-root, SDK platform contracts, fallback fonts, pointer tooltips and native
-accessibility integration. The final GUI-owned suspend/input-loss and full-duplex
-contracts are verified at implementation commit
+The dated Linux/Windows package and native evidence cover the retained root,
+SDK platform contracts, fallback fonts, pointer tooltips and native
+accessibility integration at its recorded revisions. The GUI-owned
+suspend/input-loss and full-duplex contracts were implemented at commit
 `da5ca681dc6a2a569688deb85f7c4fad2a0c6ba3`. The report separates this
-completion from unclaimed physical-appliance support.
+implementation from unclaimed physical-appliance support. Current software
+regressions and a fresh Linux 3.11 renderer/install run pass; fresh hosted
+Linux/Windows × Python 3.11/3.13 CI and the native lifecycle/media reruns remain
+acceptance gates.
 
 ## Current implementation
 
@@ -74,8 +77,10 @@ stop only the affected unsafe action. Shared root/peer actions implement protect
 pins, DROP-only cleanup, selective/bulk LIVE fallback and ended-context dismissal.
 End/Cancel and Change route carry exact Core lifecycle qualifiers. Explicit Retry
 finalization rechecks the original owner's accepted audio and never sends a DROP.
-The native Razer duplex probe and GUI capture/review evidence establish the
-declared headset validation route; they do not claim speaker AEC or other devices.
+The earlier native Razer duplex probe and GUI capture/review evidence establish
+the declared headset validation route at their recorded source revisions. The
+current full-GUI route still requires its documented native rerun; neither
+result claims speaker AEC or other devices.
 
 Own delivered LIVE text and complete retained PCM can be explicitly resent as a
 new DROP with a new ID. The contextual action rechecks source availability;
@@ -132,9 +137,12 @@ python scripts/build_release_wheelhouse.py --variant gui --skip-pip-upgrade
 
 `gui` is an explicit development variant, also included in the canonical `all`
 group and CI/release validation. Installed-consumer checks cover both UI removal
-orders, and the installer validator requires all four bundles. Linux and Windows canonical ZIP installers and installed consumers pass, including
-both UI uninstall orders. Final-source artifact hashes and remaining product
-acceptance are recorded separately in the acceptance report.
+orders, and the installer validator requires all four bundles. Linux and Windows
+canonical ZIP installers and installed consumers, including both UI uninstall
+orders, pass in the dated evidence. Fresh current-source Linux bundles pass the
+same checks; current native Windows execution remains a hosted CI/release gate.
+Final-source artifact hashes and remaining product acceptance are recorded
+separately in the closure worklog.
 
 For an already assembled native wheelhouse, the actual independent package can
 be installed without source checkout/editable paths:

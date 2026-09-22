@@ -16,8 +16,8 @@ reports remain evidence and are not competing implementation backlogs.
 | N07     | implemented | `d5aeebd`                    | 10k coalescing, controlled logind/session/owner/loss/startup/cleanup, Windows failure paths, GUI lifecycle/security neighbors; Ruff; mypy; boundaries | Native Windows WTS/Power and real Linux lock/suspend/resume remain N11 gates    |
 | N08     | verified    | `725fc09`                    | Real GUI/SDK/Core inbound LIVE duplex, interruption neighbors, 20 MiB pressure; Ruff                                                                  | Controlled-port software scope complete; native audio route remains an N11 gate |
 | N09     | implemented | `bc26414`                    | Dynamic 3.11/3.13 installer oracles, EGL/SDL workflow contract, local native renderer, release neighbors; Ruff; mypy                                  | Fresh four-lane hosted CI remains an N11 gate                                   |
-| N10     | implemented | N10 checkpoint (this commit) | 79 release/batch tests (4 native Windows skips), four fresh offline bundles/installed consumers, atomic ref rejection; Ruff; mypy                     | Native Windows batch execution and release dry run remain N11 gates             |
-| N11     | open        | —                            | —                                                                                                                                                     | Consolidate documentation and final acceptance evidence                         |
+| N10     | implemented | `a79de49`                    | 79 release/batch tests (4 native Windows skips), four fresh offline bundles/installed consumers, atomic ref rejection; Ruff; mypy                     | Native Windows batch execution and release dry run remain N11 gates             |
+| N11     | blocked     | N11 checkpoint (this commit) | 842 tests (4 native Windows skips), all static gates, four Linux bundles/consumers, native renderer and 20 MiB pressure                               | Fresh hosted CI/release dry run and mandatory native lifecycle/media gates      |
 
 N03 cohesion review: `metor.utils.security` is now 726 physical lines because
 the POSIX descriptor and Windows handle implementations must share exact entry
@@ -108,6 +108,83 @@ with a branch-rejecting pre-receive hook proved that the rejected transaction
 advances neither the branch nor the tag. No real remote, release, branch, or
 tag was mutated.
 
+N11 aligns the active README, architecture, frontend/GUI contracts, platform
+decision, support manifest, release guide, operator examples, agent routing,
+and affected file headers with the single public `metor` CLI and current
+acceptance state. Active examples now use `metor daemon --locked` and the exact
+`chat --list-uis` option. Other historical audits and the approved
+specifications remain unmodified evidence. The obsolete A20–A25 row below now
+reflects the verified sections that already followed it instead of presenting
+them as open.
+
+The first complete N11 gate found one stale integration harness: it started an
+in-process daemon but expected N02's managed-process detector to accept the
+unittest interpreter as a canonical daemon child. The harness now identifies
+that actual daemon as an explicitly configured endpoint and continues through
+the public host, SDK, IPC, and real snapshot path. It does not weaken production
+ownership. The focused test and its 24 daemon/start neighbors passed, followed
+by a clean complete discovery of 842 tests in 670.608 seconds. Four native
+Windows batch cases were skipped only because this host has no standard native
+Windows Python environment.
+
+The final local environment is WSL2 Linux x86-64 with system CPython 3.11.4 for
+the complete repository gates and repository CPython 3.11.15, Kivy 2.3.1,
+SDL2, and Mesa llvmpipe for native rendering. Ruff checked the complete source,
+all 562 configured Python files were format-clean, strict mypy checked 465
+sources, distribution boundaries passed, and generated references were fresh
+and reproducible. Fresh Linux CPython 3.11 SDK, Base, Terminal, and GUI ZIPs
+passed exact target/hash verification, RECORD ownership, offline installation,
+SDK-only/Base-only/UI isolation and coexistence, positive/negative external
+typing, both UI removal orders, and final SDK reimport. Their local temporary
+paths and SHA-256 values are:
+
+- `metor-sdk-wheelhouse-linux-x86_64-py311.zip`:
+  `af24a3b11ab1c39ed0ef4069c29b03fa52bb6800184c7d7277ff939932e2536f`
+- `metor-wheelhouse-linux-x86_64-py311.zip`:
+  `15cfb603cb43d4a358478bec859d6e520ce07742d87e89436de87bf614462f32`
+- `metor-ui-terminal-wheelhouse-linux-x86_64-py311.zip`:
+  `1887caa88f0eddcb26f51820a81a70abd012c20c3ab6e744449670078e3b376f`
+- `metor-ui-gui-wheelhouse-linux-x86_64-py311.zip`:
+  `c8fb04423a8381a40cebda6da6953f2576ab25b9958178f3390c32cd40e95886`
+
+Both production Kivy/SDL2 views ran at 360 × 640 / 150% and were visually
+inspected from `/tmp/metor-n11-root-refresh.png` and
+`/tmp/metor-n11-setting-keyboard.png`. The 20 MiB production-worker fixture at
+`/tmp/metor-n11-stream-pressure.json` emitted 20,971,520 exact bytes with
+64 KiB maximum reads, 640-byte maximum frames, the 16 MiB cache ceiling, and a
+39-record sampled queue peak. Optional mtdev and sandbox clipboard diagnostics
+did not prevent either renderer result. These are Linux offscreen and
+controlled-port evidence, not physical audio, live desktop lifecycle, or
+Windows evidence.
+
+No current hosted CI run or release dry run exists because this local task did
+not authorize a remote push or workflow dispatch. Consequently there are no
+new CI run/job IDs to report, and the Linux/Windows × Python 3.11/3.13 matrix,
+native Windows batch/release lanes, and release dry run remain blocked rather
+than inferred from local tests. After an authorized push of the exact final
+commit, the executable continuation is:
+
+1. Let `.github/workflows/ci.yml` run its four declared lanes and retain the
+   Linux 3.11 `gui-native-evidence-linux-py311` artifact plus all run/job IDs.
+2. Dispatch `.github/workflows/release.yml` at that same ref with
+   `release_type=current` and `dry_run=true`; verify both operating-system jobs
+   and all four distributions without publication.
+3. On an authorized installed Windows 3.11 system, run the native batch branch
+   tests, exercise WTS Lock/Unlock and power transitions while capture/playback
+   are active, and run the `tests/gui_native_voice.py` probe with
+   `--headset-confirmed` and an explicit `--result` path on the documented Razer
+   BlackShark V2 HS 2.4 route.
+4. In an authorized real Linux desktop session, run the installed
+   `tests/gui_native_lifecycle.py --expect lock,suspend,resume` while observing
+   capture, playback, privacy cover, and no implicit resume. Do not suspend an
+   unattended or unrelated user system.
+
+This host cannot execute those Windows/session/hardware gates and has no Penpot
+connector for a fresh reference inspection. Therefore the accurate final
+status is **software corrections implemented; native overall acceptance
+pending**. No physical GPIO/appliance adapter, certification, publication,
+tag, push, completion percentage, or error-free claim is implied.
+
 ## Baseline
 
 - Starting SHA: `bb7ae07b5f83f8cae9ac8f38c35f9a9a757a43d7`
@@ -149,30 +226,30 @@ ownership map. Counts sum to 763; no path is unclassified.
 
 ## Package status
 
-| Package | State    | Changed files                                                                                                                                                                                                                                                                       | Verification         | Next step                               |
-| ------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- | --------------------------------------- |
-| A00     | verified | `docs/audits/FINAL_CLOSURE_WORKLOG.md`                                                                                                                                                                                                                                              | Baseline gates below | Complete                                |
-| A01     | verified | `src/metor/data/sql/manager.py`, `tests/test_gui_purge.py`, this worklog                                                                                                                                                                                                            | A01 gates below      | Complete                                |
-| A02     | verified | `src/metor/core/tor.py`, `tests/test_tor_path_resolution.py`, `tests/test_closure_integration.py`, this worklog                                                                                                                                                                     | A02 gates below      | Complete                                |
-| A03     | verified | `src/metor/utils/{constants,security}.py`, `tests/test_security_contract.py`, this worklog                                                                                                                                                                                          | A03 gates below      | Complete                                |
-| A04     | verified | `src/metor/shared/security.py`, `tests/test_security_contract.py`, this worklog                                                                                                                                                                                                     | A04 gates below      | Complete                                |
-| A05     | verified | `src/metor/utils/lock.py`, `tests/test_lock_contract.py`, this worklog                                                                                                                                                                                                              | A05 gates below      | Complete                                |
-| A06     | verified | `src/metor/data/profile/{support,paths,manager,catalog,lifecycle}.py`, `src/metor/data/profile/migration/{journal,orchestrator}.py`, `tests/test_profile_path_security.py`, this worklog                                                                                            | A06 gates below      | Complete                                |
-| A07     | verified | `src/metor/{utils/process.py,data/profile/manager.py,application/runtime/maintenance.py,application/frontend/host.py,core/tor.py}`, `tests/test_application_runtime_contract.py`, this worklog                                                                                      | A07 gates below      | Complete                                |
-| A08     | verified | `src/metor/core/api/{base.py,events/shared.py,events/entries.py}`, `tests/test_ipc_type_validation.py`, this worklog                                                                                                                                                                | A08 gates below      | Complete                                |
-| A09     | verified | `scripts/{generate_api_docs.py,release/compatibility.py}`, `docs/generated/{API.md,api.schema.json,compatibility.json}`, `tests/test_api_generation_contract.py`, this worklog                                                                                                      | A09 gates below      | Complete                                |
-| A10     | verified | `src/metor/cli/{parser,entry}.py`, `tests/test_refactor2_cli_contract.py`, this worklog                                                                                                                                                                                             | A10 gates below      | Complete                                |
-| A10b    | verified | Terminal renderer/presenter hardening and regression coverage; this worklog                                                                                                                                                                                                         | A10b gates below     | Complete                                |
-| A11     | verified | Canonical daemon bootstrap/runtime preparation and regression coverage; this worklog                                                                                                                                                                                                | A11 gates below      | Complete                                |
-| A12     | verified | Producer recovery correlation ordering and regression coverage; this worklog                                                                                                                                                                                                        | A12 gates below      | Complete                                |
-| A13     | verified | `src/metor/ui/gui/platform/{configuration,configuration_security}.py`, `tests/test_device_configuration_security.py`, this worklog                                                                                                                                                  | A13 gates below      | Complete                                |
-| A14     | verified | `src/metor/ui/gui/{app.py,platform/lifecycle.py,runtime/controller.py}`, `packaging/gui/setup.py`, `requirements/gui.lock`, `tests/{test_gui_os_lifecycle.py,gui_native_lifecycle.py,test_gui_lifecycle.py}`, `docs/contracts/{GUI_PLATFORM_ADR.md,gui/support.json}`, this worklog | A14 gates below      | Complete                                |
-| A15     | verified | `tests/{test_gui_capture.py,test_gui_audio.py,gui_native_voice.py}`, `docs/contracts/{GUI_PLATFORM_ADR.md,gui/support.json}`, this worklog                                                                                                                                          | A15 gates below      | Complete                                |
-| A16     | verified | `src/metor/core/daemon/managed/{notify/notification.py,notify/sinks.py,ipc.py,engine/daemon.py}`, `tests/{test_notification_delivery.py,test_gui_capture.py}`, this worklog                                                                                                         | A16 gates below      | Complete                                |
-| A17     | verified | Removed `src/metor/ui/embedded/**` and `tests/test_embedded_contract.py`; `tests/{test_ui_boundaries.py,test_contact_qr.py}`, this worklog                                                                                                                                          | A17 gates below      | Complete                                |
-| A18     | verified | `scripts/{build_release_wheelhouse.py,release/bundle.py}`, Base/shared/Core owner imports, `src/metor/utils/{__init__,constants}.py`, `tests/{test_release_contract.py,test_closure_architecture.py}`, `docs/ARCHITECTURE.md`, this worklog                                         | A18 gates below      | Complete                                |
-| A19     | verified | `src/metor/core/daemon/managed/network/voice/{manager,inbound,retained,capture,outbound}.py`, `tests/{test_voice_contract.py,test_gui_producers.py}`, `docs/ARCHITECTURE.md`, this worklog                                                                                          | A19 gates below      | Complete                                |
-| A20–A25 | open     | None                                                                                                                                                                                                                                                                                | Not run              | A20: audit the complete production tree |
+| Package | State    | Changed files                                                                                                                                                                                                                                                                       | Verification         | Next step                            |
+| ------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- | ------------------------------------ |
+| A00     | verified | `docs/audits/FINAL_CLOSURE_WORKLOG.md`                                                                                                                                                                                                                                              | Baseline gates below | Complete                             |
+| A01     | verified | `src/metor/data/sql/manager.py`, `tests/test_gui_purge.py`, this worklog                                                                                                                                                                                                            | A01 gates below      | Complete                             |
+| A02     | verified | `src/metor/core/tor.py`, `tests/test_tor_path_resolution.py`, `tests/test_closure_integration.py`, this worklog                                                                                                                                                                     | A02 gates below      | Complete                             |
+| A03     | verified | `src/metor/utils/{constants,security}.py`, `tests/test_security_contract.py`, this worklog                                                                                                                                                                                          | A03 gates below      | Complete                             |
+| A04     | verified | `src/metor/shared/security.py`, `tests/test_security_contract.py`, this worklog                                                                                                                                                                                                     | A04 gates below      | Complete                             |
+| A05     | verified | `src/metor/utils/lock.py`, `tests/test_lock_contract.py`, this worklog                                                                                                                                                                                                              | A05 gates below      | Complete                             |
+| A06     | verified | `src/metor/data/profile/{support,paths,manager,catalog,lifecycle}.py`, `src/metor/data/profile/migration/{journal,orchestrator}.py`, `tests/test_profile_path_security.py`, this worklog                                                                                            | A06 gates below      | Complete                             |
+| A07     | verified | `src/metor/{utils/process.py,data/profile/manager.py,application/runtime/maintenance.py,application/frontend/host.py,core/tor.py}`, `tests/test_application_runtime_contract.py`, this worklog                                                                                      | A07 gates below      | Complete                             |
+| A08     | verified | `src/metor/core/api/{base.py,events/shared.py,events/entries.py}`, `tests/test_ipc_type_validation.py`, this worklog                                                                                                                                                                | A08 gates below      | Complete                             |
+| A09     | verified | `scripts/{generate_api_docs.py,release/compatibility.py}`, `docs/generated/{API.md,api.schema.json,compatibility.json}`, `tests/test_api_generation_contract.py`, this worklog                                                                                                      | A09 gates below      | Complete                             |
+| A10     | verified | `src/metor/cli/{parser,entry}.py`, `tests/test_refactor2_cli_contract.py`, this worklog                                                                                                                                                                                             | A10 gates below      | Complete                             |
+| A10b    | verified | Terminal renderer/presenter hardening and regression coverage; this worklog                                                                                                                                                                                                         | A10b gates below     | Complete                             |
+| A11     | verified | Canonical daemon bootstrap/runtime preparation and regression coverage; this worklog                                                                                                                                                                                                | A11 gates below      | Complete                             |
+| A12     | verified | Producer recovery correlation ordering and regression coverage; this worklog                                                                                                                                                                                                        | A12 gates below      | Complete                             |
+| A13     | verified | `src/metor/ui/gui/platform/{configuration,configuration_security}.py`, `tests/test_device_configuration_security.py`, this worklog                                                                                                                                                  | A13 gates below      | Complete                             |
+| A14     | verified | `src/metor/ui/gui/{app.py,platform/lifecycle.py,runtime/controller.py}`, `packaging/gui/setup.py`, `requirements/gui.lock`, `tests/{test_gui_os_lifecycle.py,gui_native_lifecycle.py,test_gui_lifecycle.py}`, `docs/contracts/{GUI_PLATFORM_ADR.md,gui/support.json}`, this worklog | A14 gates below      | Complete                             |
+| A15     | verified | `tests/{test_gui_capture.py,test_gui_audio.py,gui_native_voice.py}`, `docs/contracts/{GUI_PLATFORM_ADR.md,gui/support.json}`, this worklog                                                                                                                                          | A15 gates below      | Complete                             |
+| A16     | verified | `src/metor/core/daemon/managed/{notify/notification.py,notify/sinks.py,ipc.py,engine/daemon.py}`, `tests/{test_notification_delivery.py,test_gui_capture.py}`, this worklog                                                                                                         | A16 gates below      | Complete                             |
+| A17     | verified | Removed `src/metor/ui/embedded/**` and `tests/test_embedded_contract.py`; `tests/{test_ui_boundaries.py,test_contact_qr.py}`, this worklog                                                                                                                                          | A17 gates below      | Complete                             |
+| A18     | verified | `scripts/{build_release_wheelhouse.py,release/bundle.py}`, Base/shared/Core owner imports, `src/metor/utils/{__init__,constants}.py`, `tests/{test_release_contract.py,test_closure_architecture.py}`, `docs/ARCHITECTURE.md`, this worklog                                         | A18 gates below      | Complete                             |
+| A19     | verified | `src/metor/core/daemon/managed/network/voice/{manager,inbound,retained,capture,outbound}.py`, `tests/{test_voice_contract.py,test_gui_producers.py}`, `docs/ARCHITECTURE.md`, this worklog                                                                                          | A19 gates below      | Complete                             |
+| A20–A25 | verified | Production-tree audit, canonical docs, CI/release closure, bundle integrity, final evidence; this worklog                                                                                                                                                                           | A20–A25 gates below  | Complete at their recorded revisions |
 
 ## A00 verification
 
