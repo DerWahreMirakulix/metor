@@ -2,13 +2,46 @@
 
 import dataclasses
 import json
+import socket
+import sys
+import threading
 import unittest
 from enum import Enum
 from types import UnionType
 from typing import ForwardRef, Union, get_args, get_origin, get_type_hints
 
 from metor.client.stream import BufferedIpcEventReader
-from metor.core.api import CMD_MAP, EVENT_MAP, IpcCommand, IpcEvent
+from metor.core.api import (
+    CMD_MAP,
+    EVENT_MAP,
+    EventType,
+    IpcCommand,
+    IpcEvent,
+    SetSettingCommand,
+)
+from metor.core.daemon.managed.ipc import IpcServer
+
+
+class _DispatcherConfig:
+    """Provides the bounded socket timeout needed by the real IPC handler."""
+
+    @staticmethod
+    def get_float(_key: object) -> float:
+        """Returns a short finite timeout for the local socket probe.
+
+        Args:
+            _key (object): Ignored setting identity.
+
+        Returns:
+            float: Probe socket timeout.
+        """
+        return 0.1
+
+
+class _DispatcherProfileManager:
+    """Supplies the narrow profile surface used by ``IpcServer._handler``."""
+
+    config = _DispatcherConfig()
 
 
 def _sample_value(field_type: object) -> object:
@@ -181,6 +214,156 @@ class IpcTypeValidationTests(unittest.TestCase):
                     'params': {'invalid': object()},
                 }
             )
+
+    def test_nonfinite_numbers_are_rejected_by_command_and_event_factories(
+        self,
+    ) -> None:
+        """Typed floats and open JSON trees accept only finite JSON numbers.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        for value in (
+            float('nan'),
+            float('inf'),
+            float('-inf'),
+            json.loads('1e999'),
+        ):
+            with self.subTest(value=value):
+                with self.assertRaises(TypeError):
+                    IpcCommand.from_dict(
+                        {
+                            'command_type': 'set_setting',
+                            'setting_key': 'ui.default_profile',
+                            'setting_value': value,
+                        }
+                    )
+                with self.assertRaises(TypeError):
+                    IpcEvent.from_dict(
+                        {
+                            'event_type': 'profile_operation_result',
+                            'success': True,
+                            'operation_type': 'profile_created',
+                            'params': {'nested': [value]},
+                        }
+                    )
+                with self.assertRaises(TypeError):
+                    IpcEvent.from_dict(
+                        {
+                            'event_type': 'settings_list_data',
+                            'scope': 'ui',
+                            'entries': [
+                                {
+                                    'key': 'client.ipc_timeout',
+                                    'value': '1',
+                                    'source': 'default',
+                                    'category': 'client',
+                                    'min_value': value,
+                                }
+                            ],
+                        }
+                    )
+
+        finite = sys.float_info.max
+        command = IpcCommand.from_dict(
+            {
+                'command_type': 'set_setting',
+                'setting_key': 'client.ipc_timeout',
+                'setting_value': finite,
+            }
+        )
+        event = IpcEvent.from_dict(
+            {
+                'event_type': 'profile_operation_result',
+                'success': True,
+                'operation_type': 'profile_created',
+                'params': {'finite': finite},
+            }
+        )
+        self.assertEqual(command.setting_value, finite)
+        self.assertEqual(event.params['finite'], finite)
+
+    def test_nonfinite_outbound_message_cannot_be_serialized(self) -> None:
+        """Direct construction cannot put a non-standard number on the wire.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        command = SetSettingCommand('client.ipc_timeout', float('nan'))
+        with self.assertRaisesRegex(ValueError, 'JSON compliant'):
+            command.to_json()
+
+    def test_sdk_reader_rejects_nonfinite_json_tokens_and_overflow(self) -> None:
+        """The production SDK decoder rejects every non-finite JSON spelling.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        for token in ('NaN', 'Infinity', '-Infinity', '1e999'):
+            reader = BufferedIpcEventReader()
+            reader.append_bytes(
+                (
+                    '{"event_type":"profile_operation_result",'
+                    '"success":true,"operation_type":"profile_created",'
+                    f'"params":{{"nested":[{token}]}}}}\n'
+                ).encode('utf-8')
+            )
+            with self.subTest(token=token), self.assertRaises(TypeError):
+                reader.pop_event()
+
+    def test_daemon_dispatcher_rejects_nonfinite_command_without_callback(
+        self,
+    ) -> None:
+        """The real local socket handler rejects overflow before domain dispatch.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        dispatched: list[IpcCommand] = []
+        server = IpcServer(  # type: ignore[arg-type]
+            _DispatcherProfileManager(),
+            lambda command, _conn: dispatched.append(command),
+        )
+        daemon_side, client_side = socket.socketpair()
+        client_side.settimeout(2.0)
+        server._clients.append(daemon_side)
+        handler = threading.Thread(target=server._handler, args=(daemon_side,))
+        handler.start()
+        try:
+            payload = (
+                b'{"command_type":"set_setting",'
+                b'"request_id":"finite-check",'
+                b'"setting_key":"secret-field",'
+                b'"setting_value":1e999}\n'
+            )
+            client_side.sendall(payload)
+            response = client_side.recv(4096)
+            decoded = IpcEvent.from_dict(json.loads(response.decode('utf-8')))
+            self.assertEqual(decoded.event_type, EventType.UNKNOWN_COMMAND)
+            self.assertEqual(decoded.request_id, 'finite-check')
+            self.assertNotIn(b'secret-field', response)
+            self.assertEqual(dispatched, [])
+        finally:
+            try:
+                client_side.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+            handler.join(timeout=2.0)
+            server.stop()
+            client_side.close()
+        self.assertFalse(handler.is_alive())
 
     def test_buffered_ipc_reader_applies_recursive_validation(self) -> None:
         """The production NDJSON reader rejects an invalid later nested element."""

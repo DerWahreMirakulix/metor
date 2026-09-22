@@ -11,9 +11,9 @@ reports remain evidence and are not competing implementation backlogs.
 | N02 | verified | `e033e7e` | Runtime/cleanup, Tor/Stem, live shebang; Ruff; mypy | Complete |
 | N03 | implemented | `1c50e43` | POSIX race regressions, profile/storage neighbors, Windows handle structure; Ruff; mypy | Native Windows junction/error execution remains an N11 gate |
 | N04 | verified | `c1770a0` | Lock modes/bounded safe reads/process generations/races/real child, settings/profile neighbors; Ruff; mypy; boundaries | Complete on Linux; native Windows ACL/error execution remains an N11 gate |
-| N05 | implemented | N05 checkpoint (this commit) | POSIX FIFO/link/type/size/TOML, configuration/launcher neighbors; Ruff; mypy | Native Windows 3.11/3.13 mypy and ACL/reparse execution remain N09/N11 gates |
-| N06 | in progress | pending | Counterexamples being added | Reject non-finite numbers at both IPC boundaries |
-| N07 | open | — | — | Bound lifecycle wakeups and validate Linux sources |
+| N05 | implemented | `5b9b140` | POSIX FIFO/link/type/size/TOML, configuration/launcher neighbors; Ruff; mypy | Native Windows 3.11/3.13 mypy and ACL/reparse execution remain N09/N11 gates |
+| N06 | verified | N06 checkpoint (this commit) | All DTO factories, SDK NDJSON, real daemon socket dispatcher, generated references, IPC/auth neighbors; Ruff; mypy | Complete |
+| N07 | in progress | pending | Counterexamples being added | Bound lifecycle wakeups and validate Linux sources |
 | N08 | open | — | — | Extend the GUI media integration through inbound LIVE voice |
 | N09 | open | — | — | Close the CI and native renderer matrix |
 | N10 | open | — | — | Repair release smoke, batch, and ref-transaction paths |
@@ -26,6 +26,11 @@ filesystem responsibility and stays below the 800-line exceptional ceiling.
 Splitting the mutually dependent native backends during the race correction
 would obscure the shared invariants; a later extraction is not part of this
 bounded remediation.
+
+N06 rejects values that standard JSON cannot represent, so it narrows no valid
+IPC message and requires no protocol-generation bump. The schema already uses
+JSON Schema `number`; strict runtime decoding and serialization now enforce the
+same finite-number domain.
 
 ## Baseline
 

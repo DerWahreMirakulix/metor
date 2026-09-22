@@ -195,7 +195,7 @@ class ApiDocGenerator:
             ):
                 payload[field.name] = self._sample_value(hints[field.name])
 
-        return json.dumps(payload, indent=2)
+        return json.dumps(payload, indent=2, allow_nan=False)
 
     def _format_dataclass(self, cls: Type['IpcMessage']) -> str:
         """
@@ -526,7 +526,7 @@ class ApiSchemaGenerator:
         }
 
         with self._output_path.open('w', encoding='utf-8', newline='\n') as f:
-            f.write(json.dumps(document, indent=2))
+            f.write(json.dumps(document, indent=2, allow_nan=False))
             f.write('\n')
 
 

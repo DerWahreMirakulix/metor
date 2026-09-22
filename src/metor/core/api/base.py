@@ -4,6 +4,7 @@ import contextlib
 import contextvars
 import dataclasses
 import json
+import math
 import secrets
 from collections.abc import Mapping as MappingABC
 from collections.abc import Sequence as SequenceABC
@@ -179,7 +180,7 @@ def _validate_value(expected_type: object, value: object, path: str) -> object:
         if type(value) is bool:
             return value
     elif expected_type is float:
-        if type(value) is float:
+        if type(value) is float and math.isfinite(value):
             return value
     elif expected_type is str:
         if type(value) is str:
@@ -288,7 +289,7 @@ class IpcMessage:
         data: Dict[str, JsonValue] = {
             k: v for k, v in asdict(self).items() if v is not None
         }
-        return json.dumps(data)
+        return json.dumps(data, allow_nan=False)
 
 
 @dataclass
