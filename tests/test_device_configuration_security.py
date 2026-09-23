@@ -13,6 +13,7 @@ from metor.ui.gui.platform.configuration import (
     DeviceConfigurationError,
     read_configuration,
 )
+from metor.utils import open_private_binary_file
 
 
 DEVICE = """schema_version = 1
@@ -25,6 +26,21 @@ adapter = "simulator"
 ptt_binding = "ptt"
 power_binding = "power"
 """
+
+
+def _write_private_configuration(path: Path, content: str | bytes) -> None:
+    """Writes one configuration with the production platform-private policy.
+
+    Args:
+        path (Path): Exact temporary configuration path.
+        content (str | bytes): UTF-8 text or exact binary fixture bytes.
+
+    Returns:
+        None
+    """
+    payload = content.encode('utf-8') if isinstance(content, str) else content
+    with open_private_binary_file(path) as handle:
+        handle.write(payload)
 
 
 class DeviceConfigurationSecurityTests(unittest.TestCase):
@@ -156,15 +172,19 @@ class DeviceConfigurationSecurityTests(unittest.TestCase):
     def test_wrong_type_and_oversize_fail_before_parsing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            with self.assertRaisesRegex(DeviceConfigurationError, 'regular file'):
-                read_configuration(str(root), True)
+            if os.name == 'nt':
+                with self.assertRaisesRegex(DeviceConfigurationError, 'trust'):
+                    read_configuration(str(root), True)
+            else:
+                with self.assertRaisesRegex(DeviceConfigurationError, 'regular file'):
+                    read_configuration(str(root), True)
 
             path = root / 'large.toml'
-            path.write_bytes(b'#' * (64 * 1024 + 1))
+            _write_private_configuration(path, b'#' * (64 * 1024 + 1))
             with self.assertRaisesRegex(DeviceConfigurationError, '64 KiB'):
                 read_configuration(str(path), True)
 
-            path.write_text('[display', encoding='utf-8')
+            _write_private_configuration(path, '[display')
             with self.assertRaisesRegex(DeviceConfigurationError, 'could not be read'):
                 read_configuration(str(path), True)
 
@@ -206,6 +226,50 @@ class DeviceConfigurationSecurityTests(unittest.TestCase):
                 self.assertRaisesRegex(DeviceConfigurationError, 'trust'),
             ):
                 read_configuration(str(path), True)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows-native ACL regression.')
+    def test_windows_accepts_private_and_rejects_foreign_writable_acl(self) -> None:
+        """The native opener distinguishes an owner-only file from a broad DACL.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'device.toml'
+            _write_private_configuration(path, DEVICE)
+            self.assertEqual(read_configuration(str(path), True).width_px, 480)
+
+            result = subprocess.run(
+                ['icacls', str(path), '/grant', '*S-1-1-0:(W)'],
+                capture_output=True,
+                check=False,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+            with self.assertRaisesRegex(DeviceConfigurationError, 'trust'):
+                read_configuration(str(path), True)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows-native reparse regression.')
+    def test_windows_rejects_reparse_configuration_before_parsing(self) -> None:
+        """A native symbolic-link fixture never reaches TOML parsing.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / 'target.toml'
+            link = root / 'device.toml'
+            _write_private_configuration(target, DEVICE)
+            link.symlink_to(target)
+            with self.assertRaisesRegex(DeviceConfigurationError, 'trust'):
+                read_configuration(str(link), True)
 
 
 if __name__ == '__main__':

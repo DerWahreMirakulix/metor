@@ -42,6 +42,44 @@ def _current_posix_uid() -> int:
     return int(get_uid())
 
 
+def _open_process_identity(file_path: Path) -> int:
+    """Opens process metadata through the active platform's trust boundary.
+
+    Args:
+        file_path (Path): Exact managed-process identity path.
+
+    Returns:
+        int: Owned descriptor for a non-reparse private regular-file candidate.
+
+    Raises:
+        OSError: If the path cannot be opened or its Windows DACL is not private.
+    """
+    if os.name != 'nt':
+        flags: int = os.O_RDONLY
+        flags |= int(getattr(os, 'O_CLOEXEC', 0))
+        flags |= int(getattr(os, 'O_NOFOLLOW', 0))
+        flags |= int(getattr(os, 'O_NONBLOCK', 0))
+        return os.open(file_path, flags)
+
+    import msvcrt
+
+    from metor.utils.security import _open_windows_file
+    from metor.utils.windows_acl import validate_private_windows_dacl
+
+    descriptor = _open_windows_file(file_path)
+    if descriptor is None:
+        raise FileNotFoundError(file_path)
+    try:
+        validate_private_windows_dacl(
+            getattr(msvcrt, 'get_osfhandle')(descriptor),
+            directory=False,
+        )
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return descriptor
+
+
 @dataclass(frozen=True)
 class _ProcessIdentity:
     """Persisted process lifetime and profile ownership."""
@@ -119,12 +157,8 @@ class ProcessManager:
         Returns:
             Optional[_ProcessIdentity]: Parsed identity, or None when untrusted.
         """
-        flags: int = os.O_RDONLY
-        flags |= int(getattr(os, 'O_CLOEXEC', 0))
-        flags |= int(getattr(os, 'O_NOFOLLOW', 0))
-        flags |= int(getattr(os, 'O_NONBLOCK', 0))
         try:
-            descriptor: int = os.open(file_path, flags)
+            descriptor: int = _open_process_identity(file_path)
             try:
                 info = os.fstat(descriptor)
                 file_attributes: int = int(getattr(info, 'st_file_attributes', 0))

@@ -87,6 +87,9 @@ class DocumentationContractTests(unittest.TestCase):
             encoding='utf-8'
         )
         self.assertIn("'prettier-generated.ignore'", formatter)
+        attributes = (ROOT / '.gitattributes').read_text(encoding='utf-8')
+        for name in SPEC_HASHES:
+            self.assertIn(f'/docs/specs/{name} -text', attributes)
 
     def test_gui_status_does_not_claim_acceptance_with_native_gates_open(self) -> None:
         """Keeps the machine-readable status aligned with named native gaps.

@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.application import cleanup_local_runtime
 from metor.data import ProfileManager
-from metor.utils import Constants, ProcessManager
+from metor.utils import Constants, ProcessManager, open_private_binary_file
 
 
 def _identity_payload(
@@ -69,8 +69,30 @@ def _write_identity(path: Path, payload: str) -> None:
     Returns:
         None
     """
-    path.write_text(payload)
-    path.chmod(0o600)
+    with open_private_binary_file(path) as handle:
+        handle.write(payload.encode('utf-8'))
+
+
+def _make_identity_foreign_writable(path: Path) -> None:
+    """Makes one fixture writable by a foreign identity on the active platform.
+
+    Args:
+        path (Path): Private process-identity fixture to expose deliberately.
+
+    Returns:
+        None
+    """
+    if os.name != 'nt':
+        path.chmod(0o644)
+        return
+    result = subprocess.run(
+        ['icacls', str(path), '/grant', '*S-1-1-0:(W)'],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise AssertionError(result.stderr or result.stdout)
 
 
 class ApplicationRuntimeContractTests(unittest.TestCase):
@@ -89,7 +111,8 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
         """
         interpreter = str(Path(sys.executable).resolve())
         scripts = Path(sysconfig.get_path('scripts')).resolve()
-        launcher = str(scripts / 'metor')
+        launcher_name = 'metor.exe' if os.name == 'nt' else 'metor'
+        launcher = str(scripts / launcher_name)
         accepted = (
             [interpreter, '-I', '-m', 'metor', '-p', 'alpha', 'daemon'],
             [interpreter, '-I', '-m', 'metor', 'daemon', '--profile=alpha'],
@@ -273,7 +296,7 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
             )
 
             _write_identity(pid_file, _identity_payload(12345, 20.0, 'alpha'))
-            pid_file.chmod(0o644)
+            _make_identity_foreign_writable(pid_file)
             self.assertIsNone(ProcessManager._read_process_identity(pid_file))
 
     def test_tor_detector_requires_profile_owned_runtime_arguments(self) -> None:

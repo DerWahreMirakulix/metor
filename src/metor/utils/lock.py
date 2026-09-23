@@ -277,7 +277,7 @@ class FileLock:
         os.fsync(descriptor)
 
     def _release_owned_lock(self) -> None:
-        """Closes and removes only this instance's confirmed lock file.
+        """Releases this instance's OS lock and closes its owned descriptor.
 
         Args:
             None
@@ -286,7 +286,7 @@ class FileLock:
             None
 
         Raises:
-            OSError: If descriptor inspection, close, or removal fails.
+            OSError: If native unlock or descriptor close fails.
         """
         if self._lock_fd is None:
             return

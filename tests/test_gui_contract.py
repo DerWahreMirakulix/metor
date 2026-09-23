@@ -31,6 +31,7 @@ from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.runtime.interaction import Interactions
 from metor.ui.gui.state import GuiState, Route
 from metor.ui.gui.state.mailbox import Mailbox, Update
+from metor.utils import open_private_binary_file
 
 
 DEVICE = """schema_version = 1
@@ -47,6 +48,20 @@ touch = true
 """
 
 
+def _write_private_configuration(path: Path, content: str) -> None:
+    """Writes one configuration through the production private-file owner.
+
+    Args:
+        path (Path): Exact temporary configuration path.
+        content (str): UTF-8 TOML fixture content.
+
+    Returns:
+        None
+    """
+    with open_private_binary_file(path) as handle:
+        handle.write(content.encode('utf-8'))
+
+
 class ConfigurationTests(unittest.TestCase):
     """Checks explicit mode resolution and side-effect-free schema rejection."""
 
@@ -59,17 +74,18 @@ class ConfigurationTests(unittest.TestCase):
         """A simulator description never becomes a real physical driver."""
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'device.toml'
-            path.write_text(DEVICE)
+            _write_private_configuration(path, DEVICE)
             self.assertEqual(
                 read_configuration(str(path), True).logical_size, (480, 800)
             )
             with self.assertRaises(DeviceConfigurationError):
                 read_configuration(str(path), False)
-            path.write_text(
+            _write_private_configuration(
+                path,
                 DEVICE.replace('width_px = 960', 'width_px = 1600').replace(
                     'height_px = 1600', 'height_px = 960'
                 )
-                + '\n'
+                + '\n',
             )
             with self.assertRaises(DeviceConfigurationError):
                 read_configuration(str(path), True)
@@ -94,7 +110,7 @@ class ConfigurationTests(unittest.TestCase):
             path = Path(directory) / 'device.toml'
             for content in variants:
                 with self.subTest(content=content[:50]):
-                    path.write_text(content)
+                    _write_private_configuration(path, content)
                     with self.assertRaises(DeviceConfigurationError):
                         read_configuration(str(path), True)
 

@@ -5,13 +5,13 @@ reports remain evidence and are not competing implementation backlogs.
 
 ## Current completion-correction status
 
-| Package | State                                      | Commit    | Tests                                                                                                                                           | Result                                                                                                      | Next step                                                                        |
-| ------- | ------------------------------------------ | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| C01     | locally verified                           | `8312941` | 5 focused launch/detection tests; 57 daemon/runtime/IPC neighbors; fresh four-bundle installed-consumer validation with two real managed starts | PASS on Linux: isolated locked and plaintext session-auth children ignored CWD and inherited import shadows | Native Windows installed startup remains part of C05                             |
-| C02     | local candidate; native acceptance pending | `61c3b67` | 76 focused tests plus 49 subtests; full 861-test discovery; normal and `win32` strict mypy; documentation/boundary checks                       | Local PASS with 6 native skips in full discovery; no native Windows runtime exists on this host             | Run the prepared real Windows 3.11/3.13 ACL lifecycle tests before accepting C02 |
-| C03     | open                                       | —         | —                                                                                                                                               | Native fixture and checkout-byte failures supplied                                                          | Make native expectations and immutable spec bytes portable                       |
-| C04     | open                                       | —         | —                                                                                                                                               | Four native batch branch failures supplied on both Windows lanes                                            | Diagnose real `cmd.exe` control flow before changing installer semantics         |
-| C05     | open                                       | —         | —                                                                                                                                               | Hosted baseline run `35756273840`, attempt 1, applies only to `3726de4`                                     | Reverify the exact corrected tree and retain external native blockers            |
+| Package | State                                      | Commit                      | Tests                                                                                                                                           | Result                                                                                             | Next step                                                                |
+| ------- | ------------------------------------------ | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| C01     | hosted follow-up required                  | `8312941`                   | 5 focused launch/detection tests; 57 daemon/runtime/IPC neighbors; local four-bundle installed-consumer validation with two real managed starts | Local PASS; hosted Linux 3.11 installed child failed to publish IPC readiness in run `35827552290` | Reproduce and close the installed-start failure before C05               |
+| C02     | native verified                            | `61c3b67`                   | 76 focused tests plus 49 subtests; full 861-test local discovery; real Windows 3.11/3.13 quality execution                                      | PASS at C02 scope; both Windows lanes reached only later C03 failures                              | Retain C02 native ACL tests in every later matrix                        |
+| C03     | local candidate; native acceptance pending | C03 candidate (this commit) | 113 focused lock/process/configuration/GUI/documentation/storage tests plus 83 subtests; normal and `win32` mypy                                | Local PASS with 4 native skips; exact Windows fixtures prepared                                    | Run Windows 3.11/3.13 and verify fresh checkout spec bytes               |
+| C04     | open                                       | —                           | —                                                                                                                                               | Four native batch branch failures supplied on both Windows lanes                                   | Diagnose real `cmd.exe` control flow before changing installer semantics |
+| C05     | open                                       | —                           | —                                                                                                                                               | Hosted baseline run `35756273840`, attempt 1, applies only to `3726de4`                            | Reverify the exact corrected tree and retain external native blockers    |
 
 The task's verified starting evidence records run `35756273840`, attempt 1, at
 `3726de443716dbdd0a2aa2316e86a0acb02015c3`: Linux 3.11 job
@@ -98,8 +98,60 @@ local socket I/O was permitted. Under that same condition the exact `61c3b67`
 tree completed all 861 discovered tests in 648.649 seconds with six native
 skips and no failures. This supersedes the interrupted sandbox result; it does
 not substitute Linux socket execution for Windows ACL execution.
-C02 is deliberately not accepted until the same candidate executes on real
-Windows Python 3.11 and 3.13; no push or workflow dispatch was authorized.
+C02's initial checkpoint deliberately remained unaccepted until native
+execution. The owner then authorized the push of C01/C02 through worklog commit
+`4705091`. Fresh CI run `35827552290`, attempt 1, tested exact head
+`4705091faafcdad2039f672613522af4beefc068`. Windows 3.11 job
+`107072525303` and Windows 3.13 job `107072525097` both completed the full
+quality step. Their complete public annotation sets contain only one IPC
+timeout and three C03 device-configuration fixture failures apiece; no C02
+directory, profile, blob, safe-write, cleanup, owner/DACL, denied-operation, or
+reparse regression failed. The prepared native C02 lifecycle tests therefore
+executed successfully on both required Python versions. C02 is accepted at its
+bounded scope even though the aggregate jobs remain red for later packages.
+
+In the same run, Linux 3.13 job `107072525240` succeeded. Linux 3.11 job
+`107072525263` passed its complete quality suite, wheel checks, version
+registry, and generated-reference validation, then failed installed-artifact
+validation because the managed child did not publish IPC readiness. That is a
+fresh C01/C05 artifact-path defect, not C02 Windows evidence, and remains open.
+The Linux native GUI/pressure steps were downstream of that failed step and did
+not run.
+
+C03 makes fixtures exercise the existing production trust boundaries instead
+of depending on POSIX-shaped path modes. Valid GUI device configurations are
+now written through `open_private_binary_file`, which creates an actual
+protected current-user-only DACL on Windows before the real configuration
+opener validates the same object. Dedicated native tests accept that file,
+grant Everyone write with `icacls` and require rejection, and reject a real
+file reparse point before TOML parsing. Oversize and malformed fixtures also
+remain private so Windows reaches their intended size/parser branches; a
+directory rejection asserts the native trust category rather than POSIX-only
+wording.
+
+Managed-process metadata now uses the no-reparse Windows handle owner and
+validates its exact private DACL before parsing. Its positive fixtures use the
+same production private writer; the exposure negative grants a real foreign
+write ACE on Windows and retains mode-bit exposure on POSIX. Exact daemon-start
+fixtures select `metor.exe` from the native Scripts directory on Windows while
+keeping lookalike rejection unchanged.
+
+Lock exchange tests now assert the feasible native invariant. POSIX still
+performs the pathname swap and proves the foreign replacement survives.
+Windows requires the held no-delete-sharing handle to reject rename, proves a
+contender cannot enter, and proves acquisition succeeds after release or
+rollback. Metadata inspection that would cross Windows' mandatory locked byte
+range occurs after release. The stale release docstring now describes OS-lock
+release and descriptor close; the persistent object is never described as
+removed.
+
+Finally, `.gitattributes` marks both approved specifications `-text`, preventing
+checkout line-ending conversion. The documentation contract requires those
+exact attributes in addition to the unchanged approved SHA-256 values. The
+focused C03 set passes locally with 113 tests, four native skips, and 83
+subtests; Ruff, format, normal strict mypy, and `--platform win32` strict mypy
+pass for the changed surface. Native acceptance remains pending until a fresh
+Windows checkout executes these positive and negative branches.
 
 ## Current targeted follow-up status
 

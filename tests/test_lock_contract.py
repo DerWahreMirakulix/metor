@@ -75,7 +75,9 @@ class LockContractTests(unittest.TestCase):
             with patch('metor.utils.lock.os.write', side_effect=short_write):
                 with lock:
                     expected = f'{lock._pid}:{lock._pid_create_time}'
-                    self.assertEqual(lock.lock_path.read_text(), expected)
+                    if os.name != 'nt':
+                        self.assertEqual(lock.lock_path.read_text(), expected)
+            self.assertEqual(lock.lock_path.read_text(), expected)
 
     def test_file_lock_creation_uses_owner_only_mode_under_permissive_umask(
         self,
@@ -234,7 +236,7 @@ class LockContractTests(unittest.TestCase):
                 pass
 
     def test_file_lock_preserves_exchanged_foreign_lock(self) -> None:
-        """Release cannot unlink a replacement created under the same pathname.
+        """Native ownership prevents or preserves a pathname replacement.
 
         Args:
             None
@@ -246,13 +248,28 @@ class LockContractTests(unittest.TestCase):
             lock = FileLock(Path(temp_dir) / 'config.json')
             displaced = Path(temp_dir) / 'owned.lock'
             lock.__enter__()
-            lock.lock_path.rename(displaced)
-            lock.lock_path.write_text('foreign-owner')
+            try:
+                if os.name == 'nt':
+                    with self.assertRaises(OSError):
+                        lock.lock_path.rename(displaced)
+                    with self.assertRaises(TimeoutError):
+                        FileLock(
+                            Path(temp_dir) / 'config.json', timeout=0.1
+                        ).__enter__()
+                    self.assertTrue(lock.lock_path.exists())
+                    self.assertFalse(displaced.exists())
+                else:
+                    lock.lock_path.rename(displaced)
+                    lock.lock_path.write_text('foreign-owner')
+            finally:
+                lock.__exit__(None, None, None)
 
-            lock.__exit__(None, None, None)
-
-            self.assertEqual(lock.lock_path.read_text(), 'foreign-owner')
-            self.assertTrue(displaced.exists())
+            if os.name == 'nt':
+                with FileLock(Path(temp_dir) / 'config.json', timeout=0.5):
+                    pass
+            else:
+                self.assertEqual(lock.lock_path.read_text(), 'foreign-owner')
+                self.assertTrue(displaced.exists())
 
     def test_file_lock_rollback_preserves_exchanged_foreign_lock(self) -> None:
         """Acquisition rollback removes no replacement from another owner.
@@ -284,8 +301,12 @@ class LockContractTests(unittest.TestCase):
                     OSError: Always, after exchanging the lock path.
                 """
                 del descriptor, data
-                lock.lock_path.rename(displaced)
-                lock.lock_path.write_text('foreign-owner')
+                if os.name == 'nt':
+                    with self.assertRaises(OSError):
+                        lock.lock_path.rename(displaced)
+                else:
+                    lock.lock_path.rename(displaced)
+                    lock.lock_path.write_text('foreign-owner')
                 raise OSError('write failed after exchange')
 
             with (
@@ -294,9 +315,15 @@ class LockContractTests(unittest.TestCase):
             ):
                 lock.__enter__()
 
-            self.assertEqual(lock.lock_path.read_text(), 'foreign-owner')
-            self.assertTrue(displaced.exists())
             self.assertIsNone(lock._lock_fd)
+            if os.name == 'nt':
+                self.assertTrue(lock.lock_path.exists())
+                self.assertFalse(displaced.exists())
+                with FileLock(Path(temp_dir) / 'config.json', timeout=0.5):
+                    pass
+            else:
+                self.assertEqual(lock.lock_path.read_text(), 'foreign-owner')
+                self.assertTrue(displaced.exists())
 
     def test_file_lock_rejects_exchange_during_native_acquisition(self) -> None:
         """A path exchanged after opening cannot become an acquired lock.
@@ -325,15 +352,26 @@ class LockContractTests(unittest.TestCase):
                 lock.lock_path.write_text('foreign')
                 return True
 
+            expectation = (
+                self.assertRaises(OSError)
+                if os.name == 'nt'
+                else self.assertRaisesRegex(OSError, 'changed during acquisition')
+            )
             with (
                 patch('metor.utils.lock._try_lock_descriptor', side_effect=exchange),
-                self.assertRaisesRegex(OSError, 'changed during acquisition'),
+                expectation,
             ):
                 lock.__enter__()
 
             self.assertIsNone(lock._lock_fd)
-            self.assertEqual(lock.lock_path.read_text(), 'foreign')
-            self.assertTrue(displaced.exists())
+            if os.name == 'nt':
+                self.assertTrue(lock.lock_path.exists())
+                self.assertFalse(displaced.exists())
+                with FileLock(root / 'config.json', timeout=0.5):
+                    pass
+            else:
+                self.assertEqual(lock.lock_path.read_text(), 'foreign')
+                self.assertTrue(displaced.exists())
 
     def test_file_lock_timeout_uses_monotonic_clock(self) -> None:
         """Wall-clock jumps cannot extend the acquisition deadline.

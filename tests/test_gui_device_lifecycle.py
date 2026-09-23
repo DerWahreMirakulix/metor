@@ -28,6 +28,21 @@ from metor.ui.gui.platform import read_configuration
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.runtime.device import DevicePhase
 from metor.ui.gui.state import Route
+from metor.utils import open_private_binary_file
+
+
+def _write_private_configuration(path: Path, content: str) -> None:
+    """Writes one native-private UTF-8 device configuration fixture.
+
+    Args:
+        path (Path): Exact temporary configuration path.
+        content (str): TOML fixture content.
+
+    Returns:
+        None
+    """
+    with open_private_binary_file(path) as handle:
+        handle.write(content.encode('utf-8'))
 
 
 class DeviceLifecycleTests(unittest.TestCase):
@@ -163,7 +178,7 @@ adapter = 'fixture'
 """
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'device.toml'
-            path.write_text(source, encoding='utf-8')
+            _write_private_configuration(path, source)
             config = read_configuration(str(path), False, self.bindings)
         self.assertEqual(config.mode, 'device')
         self.assertEqual(config.logical_size, (480, 800))
@@ -191,7 +206,7 @@ touch = true
 """
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'device.toml'
-            path.write_text(source, encoding='utf-8')
+            _write_private_configuration(path, source)
             config = read_configuration(str(path), False, self.bindings)
         active = config.activate_platform(self.bindings)
         self.assertIsNotNone(active)
