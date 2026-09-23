@@ -31,6 +31,28 @@ def _same_filesystem_object(left: Path, right: Path) -> bool:
         return left.resolve() == right.resolve()
 
 
+def _expected_interpreter_files(executable: Path) -> tuple[Path, ...]:
+    """Returns the exact interpreter files allowed for the spawned daemon.
+
+    Windows virtual-environment launchers can hand execution to their configured
+    base interpreter. Both files belong to the selected environment; no other
+    executable is accepted.
+
+    Args:
+        executable (Path): Virtual-environment interpreter selected by the probe.
+
+    Returns:
+        tuple[Path, ...]: Selected interpreter and its Windows base interpreter.
+    """
+    selected = [executable.resolve()]
+    base_executable = getattr(sys, '_base_executable', None)
+    if os.name == 'nt' and isinstance(base_executable, str) and base_executable:
+        base_path = Path(base_executable).resolve()
+        if not any(_same_filesystem_object(base_path, current) for current in selected):
+            selected.append(base_path)
+    return tuple(selected)
+
+
 def _is_within_filesystem_root(path: Path, root: Path) -> bool:
     """Checks containment by directory identity rather than path spelling."""
     return any(
@@ -279,7 +301,11 @@ def _run_installed_start(
 
         child = psutil.Process(pid)
         command = child.cmdline()
-        if not command or not _same_filesystem_object(Path(command[0]), executable):
+        expected_interpreters = _expected_interpreter_files(executable)
+        if not command or not any(
+            _same_filesystem_object(Path(command[0]), candidate)
+            for candidate in expected_interpreters
+        ):
             raise AssertionError(command)
         if command[1:4] != ['-I', '-m', 'metor']:
             raise AssertionError(command)
