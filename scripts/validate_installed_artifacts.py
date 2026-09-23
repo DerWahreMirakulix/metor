@@ -19,6 +19,26 @@ import venv
 from zipfile import ZipFile
 
 
+_ANNOTATION_MAX_CHARS = 4096
+
+
+def _emit_failure_annotation(
+    message: str,
+    *,
+    redactions: tuple[str, ...],
+) -> None:
+    """Emits one bounded, path-redacted GitHub-compatible error annotation."""
+    rendered = message[-_ANNOTATION_MAX_CHARS:]
+    for value in redactions:
+        if value:
+            rendered = rendered.replace(value, '<redacted>')
+    escaped = rendered.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+    print(
+        f'::error title=Installed artifact acceptance failed::{escaped}',
+        flush=True,
+    )
+
+
 GOOD_CONSUMER = """from typing import assert_type
 from metor.client import MetorClient, FrontendHost, FrontendInteractions
 from metor.core.api import Delivery, RuntimeSnapshotEvent
@@ -250,6 +270,19 @@ def run_acceptance(bundle_root: Path) -> None:
             )
             print(result.stdout, end='')
             if result.returncode != expected:
+                _emit_failure_annotation(
+                    (
+                        f'Command exited {result.returncode}, expected {expected}: '
+                        f'{args[:4]}\n{result.stdout}'
+                    ),
+                    redactions=(
+                        str(root),
+                        str(bundle_root.resolve()),
+                        str(Path(__file__).resolve().parents[1]),
+                        str(Path.home()),
+                        str(Path(sys.prefix).resolve()),
+                    ),
+                )
                 raise RuntimeError(
                     f'Consumer command exited {result.returncode}, expected {expected}: {args[:4]}'
                 )
