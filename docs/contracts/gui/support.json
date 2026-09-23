@@ -9,12 +9,12 @@
   },
   "frontend": "gui",
   "distribution": "metor-ui-gui",
-  "python_tested": "local quality/artifact acceptance on 3.11.4; native renderer evidence on 3.11.15",
+  "python_tested": "final hosted quality acceptance on Python 3.11 and 3.13 for Linux x86_64 and Windows x86_64; release-bundle acceptance on Python 3.11",
   "renderer": "Kivy 2.3.1 / SDL2 / OpenGL",
   "continuous_integration": {
     "declared_matrix": "Linux and Windows with Python 3.11 and 3.13",
-    "current_source_status": "run 35838220430 completed red on the prior candidate; the correction tree passes local Linux 3.11 software gates, four bundles, installed consumers, and offline installers, while its fresh hosted Linux/Windows 3.11/3.13 rerun remains pending",
-    "release_bundle_lanes": "Python 3.11 on each native operating system"
+    "current_source_status": "run 35873740981 completed green on exact SHA 3fd15f631fa50f760f8b0f05a36d4825b21adf3d and tree 4b3d5333cdaedf27ceeb60703de6110079b34305 across Linux/Windows with Python 3.11/3.13; the Python 3.11 lanes also passed fresh bundles and installed consumers, including real native Windows offline installers; separate support-level native lifecycle, media, and installed full-GUI duplex acceptance remains pending",
+    "release_bundle_lanes": "Python 3.11 on each native operating system; final run 35873740981 passed"
   },
   "accessibility": {
     "bridge": "AccessKit 0.7.0; GUI-owned bounded projection and synchronous privacy fence",
@@ -52,7 +52,7 @@
     "historical_bounded_duplex_capture_playback_2026_09_20": "tested on the recorded route; captured bytes discarded",
     "historical_gui_ptt_2026_09_20": "tested from then-current lifecycle installed packages with synthetic focused Space input, actual capture/review and temporary encrypted Core; 30720 bytes / 960 ms",
     "current_source_full_gui_duplex_probe": "generic explicit-route harness implemented with synthetic Core-backed playback during actual capture plus captured-review playback; native rerun unavailable in the current WSL environment",
-    "canonical_installer": "tested offline with official full CPython 3.11.9 NuGet runtime; 2026-09-15",
+    "canonical_installer": "all four fresh offline bundle installers passed the generic native Windows gate in final run 35873740981; 2026-09-23",
     "coinstall_uninstall": "tested both UI removal orders; 2026-09-15",
     "speaker_aec": "unsupported",
     "current_validation_runtime": "official CPython 3.11.9 NuGet package with pip and venv; temporary isolated installation",
@@ -96,7 +96,7 @@
   "host_shutdown": "typed fixed-port request occurs only after local single-runtime checks plus Core preparation, or exact safe purge terminal state; the port owns atomic exclusive-host enforcement; no OS adapter registered or real shutdown tested",
   "purge": "bounded physical-input composition, scoped grant, exact initiation and safe-terminal shutdown gating tested; no production hardware driver or real destruction/shutdown tested",
   "pause_checkpoint": "2026-09-15: retained root source has targeted native/static validation; installed artifact and audio-route evidence predates final RootPanel/RootRow changes",
-  "current_checkpoint": "2026-09-23: run 35838220430 completed red on exact prior SHA 1fcb246; Linux 3.11 stopped at installed Session Auth startup and both Windows lanes stopped in quality. The correction tree passes normal and Win32 static gates, 865 tests with eight platform-native skips, four fresh Linux 3.11 bundles, isolated installed consumers, the missing-installation negative, both installed managed-child provenance paths, and every offline ZIP installer. Its fresh hosted four-lane rerun remains pending. Real installed Windows WTS/power media, real Linux lock/suspend media, a separately authorized release dry run, and installed full-GUI duplex on an explicitly confirmed capability-compatible audio route remain unavailable; side-effect-free enumeration found zero native audio endpoints here. Historical route and host observations retain only their dated scope and are not active requirements.",
+  "current_checkpoint": "2026-09-23: final run 35873740981 passed on exact SHA 3fd15f631fa50f760f8b0f05a36d4825b21adf3d and tree 4b3d5333cdaedf27ceeb60703de6110079b34305 in all four Linux/Windows and Python 3.11/3.13 lanes. The same 866-test discovery passed without failures or errors, with eight Linux and 15 Windows platform-qualified skips. Python 3.11 additionally passed fresh Base, Terminal, SDK, and GUI bundles, isolated installed consumers, the missing-installation negative, both installed managed-child provenance paths, and native offline installers; Windows exercised the real cmd.exe paths. C01, C02, C04, and C05 are closed at their assigned software/package scope, while C03 remains accepted and was not reopened. Tests and active media gates are generic and contain no headset brand, GPU, developer-machine specification, or route-specific device requirement. Real installed Windows WTS/power media, real Linux lock/suspend media, a separately authorized release dry run, and installed full-GUI duplex on an explicitly confirmed capability-compatible audio route remain unavailable; historical route and host observations retain only their dated scope and are not active requirements.",
   "acceptance_at_claimed_support_level": false,
   "physical_appliance_acceptance": "not applicable until a production adapter is registered and claimed"
 }

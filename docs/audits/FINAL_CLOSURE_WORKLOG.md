@@ -5,13 +5,13 @@ reports remain evidence and are not competing implementation backlogs.
 
 ## Current completion-correction status
 
-| Package | State                                      | Commit                | Tests                                                                                                                            | Result                                                                            | Next step                                                           |
-| ------- | ------------------------------------------ | --------------------- | -------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| C01     | corrected locally; hosted rerun pending    | correction checkpoint | bounded child diagnostics; missing-installation isolation; four fresh bundles; installed locked/session-auth starts and real IPC | Local PASS; run `35838220430` exposed the unprovisioned external Tor prerequisite | Run the exact correction tree in all four hosted lanes              |
-| C02     | corrected locally; native rerun pending    | correction checkpoint | non-mutating existing-parent regression; credential lifecycle; full 865-test local discovery                                     | Local/POSIX PASS; exact Windows replacement denial path pending rerun             | Execute the retained native ACL lifecycle on Windows 3.11 and 3.13  |
-| C03     | hosted native exercised; final run pending | `c6b9ab9`             | 113 focused lock/process/configuration/GUI/documentation/storage tests plus 83 subtests; normal and `win32` mypy                 | Prior DACL/config/spec annotations absent from both fresh Windows lanes           | Retain the same native branches in the final matrix                 |
-| C04     | corrected locally; native rerun pending    | correction checkpoint | strict verifier argv capture; 42 release/installer tests; four native methods skip on Linux; all four Linux ZIP installers       | Linux contracts/artifacts PASS; native `cmd.exe` branches pending rerun           | Run real `cmd.exe`, then all four fresh Windows bundle installers   |
-| C05     | locally verified; final hosted run pending | correction checkpoint | 865 discovered tests; static/type/generated/boundary gates; measured GUI security and Voice IPC phases; four bundles/installers  | Local PASS with 8 platform skips; final hosted/native result pending              | Run the final four-lane matrix and record genuine external blockers |
+| Package | State                               | Commit    | Tests                                                                                                                              | Result                                                                                   | Next step                                                              |
+| ------- | ----------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| C01     | closed for the assigned scope       | `3fd15f6` | isolated installed module launch; missing-installation negative; locked/session-auth child provenance and real IPC                 | PASS in final Linux and Windows Python 3.11 installed-consumer lanes                     | None inside C01; retain the generic installed-consumer gate            |
+| C02     | closed for the assigned scope       | `3fd15f6` | non-mutating existing-parent replacement denial; credential lifecycle; native Windows ACL, reparse, owner, and cleanup regressions | PASS in final Windows Python 3.11 and 3.13 quality lanes                                 | None inside C02; retain both native Windows lanes                      |
+| C03     | accepted; deliberately not reopened | `3fd15f6` | retained native lock/process/configuration/specification-byte branches in the complete final suite                                 | PASS in all four final lanes; immutable specification hashes remain exact                | None; historical C03 audits remain evidence only                       |
+| C04     | closed for the assigned scope       | `3fd15f6` | real `cmd.exe` branch harness plus all four fresh native offline ZIP bundle installers                                             | PASS in final Windows Python 3.11 quality and native-installer steps                     | None inside C04; release publication remains separately unauthorized   |
+| C05     | closed for the assigned scope       | `3fd15f6` | 866-test discovery; static/type/generated/boundary gates; installed consumers; GUI/security/stream fixtures                        | Final run `35873740981` PASS on Linux/Windows with Python 3.11/3.13; no retries accepted | Keep separate lifecycle/media/full-duplex/release gaps explicitly open |
 
 The task's verified starting evidence records run `35756273840`, attempt 1, at
 `3726de443716dbdd0a2aa2316e86a0acb02015c3`: Linux 3.11 job
@@ -84,15 +84,50 @@ now uses that existing default and records Begin/Append phases without retries.
 No production timeout changed. On local Linux, the exact focused cases pass
 with a 2.211-second PIN worker and 0.014/0.010-second Begin/Append phases.
 
-The complete correction tree locally passes 865 tests in 719.621 seconds with
-zero failures/errors and eight platform-native skips. Ruff, format, normal and
-Win32 strict mypy over 466 sources, distribution boundaries, versioning, and
-two-pass generated-reference freshness pass. Four fresh Linux Python 3.11
-bundles pass installed SDK/Base/Terminal/GUI consumption, the missing-module
-negative, both managed-child provenance paths, and all four offline ZIP
-installers. This remains local evidence: the fresh hosted four-lane correction
-run and native Windows branches are pending, and no native lifecycle/media,
-audio-route, or release-publication claim is inferred.
+Before the final hosted closure, the correction tree locally passed 865 tests
+in 719.621 seconds with zero failures/errors and eight platform-native skips.
+Ruff, format, normal and Win32 strict mypy over 466 sources, distribution
+boundaries, versioning, two-pass generated-reference freshness, four fresh
+Linux Python 3.11 bundles, installed SDK/Base/Terminal/GUI consumption, the
+missing-module negative, both managed-child provenance paths, and all four
+offline ZIP installers passed. That local checkpoint is historical evidence
+and is superseded for current hosted status by the exact final run below; it
+never implied native lifecycle/media, audio-route, or release-publication
+acceptance.
+
+## Final C01-C05 acceptance
+
+Run `35873740981`, attempt 1, completed successfully on exact SHA
+`3fd15f631fa50f760f8b0f05a36d4825b21adf3d` and tree
+`4b3d5333cdaedf27ceeb60703de6110079b34305`. Ubuntu Python 3.11 job
+`107224189367`, Ubuntu Python 3.13 job `107224189135`, Windows Python 3.11
+job `107224189059`, and Windows Python 3.13 job `107224189105` all completed
+with `success`. Each lane ran the same 866-test discovery with zero failures or
+errors; the platform-qualified totals retain eight Linux skips and 15 Windows
+skips. Both Windows versions therefore executed the retained native C02/C03/C04
+branches. The Python 3.11 release lanes additionally passed wheel validation,
+version/reference freshness, generic native Tor provisioning, all four fresh
+offline bundles, and installed consumers. Windows Python 3.11 also passed all
+four real native offline ZIP installers; Linux Python 3.11 passed its native
+installer, GUI, and bounded stream stages.
+
+No failing run was accepted by retry. Runs `35854037705` through
+`35871126953` progressively exposed an absent external Tor prerequisite,
+Windows short/long path aliases, Windows venv-to-base-interpreter handoff, and
+three acceptance-fixture waits shorter than the existing product IPC contract.
+Each cause received a bounded generic correction before a new exact-tree run.
+The final corrections accept only filesystem-identical environment
+interpreters, retain exact daemon argv/profile/installation ownership checks,
+and use the existing 15-second IPC contract for real GUI producer fixture
+synchronization. They do not encode a headset brand, GPU, developer-machine
+specification, or a route-specific device requirement, and no production
+timeout was increased.
+
+C01, C02, C04, and C05 are closed at the assignment's software/package scope;
+C03 remains accepted without reopening. This does not convert the separately
+declared native lifecycle/media, installed full-GUI duplex, physical-adapter,
+or release-publication gaps into passes. Those remain explicitly outside this
+closure result and continue to keep support-level acceptance false.
 
 C01 changes only managed child module selection and its exact process-role
 allowlist. The launch vector preserves the uncanonicalized `sys.executable`
