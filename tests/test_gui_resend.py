@@ -23,6 +23,9 @@ from metor.ui.gui.runtime.transcript import TranscriptItem
 from metor.ui.gui.state.media import PlaybackTarget
 
 
+_GUI_OPERATION_TIMEOUT_SEC: float = Constants.DEFAULT_IPC_TIMEOUT
+
+
 class ResendCoreTests(unittest.TestCase):
     """Uses encrypted temporary profiles; no peer, microphone, or owner profile is touched."""
 
@@ -89,8 +92,14 @@ class ResendCoreTests(unittest.TestCase):
         """
         for _ in range(12):
             if self.gui._worker is not None:
-                self.gui._worker.join(5)
-                self.assertFalse(self.gui._worker.is_alive())
+                self.gui._worker.join(_GUI_OPERATION_TIMEOUT_SEC)
+                self.assertFalse(
+                    self.gui._worker.is_alive(),
+                    (
+                        'GUI operation exceeded its normal IPC bound: '
+                        f'{_GUI_OPERATION_TIMEOUT_SEC}s'
+                    ),
+                )
             self.gui.poll()
             if not self.gui.state.busy and not self.gui.resend.pending:
                 break
