@@ -273,7 +273,7 @@ def run_acceptance(bundle_root: Path) -> None:
                 _emit_failure_annotation(
                     (
                         f'Command exited {result.returncode}, expected {expected}: '
-                        f'{args[:4]}\n{result.stdout}'
+                        f'argv_count={len(args)}\n{result.stdout}'
                     ),
                     redactions=(
                         str(root),

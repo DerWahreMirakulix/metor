@@ -23,6 +23,21 @@ _MANAGED_START_TIMEOUT_SEC: float = 45.0
 _MANAGED_DIAGNOSTIC_MAX_BYTES: int = 4096
 
 
+def _same_filesystem_object(left: Path, right: Path) -> bool:
+    """Compares existing paths by identity across aliases and short names."""
+    try:
+        return left.samefile(right)
+    except OSError:
+        return left.resolve() == right.resolve()
+
+
+def _is_within_filesystem_root(path: Path, root: Path) -> bool:
+    """Checks containment by directory identity rather than path spelling."""
+    return any(
+        _same_filesystem_object(candidate, root) for candidate in (path, *path.parents)
+    )
+
+
 def _sanitized_child_output(payload: bytes, redactions: tuple[str, ...]) -> str:
     """Decodes bounded child output and removes known acceptance-only values.
 
@@ -222,6 +237,7 @@ def _run_installed_start(
                                 session_auth_password or '',
                                 str(checkout),
                                 str(environment_root),
+                                str(executable.parents[1]),
                                 str(working_directory),
                                 str(Path.home()),
                             ),
@@ -256,12 +272,14 @@ def _run_installed_start(
             raise AssertionError(identity)
         if identity['installation_root'] != expected_installation:
             raise AssertionError(identity)
-        if environment_root not in Path(expected_installation).resolve().parents:
+        if not _is_within_filesystem_root(
+            Path(expected_installation), environment_root
+        ):
             raise AssertionError(expected_installation)
 
         child = psutil.Process(pid)
         command = child.cmdline()
-        if not command or Path(command[0]) != executable:
+        if not command or not _same_filesystem_object(Path(command[0]), executable):
             raise AssertionError(command)
         if command[1:4] != ['-I', '-m', 'metor']:
             raise AssertionError(command)
@@ -274,9 +292,9 @@ def _run_installed_start(
         ):
             raise AssertionError(command)
         child_directory = Path(child.cwd()).resolve()
-        if child_directory != working_directory.resolve():
+        if not _same_filesystem_object(child_directory, working_directory):
             raise AssertionError(child_directory)
-        if checkout in child_directory.parents or child_directory == checkout:
+        if _is_within_filesystem_root(child_directory, checkout):
             raise AssertionError(f'child cwd remained in checkout: {child_directory}')
 
         print(
@@ -334,7 +352,10 @@ def run(data_parent: Path, checkout: Path) -> None:
         raise AssertionError(f'loaded Metor from checkout: {module_path}')
     if environment_root not in module_path.parents:
         raise AssertionError(f'Metor is outside selected environment: {module_path}')
-    if environment_root not in executable.parents:
+    expected_executable = environment_root / (
+        'Scripts/python.exe' if os.name == 'nt' else 'bin/python'
+    )
+    if not _same_filesystem_object(executable, expected_executable):
         raise AssertionError(
             f'interpreter is outside selected environment: {executable}'
         )
