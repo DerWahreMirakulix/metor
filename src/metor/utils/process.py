@@ -24,6 +24,14 @@ from metor.utils.constants import Constants
 logger = logging.getLogger(__name__)
 
 
+def _same_file_object(left: Path, right: Path) -> bool:
+    """Compares existing files by identity across native path aliases."""
+    try:
+        return left.samefile(right)
+    except (OSError, ValueError):
+        return False
+
+
 def _current_posix_uid() -> int:
     """Returns the POSIX owner without assuming that Windows exports getuid.
 
@@ -301,7 +309,9 @@ class ProcessManager:
             identity.profile_name != profile_name
             or identity.role != Constants.PROCESS_ROLE_DAEMON
             or identity.installation_root != str(ProcessManager._installation_root())
-            or identity.executable != str(Path(sys.executable).resolve())
+            or not _same_file_object(
+                Path(identity.executable), Path(sys.executable).resolve()
+            )
         ):
             return None
         try:
@@ -378,7 +388,7 @@ class ProcessManager:
             return False
         except OSError:
             return False
-        return str(executable) == identity.executable
+        return _same_file_object(executable, Path(identity.executable))
 
     @staticmethod
     def _is_metor_daemon_process(
@@ -418,16 +428,17 @@ class ProcessManager:
             argv_zero: Path = Path(cmdline[0]).resolve()
         except OSError:
             return False
+        interpreter_selected: bool = _same_file_object(argv_zero, current_interpreter)
 
         arguments: list[str]
-        if argv_zero == current_interpreter and cmdline[1:4] == [
+        if interpreter_selected and cmdline[1:4] == [
             '-I',
             '-m',
             'metor',
         ]:
             arguments = cmdline[4:]
         elif (
-            argv_zero == current_interpreter
+            interpreter_selected
             and len(cmdline) >= 2
             and Path(cmdline[1]).resolve() == expected_launcher
         ):
@@ -440,7 +451,7 @@ class ProcessManager:
         if identity is not None and (
             identity.role != Constants.PROCESS_ROLE_DAEMON
             or identity.profile_name != profile_name
-            or identity.executable != str(current_interpreter)
+            or not _same_file_object(Path(identity.executable), current_interpreter)
             or identity.installation_root != str(ProcessManager._installation_root())
         ):
             return False

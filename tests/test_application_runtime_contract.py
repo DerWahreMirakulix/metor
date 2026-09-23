@@ -251,6 +251,62 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
                     ProcessManager._is_metor_daemon_process(process, 'alpha')
                 )
 
+    def test_managed_daemon_accepts_same_interpreter_through_path_alias(self) -> None:
+        """A native alias may spell the same interpreter differently."""
+        with TemporaryDirectory() as temp_dir:
+            primary = Path(temp_dir) / 'python-primary.exe'
+            alias = Path(temp_dir) / 'python-alias.exe'
+            foreign = Path(temp_dir) / 'python-foreign.exe'
+            primary.touch()
+            alias.hardlink_to(primary)
+            foreign.touch()
+
+            identity = Mock()
+            identity.pid = 12345
+            identity.create_time = 20.0
+            identity.profile_name = 'alpha'
+            identity.role = Constants.PROCESS_ROLE_DAEMON
+            identity.executable = str(alias)
+            identity.installation_root = str(ProcessManager._installation_root())
+
+            process = Mock()
+            process.create_time.return_value = 20.0
+            process.cmdline.return_value = [
+                str(alias),
+                '-I',
+                '-m',
+                'metor',
+                '-p',
+                'alpha',
+                'daemon',
+                '--non-interactive',
+                '--locked',
+            ]
+            process.is_running.return_value = True
+            process.status.return_value = psutil.STATUS_RUNNING
+
+            with (
+                patch('metor.utils.process.sys.executable', str(primary)),
+                patch.object(
+                    ProcessManager, '_read_process_identity', return_value=identity
+                ),
+                patch('metor.utils.process.psutil.Process', return_value=process),
+                patch.object(ProcessManager, '_same_os_owner', return_value=True),
+            ):
+                self.assertTrue(
+                    ProcessManager.is_managed_process_running(
+                        Path(temp_dir) / Constants.DAEMON_PID_FILE,
+                        'alpha',
+                    )
+                )
+                process.cmdline.return_value[0] = str(foreign)
+                self.assertIsNone(
+                    ProcessManager.is_managed_process_running(
+                        Path(temp_dir) / Constants.DAEMON_PID_FILE,
+                        'alpha',
+                    )
+                )
+
     def test_process_identity_rejects_nonfinite_foreign_and_exposed_metadata(
         self,
     ) -> None:
