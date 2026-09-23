@@ -724,7 +724,8 @@ class ReleaseContractTests(unittest.TestCase):
 
         self.assertIn('verify_bundle.py', script)
         self.assertIn('--target-only', script)
-        self.assertIn(f'py -{target} -m venv', script)
+        self.assertIn(f'call py -{target} -m venv', script)
+        self.assertIn('call python -m venv', script)
         self.assertIn('call :try_py', script)
         self.assertIn('call :try_python', script)
         self.assertIn('if errorlevel 1', script)
@@ -738,6 +739,7 @@ class ReleaseContractTests(unittest.TestCase):
         )
         self.assertIn('--no-index --find-links "%SCRIPT_DIR%wheelhouse" metor', script)
         self.assertIn('Scripts\\metor.exe --help', script)
+        self.assertTrue(script.rstrip().endswith('endlocal\nexit /b 0'))
 
     def test_bundle_verifier_rejects_tampering_missing_files_and_wrong_target(
         self,

@@ -258,17 +258,17 @@ def build_install_windows_script(package_name: str = 'metor') -> str:
         goto wrong_python
 
         :try_py
-        py -{sys.version_info.major}.{sys.version_info.minor} "%VERIFY%" "%SCRIPT_DIR%" --target-only >nul 2>nul
+        call py -{sys.version_info.major}.{sys.version_info.minor} "%VERIFY%" "%SCRIPT_DIR%" --target-only >nul 2>nul
         if errorlevel 1 exit /b 1
-        py -{sys.version_info.major}.{sys.version_info.minor} "%VERIFY%" "%SCRIPT_DIR%" || exit /b 1
-        py -{sys.version_info.major}.{sys.version_info.minor} -m venv "%VENV_DIR%" || exit /b 1
+        call py -{sys.version_info.major}.{sys.version_info.minor} "%VERIFY%" "%SCRIPT_DIR%" || exit /b 1
+        call py -{sys.version_info.major}.{sys.version_info.minor} -m venv "%VENV_DIR%" || exit /b 1
         exit /b 0
 
         :try_python
-        python "%VERIFY%" "%SCRIPT_DIR%" --target-only >nul 2>nul
+        call python "%VERIFY%" "%SCRIPT_DIR%" --target-only >nul 2>nul
         if errorlevel 1 exit /b 1
-        python "%VERIFY%" "%SCRIPT_DIR%" || exit /b 1
-        python -m venv "%VENV_DIR%" || exit /b 1
+        call python "%VERIFY%" "%SCRIPT_DIR%" || exit /b 1
+        call python -m venv "%VENV_DIR%" || exit /b 1
         exit /b 0
 
         :wrong_python
@@ -285,6 +285,7 @@ def build_install_windows_script(package_name: str = 'metor') -> str:
         echo Metor installed in "%VENV_DIR%"
         {verification_line}
         endlocal
+        exit /b 0
         """
     )
 

@@ -10,7 +10,7 @@ reports remain evidence and are not competing implementation backlogs.
 | C01     | hosted follow-up required                  | `8312941`                   | 5 focused launch/detection tests; 57 daemon/runtime/IPC neighbors; local four-bundle installed-consumer validation with two real managed starts | Local PASS; hosted Linux 3.11 installed child failed to publish IPC readiness in run `35827552290` | Reproduce and close the installed-start failure before C05               |
 | C02     | native verified                            | `61c3b67`                   | 76 focused tests plus 49 subtests; full 861-test local discovery; real Windows 3.11/3.13 quality execution                                      | PASS at C02 scope; both Windows lanes reached only later C03 failures                              | Retain C02 native ACL tests in every later matrix                        |
 | C03     | local candidate; native acceptance pending | C03 candidate (this commit) | 113 focused lock/process/configuration/GUI/documentation/storage tests plus 83 subtests; normal and `win32` mypy                                | Local PASS with 4 native skips; exact Windows fixtures prepared                                    | Run Windows 3.11/3.13 and verify fresh checkout spec bytes               |
-| C04     | open                                       | —                           | —                                                                                                                                               | Four native batch branch failures supplied on both Windows lanes                                   | Diagnose real `cmd.exe` control flow before changing installer semantics |
+| C04     | local candidate; native acceptance pending | C04 candidate (this commit) | 42 release/installer tests; four native methods skip on Linux; Ruff, format, and strict mypy                                                     | Linux contracts PASS; two concrete batch return-flow defects corrected                             | Run real `cmd.exe`, then all four fresh Windows bundle installers         |
 | C05     | open                                       | —                           | —                                                                                                                                               | Hosted baseline run `35756273840`, attempt 1, applies only to `3726de4`                            | Reverify the exact corrected tree and retain external native blockers    |
 
 The task's verified starting evidence records run `35756273840`, attempt 1, at
@@ -152,6 +152,30 @@ focused C03 set passes locally with 113 tests, four native skips, and 83
 subtests; Ruff, format, normal strict mypy, and `--platform win32` strict mypy
 pass for the changed surface. Native acceptance remains pending until a fresh
 Windows checkout executes these positive and negative branches.
+
+C04 establishes two independent native batch control-flow causes. The
+controlled `py.cmd` and `python.cmd` front doors were invoked from
+`install.cmd` without `call`; native `cmd.exe` therefore transferred execution
+to each shim instead of returning to the installer after its status code. That
+explains the observed immediate exit with no intended fallback or diagnostic.
+Every interpreter probe, complete checksum verification, and environment
+creation invocation now uses `call`, which preserves real executable behavior
+while also requiring a controlled batch shim to return normally. Separately,
+the successful main path ended with `endlocal` immediately before the helper
+labels and could fall through into `:try_py`; it now terminates explicitly with
+`exit /b 0`.
+
+The branch harness still uses real `cmd.exe`, paths containing spaces and `!`,
+and native `.cmd` front doors. Every assertion failure now retains the exact
+generated batch, working directory, argv, relevant environment subset,
+stdout/stderr, and command trace. The existing-environment branch continues to
+use the host's real standard Windows venv executable and proves the sentinel is
+preserved for both compatible and incompatible target outcomes. Linux release
+contracts, installer source checks, Ruff, format, and strict mypy pass; the four
+native branch methods remain deliberately skipped until the hosted Windows
+lanes execute them. Full fresh Windows bundle extraction and installer
+validation remains part of the Python 3.11 matrix lane and is not inferred from
+these local checks.
 
 ## Current targeted follow-up status
 

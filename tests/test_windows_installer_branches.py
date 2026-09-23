@@ -5,10 +5,42 @@ from pathlib import Path
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
+from typing import NamedTuple
 import unittest
 import venv
 
 from scripts.release.bundle import build_install_windows_script
+
+
+class InstallerEvidence(NamedTuple):
+    """Captured native batch execution evidence for assertion diagnostics."""
+
+    result: subprocess.CompletedProcess[str]
+    trace: tuple[str, ...]
+    batch: str
+    cwd: str
+    argv: tuple[str, ...]
+    environment: tuple[tuple[str, str], ...]
+
+    def diagnostic(self) -> str:
+        """Formats all evidence needed to reproduce a failed native branch.
+
+        Args:
+            None
+
+        Returns:
+            str: Complete non-secret process and generated-batch evidence.
+        """
+        return (
+            f'cwd={self.cwd!r}\n'
+            f'argv={self.argv!r}\n'
+            f'environment={dict(self.environment)!r}\n'
+            f'returncode={self.result.returncode}\n'
+            f'trace={self.trace!r}\n'
+            f'stdout={self.result.stdout!r}\n'
+            f'stderr={self.result.stderr!r}\n'
+            f'install.cmd:\n{self.batch}'
+        )
 
 
 @unittest.skipUnless(os.name == 'nt', 'native Windows cmd.exe required')
@@ -45,21 +77,22 @@ class WindowsInstallerBranchTests(unittest.TestCase):
 
     def _selection_case(
         self, py_target: int | None, python_target: int | None
-    ) -> tuple[subprocess.CompletedProcess[str], tuple[str, ...]]:
+    ) -> InstallerEvidence:
         """Runs one exact generated installer through controlled cmd resolution.
 
         Args:
             py_target: ``py`` probe status, or None when the launcher is absent.
             python_target: ``python`` probe status, or None when absent.
         Returns:
-            tuple: Completed cmd process and recorded command trace.
+            InstallerEvidence: Exact process inputs, outputs, batch, and command trace.
         """
         with TemporaryDirectory(prefix='metor installer ! ') as directory:
             bundle = Path(directory) / 'Bundle With Spaces !'
             commands = bundle / 'commands'
             commands.mkdir(parents=True)
             installer = bundle / 'install.cmd'
-            installer.write_text(build_install_windows_script(), encoding='utf-8')
+            batch = build_install_windows_script()
+            installer.write_text(batch, encoding='utf-8')
             (bundle / 'verify_bundle.py').write_text('', encoding='utf-8')
             log = bundle / 'selection.log'
             if py_target is not None:
@@ -88,8 +121,9 @@ class WindowsInstallerBranchTests(unittest.TestCase):
                     'METOR_PYTHON_TARGET': str(python_target or 0),
                 }
             )
+            argv = (environment['COMSPEC'], '/d', '/c', 'call install.cmd')
             result = subprocess.run(
-                [environment['COMSPEC'], '/d', '/c', 'call install.cmd'],
+                argv,
                 cwd=bundle,
                 env=environment,
                 capture_output=True,
@@ -101,17 +135,33 @@ class WindowsInstallerBranchTests(unittest.TestCase):
                 if log.exists()
                 else ()
             )
-            return result, lines
+            evidence_environment = tuple(
+                (name, environment[name])
+                for name in (
+                    'COMSPEC',
+                    'PATH',
+                    'PATHEXT',
+                    'SystemRoot',
+                    'METOR_TEST_LOG',
+                    'METOR_PY_TARGET',
+                    'METOR_PYTHON_TARGET',
+                )
+            )
+            return InstallerEvidence(
+                result=result,
+                trace=lines,
+                batch=batch,
+                cwd=str(bundle),
+                argv=argv,
+                environment=evidence_environment,
+            )
 
     def test_launcher_failure_falls_back_to_matching_python(self) -> None:
         """A present but unsuitable py launcher cannot mask a suitable python."""
-        result, lines = self._selection_case(1, 0)
+        evidence = self._selection_case(1, 0)
+        result, lines = evidence.result, evidence.trace
         self.assertNotEqual(result.returncode, 0)
-        diagnostics = (
-            f'returncode={result.returncode}; args={result.args!r}; lines={lines!r}\n'
-            + result.stdout
-            + result.stderr
-        )
+        diagnostics = evidence.diagnostic()
         self.assertTrue(
             any('--target-only' in line for line in lines if line.startswith('py ')),
             diagnostics,
@@ -133,27 +183,41 @@ class WindowsInstallerBranchTests(unittest.TestCase):
 
     def test_matching_launcher_wins_and_missing_launcher_uses_python(self) -> None:
         """Both supported selection orders reach only the matching interpreter."""
-        _result, launcher_lines = self._selection_case(0, 0)
+        launcher = self._selection_case(0, 0)
+        _result, launcher_lines = launcher.result, launcher.trace
         self.assertTrue(
             any(' -m venv ' in f' {line} ' for line in launcher_lines),
-            f'returncode={_result.returncode}; output={_result.stdout + _result.stderr!r}; '
-            f'lines={launcher_lines!r}',
+            launcher.diagnostic(),
         )
-        self.assertFalse(any(line.startswith('python ') for line in launcher_lines))
-        _result, python_lines = self._selection_case(None, 0)
-        self.assertTrue(any(line.startswith('python ') for line in python_lines))
-        self.assertTrue(any(' -m venv ' in f' {line} ' for line in python_lines))
+        self.assertFalse(
+            any(line.startswith('python ') for line in launcher_lines),
+            launcher.diagnostic(),
+        )
+        python = self._selection_case(None, 0)
+        _result, python_lines = python.result, python.trace
+        self.assertTrue(
+            any(line.startswith('python ') for line in python_lines),
+            python.diagnostic(),
+        )
+        self.assertTrue(
+            any(' -m venv ' in f' {line} ' for line in python_lines),
+            python.diagnostic(),
+        )
 
     def test_no_matching_interpreter_fails_without_creating_environment(self) -> None:
         """Missing or unsuitable candidates fail closed before the venv mutation."""
-        result, lines = self._selection_case(1, 1)
+        evidence = self._selection_case(1, 1)
+        result, lines = evidence.result, evidence.trace
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(
             'No interpreter matches this bundle target.',
             result.stdout + result.stderr,
-            f'returncode={result.returncode}; lines={lines!r}',
+            evidence.diagnostic(),
         )
-        self.assertFalse(any(' -m venv ' in f' {line} ' for line in lines))
+        self.assertFalse(
+            any(' -m venv ' in f' {line} ' for line in lines),
+            evidence.diagnostic(),
+        )
 
     def test_existing_environment_is_preserved_for_both_target_outcomes(self) -> None:
         """A complete existing venv is reused only after its same interpreter verifies it."""
@@ -164,9 +228,8 @@ class WindowsInstallerBranchTests(unittest.TestCase):
             ):
                 bundle = Path(directory) / 'Existing Venv With Spaces !'
                 bundle.mkdir()
-                (bundle / 'install.cmd').write_text(
-                    build_install_windows_script(), encoding='utf-8'
-                )
+                batch = build_install_windows_script()
+                (bundle / 'install.cmd').write_text(batch, encoding='utf-8')
                 (bundle / 'verify_bundle.py').write_text(
                     'import os, sys\n'
                     "if '--target-only' in sys.argv:\n"
@@ -192,25 +255,52 @@ class WindowsInstallerBranchTests(unittest.TestCase):
                 sentinel.write_text('owned\n', encoding='utf-8')
                 environment = dict(os.environ)
                 environment['METOR_EXISTING_TARGET'] = str(target_status)
+                argv = (
+                    environment.get('COMSPEC', 'C:\\Windows\\System32\\cmd.exe'),
+                    '/d',
+                    '/c',
+                    'call install.cmd',
+                )
                 result = subprocess.run(
-                    [
-                        environment.get('COMSPEC', 'C:\\Windows\\System32\\cmd.exe'),
-                        '/d',
-                        '/c',
-                        'call install.cmd',
-                    ],
+                    argv,
                     cwd=bundle,
                     env=environment,
                     capture_output=True,
                     text=True,
                     timeout=60,
                 )
-                self.assertNotEqual(result.returncode, 0)
-                self.assertTrue(sentinel.is_file())
+                evidence = InstallerEvidence(
+                    result=result,
+                    trace=(),
+                    batch=batch,
+                    cwd=str(bundle),
+                    argv=argv,
+                    environment=(
+                        ('COMSPEC', argv[0]),
+                        ('PATH', environment.get('PATH', '')),
+                        ('PATHEXT', environment.get('PATHEXT', '')),
+                        ('SystemRoot', environment.get('SystemRoot', '')),
+                        ('METOR_EXISTING_TARGET', str(target_status)),
+                    ),
+                )
+                self.assertNotEqual(
+                    result.returncode,
+                    0,
+                    evidence.diagnostic(),
+                )
+                self.assertTrue(sentinel.is_file(), evidence.diagnostic())
                 if target_status:
-                    self.assertIn('incompatible or incomplete', result.stdout)
+                    self.assertIn(
+                        'incompatible or incomplete',
+                        result.stdout,
+                        evidence.diagnostic(),
+                    )
                 else:
-                    self.assertNotIn('incompatible or incomplete', result.stdout)
+                    self.assertNotIn(
+                        'incompatible or incomplete',
+                        result.stdout,
+                        evidence.diagnostic(),
+                    )
 
 
 if __name__ == '__main__':
