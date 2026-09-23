@@ -7,7 +7,7 @@ reports remain evidence and are not competing implementation backlogs.
 
 | Package | State                                      | Commit                      | Tests                                                                                                                                           | Result                                                                                             | Next step                                                                |
 | ------- | ------------------------------------------ | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| C01     | hosted follow-up required                  | `8312941`                   | 5 focused launch/detection tests; 57 daemon/runtime/IPC neighbors; local four-bundle installed-consumer validation with two real managed starts | Local PASS; hosted Linux 3.11 installed child failed to publish IPC readiness in run `35827552290` | Reproduce and close the installed-start failure before C05               |
+| C01     | hosted harness follow-up candidate         | C01 follow-up (this commit) | 124 daemon/runtime/IPC/release neighbors; local four-bundle installed-consumer validation with two real managed starts                         | Local PASS; two hosted runs exhausted the former 15-second acceptance wait                         | Verify the bounded 45-second generic acceptance window in the next run   |
 | C02     | native verified                            | `61c3b67`                   | 76 focused tests plus 49 subtests; full 861-test local discovery; real Windows 3.11/3.13 quality execution                                      | PASS at C02 scope; both Windows lanes reached only later C03 failures                              | Retain C02 native ACL tests in every later matrix                        |
 | C03     | local candidate; native acceptance pending | C03 candidate (this commit) | 113 focused lock/process/configuration/GUI/documentation/storage tests plus 83 subtests; normal and `win32` mypy                                | Local PASS with 4 native skips; exact Windows fixtures prepared                                    | Run Windows 3.11/3.13 and verify fresh checkout spec bytes               |
 | C04     | local candidate; native acceptance pending | C04 candidate (this commit) | 42 release/installer tests; four native methods skip on Linux; Ruff, format, and strict mypy                                                     | Linux contracts PASS; two concrete batch return-flow defects corrected                             | Run real `cmd.exe`, then all four fresh Windows bundle installers         |
@@ -117,6 +117,29 @@ validation because the managed child did not publish IPC readiness. That is a
 fresh C01/C05 artifact-path defect, not C02 Windows evidence, and remains open.
 The Linux native GUI/pressure steps were downstream of that failed step and did
 not run.
+
+The same installed-start annotation recurred on exact C03 SHA
+`c6b9ab99912bfa3efb466a442b08f471ea8978f3` in run `35829828464`, Linux
+3.11 job `107079605858`. Its quality suite, wheels, version registry, and
+generated references all passed; the bundle step ran from `07:13:08` through
+`07:13:40` and again reported no IPC readiness at the first installed probe.
+The complete four-bundle acceptance succeeds locally on that exact product
+tree, including both real children and the shadow-package checks. The hosted
+acceptance was still using the ordinary 15-second interactive IPC default as
+its process-readiness deadline, even though it performs a cold installed start
+under a loaded validation runner.
+
+The installed acceptance now sets a named, bounded 45-second IPC start window
+on each disposable profile. This changes no production default or launch
+selection and remains independent of hardware brand, device inventory, or a
+developer workstation. It prints a scenario marker before each start and, on
+failure only, retains elapsed time plus presence and size of the non-secret PID
+and port state and the trusted PID result. It never records the startup secret.
+Locally, the complete isolated four-bundle sequence again passes with both
+managed starts and `ALL_ISOLATED_ARTIFACT_SCENARIOS_OK`; 124 neighboring
+runtime/IPC/release tests pass when local socket I/O is permitted. The next
+hosted Python 3.11 lane must still demonstrate that the expanded bounded window
+closes the runner-only failure.
 
 C03 makes fixtures exercise the existing production trust boundaries instead
 of depending on POSIX-shaped path modes. Valid GUI device configurations are

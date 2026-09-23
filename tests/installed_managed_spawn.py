@@ -17,6 +17,23 @@ from metor.utils import Constants, ProcessManager
 
 
 _PUBLIC_STARTUP_SENTINEL = 'public-installed-startup-sentinel'
+_MANAGED_START_TIMEOUT_SEC: float = 45.0
+
+
+def _runtime_file_evidence(path: Path) -> tuple[bool, int | None]:
+    """Returns stable, non-content evidence for one runtime state path.
+
+    Args:
+        path (Path): Runtime state path to inspect without following aliases.
+
+    Returns:
+        tuple[bool, int | None]: Presence and size from one metadata lookup.
+    """
+    try:
+        info = path.lstat()
+    except OSError:
+        return False, None
+    return True, info.st_size
 
 
 def _stop_owned_process(pid: int) -> None:
@@ -88,8 +105,24 @@ def _run_installed_start(
     previous_directory = Path.cwd()
     pid: int | None = None
     port: int | None = None
+    started_at: float = time.monotonic()
     try:
+        profile.config.set(SettingKey.IPC_TIMEOUT, _MANAGED_START_TIMEOUT_SEC)
         os.chdir(working_directory)
+        print(
+            'INSTALLED_MANAGED_SPAWN_START',
+            json.dumps(
+                {
+                    'profile': profile.profile_name,
+                    'start_locked': start_locked,
+                    'startup_secret': session_auth_password is not None,
+                    'timeout_seconds': _MANAGED_START_TIMEOUT_SEC,
+                    'working_directory': working_directory.name,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
         started = start_managed_daemon_process(
             profile,
             start_locked=start_locked,
@@ -100,7 +133,26 @@ def _run_installed_start(
                 f'shadow Metor package executed: {shadow_marker.read_text(encoding="utf-8")!r}'
             )
         if not started:
-            raise AssertionError('managed child did not publish IPC readiness')
+            pid_path: Path = profile.paths.get_daemon_pid_file()
+            port_path: Path = profile.paths.get_daemon_port_file()
+            pid_exists, pid_size = _runtime_file_evidence(pid_path)
+            port_exists, port_size = _runtime_file_evidence(port_path)
+            raise AssertionError(
+                'managed child did not publish IPC readiness: '
+                + json.dumps(
+                    {
+                        'elapsed_seconds': round(time.monotonic() - started_at, 3),
+                        'pid_file_exists': pid_exists,
+                        'pid_file_size': pid_size,
+                        'port_file_exists': port_exists,
+                        'port_file_size': port_size,
+                        'profile': profile.profile_name,
+                        'start_locked': start_locked,
+                        'trusted_pid': profile.get_daemon_pid(),
+                    },
+                    sort_keys=True,
+                )
+            )
         port = profile.get_daemon_port()
         pid = profile.get_daemon_pid()
         if port is None or pid is None:
