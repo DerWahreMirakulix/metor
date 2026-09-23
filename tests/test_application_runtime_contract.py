@@ -366,8 +366,10 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
         """
         with TemporaryDirectory() as temp_dir:
             profile_dir = Path(temp_dir) / 'alpha'
+            tor_executable = Path(temp_dir) / 'tor'
+            tor_executable.touch()
             proc = Mock()
-            proc.exe.return_value = '/usr/bin/tor'
+            proc.exe.return_value = str(tor_executable)
             pid_file = profile_dir / 'tor.pid'
             profile_dir.mkdir()
             _write_identity(
@@ -377,7 +379,7 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
                     20.0,
                     'alpha',
                     role=Constants.PROCESS_ROLE_TOR,
-                    executable=Path('/usr/bin/tor'),
+                    executable=tor_executable,
                 ),
             )
             identity = ProcessManager._read_process_identity(pid_file)

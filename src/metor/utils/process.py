@@ -25,7 +25,15 @@ logger = logging.getLogger(__name__)
 
 
 def _same_file_object(left: Path, right: Path) -> bool:
-    """Compares existing files by identity across native path aliases."""
+    """Compares existing files by identity across native path aliases.
+
+    Args:
+        left (Path): First existing file candidate.
+        right (Path): Second existing file candidate.
+
+    Returns:
+        bool: Whether both paths identify the same existing file object.
+    """
     try:
         return left.samefile(right)
     except (OSError, ValueError):
