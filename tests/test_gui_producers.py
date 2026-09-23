@@ -50,6 +50,9 @@ from metor.data.sql import SqlManager
 from metor.utils import Constants
 
 
+_PRODUCER_FIXTURE_TIMEOUT_SEC: float = Constants.DEFAULT_IPC_TIMEOUT
+
+
 class GuiProducerTests(unittest.TestCase):
     """Tests production persistence and authorization with no real peer or microphone."""
 
@@ -339,7 +342,7 @@ class GuiProducerTests(unittest.TestCase):
 
         def release_with_barrier(item: object) -> None:
             release_entered.set()
-            if not allow_release.wait(2):
+            if not allow_release.wait(_PRODUCER_FIXTURE_TIMEOUT_SEC):
                 raise TimeoutError('test release barrier timed out')
             original_release(item)
 
@@ -362,13 +365,13 @@ class GuiProducerTests(unittest.TestCase):
         ):
             worker = threading.Thread(target=recover)
             worker.start()
-            self.assertTrue(release_entered.wait(2))
-            self.assertTrue(first_observed.wait(2))
-            self.assertTrue(second_observed.wait(2))
+            self.assertTrue(release_entered.wait(_PRODUCER_FIXTURE_TIMEOUT_SEC))
+            self.assertTrue(first_observed.wait(_PRODUCER_FIXTURE_TIMEOUT_SEC))
+            self.assertTrue(second_observed.wait(_PRODUCER_FIXTURE_TIMEOUT_SEC))
             self.assertTrue(worker.is_alive())
             self.assertIsNotNone(self.repository.get('barrier'))
             allow_release.set()
-            worker.join(2)
+            worker.join(_PRODUCER_FIXTURE_TIMEOUT_SEC)
 
         self.assertFalse(worker.is_alive())
         self.assertEqual(request_error, [])
@@ -487,7 +490,7 @@ class GuiProducerTests(unittest.TestCase):
 
         with patch.object(service, 'disconnect', side_effect=observe):
             self.client.disconnect()
-            self.assertTrue(finished.wait(2))
+            self.assertTrue(finished.wait(_PRODUCER_FIXTURE_TIMEOUT_SEC))
         self.assertIsNone(self.repository.get('lost-client'))
         self.assertFalse(
             self.blobs.exists(payload['chunk_ids'][0], BlobLifecycle.TEMPORARY)
