@@ -90,4 +90,19 @@ runs:
       if: ${{ inputs.run-tests == 'true' }}
       shell: bash
       run: |
-        ${{ inputs.test-command }}
+        test_log="${RUNNER_TEMP}/metor-unittest.log"
+        set +e
+        ${{ inputs.test-command }} 2>&1 | tee "${test_log}"
+        test_status=${PIPESTATUS[0]}
+        set -e
+        if (( test_status != 0 )); then
+          test_summary="$(tail -c 4096 "${test_log}")"
+          test_summary="${test_summary//"${GITHUB_WORKSPACE}"/'<redacted>'}"
+          test_summary="${test_summary//"${RUNNER_TEMP}"/'<redacted>'}"
+          test_summary="${test_summary//"${HOME}"/'<redacted>'}"
+          test_summary="${test_summary//'%'/'%25'}"
+          test_summary="${test_summary//$'\r'/'%0D'}"
+          test_summary="${test_summary//$'\n'/'%0A'}"
+          echo "::error title=Python quality tests failed::${test_summary}"
+          exit "${test_status}"
+        fi
