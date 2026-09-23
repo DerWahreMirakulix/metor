@@ -40,6 +40,24 @@ def _same_file_object(left: Path, right: Path) -> bool:
         return False
 
 
+def _trusted_python_executables() -> tuple[Path, ...]:
+    """Returns the exact interpreter files allowed for this environment.
+
+    Args:
+        None
+
+    Returns:
+        tuple[Path, ...]: Active interpreter plus its Windows venv base runtime.
+    """
+    selected: list[Path] = [Path(sys.executable).resolve()]
+    base_executable = getattr(sys, '_base_executable', None)
+    if os.name == 'nt' and isinstance(base_executable, str) and base_executable:
+        base_path = Path(base_executable).resolve()
+        if not any(_same_file_object(base_path, current) for current in selected):
+            selected.append(base_path)
+    return tuple(selected)
+
+
 def _current_posix_uid() -> int:
     """Returns the POSIX owner without assuming that Windows exports getuid.
 
@@ -317,8 +335,9 @@ class ProcessManager:
             identity.profile_name != profile_name
             or identity.role != Constants.PROCESS_ROLE_DAEMON
             or identity.installation_root != str(ProcessManager._installation_root())
-            or not _same_file_object(
-                Path(identity.executable), Path(sys.executable).resolve()
+            or not any(
+                _same_file_object(Path(identity.executable), interpreter)
+                for interpreter in _trusted_python_executables()
             )
         ):
             return None
@@ -426,7 +445,7 @@ class ProcessManager:
         if not cmdline:
             return False
 
-        current_interpreter: Path = Path(sys.executable).resolve()
+        trusted_interpreters = _trusted_python_executables()
         scripts_value: Optional[str] = sysconfig.get_path('scripts')
         if scripts_value is None:
             return False
@@ -436,7 +455,10 @@ class ProcessManager:
             argv_zero: Path = Path(cmdline[0]).resolve()
         except OSError:
             return False
-        interpreter_selected: bool = _same_file_object(argv_zero, current_interpreter)
+        interpreter_selected: bool = any(
+            _same_file_object(argv_zero, interpreter)
+            for interpreter in trusted_interpreters
+        )
 
         arguments: list[str]
         if interpreter_selected and cmdline[1:4] == [
@@ -459,7 +481,10 @@ class ProcessManager:
         if identity is not None and (
             identity.role != Constants.PROCESS_ROLE_DAEMON
             or identity.profile_name != profile_name
-            or not _same_file_object(Path(identity.executable), current_interpreter)
+            or not any(
+                _same_file_object(Path(identity.executable), interpreter)
+                for interpreter in trusted_interpreters
+            )
             or identity.installation_root != str(ProcessManager._installation_root())
         ):
             return False

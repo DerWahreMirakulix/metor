@@ -252,13 +252,15 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
                 )
 
     def test_managed_daemon_accepts_same_interpreter_through_path_alias(self) -> None:
-        """A native alias may spell the same interpreter differently."""
+        """Native aliases and the exact Windows venv base remain recognized."""
         with TemporaryDirectory() as temp_dir:
             primary = Path(temp_dir) / 'python-primary.exe'
             alias = Path(temp_dir) / 'python-alias.exe'
+            base = Path(temp_dir) / 'python-base.exe'
             foreign = Path(temp_dir) / 'python-foreign.exe'
             primary.touch()
             alias.hardlink_to(primary)
+            base.touch()
             foreign.touch()
 
             identity = Mock()
@@ -285,14 +287,29 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
             process.is_running.return_value = True
             process.status.return_value = psutil.STATUS_RUNNING
 
+            os_double = Mock(wraps=os)
+            os_double.name = 'nt'
             with (
+                patch('metor.utils.process.os', os_double),
                 patch('metor.utils.process.sys.executable', str(primary)),
+                patch(
+                    'metor.utils.process.sys._base_executable',
+                    str(base),
+                    create=True,
+                ),
                 patch.object(
                     ProcessManager, '_read_process_identity', return_value=identity
                 ),
                 patch('metor.utils.process.psutil.Process', return_value=process),
                 patch.object(ProcessManager, '_same_os_owner', return_value=True),
             ):
+                self.assertTrue(
+                    ProcessManager.is_managed_process_running(
+                        Path(temp_dir) / Constants.DAEMON_PID_FILE,
+                        'alpha',
+                    )
+                )
+                process.cmdline.return_value[0] = str(base)
                 self.assertTrue(
                     ProcessManager.is_managed_process_running(
                         Path(temp_dir) / Constants.DAEMON_PID_FILE,
