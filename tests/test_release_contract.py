@@ -726,18 +726,22 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn('--target-only', script)
         self.assertIn(f'call py -{target} -m venv', script)
         self.assertIn('call python -m venv', script)
-        self.assertIn('call :try_py', script)
-        self.assertIn('call :try_python', script)
+        self.assertIn('goto selected_py', script)
+        self.assertIn('goto selected_python', script)
+        self.assertNotIn(':try_py', script)
+        self.assertNotIn(':try_python', script)
         self.assertIn('if errorlevel 1', script)
         self.assertNotIn('%ERRORLEVEL%', script)
         self.assertIn('refusing to modify or delete it', script)
         self.assertNotIn('sys.version_info >=', script)
         self.assertNotIn('rd /s /q', script)
         self.assertIn(
-            '--no-index --find-links "%SCRIPT_DIR%wheelhouse" --upgrade pip==26.0.1',
+            '--no-index --find-links "%BUNDLE_DIR%\\wheelhouse" --upgrade pip==26.0.1',
             script,
         )
-        self.assertIn('--no-index --find-links "%SCRIPT_DIR%wheelhouse" metor', script)
+        self.assertIn(
+            '--no-index --find-links "%BUNDLE_DIR%\\wheelhouse" metor', script
+        )
         self.assertIn('Scripts\\metor.exe --help', script)
         self.assertTrue(script.rstrip().endswith('endlocal\nexit /b 0'))
 

@@ -5,7 +5,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from typing import Callable, Optional, TextIO
+from typing import BinaryIO, Callable, Optional, TextIO
 
 from metor.core.daemon.managed import (
     CorruptedDaemonStorageError,
@@ -43,9 +43,19 @@ class DaemonStartPreparation:
     session_auth_required: bool
 
 
+@dataclass
+class DaemonStartDiagnostics:
+    """Records bounded non-secret state for one detached startup attempt."""
+
+    phase: str = 'preflight'
+    child_pid: Optional[int] = None
+    return_code: Optional[int] = None
+
+
 __all__ = [
     'CorruptedDaemonStorageError',
     'DaemonProfileMissingError',
+    'DaemonStartDiagnostics',
     'DaemonStartPreparation',
     'DaemonStatus',
     'InvalidDaemonPasswordError',
@@ -213,6 +223,8 @@ def start_managed_daemon_process(
     *,
     start_locked: bool = False,
     session_auth_password: Optional[str] = None,
+    diagnostics: Optional[DaemonStartDiagnostics] = None,
+    diagnostic_output: Optional[BinaryIO] = None,
 ) -> bool:
     """
     Spawns one detached managed-daemon CLI process and waits for IPC readiness.
@@ -221,6 +233,8 @@ def start_managed_daemon_process(
         pm (ProfileManager): The active profile manager.
         start_locked (bool): Whether the daemon should start in locked IPC-only mode.
         session_auth_password (Optional[str]): Optional startup-only plaintext session-auth password delivered over stdin.
+        diagnostics (Optional[DaemonStartDiagnostics]): Optional non-secret launch-state recorder.
+        diagnostic_output (Optional[BinaryIO]): Optional caller-owned binary stream for bounded acceptance diagnostics.
 
     Raises:
         PlaintextLockedDaemonError: If locked startup is requested for a plaintext profile.
@@ -233,6 +247,8 @@ def start_managed_daemon_process(
         pm,
         start_locked=start_locked,
     )
+    if diagnostics is not None:
+        diagnostics.phase = 'prepared'
     if preparation.already_running:
         return True
     if preparation.session_auth_required and session_auth_password is None:
@@ -257,6 +273,7 @@ def start_managed_daemon_process(
     )
 
     with open(os.devnull, 'wb') as sink:
+        output_target: BinaryIO = diagnostic_output or sink
         if os.name == 'nt':
             detached_flags: int = getattr(subprocess, 'DETACHED_PROCESS', 0)
             new_group_flags: int = getattr(
@@ -267,22 +284,28 @@ def start_managed_daemon_process(
             process: subprocess.Popen[bytes] = subprocess.Popen(
                 command,
                 stdin=stdin_target,
-                stdout=sink,
-                stderr=sink,
+                stdout=output_target,
+                stderr=output_target,
                 creationflags=detached_flags | new_group_flags,
             )
         else:
             process = subprocess.Popen(
                 command,
                 stdin=stdin_target,
-                stdout=sink,
-                stderr=sink,
+                stdout=output_target,
+                stderr=output_target,
                 start_new_session=True,
             )
+    if diagnostics is not None:
+        diagnostics.phase = 'spawned'
+        diagnostics.child_pid = process.pid
 
     if secret_payload is not None:
         if process.stdin is None:
             _stop_failed_daemon_process(process)
+            if diagnostics is not None:
+                diagnostics.phase = 'stdin-unavailable'
+                diagnostics.return_code = process.poll()
             return False
         secret_write_failed: bool = False
         try:
@@ -302,16 +325,29 @@ def start_managed_daemon_process(
                 secret_write_failed = True
         if secret_write_failed:
             _stop_failed_daemon_process(process)
+            if diagnostics is not None:
+                diagnostics.phase = 'stdin-delivery-failed'
+                diagnostics.return_code = process.poll()
             return False
+        if diagnostics is not None:
+            diagnostics.phase = 'secret-delivered'
 
     try:
+        if diagnostics is not None:
+            diagnostics.phase = 'waiting-for-ipc'
         deadline: float = time.monotonic() + _build_daemon_start_timeout(pm)
         while time.monotonic() < deadline:
             daemon_port: Optional[int] = pm.get_daemon_port()
             if daemon_port is not None:
+                if diagnostics is not None:
+                    diagnostics.phase = 'ready'
                 return True
 
-            if process.poll() is not None:
+            return_code: Optional[int] = process.poll()
+            if return_code is not None:
+                if diagnostics is not None:
+                    diagnostics.phase = 'child-exited-before-ipc'
+                    diagnostics.return_code = return_code
                 return False
 
             time.sleep(Constants.LOCK_SLEEP_SEC)
@@ -322,6 +358,11 @@ def start_managed_daemon_process(
         raise
     if not ready:
         _stop_failed_daemon_process(process)
+        if diagnostics is not None:
+            diagnostics.phase = 'ipc-readiness-timeout'
+            diagnostics.return_code = process.poll()
+    elif diagnostics is not None:
+        diagnostics.phase = 'ready'
     return ready
 
 

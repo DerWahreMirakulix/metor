@@ -50,6 +50,10 @@ jobs:
       - name: Validate generated references against checked-in copies
         run: python scripts/validate_generated_docs.py
 
+      - name: Provision native Tor for installed daemon acceptance
+        if: matrix.python-version == '3.11'
+        uses: ./.github/actions/native-tor
+
       - name: Build native offline bundles
         if: matrix.python-version == '3.11'
         shell: bash

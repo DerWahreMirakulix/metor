@@ -5,19 +5,39 @@ import json
 import os
 from pathlib import Path
 import socket
+import subprocess
 import sys
 import time
+import venv
 
 import psutil
 
 import metor.application as metor_application
-from metor.application import start_managed_daemon_process
+from metor.application import DaemonStartDiagnostics, start_managed_daemon_process
 from metor.data import ProfileManager, ProfileSecurityMode, SettingKey, Settings
 from metor.utils import Constants, ProcessManager
 
 
 _PUBLIC_STARTUP_SENTINEL = 'public-installed-startup-sentinel'
 _MANAGED_START_TIMEOUT_SEC: float = 45.0
+_MANAGED_DIAGNOSTIC_MAX_BYTES: int = 4096
+
+
+def _sanitized_child_output(payload: bytes, redactions: tuple[str, ...]) -> str:
+    """Decodes bounded child output and removes known acceptance-only values.
+
+    Args:
+        payload (bytes): Bounded stdout/stderr bytes from the owned child.
+        redactions (tuple[str, ...]): Exact public or temporary values to remove.
+
+    Returns:
+        str: Sanitized diagnostic text without acceptance credentials or host paths.
+    """
+    rendered = payload.decode('utf-8', errors='replace')
+    for value in redactions:
+        if value:
+            rendered = rendered.replace(value, '<redacted>')
+    return rendered
 
 
 def _runtime_file_evidence(path: Path) -> tuple[bool, int | None]:
@@ -76,6 +96,49 @@ def _create_profile(
     return ProfileManager(profile_name)
 
 
+def _verify_missing_installation_fails_closed(
+    data_parent: Path,
+    shadow_directory: Path,
+    shadow_marker: Path,
+) -> None:
+    """Proves isolated module startup cannot fall back to a cwd/PYTHONPATH shadow.
+
+    Args:
+        data_parent (Path): Temporary acceptance root that owns the bare environment.
+        shadow_directory (Path): Working directory containing the hostile shadow.
+        shadow_marker (Path): Marker written only if the shadow package executes.
+
+    Returns:
+        None
+    """
+    environment_root = data_parent / 'missing-installation-environment'
+    venv.EnvBuilder(with_pip=False).create(environment_root)
+    executable = environment_root / (
+        'Scripts/python.exe' if os.name == 'nt' else 'bin/python'
+    )
+    environment = dict(os.environ)
+    environment['PYTHONPATH'] = str(shadow_directory)
+    result = subprocess.run(
+        [str(executable), '-I', '-m', 'metor', '--version'],
+        cwd=shadow_directory,
+        env=environment,
+        input=_PUBLIC_STARTUP_SENTINEL,
+        capture_output=True,
+        text=True,
+        timeout=_MANAGED_START_TIMEOUT_SEC,
+        check=False,
+    )
+    if result.returncode == 0:
+        raise AssertionError('missing installed module unexpectedly started')
+    if shadow_marker.exists():
+        raise AssertionError('missing installation fell back to the shadow package')
+    print(
+        'MISSING_INSTALLED_MODULE_FAILS_CLOSED',
+        json.dumps({'return_code': result.returncode}, sort_keys=True),
+        flush=True,
+    )
+
+
 def _run_installed_start(
     profile: ProfileManager,
     *,
@@ -105,8 +168,12 @@ def _run_installed_start(
     previous_directory = Path.cwd()
     pid: int | None = None
     port: int | None = None
+    diagnostic_stream = None
+    diagnostic_path = working_directory / 'managed-child-diagnostic.log'
+    diagnostics = DaemonStartDiagnostics()
     started_at: float = time.monotonic()
     try:
+        diagnostic_stream = diagnostic_path.open('w+b')
         profile.config.set(SettingKey.IPC_TIMEOUT, _MANAGED_START_TIMEOUT_SEC)
         os.chdir(working_directory)
         print(
@@ -127,12 +194,19 @@ def _run_installed_start(
             profile,
             start_locked=start_locked,
             session_auth_password=session_auth_password,
+            diagnostics=diagnostics,
+            diagnostic_output=diagnostic_stream,
         )
         if shadow_marker.exists():
             raise AssertionError(
                 f'shadow Metor package executed: {shadow_marker.read_text(encoding="utf-8")!r}'
             )
         if not started:
+            diagnostic_stream.flush()
+            diagnostic_stream.seek(0)
+            child_output = diagnostic_stream.read(_MANAGED_DIAGNOSTIC_MAX_BYTES + 1)
+            output_truncated = len(child_output) > _MANAGED_DIAGNOSTIC_MAX_BYTES
+            child_output = child_output[:_MANAGED_DIAGNOSTIC_MAX_BYTES]
             pid_path: Path = profile.paths.get_daemon_pid_file()
             port_path: Path = profile.paths.get_daemon_port_file()
             pid_exists, pid_size = _runtime_file_evidence(pid_path)
@@ -142,6 +216,20 @@ def _run_installed_start(
                 + json.dumps(
                     {
                         'elapsed_seconds': round(time.monotonic() - started_at, 3),
+                        'child_output': _sanitized_child_output(
+                            child_output,
+                            (
+                                session_auth_password or '',
+                                str(checkout),
+                                str(environment_root),
+                                str(working_directory),
+                                str(Path.home()),
+                            ),
+                        ),
+                        'child_output_truncated': output_truncated,
+                        'child_pid': diagnostics.child_pid,
+                        'child_return_code': diagnostics.return_code,
+                        'launch_phase': diagnostics.phase,
                         'pid_file_exists': pid_exists,
                         'pid_file_size': pid_size,
                         'port_file_exists': port_exists,
@@ -222,6 +310,9 @@ def _run_installed_start(
                     time.sleep(Constants.LOCK_SLEEP_SEC)
                 profile.clear_daemon_port(expected_pid=pid, expected_port=port)
         ProcessManager.cleanup_processes()
+        if diagnostic_stream is not None:
+            diagnostic_stream.close()
+        diagnostic_path.unlink(missing_ok=True)
 
 
 def run(data_parent: Path, checkout: Path) -> None:
@@ -268,6 +359,11 @@ def run(data_parent: Path, checkout: Path) -> None:
         encoding='utf-8',
     )
     os.environ['PYTHONPATH'] = str(shadow_directory)
+    _verify_missing_installation_fails_closed(
+        data_parent,
+        shadow_directory,
+        shadow_marker,
+    )
 
     locked_profile = _create_profile(
         'installed-managed-locked',

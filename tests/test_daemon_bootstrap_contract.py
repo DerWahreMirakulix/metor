@@ -245,6 +245,35 @@ class DaemonBootstrapContractTests(unittest.TestCase):
         process.terminate.assert_called_once_with()
         process.wait.assert_called()
 
+    def test_child_exit_records_bounded_startup_phase_and_return_code(self) -> None:
+        """Acceptance diagnostics identify an early child exit without environment data."""
+        from metor.application.runtime.daemon import (
+            DaemonStartDiagnostics,
+            start_managed_daemon_process,
+        )
+
+        process = Mock()
+        process.pid = 1234
+        process.stdin = None
+        process.poll.return_value = 17
+        profile = self._spawn_profile()
+        diagnostics = DaemonStartDiagnostics()
+
+        with (
+            patch('metor.application.runtime.daemon.Settings.validate_integrity'),
+            patch(
+                'metor.application.runtime.daemon.subprocess.Popen',
+                return_value=process,
+            ),
+        ):
+            self.assertFalse(
+                start_managed_daemon_process(profile, diagnostics=diagnostics)
+            )
+
+        self.assertEqual(diagnostics.phase, 'child-exited-before-ipc')
+        self.assertEqual(diagnostics.child_pid, 1234)
+        self.assertEqual(diagnostics.return_code, 17)
+
     def test_readiness_timeout_terminates_owned_child_with_bounded_wait(self) -> None:
         from metor.application.runtime.daemon import start_managed_daemon_process
 

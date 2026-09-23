@@ -206,13 +206,15 @@ class QuickUnlockStore:
             None
         """
         try:
-            create_private_directory_tree(self._path.parent, ())
+            credential_exists: bool = self._path.exists()
+            if not credential_exists:
+                create_private_directory_tree(self._path.parent, ())
             info = self._path.parent.lstat()
             if stat.S_ISLNK(info.st_mode) or getattr(
                 info, 'st_file_attributes', 0
             ) & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0):
                 raise QuickUnlockStorageError('Credential directory cannot be a link.')
-            if os.name == 'nt':
+            if os.name == 'nt' and not credential_exists:
                 self._protect_windows_path(self._path.parent, directory=True)
             self._validate_protection(self._path.parent, directory=True)
         except (OSError, subprocess.SubprocessError) as exc:

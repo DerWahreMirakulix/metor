@@ -5,6 +5,7 @@ import base64
 import json
 import socket
 import threading
+import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -92,6 +93,7 @@ class GuiProducerTests(unittest.TestCase):
         self.client = self.make_client()
         self.other = self.make_client()
         self.repository = SqlManager.opened_voice_producers(self.pm.paths.get_db_file())
+        self._last_capture_timings: dict[str, float] = {}
         self.owner = self.client.request(
             RegisterVoiceOwnerCommand(), VoiceOwnerRegisteredEvent
         ).owner_token
@@ -102,7 +104,11 @@ class GuiProducerTests(unittest.TestCase):
         provider.get_session_auth_proof.side_effect = lambda challenge, salt: (
             build_session_auth_proof('test-password', challenge, salt)
         )
-        client = MetorClient(self.daemon._ipc.port, auth_provider=provider, timeout=2)
+        client = MetorClient(
+            self.daemon._ipc.port,
+            auth_provider=provider,
+            timeout=Constants.DEFAULT_IPC_TIMEOUT,
+        )
         self.addCleanup(client.disconnect)
         self.assertIsNotNone(client.bootstrap())
         return client
@@ -111,18 +117,34 @@ class GuiProducerTests(unittest.TestCase):
         self, msg_id: str, delivery: Delivery = Delivery.DROP
     ) -> dict[str, object]:
         """Admits actual bytes through the owned public Begin/Append operations."""
-        self.client.request(
-            BeginVoiceCommand(
-                self.onion, delivery, msg_id, 'pcm_s16le_16000_mono', self.owner
-            ),
-            VoiceStartedEvent,
-        )
-        self.client.request(
-            AppendVoiceChunkCommand(
-                msg_id, 0, base64.b64encode(b'\x00\x01' * 320).decode(), self.owner
-            ),
-            VoiceChunkAcceptedEvent,
-        )
+        self._last_capture_timings = {}
+        begin_started = time.monotonic()
+        try:
+            self.client.request(
+                BeginVoiceCommand(
+                    self.onion, delivery, msg_id, 'pcm_s16le_16000_mono', self.owner
+                ),
+                VoiceStartedEvent,
+            )
+        finally:
+            self._last_capture_timings['begin_voice_seconds'] = (
+                time.monotonic() - begin_started
+            )
+        append_started = time.monotonic()
+        try:
+            self.client.request(
+                AppendVoiceChunkCommand(
+                    msg_id,
+                    0,
+                    base64.b64encode(b'\x00\x01' * 320).decode(),
+                    self.owner,
+                ),
+                VoiceChunkAcceptedEvent,
+            )
+        finally:
+            self._last_capture_timings['append_voice_seconds'] = (
+                time.monotonic() - append_started
+            )
         record = self.messages.get_voice_payload(
             self.onion, msg_id, MessageDirection.OUT
         )
@@ -557,7 +579,19 @@ class GuiProducerTests(unittest.TestCase):
         self,
     ) -> None:
         """Fresh runtime ownership reconstructs cleanup from SQL, not a GUI list."""
-        payload = self.capture('restart-draft')
+        try:
+            payload = self.capture('restart-draft')
+        finally:
+            print(
+                'GUI_PRODUCER_CAPTURE_TIMING '
+                + json.dumps(
+                    {
+                        phase: round(elapsed, 3)
+                        for phase, elapsed in self._last_capture_timings.items()
+                    },
+                    sort_keys=True,
+                )
+            )
         self.other.begin_voice(self.onion, Delivery.DROP, 'generic-restart', 'opus')
         fresh = VoiceProducerService(
             ProducerCleanup(

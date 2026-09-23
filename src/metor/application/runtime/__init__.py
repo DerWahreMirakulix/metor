@@ -3,6 +3,7 @@
 from metor.application.runtime.daemon import (
     CorruptedDaemonStorageError,
     DaemonProfileMissingError,
+    DaemonStartDiagnostics,
     DaemonStartPreparation,
     DaemonStatus,
     InvalidDaemonPasswordError,
@@ -24,6 +25,7 @@ from metor.application.runtime.maintenance import (
 __all__ = [
     'CorruptedDaemonStorageError',
     'DaemonProfileMissingError',
+    'DaemonStartDiagnostics',
     'DaemonStartPreparation',
     'DaemonStatus',
     'InvalidDaemonPasswordError',

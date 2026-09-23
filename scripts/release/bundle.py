@@ -234,42 +234,40 @@ def build_install_windows_script(package_name: str = 'metor') -> str:
     return dedent(
         f"""\
         @echo off
-        setlocal
-        set "SCRIPT_DIR=%~dp0"
-        set "VENV_DIR=%SCRIPT_DIR%.venv"
-        set "VERIFY=%SCRIPT_DIR%{BUNDLE_VERIFIER_NAME}"
+        setlocal DisableDelayedExpansion
+        set "BUNDLE_DIR=%~dp0."
+        set "VENV_DIR=%BUNDLE_DIR%\\.venv"
+        set "VERIFY=%BUNDLE_DIR%\\{BUNDLE_VERIFIER_NAME}"
 
         if exist "%VENV_DIR%" (
             if not exist "%VENV_DIR%\\Scripts\\python.exe" goto incompatible_venv
-            "%VENV_DIR%\\Scripts\\python.exe" "%VERIFY%" "%SCRIPT_DIR%" --target-only >nul 2>nul
+            "%VENV_DIR%\\Scripts\\python.exe" "%VERIFY%" "%BUNDLE_DIR%" --target-only >nul 2>nul
             if errorlevel 1 goto incompatible_venv
-            "%VENV_DIR%\\Scripts\\python.exe" "%VERIFY%" "%SCRIPT_DIR%" || exit /b 1
+            "%VENV_DIR%\\Scripts\\python.exe" "%VERIFY%" "%BUNDLE_DIR%" || exit /b 1
             goto install
         )
 
         where py >nul 2>nul
-        if not errorlevel 1 call :try_py
-        if not errorlevel 1 goto install
+        if not errorlevel 1 (
+            call py -{sys.version_info.major}.{sys.version_info.minor} "%VERIFY%" "%BUNDLE_DIR%" --target-only >nul 2>nul
+            if not errorlevel 1 goto selected_py
+        )
 
         where python >nul 2>nul
         if errorlevel 1 goto wrong_python
-        call :try_python
-        if not errorlevel 1 goto install
-        goto wrong_python
+        call python "%VERIFY%" "%BUNDLE_DIR%" --target-only >nul 2>nul
+        if errorlevel 1 goto wrong_python
+        goto selected_python
 
-        :try_py
-        call py -{sys.version_info.major}.{sys.version_info.minor} "%VERIFY%" "%SCRIPT_DIR%" --target-only >nul 2>nul
-        if errorlevel 1 exit /b 1
-        call py -{sys.version_info.major}.{sys.version_info.minor} "%VERIFY%" "%SCRIPT_DIR%" || exit /b 1
+        :selected_py
+        call py -{sys.version_info.major}.{sys.version_info.minor} "%VERIFY%" "%BUNDLE_DIR%" || exit /b 1
         call py -{sys.version_info.major}.{sys.version_info.minor} -m venv "%VENV_DIR%" || exit /b 1
-        exit /b 0
+        goto install
 
-        :try_python
-        call python "%VERIFY%" "%SCRIPT_DIR%" --target-only >nul 2>nul
-        if errorlevel 1 exit /b 1
-        call python "%VERIFY%" "%SCRIPT_DIR%" || exit /b 1
+        :selected_python
+        call python "%VERIFY%" "%BUNDLE_DIR%" || exit /b 1
         call python -m venv "%VENV_DIR%" || exit /b 1
-        exit /b 0
+        goto install
 
         :wrong_python
         echo No interpreter matches this bundle target.
@@ -280,8 +278,8 @@ def build_install_windows_script(package_name: str = 'metor') -> str:
         exit /b 1
 
         :install
-        "%VENV_DIR%\\Scripts\\python.exe" -m pip install --no-index --find-links "%SCRIPT_DIR%{WHEELHOUSE_DIRNAME}" --upgrade pip=={PIP_VERSION} || exit /b 1
-        "%VENV_DIR%\\Scripts\\python.exe" -m pip install --no-index --find-links "%SCRIPT_DIR%{WHEELHOUSE_DIRNAME}" {package_name} || exit /b 1
+        "%VENV_DIR%\\Scripts\\python.exe" -m pip install --no-index --find-links "%BUNDLE_DIR%\\{WHEELHOUSE_DIRNAME}" --upgrade pip=={PIP_VERSION} || exit /b 1
+        "%VENV_DIR%\\Scripts\\python.exe" -m pip install --no-index --find-links "%BUNDLE_DIR%\\{WHEELHOUSE_DIRNAME}" {package_name} || exit /b 1
         echo Metor installed in "%VENV_DIR%"
         {verification_line}
         endlocal

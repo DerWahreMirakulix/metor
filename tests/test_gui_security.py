@@ -1,7 +1,10 @@
 """GUI security orchestration against real authenticated Core IPC and SQLCipher."""
 
 import atexit
+import json
 import socket
+import subprocess
+import time
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -23,6 +26,7 @@ from metor.core.api import (
 )
 from metor.core.daemon.managed.engine import Daemon
 from metor.core.daemon.managed.local_auth import create_session_auth_context
+from metor.core.daemon.managed.quick_unlock import QuickUnlockStore
 from metor.core.key import KeyManager
 from metor.data import ContactManager, HistoryManager, MessageManager, SettingKey
 from metor.data.profile import ProfileManager
@@ -31,6 +35,11 @@ from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
 from metor.ui.gui.state.mailbox import Update
 from metor.utils import Constants
+
+
+_SECURITY_WORKER_TIMEOUT_SEC: float = (
+    Constants.QUICK_UNLOCK_HELPER_TIMEOUT_SEC + Constants.FILE_LOCK_TIMEOUT_SEC
+)
 
 
 class GuiSecurityIntegrationTests(unittest.TestCase):
@@ -92,16 +101,32 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
         self.assertIn('protected_gui_preferences', client.init_event.capabilities)
         return client
 
-    def settle(self) -> None:
-        """Drains serial SDK work without sleeps or callback timing assumptions."""
+    def settle(self, phase: str = 'security-operation') -> float:
+        """Drains serial SDK work and reports one bounded phase duration.
+
+        Args:
+            phase (str): Non-secret operation label used only on assertion failure.
+
+        Returns:
+            float: Total worker and mailbox settlement duration in seconds.
+        """
+        started_at = time.monotonic()
         for _ in range(4):
             worker = self.controller._worker
             if worker is not None:
-                worker.join(5)
-                self.assertFalse(worker.is_alive())
+                worker.join(_SECURITY_WORKER_TIMEOUT_SEC)
+                self.assertFalse(
+                    worker.is_alive(),
+                    {
+                        'phase': phase,
+                        'elapsed_seconds': round(time.monotonic() - started_at, 3),
+                        'worker_name': worker.name,
+                        'worker_timeout_seconds': _SECURITY_WORKER_TIMEOUT_SEC,
+                    },
+                )
             self.controller.poll()
             if not self.controller.state.busy:
-                return
+                return time.monotonic() - started_at
         self.fail('Security work did not settle')
 
     def test_password_lock_covers_immediately_and_does_not_lock_other_clients(
@@ -127,8 +152,50 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
     def test_pin_forgot_password_and_none_use_core_challenges(self) -> None:
         """PIN cannot weaken policy; explicit password recovery restores full strength."""
         controller = self.controller
-        self.assertTrue(controller.security.configure(ClientUnlockMethod.PIN, '1357'))
-        self.settle()
+        acl_timings: list[tuple[str, float]] = []
+        run_acl_helper = QuickUnlockStore._run_acl_helper
+
+        def timed_acl_helper(
+            path: Path, script: str, phase: str
+        ) -> subprocess.CompletedProcess[str]:
+            """Delegates to the native ACL helper while recording its phase duration.
+
+            Args:
+                path (Path): Exact temporary credential path.
+                script (str): Constant production ACL script.
+                phase (str): Non-secret production ACL phase.
+
+            Returns:
+                subprocess.CompletedProcess[str]: Unchanged production helper result.
+            """
+            started_at = time.monotonic()
+            try:
+                return run_acl_helper(path, script, phase)
+            finally:
+                acl_timings.append((phase, time.monotonic() - started_at))
+
+        with patch.object(
+            QuickUnlockStore,
+            '_run_acl_helper',
+            side_effect=timed_acl_helper,
+        ):
+            self.assertTrue(
+                controller.security.configure(ClientUnlockMethod.PIN, '1357')
+            )
+            worker_elapsed = self.settle('configure-pin')
+        print(
+            'GUI_SECURITY_TIMING '
+            + json.dumps(
+                {
+                    'acl_phases': [
+                        {'phase': phase, 'seconds': round(elapsed, 3)}
+                        for phase, elapsed in acl_timings
+                    ],
+                    'worker_seconds': round(worker_elapsed, 3),
+                },
+                sort_keys=True,
+            )
+        )
         self.assertEqual(
             controller.state.preferences.preferences.unlock_method,
             ClientUnlockMethod.PIN,

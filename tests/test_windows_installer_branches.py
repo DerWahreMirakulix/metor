@@ -1,5 +1,6 @@
 """Native cmd.exe coverage for release-installer interpreter selection branches."""
 
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -180,11 +181,16 @@ class WindowsInstallerBranchTests(unittest.TestCase):
             ),
             diagnostics,
         )
+        self.assertFalse(
+            any(' -m venv ' in f' {line} ' for line in lines if line.startswith('py ')),
+            diagnostics,
+        )
 
     def test_matching_launcher_wins_and_missing_launcher_uses_python(self) -> None:
         """Both supported selection orders reach only the matching interpreter."""
         launcher = self._selection_case(0, 0)
-        _result, launcher_lines = launcher.result, launcher.trace
+        launcher_result, launcher_lines = launcher.result, launcher.trace
+        self.assertNotEqual(launcher_result.returncode, 0, launcher.diagnostic())
         self.assertTrue(
             any(' -m venv ' in f' {line} ' for line in launcher_lines),
             launcher.diagnostic(),
@@ -193,8 +199,14 @@ class WindowsInstallerBranchTests(unittest.TestCase):
             any(line.startswith('python ') for line in launcher_lines),
             launcher.diagnostic(),
         )
+        self.assertNotIn(
+            'No interpreter matches this bundle target.',
+            launcher_result.stdout + launcher_result.stderr,
+            launcher.diagnostic(),
+        )
         python = self._selection_case(None, 0)
-        _result, python_lines = python.result, python.trace
+        python_result, python_lines = python.result, python.trace
+        self.assertNotEqual(python_result.returncode, 0, python.diagnostic())
         self.assertTrue(
             any(line.startswith('python ') for line in python_lines),
             python.diagnostic(),
@@ -230,9 +242,19 @@ class WindowsInstallerBranchTests(unittest.TestCase):
                 bundle.mkdir()
                 batch = build_install_windows_script()
                 (bundle / 'install.cmd').write_text(batch, encoding='utf-8')
+                argument_log = bundle / 'received-arguments.jsonl'
                 (bundle / 'verify_bundle.py').write_text(
-                    'import os, sys\n'
-                    "if '--target-only' in sys.argv:\n"
+                    'import json, os, pathlib, sys\n'
+                    'args = sys.argv[1:]\n'
+                    "with pathlib.Path(os.environ['METOR_ARGUMENT_LOG']).open('a', encoding='utf-8') as handle:\n"
+                    "    handle.write(json.dumps(args) + '\\n')\n"
+                    'if len(args) not in (1, 2):\n'
+                    '    raise SystemExit(91)\n'
+                    'if pathlib.Path(args[0]).resolve() != pathlib.Path(__file__).parent.resolve():\n'
+                    '    raise SystemExit(92)\n'
+                    'if len(args) == 2:\n'
+                    "    if args[1] != '--target-only':\n"
+                    '        raise SystemExit(93)\n'
                     "    raise SystemExit(int(os.environ['METOR_EXISTING_TARGET']))\n",
                     encoding='utf-8',
                 )
@@ -255,6 +277,7 @@ class WindowsInstallerBranchTests(unittest.TestCase):
                 sentinel.write_text('owned\n', encoding='utf-8')
                 environment = dict(os.environ)
                 environment['METOR_EXISTING_TARGET'] = str(target_status)
+                environment['METOR_ARGUMENT_LOG'] = str(argument_log)
                 argv = (
                     environment.get('COMSPEC', 'C:\\Windows\\System32\\cmd.exe'),
                     '/d',
@@ -289,13 +312,37 @@ class WindowsInstallerBranchTests(unittest.TestCase):
                     evidence.diagnostic(),
                 )
                 self.assertTrue(sentinel.is_file(), evidence.diagnostic())
+                received_arguments = [
+                    json.loads(line)
+                    for line in argument_log.read_text(encoding='utf-8').splitlines()
+                ]
+                self.assertGreaterEqual(
+                    len(received_arguments), 1, evidence.diagnostic()
+                )
+                self.assertEqual(
+                    received_arguments[0][1:],
+                    ['--target-only'],
+                    evidence.diagnostic(),
+                )
+                self.assertEqual(
+                    Path(received_arguments[0][0]).resolve(),
+                    bundle.resolve(),
+                    evidence.diagnostic(),
+                )
                 if target_status:
+                    self.assertEqual(len(received_arguments), 1, evidence.diagnostic())
                     self.assertIn(
                         'incompatible or incomplete',
                         result.stdout,
                         evidence.diagnostic(),
                     )
                 else:
+                    self.assertEqual(len(received_arguments), 2, evidence.diagnostic())
+                    self.assertEqual(
+                        received_arguments[1],
+                        [received_arguments[0][0]],
+                        evidence.diagnostic(),
+                    )
                     self.assertNotIn(
                         'incompatible or incomplete',
                         result.stdout,

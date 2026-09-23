@@ -5,13 +5,13 @@ reports remain evidence and are not competing implementation backlogs.
 
 ## Current completion-correction status
 
-| Package | State                                      | Commit                      | Tests                                                                                                                                    | Result                                                                     | Next step                                                              |
-| ------- | ------------------------------------------ | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| C01     | hosted harness follow-up candidate         | C01 follow-up (this commit) | 124 daemon/runtime/IPC/release neighbors; local four-bundle installed-consumer validation with two real managed starts                   | Local PASS; two hosted runs exhausted the former 15-second acceptance wait | Verify the bounded 45-second generic acceptance window in the next run |
-| C02     | native verified                            | `61c3b67`                   | 76 focused tests plus 49 subtests; full 861-test local discovery; real Windows 3.11/3.13 quality execution                               | PASS at C02 scope; both Windows lanes reached only later C03 failures      | Retain C02 native ACL tests in every later matrix                      |
-| C03     | hosted native exercised; final run pending | `c6b9ab9`                   | 113 focused lock/process/configuration/GUI/documentation/storage tests plus 83 subtests; normal and `win32` mypy                         | Prior DACL/config/spec annotations absent from both fresh Windows lanes    | Retain the same native branches in the final matrix                    |
-| C04     | local candidate; native acceptance pending | C04 candidate (this commit) | 42 release/installer tests; four native methods skip on Linux; Ruff, format, and strict mypy                                             | Linux contracts PASS; two concrete batch return-flow defects corrected     | Run real `cmd.exe`, then all four fresh Windows bundle installers      |
-| C05     | local verified; final hosted run pending   | C05 candidate (this commit) | 863 discovered tests; static/type/generated/boundary gates; four wheels/bundles/installers; two offscreen views; 20 MiB pressure fixture | Local PASS with 8 platform skips; final hosted/native result pending       | Run the final four-lane matrix and record genuine external blockers    |
+| Package | State                                      | Commit                | Tests                                                                                                                            | Result                                                                            | Next step                                                           |
+| ------- | ------------------------------------------ | --------------------- | -------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| C01     | corrected locally; hosted rerun pending    | correction checkpoint | bounded child diagnostics; missing-installation isolation; four fresh bundles; installed locked/session-auth starts and real IPC | Local PASS; run `35838220430` exposed the unprovisioned external Tor prerequisite | Run the exact correction tree in all four hosted lanes              |
+| C02     | corrected locally; native rerun pending    | correction checkpoint | non-mutating existing-parent regression; credential lifecycle; full 865-test local discovery                                     | Local/POSIX PASS; exact Windows replacement denial path pending rerun             | Execute the retained native ACL lifecycle on Windows 3.11 and 3.13  |
+| C03     | hosted native exercised; final run pending | `c6b9ab9`             | 113 focused lock/process/configuration/GUI/documentation/storage tests plus 83 subtests; normal and `win32` mypy                 | Prior DACL/config/spec annotations absent from both fresh Windows lanes           | Retain the same native branches in the final matrix                 |
+| C04     | corrected locally; native rerun pending    | correction checkpoint | strict verifier argv capture; 42 release/installer tests; four native methods skip on Linux; all four Linux ZIP installers       | Linux contracts/artifacts PASS; native `cmd.exe` branches pending rerun           | Run real `cmd.exe`, then all four fresh Windows bundle installers   |
+| C05     | locally verified; final hosted run pending | correction checkpoint | 865 discovered tests; static/type/generated/boundary gates; measured GUI security and Voice IPC phases; four bundles/installers  | Local PASS with 8 platform skips; final hosted/native result pending              | Run the final four-lane matrix and record genuine external blockers |
 
 The task's verified starting evidence records run `35756273840`, attempt 1, at
 `3726de443716dbdd0a2aa2316e86a0acb02015c3`: Linux 3.11 job
@@ -27,6 +27,72 @@ the GitHub CLI is absent, no GitHub token is present, the unauthenticated job-lo
 API returned HTTP 403, and the web reader did not expose the log archive. The
 failure counts and first-cause details below therefore remain explicitly
 owner-supplied evidence rather than a reconstructed complete log grouping.
+
+Run `35838220430`, attempt 1, tested exact SHA
+`1fcb2461fa07ef79b0b94237dbe72da645724cad` and tree
+`de321eee1da67b0f930bfb48adbe4c9284f1730e`. Linux 3.11 job
+`107106730018` passed quality, wheels, version/references, and all four bundle
+builds before installed Session Auth startup failed after 1.717 seconds with no
+PID or port file; its native installers, EGL, GUI, and pressure steps therefore
+did not run. Linux 3.13 job `107106730325` passed. Windows 3.11 job
+`107106730252` completed 863 tests with 3 failures, 1 error, and 15 skips;
+Windows 3.13 job `107106730222` completed 863 tests with 2 failures, 2 errors,
+and 15 skips. Both stopped in the combined quality step, so no Windows wheel,
+installed-consumer, bundle, or installer result exists for that tree. The
+unauthenticated job-log endpoint still returns HTTP 403; these exact test names
+and failure details are owner-supplied evidence, while the run/job/step states
+were independently confirmed through the public Actions API.
+
+The C01 correction recognizes that the unlocked installed start is the only
+acceptance branch that launches the separately installed Tor runtime. The
+`ubuntu-latest` software inventory does not include Tor, and the prior workflow
+did not provision it; the locked branch therefore passed while the unlocked
+branch exited before runtime identity publication. A reusable native-Tor step
+now installs the distribution package on Linux and a checksum-pinned official
+Expert Bundle on Windows before installed-daemon acceptance in CI and release
+quality. This does not bundle Tor into any Metor distribution. The real child
+still uses `sys.executable -I -m metor`, real stdin, the installed application,
+and real IPC. On failure only, the acceptance harness now records a bounded,
+path/credential-redacted child stream plus launch phase and return code. A bare
+venv negative case proves a missing legitimate installation fails instead of
+loading the CWD/PYTHONPATH shadow.
+
+The C02 correction preserves the existing Quick Unlock parent ACL during
+replacement. If a credential exists, `_prepare_private_parent()` now validates
+the exact current-user-plus-SYSTEM parent contract without calling the general
+single-user directory hardener or rewriting that DACL. New stores still create,
+protect, and validate the parent before use. Consequently a denied protection
+operation on the replacement temp file leaves the old credential and its
+readability unchanged; foreign trustees and malformed protection continue to
+fail closed.
+
+The C04 correction uses `%~dp0.` as a quoted point-normalized bundle path and
+explicitly disables delayed expansion, preserving separate `--target-only`
+delivery, spaces, and literal `!`. The real existing-venv Python executable now
+captures strict argv and rejects unknown or joined arguments. Interpreter
+selection ends after target matching; full verification and `-m venv` execute
+in a terminal selected-candidate branch, so either failure returns immediately
+without probing or mutating through a second interpreter.
+
+The two C05 failures were acceptance-budget defects, not evidence of relaxed
+product security or ownership. The Quick Unlock helper has a bounded 10-second
+native ACL window, but its GUI worker fixture allowed only five seconds; the
+fixture now uses a named 15-second bound derived from existing helper/file-lock
+limits and reports worker plus native ACL phase durations. The Voice producer
+fixture used a two-second IPC client despite the normal 15-second contract; it
+now uses that existing default and records Begin/Append phases without retries.
+No production timeout changed. On local Linux, the exact focused cases pass
+with a 2.211-second PIN worker and 0.014/0.010-second Begin/Append phases.
+
+The complete correction tree locally passes 865 tests in 719.621 seconds with
+zero failures/errors and eight platform-native skips. Ruff, format, normal and
+Win32 strict mypy over 466 sources, distribution boundaries, versioning, and
+two-pass generated-reference freshness pass. Four fresh Linux Python 3.11
+bundles pass installed SDK/Base/Terminal/GUI consumption, the missing-module
+negative, both managed-child provenance paths, and all four offline ZIP
+installers. This remains local evidence: the fresh hosted four-lane correction
+run and native Windows branches are pending, and no native lifecycle/media,
+audio-route, or release-publication claim is inferred.
 
 C01 changes only managed child module selection and its exact process-role
 allowlist. The launch vector preserves the uncanonicalized `sys.executable`
@@ -387,8 +453,8 @@ available Linux GUI environment, so no native audio run is claimed.
 
 Active support, GUI, platform, and integration-map instructions now state the
 generic capability-selected installed gate and exact logind/provider/session
-validation. Razer/RTX values remain only explicitly dated historical context;
-they are not rewritten as generic past successes. Native installed duplex,
+validation. Prior route and host values remain only dated historical context;
+they are not active requirements. Native installed duplex,
 Windows WTS/power/media, and real Linux lock/suspend/media remain R07 gates.
 
 R07 reran the complete local acceptance chain on the current product tree. The
@@ -1309,13 +1375,13 @@ profile-switch barriers. The 20 MiB production-worker pressure run used 64 KiB
 maximum SDK reads, 640-byte frames, a 16 MiB cache peak, and a sampled 42-record
 mailbox peak without overload.
 
-The existing explicitly authorized Razer native probe now seeds a synthetic
+The existing explicitly authorized native audio probe now seeds a synthetic
 pending PCM source in temporary Core, plays it through the production GUI
 controller during actual HeadsetAudio capture, observes capture ownership at
 the real output write, then still plays the captured review. It exports no
 microphone bytes. Native Windows/Kivy/audio hardware is unavailable here, so
 that updated scenario is a required rerun rather than a claimed pass; the prior
-native simultaneous port result remains scoped to its exact Razer route. No
+native simultaneous port result remains scoped to its exact selected route. No
 speaker AEC, arbitrary-headset, Linux-headset, or appliance claim is made.
 
 No production semantics changed in A15; this closes an evidence gap with
@@ -1330,7 +1396,7 @@ compatibility, or application version changes are required.
 | `python tests/gui_stream_pressure.py --result /tmp/metor-a15-stream-pressure.json`                                                                                                           | PASS; 20 MiB output, 16 MiB cache peak, 64 KiB read, 640-byte frame, 42-record sampled queue peak, no overload              |
 | `python -m unittest tests.test_gui_audio -v`                                                                                                                                                 | PASS; 5 framing, inert-open, cleanup, microphone-permission and speaker-permission tests                                    |
 | `PYTHONPATH=tests python -m mypy tests/gui_native_voice.py`                                                                                                                                  | PASS; updated concrete-route native probe is structurally typed                                                             |
-| Updated installed Windows Razer GUI full-duplex probe                                                                                                                                        | NOT RUN; native Windows/Kivy/Razer route unavailable in current WSL environment                                             |
+| Updated installed Windows GUI full-duplex probe on one capability-compatible route                                                                                                           | NOT RUN; native Windows/Kivy/audio route unavailable in current WSL environment                                             |
 | `python -m ruff check tests/test_gui_capture.py tests/test_gui_audio.py tests/gui_native_voice.py`                                                                                           | PASS                                                                                                                        |
 | `python -m ruff format --check tests/test_gui_capture.py tests/test_gui_audio.py tests/gui_native_voice.py`                                                                                  | PASS                                                                                                                        |
 | `python -m json.tool docs/contracts/gui/support.json`                                                                                                                                        | PASS; claims remain explicit and machine-readable                                                                           |
@@ -1661,7 +1727,7 @@ best-effort physical-erasure limits, and observable mandatory release failures.
 Active status text follows the evidence rather than a percentage. Functional
 desktop/simulator code is implemented and Linux/Windows installation evidence
 is retained, but the current installed Windows WTS/power media, real Linux
-suspend/lock media, and updated full-GUI Razer duplex reruns remain mandatory
+suspend/lock media, and updated full-GUI capability-route duplex reruns remain mandatory
 native acceptance blockers. `GUI.md`, `RELEASING.md`, the current header of the
 dated GUI report, and `gui/support.json` agree on that boundary. The machine
 manifest contains no completion percentage and reports acceptance false while
@@ -1912,7 +1978,7 @@ left intact.
 The GUI is therefore **not declared completed at its claimed support level**.
 The remaining mandatory native gates are exactly: installed Windows WTS
 lock/unlock plus power/media behavior, real Linux suspend/locked-session media
-behavior, and a current full-GUI duplex rerun on the documented Razer route.
+behavior, and a current full-GUI duplex rerun on a capability-compatible route.
 There is no registered production physical-device adapter, so appliance purge,
 shutdown, or arbitrary-headset support is not claimed. No release, tag, upload,
 remote push, certification, error-free claim, or completion percentage was made.
@@ -1927,5 +1993,5 @@ remote push, certification, error-free claim, or completion percentage was made.
 | `python scripts/versioning.py validate`; `python -m json.tool docs/contracts/gui/support.json`; generated-reference validation                           | PASS                                                                                                                                             |
 | Approved-spec `sha256sum`                                                                                                                                | PASS; both owner-supplied hashes unchanged                                                                                                       |
 | Active integration-map review against Lock/Continuation/Purge/Power, Text/Voice/LIVE, profiles, lost input, offline/recovery, accessibility, and layouts | PASS at implemented software/test scope; mandatory physical/native reruns remain explicitly pending                                              |
-| Native installed Windows WTS/power/media, real Linux suspend/lock media, current full-GUI Razer duplex                                                   | BLOCKED by unavailable target OS/session/hardware on this WSL2 host; retained as mandatory acceptance gates, not reported as passes              |
+| Native installed Windows WTS/power/media, real Linux suspend/lock media, current full-GUI capability-route duplex                                        | BLOCKED by unavailable target OS/session/hardware on this WSL2 host; retained as mandatory acceptance gates, not reported as passes              |
 | `git status`, ignored packaging-output inventory, tracked-file/secret-pattern checks, and `git diff --check`                                             | PASS after focused packaging cleanup; no unintended repository artifact or credential found                                                      |

@@ -150,6 +150,9 @@ jobs:
           fi
           python scripts/check_release_compatibility.py "${args[@]}"
 
+      - name: Provision native Tor for installed daemon acceptance
+        uses: ./.github/actions/native-tor
+
       - name: Build all package variants
         shell: bash
         run: |

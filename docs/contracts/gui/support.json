@@ -3,7 +3,7 @@
   "completion": {
     "gui_contract_and_design": "implemented for the declared desktop and simulator scope",
     "desktop_installation": "tested on Linux x86_64 and Windows x86_64",
-    "mandatory_native_acceptance": "pending installed Windows WTS/power media, real Linux suspend/lock media, and current installed full-GUI duplex on an explicitly selected capability-compatible headset route",
+    "mandatory_native_acceptance": "pending installed Windows WTS/power media, real Linux suspend/lock media, and current installed full-GUI duplex on an explicitly selected capability-compatible audio route",
     "physical_appliance": "not applicable: no production physical adapter is registered or claimed",
     "release_publication": "not performed"
   },
@@ -13,7 +13,7 @@
   "renderer": "Kivy 2.3.1 / SDL2 / OpenGL",
   "continuous_integration": {
     "declared_matrix": "Linux and Windows with Python 3.11 and 3.13",
-    "current_source_status": "completion-correction runs executed on Linux and Windows 3.11/3.13; the exact final candidate rerun is pending while local Linux 3.11 native renderer, software gates, four bundles, installed consumers, and offline installers pass",
+    "current_source_status": "run 35838220430 completed red on the prior candidate; the correction tree passes local Linux 3.11 software gates, four bundles, installed consumers, and offline installers, while its fresh hosted Linux/Windows 3.11/3.13 rerun remains pending",
     "release_bundle_lanes": "Python 3.11 on each native operating system"
   },
   "accessibility": {
@@ -48,7 +48,7 @@
     "native_dependency_imports": "tested",
     "native_sdl_window": "tested",
     "root_480x800": "tested",
-    "historical_headset_route_2026_09_20": "Razer BlackShark V2 HS 2.4; contextual observation, not a current device requirement",
+    "historical_native_audio_route_2026_09_20": "one explicitly selected capability-compatible route; contextual observation, not a current device requirement",
     "historical_bounded_duplex_capture_playback_2026_09_20": "tested on the recorded route; captured bytes discarded",
     "historical_gui_ptt_2026_09_20": "tested from then-current lifecycle installed packages with synthetic focused Space input, actual capture/review and temporary encrypted Core; 30720 bytes / 960 ms",
     "current_source_full_gui_duplex_probe": "generic explicit-route harness implemented with synthetic Core-backed playback during actual capture plus captured-review playback; native rerun unavailable in the current WSL environment",
@@ -57,7 +57,7 @@
     "speaker_aec": "unsupported",
     "current_validation_runtime": "official CPython 3.11.9 NuGet package with pip and venv; temporary isolated installation",
     "installed_desktop_and_simulator": "tested outside checkout with isolated interpreter; 2026-09-20",
-    "historical_local_install_root_load_2026_09_20": "measured on an RTX 4060 host; contextual hardware metadata only; 24 synthetic queued inputs, 64 changing rows; first input 297 ms, subsequent p95 71.8 ms; excludes native audio and physical input"
+    "historical_local_install_root_load_2026_09_20": "contextual host observation only; 24 synthetic queued inputs, 64 changing rows; first input 297 ms, subsequent p95 71.8 ms; excludes native audio and physical input"
   },
   "physical_adapters": [],
   "software_media_integration": {
@@ -65,7 +65,7 @@
     "concurrent_ui_state": "text draft and bounded mailbox/controller polling remain usable during overlap",
     "truthful_outcomes": "captured media remains draft and the playback source remains pending; no Delivered, Read or Safe state is inferred",
     "pressure": "20 MiB production playback probe passes with 16 MiB cache cap, 64 KiB reads and bounded mailbox",
-    "native_scope": "current gate requires an explicitly selected capability-compatible headset route and verified installed-module origin; the prior named-device duplex is dated historical evidence only; no speaker AEC or appliance claim"
+    "native_scope": "current gate requires an explicitly selected capability-compatible audio route and verified installed-module origin; prior route-specific duplex is dated historical evidence only; no speaker AEC or appliance claim"
   },
   "platform_contracts": {
     "owner": "metor-sdk / metor.client.platform",
@@ -95,8 +95,8 @@
   "simulator_description_adapters": ["simulator"],
   "host_shutdown": "typed fixed-port request occurs only after local single-runtime checks plus Core preparation, or exact safe purge terminal state; the port owns atomic exclusive-host enforcement; no OS adapter registered or real shutdown tested",
   "purge": "bounded physical-input composition, scoped grant, exact initiation and safe-terminal shutdown gating tested; no production hardware driver or real destruction/shutdown tested",
-  "pause_checkpoint": "2026-09-15: retained root source has targeted native/static validation; installed artifacts/headset evidence predates final RootPanel/RootRow changes",
-  "current_checkpoint": "2026-09-23: local static gates pass normally and for the Win32 type target; 863 tests pass with eight platform-native skips; software full-GUI inbound LIVE overlap, 20 MiB pressure, two Linux native offscreen renders, four fresh Linux 3.11 bundles, isolated installed consumers, every offline ZIP installer, and both installed managed-child provenance paths pass. Fresh hosted correction runs have exercised Linux and Windows 3.11/3.13; the exact final candidate rerun remains pending. Real installed Windows WTS/power media, real Linux lock/suspend media, a separately authorized release dry run, and installed full-GUI duplex on an explicitly confirmed capability-compatible route remain unavailable; side-effect-free enumeration found zero native audio endpoints here. Historical device and host observations retain only their dated scope and are not active requirements.",
+  "pause_checkpoint": "2026-09-15: retained root source has targeted native/static validation; installed artifact and audio-route evidence predates final RootPanel/RootRow changes",
+  "current_checkpoint": "2026-09-23: run 35838220430 completed red on exact prior SHA 1fcb246; Linux 3.11 stopped at installed Session Auth startup and both Windows lanes stopped in quality. The correction tree passes normal and Win32 static gates, 865 tests with eight platform-native skips, four fresh Linux 3.11 bundles, isolated installed consumers, the missing-installation negative, both installed managed-child provenance paths, and every offline ZIP installer. Its fresh hosted four-lane rerun remains pending. Real installed Windows WTS/power media, real Linux lock/suspend media, a separately authorized release dry run, and installed full-GUI duplex on an explicitly confirmed capability-compatible audio route remain unavailable; side-effect-free enumeration found zero native audio endpoints here. Historical route and host observations retain only their dated scope and are not active requirements.",
   "acceptance_at_claimed_support_level": false,
   "physical_appliance_acceptance": "not applicable until a production adapter is registered and claimed"
 }

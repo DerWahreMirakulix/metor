@@ -102,6 +102,29 @@ class FinalRemediationContractTests(unittest.TestCase):
             run.call_args.kwargs['timeout'], Constants.QUICK_UNLOCK_HELPER_TIMEOUT_SEC
         )
 
+    def test_existing_windows_quick_unlock_parent_is_validated_without_mutation(
+        self,
+    ) -> None:
+        """C02: failed credential replacement cannot rewrite the valid parent ACL."""
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / 'protected' / 'quick-unlock.json'
+            path.parent.mkdir()
+            path.write_text('{}', encoding='utf-8')
+            store = QuickUnlockStore(path)
+            with (
+                patch('metor.core.daemon.managed.quick_unlock.os.name', 'nt'),
+                patch(
+                    'metor.core.daemon.managed.quick_unlock.create_private_directory_tree'
+                ) as create_tree,
+                patch.object(store, '_protect_windows_path') as protect,
+                patch.object(store, '_validate_protection') as validate,
+            ):
+                store._prepare_private_parent()
+
+            create_tree.assert_not_called()
+            protect.assert_not_called()
+            validate.assert_called_once_with(path.parent, directory=True)
+
     def test_sensitive_grant_is_verified_scoped_consumed_and_session_local(
         self,
     ) -> None:
