@@ -50,13 +50,18 @@ jobs:
       - name: Validate generated references against checked-in copies
         run: python scripts/validate_generated_docs.py
 
-      - name: Build native offline bundles and test installed consumers
+      - name: Build native offline bundles
         if: matrix.python-version == '3.11'
         shell: bash
-        run: |
-          python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir closure-bundles
-          python scripts/validate_installed_artifacts.py closure-bundles
-          python scripts/validate_release_installers.py closure-bundles
+        run: python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir closure-bundles
+
+      - name: Validate installed consumers
+        if: matrix.python-version == '3.11'
+        run: python scripts/validate_installed_artifacts.py closure-bundles
+
+      - name: Validate native offline installers
+        if: matrix.python-version == '3.11'
+        run: python scripts/validate_release_installers.py closure-bundles
 
       - name: Provision and verify Linux EGL software rendering
         if: runner.os == 'Linux' && matrix.python-version == '3.11'

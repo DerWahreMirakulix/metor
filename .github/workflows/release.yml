@@ -164,11 +164,13 @@ jobs:
         shell: bash
         run: python scripts/build_release_wheelhouse.py --output-dir dist/release --skip-pip-upgrade --variant all
 
-      - name: Validate installed consumers and every native installer
+      - name: Validate installed consumers
         shell: bash
-        run: |
-          python scripts/validate_installed_artifacts.py dist/release
-          python scripts/validate_release_installers.py dist/release
+        run: python scripts/validate_installed_artifacts.py dist/release
+
+      - name: Validate every native installer
+        shell: bash
+        run: python scripts/validate_release_installers.py dist/release
 
       - name: Smoke-test Linux bundle installers
         if: runner.os == 'Linux'

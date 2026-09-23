@@ -5,13 +5,13 @@ reports remain evidence and are not competing implementation backlogs.
 
 ## Current completion-correction status
 
-| Package | State                                      | Commit                      | Tests                                                                                                                                           | Result                                                                                             | Next step                                                                |
-| ------- | ------------------------------------------ | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| C01     | hosted harness follow-up candidate         | C01 follow-up (this commit) | 124 daemon/runtime/IPC/release neighbors; local four-bundle installed-consumer validation with two real managed starts                         | Local PASS; two hosted runs exhausted the former 15-second acceptance wait                         | Verify the bounded 45-second generic acceptance window in the next run   |
-| C02     | native verified                            | `61c3b67`                   | 76 focused tests plus 49 subtests; full 861-test local discovery; real Windows 3.11/3.13 quality execution                                      | PASS at C02 scope; both Windows lanes reached only later C03 failures                              | Retain C02 native ACL tests in every later matrix                        |
-| C03     | local candidate; native acceptance pending | C03 candidate (this commit) | 113 focused lock/process/configuration/GUI/documentation/storage tests plus 83 subtests; normal and `win32` mypy                                | Local PASS with 4 native skips; exact Windows fixtures prepared                                    | Run Windows 3.11/3.13 and verify fresh checkout spec bytes               |
-| C04     | local candidate; native acceptance pending | C04 candidate (this commit) | 42 release/installer tests; four native methods skip on Linux; Ruff, format, and strict mypy                                                     | Linux contracts PASS; two concrete batch return-flow defects corrected                             | Run real `cmd.exe`, then all four fresh Windows bundle installers         |
-| C05     | open                                       | —                           | —                                                                                                                                               | Hosted baseline run `35756273840`, attempt 1, applies only to `3726de4`                            | Reverify the exact corrected tree and retain external native blockers    |
+| Package | State                                      | Commit                      | Tests                                                                                                                                    | Result                                                                     | Next step                                                              |
+| ------- | ------------------------------------------ | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| C01     | hosted harness follow-up candidate         | C01 follow-up (this commit) | 124 daemon/runtime/IPC/release neighbors; local four-bundle installed-consumer validation with two real managed starts                   | Local PASS; two hosted runs exhausted the former 15-second acceptance wait | Verify the bounded 45-second generic acceptance window in the next run |
+| C02     | native verified                            | `61c3b67`                   | 76 focused tests plus 49 subtests; full 861-test local discovery; real Windows 3.11/3.13 quality execution                               | PASS at C02 scope; both Windows lanes reached only later C03 failures      | Retain C02 native ACL tests in every later matrix                      |
+| C03     | hosted native exercised; final run pending | `c6b9ab9`                   | 113 focused lock/process/configuration/GUI/documentation/storage tests plus 83 subtests; normal and `win32` mypy                         | Prior DACL/config/spec annotations absent from both fresh Windows lanes    | Retain the same native branches in the final matrix                    |
+| C04     | local candidate; native acceptance pending | C04 candidate (this commit) | 42 release/installer tests; four native methods skip on Linux; Ruff, format, and strict mypy                                             | Linux contracts PASS; two concrete batch return-flow defects corrected     | Run real `cmd.exe`, then all four fresh Windows bundle installers      |
+| C05     | local verified; final hosted run pending   | C05 candidate (this commit) | 863 discovered tests; static/type/generated/boundary gates; four wheels/bundles/installers; two offscreen views; 20 MiB pressure fixture | Local PASS with 8 platform skips; final hosted/native result pending       | Run the final four-lane matrix and record genuine external blockers    |
 
 The task's verified starting evidence records run `35756273840`, attempt 1, at
 `3726de443716dbdd0a2aa2316e86a0acb02015c3`: Linux 3.11 job
@@ -199,6 +199,46 @@ native branch methods remain deliberately skipped until the hosted Windows
 lanes execute them. Full fresh Windows bundle extraction and installer
 validation remains part of the Python 3.11 matrix lane and is not inferred from
 these local checks.
+
+Fresh hosted run `35829828464` tested exact C03 SHA
+`c6b9ab99912bfa3efb466a442b08f471ea8978f3`. The earlier native Windows
+device-configuration DACL failures and specification-byte mismatch did not
+recur on either Windows 3.11 job `107079605877` or Windows 3.13 job
+`107079605959`. Their remaining public evidence was an aggregate test failure
+plus unrelated IPC request timeouts; C03's private positive/foreign-writable,
+reparse, lock, launcher, process-metadata, and checkout-byte branches all
+remained enabled. The final matrix must retain them rather than treating this
+intermediate aggregate result as overall acceptance.
+
+Run `35831081199` tested exact C04 SHA
+`e2792c1979c17b6e27385fb924d11d60a0d9ff53`. Its public Windows annotations
+no longer identify an installer-branch assertion; Windows 3.13 job
+`107083581537` reports one unrelated IPC timeout and Windows 3.11 job
+`107083581683` exposes only the aggregate failure. Because both jobs stop at
+the combined quality step, fresh all-variant Windows installer execution still
+depends on a completely green test suite. The CI and release workflows now use
+separate build, installed-consumer, and native-installer steps so a later
+artifact failure names its exact stage without changing any gate.
+
+The remaining hosted IPC annotations came from the only long authenticated
+real-daemon integration with two continuing subtests and a final exchange. The
+same test needs 28.244 seconds as a whole on the local Linux host. Its
+per-request window is now a named, generic 45-second integration bound, and any
+future timeout reports only the command DTO class, never user data. This does
+not alter the product's 15-second default.
+
+C05 local verification uses one C01-C04 product tree. Full discovery completes
+863 tests in 706.900 seconds with eight platform-native skips. Ruff and format
+pass over 568 files; strict normal and `--platform win32` mypy pass over 466
+sources; boundaries, version registry, and two-pass generated-reference
+freshness pass. Four fresh wheels report application version 0.2.0. Four fresh
+Linux Python 3.11 offline bundles pass wheel ownership/type/dependency checks,
+external positive/negative SDK typing, both UI removal orders, SDK survival,
+the locked and session-auth installed managed starts, and each real ZIP
+installer. Offscreen SDL captures pass for root refresh and settings keyboard;
+the synthetic production worker/cache fixture processes 20 MiB with a 16 MiB
+cache cap. Side-effect-free endpoint enumeration returns no native audio
+endpoints, so no microphone stream is opened.
 
 ## Current targeted follow-up status
 

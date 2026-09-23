@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 import test_closure_integration as integration
-from metor.client.ipc import IpcClient
+from metor.client.ipc import IpcClient, IpcTimeoutError
 from metor.core.api import (
     InitCommand,
     AuthenticateSessionCommand,
@@ -32,6 +32,9 @@ from metor.utils import Constants
 from metor.versioning import IPC_PROTOCOL_VERSION, IPC_PROTOCOL_MIN_SUPPORTED
 
 
+_INTEGRATION_IPC_TIMEOUT_SEC: float = 45.0
+
+
 class ClosureSecurityTests(unittest.TestCase):
     """Real session sockets bind full proof, restriction and purpose grants."""
 
@@ -48,7 +51,7 @@ class ClosureSecurityTests(unittest.TestCase):
         def attach() -> IpcClient:
             raw = IpcClient(
                 daemon._ipc.port,
-                Constants.DEFAULT_IPC_TIMEOUT,
+                _INTEGRATION_IPC_TIMEOUT_SEC,
                 lambda event: None,
                 lambda: None,
             )
@@ -61,7 +64,13 @@ class ClosureSecurityTests(unittest.TestCase):
             lease = raw.begin_request(request_id)
             try:
                 raw.send_command(command, lease)
-                response = raw.wait_for_response(request_id, lease)
+                try:
+                    response = raw.wait_for_response(request_id, lease)
+                except IpcTimeoutError as exc:
+                    raise AssertionError(
+                        'Authenticated integration exchange timed out for '
+                        f'{type(command).__name__}.'
+                    ) from exc
                 self.assertIsNotNone(response)
                 return response
             finally:

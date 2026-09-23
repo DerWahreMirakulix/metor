@@ -11,6 +11,15 @@ launcher 2, DB 4 (minimum 3; transactional 3 → 4 migration), keyslot/blob and 
 `scripts/generate_api_docs.py`, `generate_settings_docs.py`, and
 `generate_compatibility_manifest.py`.
 
+The 23 September completion-correction candidate passes the complete local
+software, packaging, installed-consumer, offline-installer, native-offscreen,
+and bounded synthetic-stream gates recorded in the closure worklog. Fresh
+hosted Linux/Windows execution has replaced the earlier unavailable-run claim;
+the exact final candidate matrix remains pending at this checkpoint. Remaining
+desktop lifecycle and full-GUI duplex evidence is selected by native capability
+and explicit operator consent, never by a fixed device brand, GPU, or developer
+machine.
+
 The baseline `InitEvent.capabilities` advertises `text_content`, `voice_content`,
 `voice_inbound_descriptor`, `voice_bounded_read`, `retained_message_inventory`,
 `voice_resume`, `voice_terminal_commit`, `voice_draft_commit`,

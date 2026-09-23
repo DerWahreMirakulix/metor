@@ -1,11 +1,30 @@
-# GUI implementation and acceptance report — updated 2026-09-20
+# GUI implementation and acceptance report — updated 2026-09-23
+
+## Completion-correction checkpoint — 23 September 2026
+
+The current C05 candidate passes 863 locally discovered tests with eight
+platform-native skips, normal and Win32-target strict typing, all static and
+generated-reference gates, four fresh Linux Python 3.11 bundles, installed
+consumer/removal/provenance scenarios, all four real offline ZIP installers,
+two offscreen SDL views, and the generic 20 MiB stream-pressure fixture. The
+native audio inventory is empty on this host, so enumeration opens no stream
+and no full-GUI duplex claim is made.
+
+Fresh hosted correction runs have exercised both supported Python versions on
+Linux and Windows. Their evidence replaced the former statement that no hosted
+run existed; an exact final-candidate matrix is still pending at this
+checkpoint. Required remaining native gates are capability-based: an explicitly
+selected compatible input/output route with operator consent, and the real
+installed OS lifecycle sequences. A dated named headset or host/GPU observation
+is historical context only, never an active selection rule or prerequisite.
 
 ## Final GUI implementation closure — 20 September 2026
 
 The functional desktop/simulator implementation is complete, but final GUI
 acceptance remains **pending**. The current support manifest records unavailable
 mandatory native Windows lifecycle/media, real Linux suspend/lock media, and
-updated full-GUI Razer duplex reruns. No percentage is inferred from automated
+updated full-GUI duplex reruns on an explicitly selected capability-compatible
+route. No percentage is inferred from automated
 coverage. The repository registers no production physical adapter, so appliance
 acceptance remains outside the claimed product scope rather than being counted
 as a desktop failure.
@@ -38,7 +57,8 @@ repaints; it cannot synthesize focus, unlock or a new PTT press. A controller
 contract test also proves that an incoming eligible Voice turn remains admitted
 while the local capture worker is active. Capture and output already use
 independent typed ports/workers; the approved Razer route separately passed the
-concurrent native port probe. Permission, unplug and output failures retain
+concurrent native port probe at that dated checkpoint. Current selection is
+capability-based and does not require that device. Permission, unplug and output failures retain
 accepted data and never create false playback/consumption.
 
 Final verification on Linux x86_64 / Python 3.11.15:
@@ -491,7 +511,7 @@ Canonical packaging remains `scripts/build_release_wheelhouse.py`,
 `scripts/validate_release_installers.py`. Explicit probes are
 `tests/gui_installed_launcher.py`, `tests/gui_native_voice.py` and
 `tests/gui_stream_pressure.py`. The last uses synthetic output; the Voice probe
-requires `--headset-confirmed` and the already approved Razer route.
+requires `--headset-confirmed` and explicit compatible input/output endpoints.
 
 ## Earlier 15 September implementation checkpoint
 
