@@ -115,16 +115,6 @@ jobs:
           mypy-paths: "src/metor/ scripts/"
           run-tests: "false"
 
-      - name: Set up Node.js for documentation generators
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: "22.17.1"
-          cache: "npm"
-
-      - name: Install pinned documentation tooling
-        shell: bash
-        run: npm ci
-
       - name: Generate and validate release documentation
         shell: bash
         run: |
@@ -134,7 +124,7 @@ jobs:
 
       - name: Run candidate test suite
         shell: bash
-        run: python -m unittest discover -s tests -p 'test_*.py'
+        run: python scripts/run_tests.py --suite all
 
       - name: Load previous public compatibility baseline
         if: needs.prepare.outputs.latest_tag != ''

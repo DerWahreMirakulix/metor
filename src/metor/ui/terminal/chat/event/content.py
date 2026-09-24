@@ -27,6 +27,7 @@ from metor.core.api import (
     TransportStateEvent,
     UnreadMessageEntry,
     UnreadMessagesEvent,
+    VoiceContent,
 )
 from metor.ui.terminal.content import render_content
 from metor.ui.terminal import AliasPolicy, StatusTone, UIPresenter
@@ -81,6 +82,9 @@ def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool
                 )
         elif isinstance(event, MessagesDataEvent):
             handler._remember_peer(event.alias, event.onion)
+
+        if isinstance(event, InboxCountsEvent):
+            handler._voice.request_inventory()
 
         text_fmt: str = UIPresenter.format_response(event, chat_mode=True)
         target_alias: Optional[str] = getattr(event, 'target', None) or getattr(
@@ -150,6 +154,18 @@ def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool
         return True
 
     if isinstance(event, MessageReceivedEvent):
+        if isinstance(event.content, VoiceContent):
+            if event.msg_id:
+                handler._voice.announce(
+                    event.epoch, event.onion, event.alias, event.msg_id
+                )
+            else:
+                handler._renderer.print_message(
+                    render_content(event.content),
+                    msg_type=ChatMessageType.STATUS,
+                    tone=StatusTone.INFO,
+                )
+            return True
         handler._remember_peer(event.alias, event.onion)
         if event.alias and event.alias == handler._session.focused_alias:
             if event.msg_id:
@@ -202,6 +218,10 @@ def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool
         return True
 
     if isinstance(event, InboxNotificationEvent):
+        if event.source_id and handler._voice.seen(
+            event.epoch, event.onion, event.alias, event.source_id
+        ):
+            return True
         handler._remember_peer(event.alias, event.onion)
         if event.alias and event.alias == handler._session.focused_alias:
             handler._cancel_buffered_notification(event.alias, event.onion)

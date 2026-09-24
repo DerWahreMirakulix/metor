@@ -17,11 +17,7 @@ from metor.client import (
     load_frontend,
     valid_frontend_profile_name,
 )
-from metor.data.profile.catalog import (
-    resolve_initial_profile,
-    get_all_profiles,
-    get_unavailable_profile_names,
-)
+
 from metor.data import ProfileManager, SettingKey, Settings
 from metor.cli.dispatcher import CliDispatcher
 from metor.cli.handlers import CommandHandlers
@@ -113,36 +109,21 @@ def run_cli(argv: List[str]) -> int:
         if args.profile is not None and not valid_frontend_profile_name(args.profile):
             sys.stderr.write('Invalid profile name.\n')
             return 2
-        initial = resolve_initial_profile(args.profile)
-        if selected_frontend == 'gui':
-            try:
-                pm_for_gui = ProfileManager(initial) if initial is not None else None
-            except (ValueError, OSError):
-                pm_for_gui = None
-            return CommandHandlers.handle_chat(
-                pm_for_gui,
-                args.start_daemon,
-                selected_frontend,
-                loaded_frontend=args.loaded_frontend,
-                device_config=args.device_config,
-                simulator=args.simulator,
-                debug=args.debug,
-                initial_profile=initial,
-            )
-        if initial is None:
-            message = (
-                'Some profiles are unavailable or damaged. Repair storage or choose another profile.\n'
-                if get_unavailable_profile_names()
-                else 'No profiles exist yet. Create one with `metor profiles add NAME`.\n'
-                if not get_all_profiles()
-                else 'Select a profile with -p NAME or set a default.\n'
-            )
-            sys.stderr.write(message)
+        try:
+            Settings.validate_integrity()
+        except ValueError:
+            sys.stderr.write('Global settings are unavailable.\n')
             return 1
-        if initial not in get_all_profiles():
-            sys.stderr.write(f"Profile '{initial}' does not exist.\n")
-            return 1
-        args.profile = initial
+        return CommandHandlers.handle_chat(
+            None,
+            args.start_daemon,
+            selected_frontend,
+            loaded_frontend=args.loaded_frontend,
+            device_config=args.device_config,
+            simulator=args.simulator,
+            debug=args.debug,
+            initial_profile=args.profile,
+        )
 
     pm: ProfileManager = ProfileManager(args.profile)
     if args.command != 'daemon':

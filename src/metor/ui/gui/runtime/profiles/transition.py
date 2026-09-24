@@ -144,6 +144,9 @@ class ProfileTransition:
                 raise RuntimeError('Selected profile no longer exists')
             interactions = Interactions(generation + 1, controller.mailbox)
             self._interactions = interactions
+            if self._cancelled.is_set() or state.generation != generation:
+                interactions.cancel()
+                raise RuntimeError('Activation abandoned')
             controller.interactions.cancel()
             controller.interactions = interactions
             return controller.activation.connect(generation + 1, interactions)

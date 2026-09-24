@@ -385,6 +385,7 @@ class Chat:
 
         self._ipc.start_listener()
         self._ipc.send_command(RegisterLiveConsumerCommand())
+        self._handler._voice.request_inventory()
 
         self._renderer.print_empty_line()
         self._renderer.print_prompt()

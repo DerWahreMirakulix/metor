@@ -8,7 +8,12 @@ from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from metor.application import create_local_frontend_host
-from metor.client import FrontendLaunchContext, LoadedFrontend
+from metor.client import (
+    FrontendBootstrapError,
+    FrontendLaunchContext,
+    FrontendSelectionKind,
+    LoadedFrontend,
+)
 from metor.cli.entry import run_cli
 from metor.data import ProfileManager, SettingKey, Settings
 from metor.data.profile.catalog import resolve_initial_profile
@@ -214,3 +219,123 @@ class StartupSelectionTests(unittest.TestCase):
         Settings.set(SettingKey.DEFAULT_PROFILE, 'stale')
         self.assertEqual(resolve_initial_profile(), 'first')
         self.assertEqual(Settings.get_str(SettingKey.DEFAULT_PROFILE), 'first')
+
+    def test_repair_holds_catalog_lock_until_default_is_written(self) -> None:
+        """A rename cannot enter between singleton inspection and settings repair.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self._add_remote('alpha', 44108)
+        Settings.set(SettingKey.DEFAULT_PROFILE, 'stale')
+        entered = threading.Event()
+        resume = threading.Event()
+        original_set = Settings.set
+
+        def delayed_set(
+            key: SettingKey, value: str, *, expected_value: str | None = None
+        ) -> None:
+            """Pause only the resolver at its real settings write boundary.
+
+            Args:
+                key: Settings key.
+                value: New setting.
+                expected_value: Compare-and-swap value.
+            Returns:
+                None
+            """
+            if threading.current_thread().name.startswith('resolver'):
+                entered.set()
+                self.assertTrue(resume.wait(5))
+            original_set(key, value, expected_value=expected_value)
+
+        with patch.object(Settings, 'set', side_effect=delayed_set):
+            with ThreadPoolExecutor(
+                max_workers=2, thread_name_prefix='resolver'
+            ) as pool:
+                resolution = pool.submit(resolve_initial_profile)
+                self.assertTrue(entered.wait(5))
+                renamed = pool.submit(
+                    ProfileManager.rename_profile_folder, 'alpha', 'beta'
+                )
+                self.assertFalse(renamed.done())
+                resume.set()
+                self.assertEqual(resolution.result(), 'alpha')
+                self.assertTrue(renamed.result().success)
+        self.assertEqual(Settings.get_str(SettingKey.DEFAULT_PROFILE), 'beta')
+        self.assertEqual(resolve_initial_profile(), 'beta')
+
+    def test_neutral_frontend_selects_via_host_without_cli_exception(self) -> None:
+        """A third frontend can implement a picker using the ordinary launch host.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self._add_remote('alpha', 44109)
+        self._add_remote('beta', 44110)
+        Settings.set(SettingKey.DEFAULT_PROFILE, '')
+        observed: list[FrontendSelectionKind] = []
+
+        def picker(context: FrontendLaunchContext) -> int:
+            """Select and revalidate a catalog entry with the common host.
+
+            Args:
+                context: Shared launch contract.
+            Returns:
+                int: Successful test frontend exit.
+            """
+            observed.append(context.host.initial_selection().kind)
+            context.host.select_profile('beta')
+            self.assertEqual(context.host.initial_selection().profile, 'beta')
+            return 0
+
+        frontend = LoadedFrontend(Mock(frontend_id='other'), picker)
+        with (
+            patch('metor.cli.entry.initialize_runtime_environment'),
+            patch('metor.cli.entry.load_frontend', return_value=frontend),
+        ):
+            self.assertEqual(run_cli(['chat', '--ui', 'other']), 0)
+        self.assertEqual(observed, [FrontendSelectionKind.CHOICE_REQUIRED])
+        self.assertEqual(Settings.get_str(SettingKey.DEFAULT_PROFILE), '')
+
+    def test_close_racing_bootstrap_fences_late_result(self) -> None:
+        """Closing during endpoint resolution rejects activation and future selection.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self._add_remote('alpha', 44111)
+        host = create_local_frontend_host('alpha')
+        entered = threading.Event()
+        resume = threading.Event()
+
+        def port(_manager: ProfileManager) -> int:
+            """Pause the real host at its endpoint boundary.
+
+            Args:
+                _manager: Selected temporary remote profile.
+            Returns:
+                int: Fixture port.
+            """
+            entered.set()
+            self.assertTrue(resume.wait(5))
+            return 44111
+
+        with patch.object(ProfileManager, 'get_daemon_port', port):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                bootstrap = pool.submit(host.bootstrap, Mock())
+                self.assertTrue(entered.wait(5))
+                closing = pool.submit(host.close)
+                self.assertTrue(host._closed.wait(5))
+                resume.set()
+                with self.assertRaises(FrontendBootstrapError):
+                    bootstrap.result()
+                closing.result()
+        with self.assertRaises(FrontendBootstrapError):
+            host.select_profile('alpha')

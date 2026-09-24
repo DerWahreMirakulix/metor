@@ -913,12 +913,16 @@ class DocumentationReleaseArchitectureTests(unittest.TestCase):
         self.assertIn('contents: read', validation_jobs)
         self.assertIn('contents: write', publish_job)
         self.assertIn("github.ref_name == 'main'", publish_job)
+        quality_action = (
+            root / '.github' / 'actions' / 'python-quality' / 'action.yml'
+        ).read_text(encoding='utf-8')
+        self.assertIn('uses: ./.github/actions/python-quality', validation_jobs)
         self.assertIn(
             'actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38',
-            validation_jobs,
+            quality_action,
         )
-        self.assertIn('node-version: "22.17.1"', validation_jobs)
-        self.assertIn('npm ci', validation_jobs)
+        self.assertIn('node-version: "22.17.1"', quality_action)
+        self.assertIn('npm ci', quality_action)
         self.assertIn('python scripts/validate_generated_docs.py', validation_jobs)
         self.assertIn('docs/generated/SETTINGS.md', workflow)
         self.assertIn('if ! git diff --cached --quiet; then', publish_job)
@@ -1106,7 +1110,7 @@ class DocumentationReleaseArchitectureTests(unittest.TestCase):
         self.assertIn('run-tests: "false"', quality)
         generator = quality.index('npm run generate:docs')
         validator = quality.index('python scripts/validate_generated_docs.py')
-        tests = quality.index("python -m unittest discover -s tests -p 'test_*.py'")
+        tests = quality.index('python scripts/run_tests.py --suite all')
         self.assertLess(generator, validator)
         self.assertLess(validator, tests)
 

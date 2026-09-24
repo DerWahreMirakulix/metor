@@ -18,11 +18,18 @@ from metor.ui.gui.launcher import GuiEntry
 class GuiStartupDiagnosticsTests(unittest.TestCase):
     """Exercise the production launcher without opening a native window."""
 
-    def _launch_with_app(self, exit_ready: bool) -> tuple[int, str]:
+    def _launch_with_app(
+        self,
+        exit_ready: bool,
+        failure: BaseException | None = None,
+        cleanup_failure: BaseException | None = None,
+    ) -> tuple[int, str]:
         """Run the launcher with an inert toolkit app at its import boundary.
 
         Args:
             exit_ready: Whether a deliberate GUI close completed.
+            failure: Optional event-loop failure.
+            cleanup_failure: Optional cleanup failure.
         Returns:
             tuple[int, str]: Exit code and caller-visible stderr.
         """
@@ -45,6 +52,18 @@ class GuiStartupDiagnosticsTests(unittest.TestCase):
                 )
                 self.exit_status = 0
 
+            def on_stop(self) -> None:
+                """Record cleanup even after an abnormal toolkit return.
+
+                Args:
+                    None
+                Returns:
+                    None
+                """
+                self_outer.stops += 1
+                if cleanup_failure is not None:
+                    raise cleanup_failure
+
             def run(self) -> None:
                 """Return as a mocked event loop.
 
@@ -53,8 +72,11 @@ class GuiStartupDiagnosticsTests(unittest.TestCase):
                 Returns:
                     None
                 """
-                return
+                if failure is not None:
+                    raise failure
 
+        self_outer = self
+        self.stops = 0
         module.MetorApp = TestApp  # type: ignore[attr-defined]
         configuration = SimpleNamespace(activate_platform=lambda value: value)
         sink = StringIO()
@@ -80,6 +102,7 @@ class GuiStartupDiagnosticsTests(unittest.TestCase):
         status, stderr = self._launch_with_app(True)
         self.assertEqual(status, 0)
         self.assertEqual(stderr, '')
+        self.assertEqual(self.stops, 1)
 
     def test_unexpected_event_loop_return_is_visible_failure(self) -> None:
         """A toolkit return without deliberate Close reports a nonzero stop.
@@ -92,6 +115,45 @@ class GuiStartupDiagnosticsTests(unittest.TestCase):
         status, stderr = self._launch_with_app(False)
         self.assertEqual(status, 1)
         self.assertIn('Metor GUI could not start [event-loop]', stderr)
+        self.assertEqual(self.stops, 1)
+
+    def test_event_loop_failures_release_app_and_redact_details(self) -> None:
+        """An exception or nonnumeric toolkit exit still runs cleanup once.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        for failure, expected in (
+            (RuntimeError('password-secret'), 'RuntimeError'),
+            (SystemExit('password-secret'), 'SystemExit'),
+            (SystemExit(7), 'toolkit exited with status 7'),
+        ):
+            with self.subTest(failure=type(failure).__name__):
+                status, stderr = self._launch_with_app(False, failure)
+                self.assertEqual(status, 1)
+                self.assertIn(
+                    f'Metor GUI could not start [event-loop]: {expected}', stderr
+                )
+                self.assertNotIn('password-secret', stderr)
+                self.assertEqual(self.stops, 1)
+
+    def test_cleanup_failure_is_reported_even_on_normal_return(self) -> None:
+        """A native teardown failure cannot be mistaken for a clean exit.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        status, stderr = self._launch_with_app(
+            True, cleanup_failure=RuntimeError('password-secret')
+        )
+        self.assertEqual(status, 1)
+        self.assertIn('Metor GUI could not start [app-cleanup]: RuntimeError', stderr)
+        self.assertNotIn('password-secret', stderr)
+        self.assertEqual(self.stops, 1)
 
     def test_real_subprocess_import_error_preserves_stderr_and_redacts_exception(
         self,
@@ -137,6 +199,29 @@ sys.exit(GuiEntry()(FrontendLaunchContext(None, object(), debug=True)))
         self.assertIn('launcher.py:', result.stderr)
         self.assertIn('stderr-preserved True', result.stdout)
         self.assertNotIn('synthetic-secret-sentinel', result.stderr)
+
+    def test_debug_redacts_foreign_stack_locations_and_exception_class(self) -> None:
+        """Untrusted callback filenames and custom class names never reach stderr.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        secret = 'password-secret'
+        namespace: dict[str, object] = {}
+        exec(
+            compile('def fail():\n    raise RuntimeError()', secret, 'exec'), namespace
+        )
+        try:
+            namespace['fail']()
+        except RuntimeError as error:
+            sink = StringIO()
+            GuiEntry._report_fatal(sink, 'event-loop', 'RuntimeError', True, error)
+            self.assertNotIn(secret, sink.getvalue())
+            self.assertNotIn('fail', sink.getvalue())
+        custom = type(secret, (Exception,), {})()
+        self.assertEqual(GuiEntry._safe_reason(custom), 'Exception')
 
     def test_default_subprocess_import_failure_has_safe_stderr(self) -> None:
         """Fatal import failure is visible without opting into debug detail.

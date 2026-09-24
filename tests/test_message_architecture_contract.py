@@ -86,7 +86,10 @@ class MessageArchitectureContractTests(unittest.TestCase):
         )
         decoded = IpcEvent.from_dict(json.loads(event.to_json()))
         self.assertEqual(decoded, event)
-        self.assertEqual(render_content(content), '[Voice: opus, 4096 bytes]')
+        self.assertEqual(
+            render_content(content),
+            'Voice message received. Playback is not supported in this frontend.',
+        )
         self.assertEqual(render_content(object()), '[Unsupported message content]')
 
     def test_generated_schema_exposes_delivery_and_content(self) -> None:

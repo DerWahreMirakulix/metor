@@ -4,11 +4,21 @@ permissions: {}
 
 on:
   push:
+    # Keep main and the active embeddedui branch covered without running all feature pushes.
+    branches:
+      - main
+      - embeddedui
   pull_request:
+
+# Superseded revisions on the same branch/PR do not need another full matrix.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   python-quality:
     name: Python Quality (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    # PR merge refs and branch commits are distinct acceptance candidates.
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -34,6 +44,7 @@ jobs:
           ruff-format-paths: "src/metor/ scripts/ tests/"
           mypy-paths: "src/metor/ scripts/"
           run-tests: "true"
+          test-command: python scripts/run_tests.py --suite all
 
       - name: Build and validate all wheels
         shell: bash

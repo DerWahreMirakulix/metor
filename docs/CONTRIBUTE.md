@@ -15,6 +15,49 @@ GUI or Terminal, use the applicable `requirements/base.lock` pins and install
 `./packaging/sdk` and `.` together. Independent wheel and installed-consumer
 tests remain necessary: editable source imports do not prove wheel ownership.
 
+## Running tests
+
+From the repository root, use the selected development Python after the checkout
+installation above (do not install dependencies again for each suite):
+
+```sh
+python scripts/run_tests.py --list
+python scripts/run_tests.py --suite fast
+python scripts/run_tests.py --suite integration
+python scripts/run_tests.py --suite all
+python scripts/run_tests.py --suite all --match test_profile_storage_security --failfast
+python scripts/run_tests.py --suite all --durations 20
+```
+
+The runner loads `tests/test_*.py` through an explicit per-module manifest in
+`scripts/run_tests.py`. Classify each new module as fast or integration; missing,
+unclassified or multiply classified files fail _before any test module imports_.
+Fast imports only fast modules (and their own dependencies); keep fast test
+imports independent of integration fixtures. `all` includes every classified
+module and is the CI/release gate. `--list` prints **every full unittest ID** in
+the selected suite, without executing cases; `--match` filters full IDs by
+substring. Empty selections, import failures, duplicate IDs and unexpected
+case modules fail closed. For a failed import or test, the console and ignored
+`build/test-report.txt` contain safe IDs and counts, **not** exception strings,
+tracebacks or captured output. The ignored report also lists the status and
+setup-to-cleanup runtime of each case; the console shows only the slowest cases
+measured from before `setUp` through `tearDown` and cleanups. Class/module
+fixtures are in overall elapsed time, not attributed to an individual case.
+
+Optional coverage requires `coverage.py` already installed in the same Python
+environment; the pinned development manifest does not install it. Run
+`python scripts/run_tests.py --suite all --coverage` to emit a terminal summary
+for `metor` and save detailed data in ignored `build/.coverage`. CI does
+not install coverage or claim a coverage threshold. CI runs `--suite all` on
+**every** Linux/Windows × Python 3.11/3.13 job; the release quality gate also
+runs all tests. Fast is an optional local check, never a substitute for CI.
+The CI workflow cancels superseded runs per branch/PR. Pushes to `main` and the
+active `embeddedui` branch get the full matrix. PRs get the full merge-ref
+matrix, even when the source branch is already push-covered: a branch commit
+cannot certify a different merge tree. There is no added job-level test timeout. Explicit native
+GUI and stream fixtures remain separate from unittest discovery; the runner
+does not replace installed-consumer, Tor, or physical-device acceptance.
+
 ## 1. Language & Naming
 
 - **English Only:** All code, variables, comments, commit messages, and docstrings MUST be written in English.

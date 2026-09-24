@@ -510,6 +510,16 @@ class GuiLifecycleCoreTests(unittest.TestCase):
         self.gui._worker.join(5)
         self.gui.poll()
         self.assertEqual(self.gui.identity.outcome, 'rejected')
+        self.assertFalse(self.gui.identity.unknown)
+        self.assertFalse(self.gui.state.covered)
+        for _ in range(4):
+            if not self.gui.state.busy:
+                break
+            worker = self.gui._worker
+            if worker is not None:
+                worker.join(5)
+            self.gui.poll()
+        self.assertFalse(self.gui.state.busy)
         self.assertTrue(
             self.gui.identity.change_password('test-password', 'new-test-password')
         )

@@ -7,6 +7,7 @@ import unittest
 from urllib.parse import unquote
 
 from metor.ui.gui.platform import DeviceConfigurationError, read_configuration
+from metor.utils import open_private_binary_file
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -159,7 +160,8 @@ class DocumentationContractTests(unittest.TestCase):
         example = ROOT / 'docs/examples/gui-simulator.toml'
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'device.toml'
-            path.write_bytes(example.read_bytes())
+            with open_private_binary_file(path) as handle:
+                handle.write(example.read_bytes())
             with self.assertRaises(DeviceConfigurationError):
                 read_configuration(str(path), simulator=False)
 
@@ -175,7 +177,8 @@ class DocumentationContractTests(unittest.TestCase):
         example = ROOT / 'docs/examples/gui-simulator.toml'
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'device.toml'
-            path.write_bytes(example.read_bytes())
+            with open_private_binary_file(path) as handle:
+                handle.write(example.read_bytes())
             configuration = read_configuration(str(path), simulator=True)
         self.assertEqual(configuration.mode, 'simulator')
         self.assertEqual(configuration.logical_size, (480, 800))

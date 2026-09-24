@@ -4,6 +4,9 @@ from metor.core.api import MessageContent, TextContent, VoiceContent
 from metor.shared import escape_terminal_text
 
 
+VOICE_HINT = 'Voice message received. Playback is not supported in this frontend.'
+
+
 def render_content(content: MessageContent | object) -> str:
     """Renders supported content or a stable generic placeholder.
 
@@ -16,6 +19,5 @@ def render_content(content: MessageContent | object) -> str:
     if isinstance(content, TextContent):
         return escape_terminal_text(content.text)
     if isinstance(content, VoiceContent):
-        codec: str = escape_terminal_text(content.codec)
-        return f'[Voice: {codec}, {content.size_bytes} bytes]'
+        return VOICE_HINT
     return '[Unsupported message content]'

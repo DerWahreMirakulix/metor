@@ -1,7 +1,8 @@
 """Central event handler for incoming daemon IPC events in chat mode."""
 
 import threading
-from typing import Callable, Dict, Iterable, Optional, Set, Type
+from collections import OrderedDict
+from typing import Callable, Dict, Iterable, Optional, Type
 
 from metor.core.api import (
     EventType,
@@ -11,6 +12,7 @@ from metor.core.api import (
     SwitchCommand,
 )
 from metor.ui.terminal import AliasPolicy, StatusTone, Translator
+from metor.ui.terminal.constants import Constants
 from metor.shared import clean_onion
 
 # Local Package Imports
@@ -18,6 +20,7 @@ from metor.ui.terminal.chat.event.content import handle_content_event
 from metor.ui.terminal.chat.event.models import BufferedInboxNotification
 from metor.ui.terminal.chat.event.state import handle_state_event
 from metor.ui.terminal.chat.event.transport import handle_transport_event
+from metor.ui.terminal.chat.event.voice import VoiceNotices
 from metor.ui.terminal.chat.ipc import IpcClient
 from metor.ui.terminal.chat.models import ChatMessageType
 from metor.ui.terminal.chat.renderer import ChatRenderer
@@ -65,7 +68,8 @@ class EventHandler:
         self._has_auto_reconnect: Callable[[], bool] = has_auto_reconnect
         self._notification_lock: threading.Lock = threading.Lock()
         self._buffered_inbox_notifications: Dict[str, BufferedInboxNotification] = {}
-        self._pushed_live_msg_ids: Set[str] = set()
+        self._pushed_live_msg_ids: OrderedDict[str, None] = OrderedDict()
+        self._voice = VoiceNotices(self)
 
     def _remember_pushed_live_msg_id(self, msg_id: str) -> None:
         """
@@ -78,7 +82,9 @@ class EventHandler:
             None
         """
         with self._notification_lock:
-            self._pushed_live_msg_ids.add(msg_id)
+            self._pushed_live_msg_ids[msg_id] = None
+            if len(self._pushed_live_msg_ids) > Constants.PUSHED_LIVE_IDS:
+                self._pushed_live_msg_ids.popitem(last=False)
 
     def _was_pushed_live_msg_id(self, msg_id: str) -> bool:
         """
@@ -105,7 +111,7 @@ class EventHandler:
         """
         with self._notification_lock:
             for msg_id in msg_ids:
-                self._pushed_live_msg_ids.discard(msg_id)
+                self._pushed_live_msg_ids.pop(msg_id, None)
 
     @staticmethod
     def _notification_key(alias: Optional[str], onion: Optional[str]) -> Optional[str]:
@@ -393,6 +399,8 @@ class EventHandler:
         Returns:
             None
         """
+        if self._voice.handle(event):
+            return
         if handle_content_event(self, event):
             return
         if handle_transport_event(self, event):

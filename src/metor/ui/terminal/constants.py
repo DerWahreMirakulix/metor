@@ -10,3 +10,6 @@ class Constants(ContractConstants):
     INPUT_SLEEP_SEC: float = 0.02
     INPUT_SELECT_TIMEOUT_SEC: float = 0.0
     UUID_MSG_BYTES: int = 8
+    PUSHED_LIVE_IDS: int = ContractConstants.MAX_RETAINED_PAGE_SIZE
+    VOICE_NOTICE_IDS: int = ContractConstants.MAX_RETAINED_PAGE_SIZE
+    VOICE_INVENTORY_PAGES: int = 4

@@ -1,5 +1,6 @@
 """Lazy GUI entry point; validation precedes toolkit, host and driver work."""
 
+import builtins
 from dataclasses import replace
 import os
 import logging
@@ -58,6 +59,8 @@ class GuiEntry:
         original_stderr = sys.stderr
         started = time.monotonic()
         stage = 'toolkit-import'
+        app = None
+        status = 1
         try:
             from metor.ui.gui.app import MetorApp
 
@@ -77,12 +80,10 @@ class GuiEntry:
                     context.debug,
                     elapsed=time.monotonic() - started,
                 )
-                return 1
-            return app.exit_status
+            else:
+                status = app.exit_status
         except BaseException as exc:
-            reason = exc.__class__.__name__
-            if isinstance(exc, SystemExit) and type(exc.code) is int:
-                reason = f'toolkit exited with status {exc.code}'
+            reason = self._safe_reason(exc)
             self._report_fatal(
                 original_stderr,
                 stage,
@@ -91,7 +92,36 @@ class GuiEntry:
                 exc,
                 elapsed=time.monotonic() - started,
             )
-            return 1
+        finally:
+            if app is not None:
+                try:
+                    app.on_stop()
+                except BaseException as exc:
+                    self._report_fatal(
+                        original_stderr,
+                        'app-cleanup',
+                        self._safe_reason(exc),
+                        context.debug,
+                        exc,
+                        elapsed=time.monotonic() - started,
+                    )
+                    status = 1
+        return status
+
+    @staticmethod
+    def _safe_reason(error: BaseException) -> str:
+        """Classify an exception without exposing user-defined names or messages.
+
+        Args:
+            error: Toolkit or application failure.
+        Returns:
+            str: Safe built-in class or explicit numeric toolkit exit.
+        """
+        if isinstance(error, SystemExit) and type(error.code) is int:
+            return f'toolkit exited with status {error.code}'
+        if vars(builtins).get(type(error).__name__) is type(error):
+            return type(error).__name__
+        return 'Exception'
 
     @staticmethod
     def _report_fatal(
@@ -124,11 +154,11 @@ class GuiEntry:
                 )
             if debug and error is not None:
                 frames = traceback.extract_tb(error.__traceback__)[-8:]
+                gui_root = Path(__file__).resolve().parent
                 for frame in frames:
-                    stream.write(
-                        f'  {Path(frame.filename).name}:{frame.lineno} '
-                        f'in {frame.name}\n'
-                    )
+                    path = Path(frame.filename).resolve()
+                    if path.is_relative_to(gui_root):
+                        stream.write(f'  {path.name}:{frame.lineno}\n')
             stream.flush()
         except OSError:
             pass

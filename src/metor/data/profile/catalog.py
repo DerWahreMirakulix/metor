@@ -43,23 +43,34 @@ def resolve_initial_profile(explicit: str | None = None) -> str | None:
     """
     if explicit is not None:
         return explicit
+    if not Constants.DATA.exists():
+        return _resolve_initial_profile_locked()
+    with FileLock(Constants.DATA / '.profile-catalog'):
+        return _resolve_initial_profile_locked()
+
+
+def _resolve_initial_profile_locked() -> str | None:
+    """Resolve and repair the default while holding the catalog-before-settings lock.
+
+    Args:
+        None
+    Returns:
+        str | None: Valid default, sole profile, or no unambiguous choice.
+    """
     profiles = get_all_profiles()
     default = load_default_profile()
     if default in profiles:
         return default
-    if len(profiles) == 1:
-        try:
-            Settings.set(
-                SettingKey.DEFAULT_PROFILE, profiles[0], expected_value=default
-            )
-        except SettingValidationError:
-            # Another catalog writer may have selected a valid default first.
-            current = load_default_profile()
-            if current in profiles:
-                return current
-            raise
-        return profiles[0]
-    return None
+    if len(profiles) != 1:
+        return None
+    try:
+        Settings.set(SettingKey.DEFAULT_PROFILE, profiles[0], expected_value=default)
+    except SettingValidationError:
+        current = load_default_profile()
+        if current in profiles:
+            return current
+        raise
+    return profiles[0]
 
 
 def valid_default_profile(profiles: list[str] | None = None) -> str | None:

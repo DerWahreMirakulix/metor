@@ -9,6 +9,7 @@ from metor.client import (
     FrontendInteractions,
     FrontendLaunchContext,
     FrontendLaunchError,
+    FrontendSelectionKind,
 )
 from metor.ui.terminal import (
     PromptAbortedError,
@@ -98,6 +99,16 @@ def launch(context: FrontendLaunchContext) -> int:
         raise FrontendLaunchError(
             'The installed Terminal frontend uses an incompatible launch contract.'
         )
+    selection = context.host.initial_selection()
+    if selection.kind is not FrontendSelectionKind.RESOLVED:
+        messages = {
+            FrontendSelectionKind.EMPTY: 'No profiles exist yet. Create one with `metor profiles add NAME`.',
+            FrontendSelectionKind.CHOICE_REQUIRED: 'Select a profile with -p NAME or set a default.',
+            FrontendSelectionKind.REQUESTED_MISSING: 'Requested profile does not exist. Choose another with -p NAME.',
+            FrontendSelectionKind.UNAVAILABLE: 'Some profiles are unavailable or damaged. Repair storage or choose another profile.',
+        }
+        sys.stderr.write(messages[selection.kind] + '\n')
+        return 1
     interactions = _TerminalInteractions()
     started = time.monotonic()
     try:

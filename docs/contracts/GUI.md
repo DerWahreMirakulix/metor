@@ -37,7 +37,8 @@ terminal stdin. A daemon spawned by this chat invocation ends when the GUI close
 or switches away; an already running daemon is borrowed and survives. Optional
 audio or camera failure leaves available text actions usable.
 
-`--debug` adds safe exception class and stack locations to fatal stderr output.
+`--debug` adds bounded phase, timing and known-safe source locations to fatal
+stderr output without printing untrusted exception text, class names or locals.
 Fatal toolkit startup and unexpected event-loop termination return nonzero with a
 safe stage summary even without debug. Normal first-run Close returns zero. A
 missing display or native graphics dependency remains a platform prerequisite;

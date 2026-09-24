@@ -22,6 +22,7 @@ from metor.cli.parser import CliParser
 from metor.client import (
     FRONTEND_LAUNCH_CONTRACT_VERSION,
     FrontendLaunchContext,
+    FrontendBootstrapError,
     FrontendLaunchError,
     LoadedFrontend,
     load_frontend,
@@ -335,8 +336,9 @@ class IndependentCliContractTests(unittest.TestCase):
                 context = invoke.call_args.args[1]
                 self.assertEqual(context.profile, 'profile-a')
                 interactions = Mock()
-                result = context.host.bootstrap(interactions)
-                self.assertEqual(result.port, 37123)
+                with self.assertRaises(FrontendBootstrapError):
+                    context.host.bootstrap(interactions)
+                interactions.confirm_daemon_start.assert_not_called()
 
     def test_missing_selected_frontend_prevents_profile_and_daemon_side_effects(
         self,

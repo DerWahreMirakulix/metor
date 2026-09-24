@@ -1,12 +1,16 @@
 """Protocol definitions for the modular chat event helpers."""
 
 import threading
-from typing import Callable, Dict, List, Optional, Protocol, Type
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Protocol, Type
 
 from metor.core.api import EventType, JsonValue, MarkReadCommand
+from metor.ui.terminal.models import StatusTone
 from metor.ui.terminal.chat.ipc import IpcClient
 from metor.ui.terminal.chat.renderer import ChatRenderer
 from metor.ui.terminal.chat.session import Session
+
+if TYPE_CHECKING:
+    from metor.ui.terminal.chat.event.voice import VoiceNotices
 
 
 class EventHandlerProtocol(Protocol):
@@ -19,6 +23,22 @@ class EventHandlerProtocol(Protocol):
     _conn_event: threading.Event
     _mark_read_command_type: Type[MarkReadCommand]
     _has_auto_reconnect: Callable[[], bool]
+    _voice: 'VoiceNotices'
+
+    def _print_peer_status(
+        self, text: str, tone: StatusTone, alias: str, onion: Optional[str] = None
+    ) -> None:
+        """Renders a peer-bound terminal status line.
+
+        Args:
+            text: Safe status template.
+            tone: Terminal tone.
+            alias: Peer alias.
+            onion: Stable peer identity if available.
+        Returns:
+            None
+        """
+        ...
 
     def _remember_peer(
         self,

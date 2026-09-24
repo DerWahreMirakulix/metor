@@ -50,8 +50,18 @@ or dismiss behavior.
 
 ## Startup selection and invocation lifetime
 
-The catalog, persisted default, initial selection and authenticated active
-profile are separate facts. First successful creation sets the default. A stale
+The catalog, persisted default, requested `-p` name, initial selection and
+authenticated active profile are separate facts. `FrontendHost.initial_selection()`
+returns one bounded `FrontendSelection` with a typed kind (resolved, choice
+required, empty, requested missing, or unavailable), requested name, resolved
+name and valid stored default. It is an explicitly requested initial resolution;
+paginated `profile_catalog()` reads never repair a default. The general CLI loads
+any installed frontend and passes the host without profile-dependent UI-name
+exceptions. GUI renders create/picker/error routes; Terminal currently prints
+selection guidance and exits before chat/daemon startup. A future Terminal picker
+can call the existing host `select_profile()` and then `bootstrap()`; no picker
+is currently provided. Host selection revalidates each chosen profile at the
+activation boundary. First successful creation sets the default. A stale
 or missing default resolves to the sole valid profile; several profiles without
 a valid default require a choice. Rename follows the default; permitted removal
 reconciles it to the sole survivor or clears it when none remain. Empty storage
@@ -153,7 +163,12 @@ A newly attached frontend discovers retained identities with
 `ListRetainedMessagesCommand`. Its opaque cursor is filter-bound and tied to a
 stable inventory version; stale pages fail explicitly. Entries expose only safe
 identity/status/media metadata, never bytes, text, previews, or storage paths.
-Enumeration and range reads preserve unread/payload state. Pending outbound IDs
+Enumeration and range reads preserve unread/payload state. Terminal displays
+finalized inbound Voice as metadata-only text, including a notice that playback
+is unsupported there. Its bounded retained-inventory lookup does not retrieve
+chunks, issue `ReleaseVoiceCommand`, or mark Voice read; `/inbox` retains its
+text-consumption behavior. Playback and Voice release require a capable client
+and an explicit handoff. Pending outbound IDs
 also provide the public discovery path for selective fallback after restart.
 
 Peer wire generation 3 separates `/ack` (LIVE text), `/drop_ack` (DROP text),

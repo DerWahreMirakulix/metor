@@ -5,7 +5,7 @@ from contextlib import redirect_stderr
 from io import StringIO
 from unittest.mock import Mock, patch
 
-from metor.client import FrontendLaunchContext
+from metor.client import FrontendLaunchContext, FrontendSelection, FrontendSelectionKind
 from metor.ui.terminal.launcher import launch
 
 
@@ -21,6 +21,9 @@ class TerminalBootstrapStatusTests(unittest.TestCase):
             None
         """
         host = Mock()
+        host.initial_selection.return_value = FrontendSelection(
+            FrontendSelectionKind.RESOLVED, 'fixture', 'fixture', 'fixture'
+        )
         host.bootstrap.return_value.session_auth.take.return_value = None
         with patch('metor.ui.terminal.launcher.Chat') as chat_type:
             chat_type.return_value.run.return_value = False
@@ -37,6 +40,9 @@ class TerminalBootstrapStatusTests(unittest.TestCase):
             None
         """
         host = Mock()
+        host.initial_selection.return_value = FrontendSelection(
+            FrontendSelectionKind.RESOLVED, 'fixture', 'fixture', 'fixture'
+        )
         host.bootstrap.return_value.session_auth.take.return_value = None
         stderr = StringIO()
         with (

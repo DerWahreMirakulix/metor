@@ -20,6 +20,8 @@ from metor.client import (
     FrontendProfileOperationResult,
     FrontendProfileSecurity,
     FrontendProfileState,
+    FrontendSelection,
+    FrontendSelectionKind,
     FrontendProfileAction,
     FrontendProfileCatalog,
     FrontendProfileChange,
@@ -36,6 +38,7 @@ from metor.data import (
 from metor.utils import Constants, TypeCaster, ProcessManager
 from metor.data.profile.catalog import (
     get_unavailable_profile_names,
+    resolve_initial_profile,
     valid_default_profile,
 )
 
@@ -107,8 +110,12 @@ class LocalFrontendHost:
         """
         self._profile = profile
         self._unavailable_name: str | None = None
+        self._requested_name: str | None = (
+            profile.profile_name if profile is not None else None
+        )
         self._start_daemon_override = start_daemon_override
         self._attempt_lock = threading.Lock()
+        self._closed = threading.Event()
         self._started_processes: dict[str, int | None] = {}
         self._owned_processes: dict[str, subprocess.Popen[bytes]] = {}
 
@@ -152,6 +159,7 @@ class LocalFrontendHost:
         Returns:
             None
         """
+        self._closed.set()
         with self._attempt_lock:
             failures: list[Exception] = []
             for profile in tuple(self._owned_processes):
@@ -161,6 +169,46 @@ class LocalFrontendHost:
                     failures.append(exc)
             if failures:
                 raise OSError('Owned daemon cleanup could not be confirmed.')
+
+    def initial_selection(self) -> FrontendSelection:
+        """Classify the selected profile against current safe catalog facts.
+
+        Args:
+            None
+        Returns:
+            FrontendSelection: Typed initial state without catalog contents.
+        """
+        requested = self._requested_name
+        selected = self.profile_state()
+        try:
+            names = ProfileManager.get_all_profiles()
+            unavailable = get_unavailable_profile_names()
+            default = valid_default_profile(names)
+        except (OSError, ValueError):
+            return FrontendSelection(
+                FrontendSelectionKind.UNAVAILABLE, requested, None, None
+            )
+        if selected is not None:
+            if selected.issue or selected.profile in unavailable:
+                kind = FrontendSelectionKind.UNAVAILABLE
+            elif selected.exists and selected.profile in names:
+                kind = FrontendSelectionKind.RESOLVED
+            else:
+                kind = FrontendSelectionKind.REQUESTED_MISSING
+            return FrontendSelection(
+                kind,
+                requested,
+                selected.profile if kind is FrontendSelectionKind.RESOLVED else None,
+                default,
+            )
+        kind = (
+            FrontendSelectionKind.UNAVAILABLE
+            if unavailable
+            else FrontendSelectionKind.CHOICE_REQUIRED
+            if names
+            else FrontendSelectionKind.EMPTY
+        )
+        return FrontendSelection(kind, requested, None, default)
 
     def profile_state(self) -> FrontendProfileState | None:
         """Returns read-only state for a frontend first-run route.
@@ -209,7 +257,7 @@ class LocalFrontendHost:
         Returns:
             None
         """
-        if self._attempt_lock.locked():
+        if self._closed.is_set() or self._attempt_lock.locked():
             raise FrontendBootstrapError(
                 'Frontend bootstrap is already running.',
                 reason=FrontendBootstrapReason.BUSY,
@@ -249,16 +297,18 @@ class LocalFrontendHost:
                 reason=FrontendBootstrapReason.BUSY,
             )
         try:
+            self._require_open()
             if self._profile is not None and self._profile.profile_name != profile:
                 self._close_owned_profile(self._profile.profile_name)
+            selected = self._catalog_state(profile)
+            if not selected.exists or selected.issue:
+                raise FrontendBootstrapError(
+                    'Selected profile is missing or unavailable.',
+                    reason=FrontendBootstrapReason.MISSING_PROFILE,
+                )
             self._profile = ProfileManager(profile)
             self._unavailable_name = None
-            return FrontendProfileState(
-                profile,
-                self._profile.exists(),
-                self._profile.is_remote() if self._profile.exists() else False,
-                self._profile.is_daemon_running() if self._profile.exists() else False,
-            )
+            return selected
         except ValueError:
             raise FrontendBootstrapError(
                 'Invalid profile configuration.',
@@ -475,6 +525,7 @@ class LocalFrontendHost:
                 reason=FrontendBootstrapReason.BUSY,
             )
         try:
+            self._require_open()
             yield
         finally:
             self._attempt_lock.release()
@@ -494,6 +545,7 @@ class LocalFrontendHost:
                 reason=FrontendBootstrapReason.BUSY,
             )
         try:
+            self._require_open()
             return self._bootstrap_attempt(interactions)
         except FrontendBootstrapError:
             raise
@@ -510,6 +562,19 @@ class LocalFrontendHost:
         finally:
             self._attempt_lock.release()
 
+    def _require_open(self) -> None:
+        """Reject new activity after the invocation begins closing.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        if self._closed.is_set():
+            raise FrontendBootstrapError(
+                'Frontend host is closing.', reason=FrontendBootstrapReason.CANCELLED
+            )
+
     def _bootstrap_attempt(
         self, interactions: FrontendInteractions
     ) -> FrontendBootstrapResult:
@@ -521,6 +586,7 @@ class LocalFrontendHost:
         Returns:
             FrontendBootstrapResult: The resulting value.
         """
+        self._require_open()
         profile = self._profile
         if profile is None:
             raise FrontendBootstrapError(
@@ -560,6 +626,7 @@ class LocalFrontendHost:
                     )
                 if not confirmation:
                     raise FrontendBootstrapError(_offline_hint())
+            self._require_open()
             if profile.uses_plaintext_storage() and profile.config.get_bool(
                 SettingKey.REQUIRE_LOCAL_AUTH
             ):
@@ -568,7 +635,9 @@ class LocalFrontendHost:
                     raise FrontendBootstrapError(
                         'Aborted.', 130, reason=FrontendBootstrapReason.CANCELLED
                     )
+            self._require_open()
             interactions.show_status('Starting local daemon...')
+            self._require_open()
             diagnostics = DaemonStartDiagnostics()
             owner = psutil.Process(os.getpid())
             try:
@@ -610,6 +679,7 @@ class LocalFrontendHost:
             if diagnostics.process is not None:
                 self._owned_processes[profile.profile_name] = diagnostics.process
             self._started_processes[profile.profile_name] = profile.get_daemon_pid()
+            self._require_open()
         port = profile.get_daemon_port()
         if type(port) is not int or not 0 < port < 65536:
             startup_secret = None
@@ -633,6 +703,7 @@ class LocalFrontendHost:
                 + Constants.LISTENER_READY_TIMEOUT,
             ),
         )
+        self._require_open()
         return FrontendBootstrapResult(
             profile=profile.profile_name,
             remote=profile.is_remote(),
@@ -658,12 +729,15 @@ def create_local_frontend_host(
     Returns:
         FrontendHost: Versioned frontend-neutral host boundary.
     """
+    if profile is None:
+        profile = resolve_initial_profile()
     if isinstance(profile, str):
         try:
             selected = ProfileManager(profile)
         except (ValueError, OSError):
             host = LocalFrontendHost(None, start_daemon_override)
             host._unavailable_name = profile
+            host._requested_name = profile
             return host
         return LocalFrontendHost(selected, start_daemon_override)
     return LocalFrontendHost(profile, start_daemon_override)

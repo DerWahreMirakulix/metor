@@ -14,7 +14,7 @@ from .platform import PlatformBindings
 
 
 FRONTEND_ENTRY_POINT_GROUP: str = 'metor.ui_frontends'
-FRONTEND_LAUNCH_CONTRACT_VERSION: int = 2
+FRONTEND_LAUNCH_CONTRACT_VERSION: int = 3
 
 
 class FrontendLaunchError(RuntimeError):
@@ -287,6 +287,26 @@ class FrontendProfileState:
     issue: str | None = None
 
 
+class FrontendSelectionKind(str, Enum):
+    """One shared pre-bootstrap decision, independent of presentation capability."""
+
+    RESOLVED = 'resolved'
+    CHOICE_REQUIRED = 'choice_required'
+    EMPTY = 'empty'
+    REQUESTED_MISSING = 'requested_missing'
+    UNAVAILABLE = 'unavailable'
+
+
+@dataclass(frozen=True)
+class FrontendSelection:
+    """Bounded selection facts without a profile catalog or credentials."""
+
+    kind: FrontendSelectionKind
+    requested: str | None
+    profile: str | None
+    default: str | None
+
+
 class FrontendHost(Protocol):
     """Base-distribution service boundary exposed to installed frontends."""
 
@@ -299,6 +319,16 @@ class FrontendHost(Protocol):
             None
         Returns:
             None
+        """
+        ...
+
+    def initial_selection(self) -> FrontendSelection:
+        """Return the shared selection decision before any daemon bootstrap.
+
+        Args:
+            None
+        Returns:
+            FrontendSelection: Bounded initial selection and default facts.
         """
         ...
 

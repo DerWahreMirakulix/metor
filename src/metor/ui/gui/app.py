@@ -1,5 +1,7 @@
 """Native SDL/Kivy application lifecycle and generation-safe GUI polling."""
 
+from contextlib import ExitStack
+
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.config import Config
@@ -56,6 +58,7 @@ class MetorApp(App):
         self.controller = GuiController(context, configuration.mode == 'simulator')
         self.title = 'Metor · Simulator' if self.controller.simulator else 'Metor'
         self.exit_status: int = 0
+        self._stopped = False
         self.shell: Shell | None = None
         self.viewport: BoxLayout | None = None
         self.input_dock: InputDock | None = None
@@ -433,26 +436,33 @@ class MetorApp(App):
         Returns:
             None
         """
-        PointerTooltip.clear_all()
-        self._lifecycle_handoff.close()
-        if self._lifecycle_source is not None:
-            self._lifecycle_source.close()
-            self._lifecycle_source = None
-        if self.accessibility is not None:
-            self.accessibility.close()
-            self.accessibility = None
-        if self.input_dock is not None:
-            self.input_dock.hide()
-        TextField.keyboard_owner = None
-        self.controller.device.close()
-        Window.unbind(
-            on_request_close=self._close,
-            on_keyboard=self._keyboard,
-            on_key_down=self._key_down,
-            on_key_up=self._key_up,
-            on_touch_down=self._activity,
-            on_touch_up=self._touch_up,
-            focus=self._focus,
-        )
-        self.controller.close()
-        ActionSheet.reconcile()
+        if self._stopped:
+            return
+        self._stopped = True
+        with ExitStack() as cleanup:
+            cleanup.callback(ActionSheet.reconcile)
+            cleanup.callback(self.controller.close)
+            cleanup.callback(
+                Window.unbind,
+                on_request_close=self._close,
+                on_keyboard=self._keyboard,
+                on_key_down=self._key_down,
+                on_key_up=self._key_up,
+                on_touch_down=self._activity,
+                on_touch_up=self._touch_up,
+                focus=self._focus,
+            )
+            cleanup.callback(self.controller.device.close)
+            cleanup.callback(setattr, TextField, 'keyboard_owner', None)
+            if self.input_dock is not None:
+                cleanup.callback(self.input_dock.hide)
+            if self.accessibility is not None:
+                accessibility, self.accessibility = self.accessibility, None
+                cleanup.callback(accessibility.close)
+            if self._lifecycle_source is not None:
+                source, self._lifecycle_source = self._lifecycle_source, None
+                cleanup.callback(source.close)
+            cleanup.callback(self._lifecycle_handoff.close)
+            cleanup.callback(PointerTooltip.clear_all)
+            cleanup.callback(self.controller.lifecycle.cancel)
+            cleanup.callback(self.controller.interactions.cancel)

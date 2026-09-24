@@ -6,6 +6,7 @@ import threading
 from metor.client import (
     FrontendBootstrapError,
     FrontendLaunchContext,
+    FrontendSelectionKind,
     IpcDisconnectedError,
     IpcTimeoutError,
     MetorClient,
@@ -108,17 +109,16 @@ class GuiController:
         self.profiles = ProfileCatalog(self)
         self.initial_missing_profile: str | None = None
         if not simulator:
-            selected = context.host.profile_state()
-            if selected is None or not selected.exists or selected.issue:
+            selection = context.host.initial_selection()
+            if selection.kind is not FrontendSelectionKind.RESOLVED:
                 available = context.host.list_profiles()
-                damaged = any(entry.issue for entry in available)
                 self.state.route = Route('V03' if not available else 'V02')
                 self.initial_missing_profile = (
-                    context.profile
-                    if selected is not None and not selected.exists
+                    selection.requested
+                    if selection.kind is FrontendSelectionKind.REQUESTED_MISSING
                     else None
                 )
-                if damaged:
+                if selection.kind is FrontendSelectionKind.UNAVAILABLE:
                     self.state.status = (
                         'Some profiles are unavailable or damaged. '
                         'Choose another profile or create one.'
@@ -237,7 +237,9 @@ class GuiController:
                 try:
                     event = work()
                     update = Update(generation, operation, event)
-                    if event is None and operation.startswith('A'):
+                    if event is None and (
+                        operation == 'bootstrap' or operation.startswith('A')
+                    ):
                         update = Update(
                             generation,
                             operation,
@@ -688,17 +690,21 @@ class GuiController:
         """
         if preserve_purge and not (purging and self.purge.active):
             raise ValueError('Only accepted destruction can retain its observer')
+        with self._guard:
+            self.lifecycle.cancel()
+            if self.interactions is not preserve_interactions:
+                self.interactions.cancel()
         if not preserve_purge:
             self.purge.dispose()
             self.purge = PurgeMonitor(self)
         with self._guard:
             self.lifecycle.cancel()
+            if self.interactions is not preserve_interactions:
+                self.interactions.cancel()
             self.resend.clear()
             self.contacts.book.stop()
             self.voice.abandon(purge=purging)
             self.playback.abandon()
-            if self.interactions is not preserve_interactions:
-                self.interactions.cancel()
             client, self.client = self.client, None
             owner, self.voice_owner.token = self.voice_owner.token, None
             self.state.abandon()

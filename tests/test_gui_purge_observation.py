@@ -8,6 +8,8 @@ from unittest.mock import Mock, patch
 from metor.client import (
     FrontendLaunchContext,
     FrontendProfileState,
+    FrontendSelection,
+    FrontendSelectionKind,
     MetorClient,
     build_session_auth_proof,
 )
@@ -244,6 +246,9 @@ class PurgeObservationCoreTests(unittest.TestCase):
         host.profile_state.return_value = FrontendProfileState(
             'voice-owned', True, False, True
         )
+        host.initial_selection.return_value = FrontendSelection(
+            FrontendSelectionKind.RESOLVED, 'voice-owned', 'voice-owned', 'voice-owned'
+        )
         shutdown = Mock()
         shutdown.request_shutdown.return_value = PlatformActionResult.ACCEPTED
         bindings = PlatformBindings('fixture', Mock(), shutdown)
@@ -295,12 +300,13 @@ class PurgeObservationCoreTests(unittest.TestCase):
             gui.device.receive(sample)
             gui.device.poll()
         deadline = time.monotonic() + 20
-        while (
-            not terminal.is_set() or not shutdown.request_shutdown.called
-        ) and time.monotonic() < deadline:
+        # Wait for Core's terminal fact before GUI polling can detach a slow cleanup.
+        while not terminal.is_set() and time.monotonic() < deadline:
+            terminal.wait(0.01)
+        self.assertTrue(terminal.is_set(), 'Core did not report terminal cleanup')
+        while not shutdown.request_shutdown.called and time.monotonic() < deadline:
             gui.poll()
             terminal.wait(0.01)
-        self.assertTrue(terminal.is_set())
         self.assertTrue(shutdown.request_shutdown.called)
         shutdown_worker = gui.device._purge_shutdown_worker
         self.assertIsNotNone(shutdown_worker)
@@ -314,4 +320,4 @@ class PurgeObservationCoreTests(unittest.TestCase):
         self.assertEqual(gui.purge.detail, 'Powering off.')
         shutdown.request_shutdown.assert_called_once_with()
         self.assertIsNone(gui.client)
-        self.assertEqual(host.profile_state.call_count, 2)
+        host.profile_state.assert_called_once_with()
