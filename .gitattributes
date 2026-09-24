@@ -10,5 +10,3 @@
 /src/metor/ui/gui/assets/fonts/DejaVu-LICENSE.txt -whitespace
 
 # Approved specifications are immutable byte inputs on every checkout platform.
-/docs/specs/METOR_GUI_SPEC.md -text
-/docs/specs/METOR_GUI_LAYOUT_SPEC.md -text

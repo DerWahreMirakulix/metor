@@ -89,3 +89,154 @@ definition or generator, regenerate, and commit the result. Authored documents
 should link readers to deeper generated references instead of duplicating them,
 and relevant links must remain reachable from the existing human or agent entry
 point.
+
+## 10. Security and Architecture Review
+
+Every change is reviewed against the risks it can actually affect. Record the
+relevant checks and evidence; do not claim a platform, hardware, or destructive
+path that was not exercised.
+
+### Ownership and isolation
+
+- Frontends access Core through typed IPC and the narrow public host/settings and
+  platform contracts. They never read SQL, Tor state, keys, or profile runtime
+  files directly.
+- Daemon DTOs carry domain codes and structured data, not preformatted UI text.
+- Client and `ui.*` settings remain local; `daemon.*` settings are routed to the
+  daemon host. Genuinely shared behavior has one explicit owner.
+- New platform adapters keep observation, ordered input, and controlling actions
+  separate. Hardware input or actuator success never grants Core authorization.
+
+### Cryptography, credentials, and retention
+
+- Generate seeds, UUIDs, nonces, and tokens with cryptographically secure
+  primitives; never use `random` for security material.
+- Validate signatures and challenge-response proofs without timing-sensitive
+  comparisons or replayable authorization.
+- Passwords derive only the KEK that unwraps a random PMK. Keyslot permissions
+  and sensitive directories remain owner-only where supported.
+- Lock clears runtime key references; purge destroys protected PMK access before
+  best-effort file cleanup. Never describe software overwrite as guaranteed
+  physical erasure.
+- Apply explicit read/release and retention rules. A placeholder, download,
+  delivery ACK, or UI observation is not proof that content was read or safely
+  consumed.
+
+### Network, IPC, and resource safety
+
+- Reassemble TCP/IPC streams with their declared framing. One `recv()` is never
+  assumed to contain one complete frame.
+- Bound frames, queues, callbacks, connections, buffers, retries, and timeouts.
+  Saturation and loss are explicit outcomes rather than silent drops or
+  unbounded growth.
+- Serialize socket writers, keep physical I/O outside canonical state locks, and
+  ensure stale callbacks cannot tear down a replacement generation.
+- Treat request correlation as routing, not authorization. Revalidate exact
+  identity, generation, scope, and eligibility at mutation time.
+
+### Concurrency and process lifecycle
+
+- Protect shared iteration and mutation with the owning lock and preserve the
+  documented lock order across domain, state, store, and writer boundaries.
+- Cross-process file locks must survive crashed owners safely. Spawned Tor and
+  managed child processes must be tracked and terminated on failed startup or
+  shutdown.
+- Isolate optional callback and malformed-input failures while keeping release,
+  authorization, persistence, and cleanup failures observable.
+- Test races at enclosing production boundaries: reconnect replacement, unknown
+  operation outcome, owner loss, finalization, restriction, profile switch, and
+  purge fencing.
+
+### Persistence and local data
+
+- Parameterize all SQL data values. Structural SQL may interpolate only strict
+  constants or mathematically constructed placeholders, never raw user input.
+- Keep secrets short-lived and remove payloads, credentials, keys, and peer
+  identities from exceptions and logs.
+- Preserve the random PMK and domain-separated DB, secret, and blob keys. A
+  future `KeyProtector` must remain replaceable without changing consumers.
+- Blob IDs remain opaque and path-independent; formats are versioned and
+  authenticated; temporary and persistent ownership is explicit.
+- Test partial transactions, staged migration recovery, commit uncertainty, and
+  cleanup failure without deleting the only recoverable copy.
+
+### Versioning and release integrity
+
+- All application and compatibility values come from
+  `src/metor/versioning/__init__.py`.
+- SQL, IPC, peer, keyslot, blob, and derivation changes receive the semantic
+  review and version treatment described in [RELEASING.md](./RELEASING.md).
+  Additive defaulted fields do not justify an automatic generation bump;
+  incompatible changes do.
+- `*_MIN_SUPPORTED` claims require actual reader/negotiation coverage. Application
+  SemVer changes only in the explicit release process.
+- Regenerate and validate code-owned API, settings, schema, and compatibility
+  references through their generators. Never edit `docs/generated/*` manually.
+
+### Documentation and evidence
+
+- Update the one owning document for each rule and repair every path consumer.
+  Put GUI operation, behavior, device configuration, and visual rules in
+  `docs/contracts/GUI.md`; shared frontend contracts belong in
+  `docs/contracts/FRONTENDS.md`. Record dated acceptance results with the
+  relevant release evidence, not in a maintained project-status database.
+- Preserve stable requirement/test identifiers when they remain useful. Remove
+  implementation diaries and copied run counts from maintained explanations.
+- Verify local links and anchors, JSON/schema consumers, generated-reference
+  determinism, and any packaging/resource relocation. Build installed consumers
+  outside the checkout when package contents change.
+- Evidence must state revision, platform/capability, scope, result, and durable
+  reference. Mock, offscreen, or typed-adapter evidence is never promoted to
+  native, acoustic, accessibility-product, or appliance acceptance.
+
+## 11. Native GUI Acceptance Gates
+
+Native acceptance is capability-selected and separately authorized. Never encode
+a headset brand, GPU, board model, or developer-machine path as a requirement.
+Use a fresh installed GUI outside the checkout for an installed gate, record the
+exact source/artifact revision, and keep microphone bytes and temporary profiles
+out of durable artifacts.
+
+Enumerate audio endpoints without opening a stream:
+
+```sh
+python tests/gui_native_voice.py --mode source --list-devices
+```
+
+After an operator explicitly selects compatible input/output endpoints and
+confirms a headset route, run the full GUI/Core duplex gate:
+
+```sh
+python tests/gui_native_voice.py \
+  --mode source \
+  --input-device INPUT_INDEX \
+  --output-device OUTPUT_INDEX \
+  --headset-confirmed \
+  --revision COMMIT_OR_TREE \
+  --result native-gui-voice.json
+```
+
+For installed acceptance, invoke the script from outside the checkout with the
+wheel-installed interpreter and `--mode installed`; the harness rejects a GUI
+loaded from the checkout. `tests/gui_native_audio.py` is the narrower PortAudio
+diagnostic and does not replace the full GUI/Core gate.
+
+On a supported installed Linux desktop, observe real provider events while an
+operator performs only the authorized actions:
+
+```sh
+python tests/gui_native_lifecycle.py --expect lock,suspend,resume
+```
+
+The acceptance run must also verify the enclosing GUI privacy/media behavior:
+private accessibility/tooltips are revoked before cover, capture and playback
+stop safely, held input requires release, resume stays covered, and no input,
+microphone, playback, or unlock is reconstructed. Windows acceptance exercises
+the corresponding installed WTS Lock/Unlock and power suspend/resume path on an
+actual native session. Structural/unit message tests are necessary but do not
+replace either native run.
+
+A release dry run is a separate owner-authorized procedure under
+[RELEASING.md](./RELEASING.md). Preserve genuine revision-qualified evidence
+with the release record; update the GUI contract only when supported behavior
+or capability changes.

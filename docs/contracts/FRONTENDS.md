@@ -1,18 +1,16 @@
-# Frontend Core Contract
+# Frontend integration contract
 
 This document defines the shared Core and SDK boundary for every Metor
 frontend. The official frontends are `terminal` / `metor-ui-terminal` and
-`gui` / `metor-ui-gui`. The GUI's presentation contract and approved v1.0
-inputs are routed through [GUI.md](GUI.md); GUI-specific implementation facts
-remain in [GUI_INTEGRATION_MAP.md](GUI_INTEGRATION_MAP.md).
+`gui` / `metor-ui-gui`. The [GUI contract](GUI.md) covers GUI behavior, device configuration,
+presentation, and startup.
 
 This contract does not define screens, navigation, playback, hardware drivers,
 or other presentation behavior. Terminal, GUI, and third-party clients consume
 the same typed boundary without gaining storage, transport, key, or host-process
 ownership.
 
-The owner-accepted GUI starting revision is recorded in the integration map.
-This frontend contract does not approve or replace GUI/layout specifications.
+This frontend-neutral contract owns public integration behavior. GUI-specific presentation belongs in [GUI.md](GUI.md).
 
 ## Ownership boundary
 
@@ -199,25 +197,47 @@ is disabled, pending LIVE data remains recoverable and is not auto-reconnected
 on a later return.
 
 Self-destruct is a separate emergency path. Hard-locked anonymous clients cannot
-invoke it. `daemon.self_destruct_requires_unlock` defaults to `true`, so a
-restricted previously authenticated client normally reauthorizes first. When
-an operator explicitly sets it to `false`, only a restricted session with the
-frozen `device_lifecycle` capability may proceed; a new/anonymous session is
-still denied. Once accepted, it preempts Voice
-finalization, fallback, reconnect, outbox delivery, and ordinary notification
-work. Core aborts reliability workers and attempts protected-key destruction
-even if nonessential runtime preparation fails. It emits
-`SelfDestructKeyDestroyedEvent` at the irreversible milestone, then performs
-best-effort profile-scoped cleanup. `SelfDestructCleanupFailedEvent` identifies
-the failed `preparation`, `key_destruction`, or `cleanup` phase and truthfully
-states whether the key was destroyed. `SelfDestructCompletedEvent` follows only
-complete cleanup. A platform must not cut power merely on
-`SelfDestructInitiatedEvent`.
+invoke it. A restricted client can act only when it was authenticated before
+restriction and its immutable lock-cycle policy grants `device_lifecycle`. The
+`daemon.self_destruct_requires_unlock` deployment setting defaults to `true`;
+setting it to `false` does not create anonymous, cold-boot, physical-input, or
+new-session authority. No GUI preference can bypass this rule.
+
+Once Core accepts one operation ID, destruction preempts Voice finalization,
+fallback, reconnect, outbox delivery, and ordinary notification work. Core
+reports runtime release separately from persistent key-protection destruction.
+`SelfDestructSafeEvent` is the combined selected-profile milestone for an
+encrypted profile; cleanup follows and reports completion or a typed phase
+failure. Initiation, keyslot removal, runtime release, EOF, timeout, or process
+exit alone is not the combined guarantee. A platform shutdown still requires a
+validated local binding and exclusive runtime coordination, and must follow only
+the documented safe-plus-terminal result or bounded post-safe cleanup-loss rule.
 
 Purge affects only the selected profile. Ordinary exit never purges: it converts
 eligible pending LIVE text and Voice to DROP when fallback is enabled, otherwise
 retains them as pending LIVE, does not wait for delivery, and does not recreate
 an automatic reconnect intent when the profile is next opened.
+
+## Public capability and failure map
+
+| Requirement family                 | Public owner and contract                                                                                         | Failure and reconciliation rule                                                                                                                 | Primary evidence                          |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Launch and graphical bootstrap     | `FrontendHost`, `FrontendInteractions`, `FrontendLaunchContext`                                                   | Typed cancellation, unavailable, missing-profile and retryable bootstrap outcomes; no terminal prompt or local substitute for a remote endpoint | GAT-31–42                                 |
+| Runtime projection                 | `register_live_consumer`, `RuntimeSnapshotEvent`, `RuntimeStateChangedEvent`                                      | Epoch/revision ordering applies only to projected state; media, request results and lifecycle reports are reconciled by their own identities    | GAT-42–45                                 |
+| Text admission and unknown outcome | `SendMessageCommand(local_acceptance=True)`, `TextAcceptedEvent`, `TextRejectedEvent`, `GetMessageOutcomeCommand` | Definite quota rejection is immediate; a lost result is checked by the original ID and never resent blindly                                     | GAT-01, GAT-30, GAT-46                    |
+| Retained Voice                     | `ListRetainedMessagesCommand`, `GetVoiceChunkCommand`, `ReleaseVoiceCommand`                                      | Inventory/read are bounded and non-consuming; only exact eligible finalized handoff releases content                                            | GAT-43, GAT-52–55                         |
+| Voice producer ownership           | owner-qualified register/release and Begin/Append/Finalize/Commit/Cancel                                          | Disposable DROP cleanup is owner-scoped; committed winners survive uncertainty; interrupted authorized LIVE retains accepted bytes              | GAT-10–12, GAT-49–55                      |
+| Protected GUI metadata             | `GetGuiPreferencesCommand`, `SetGuiPreferencesCommand`                                                            | Profile-instance scoped, bounded and revision-checked; stale writes reject rather than merge over another client                                | GAT-61, GAT-67                            |
+| Qualified LIVE controls            | Connect/Accept/Reject, qualified Disconnect/Retunnel, Fallback, Dismiss                                           | Attempt/context qualifiers reject stale controls; fallback is atomic and preserves IDs; dismissal refuses unresolved work                       | GAT-03–06, GAT-13–16, GAT-57, GAT-60      |
+| Restriction and unlock             | Restrict/Reauthorize/ConfigureQuickUnlock and restricted-state projection                                         | Immediate cover; exact lock-cycle policy and call handles; failed restriction never becomes client-side success                                 | GAT-20–23, GAT-56–60                      |
+| Contacts and activity              | typed contact validation/mutations and paged history metadata                                                     | Stable identity guards prevent stale rename/remove; pages are bounded and body-free; uncertain mutation uses readback                           | GAT-02, GAT-03, GAT-17–19, GAT-67, GAT-68 |
+| Profile lifecycle                  | `ProfileRuntimeCoordinator`, optional public host profile management                                              | Phase-aware result distinguishes source-active from source-prepared failure; target credentials and callbacks never cross profiles              | GAT-24–26, GAT-62–64                      |
+| Device lifecycle and purge         | frontend-neutral platform ports plus correlated SelfDestruct reports                                              | Physical input grants no authority; unconfirmed preparation or destruction never reaches shutdown                                               | GAT-27, GAT-40, GAT-65, GAT-66            |
+
+All additions within the current IPC generation remain strict, registered, and
+defaulted where required. Generated wire shapes and capability names are
+authoritative; this table records ownership and failure semantics, not a second
+schema.
 
 ## Privacy and compatibility rules
 
@@ -233,41 +253,3 @@ an automatic reconnect intent when the profile is next opened.
 
 The complete wire shapes and defaults are generated in
 [API.md](../generated/API.md) and [SETTINGS.md](../generated/SETTINGS.md).
-
-## Acceptance regression map
-
-The following executable checks pin the cross-layer invariants. Test names are
-stable evidence labels; the full suite remains the final regression boundary.
-
-| Gate | Implementation invariant                                                          | Primary regression evidence                                                                                                                                                                   |
-| ---- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| G01  | Fresh DROP Voice begins at offset zero and completes with a commit ACK.           | `test_fresh_drop_voice_completes_first_attempt_empty_and_nonempty`                                                                                                                            |
-| G02  | Text replay/ACK paths cannot reinterpret or complete Voice.                       | `test_common_replay_keeps_text_and_voice_frames_typed`; `test_generic_text_ack_cannot_complete_voice_identity`                                                                                |
-| G03  | Resume offsets are monotonic and matching duplicate chunks are idempotent.        | `test_duplicate_chunk_is_idempotent_but_conflict_is_malformed`; `test_progress_ack_never_releases_before_terminal_commit`                                                                     |
-| G04  | Progress and terminal durability ACKs are distinct; DROP drafts need commit.      | `test_duplicate_end_repeats_terminal_commit_ack`; `test_drop_voice_draft_requires_commit_and_can_be_cancelled`                                                                                |
-| G05  | LIVE-to-DROP receiver promotion retains the same logical identity and bytes.      | `test_partial_live_promotes_to_drop_with_same_identity_and_full_bytes`                                                                                                                        |
-| G06  | Stale LIVE control frames cannot falsely complete promoted DROP work.             | `test_generic_text_ack_cannot_complete_voice_identity`; `test_partial_live_promotes_to_drop_with_same_identity_and_full_bytes`                                                                |
-| G07  | Encrypted object ownership reconciles after interrupted SQL/blob promotion.       | `test_interrupted_encrypted_blob_promotion_reconciles_on_restart`                                                                                                                             |
-| G08  | Public bounded IPC reads expose retained Voice after reattach.                    | `test_public_bounded_read_precedes_explicit_release`                                                                                                                                          |
-| G09  | Voice release is explicit and incomplete media survives text consume.             | `test_public_bounded_read_precedes_explicit_release`; `test_text_consume_and_live_dismiss_preserve_other_voice_state`                                                                         |
-| G10  | Focused text consumption does not abort simultaneous Voice.                       | `test_text_consume_and_live_dismiss_preserve_other_voice_state`                                                                                                                               |
-| G11  | LIVE dismissal does not remove simultaneous DROP Voice.                           | `test_text_consume_and_live_dismiss_preserve_other_voice_state`                                                                                                                               |
-| G12  | Text and Voice share atomic count/byte admission limits.                          | `test_atomic_mixed_pending_count_quota_admits_only_one`; `test_voice_byte_quota_rejects_growth_without_partial_storage`                                                                       |
-| G13  | Segmented storage is linear and peer I/O is independently scheduled.              | `test_segment_storage_is_linear_and_socket_frames_do_not_interleave`; `test_slow_voice_peer_does_not_stall_another_peer`                                                                      |
-| G14  | Every application frame has one per-socket serialized writer.                     | `test_segment_storage_is_linear_and_socket_frames_do_not_interleave`                                                                                                                          |
-| G15  | DROP-disabled policy covers session and tunnel-carried Voice.                     | `test_drop_disabled_rejects_voice_before_receipt_on_session`; DROP tunnel contract suite                                                                                                      |
-| G16  | Restricted password retries use global failure/cooldown state.                    | `test_restricted_password_retries_share_global_cooldown`                                                                                                                                      |
-| G17  | Forgot PIN obtains a password challenge without a fake failure.                   | `test_forgot_pin_issues_password_challenge_without_failed_attempt`                                                                                                                            |
-| G18  | Locked Voice is scoped to the continued LIVE target under every privacy mode.     | `test_locked_media_scope_is_independent_of_notification_privacy`                                                                                                                              |
-| G19  | Anonymous calls have unique actionable, expiring handles.                         | `test_anonymized_call_handles_are_unique_actionable_and_expirable`                                                                                                                            |
-| G20  | Snapshot installation is epoch/revision safe and exhaustion is explicit.          | `test_runtime_snapshot_retries_across_revision_change`; `test_runtime_snapshot_exhaustion_is_explicitly_retryable`; `test_epoch_round_trips_as_sequence_reset_boundary`                       |
-| G21  | One client reader demultiplexes concurrent responses and unsolicited events.      | `test_event_before_snapshot_response_is_not_discarded`; `test_concurrent_request_ids_receive_only_their_own_response`                                                                         |
-| G22  | Canonical mutations fan out content-free, privacy-projected invalidation.         | `test_mutation_fans_out_content_free_state_to_restricted_peer`                                                                                                                                |
-| G23  | Normal exit locally preserves pending text and Voice without remote waits.        | `test_normal_exit_preserves_pending_text_and_voice_locally`                                                                                                                                   |
-| G24  | Profile return creates no implicit reconnect/fallback intent.                     | `test_profile_return_does_not_resurrect_live_reconnect_intent`                                                                                                                                |
-| G25  | A purge fence wins deterministic races against Voice/fallback/outbox commits.     | `test_purge_fence_wins_after_voice_finalize_passes_initial_guard`; `test_purge_stop_wins_after_outbox_ack_passes_initial_guard`                                                               |
-| G26  | Preparation, key destruction, and cleanup failures report truthful milestones.    | `test_preparation_failure_still_destroys_key_and_reports_phase`; `test_key_destruction_failure_prevents_cleanup_and_reports_phase`; `test_cleanup_failure_does_not_restore_destroyed_keyslot` |
-| G27  | Locked lifecycle control is a prior-authenticated per-session capability.         | `test_device_lifecycle_scope_requires_prior_authenticated_session`; `test_hard_locked_daemon_cannot_bypass_session_authorization`                                                             |
-| G28  | Destructive message identity includes direction.                                  | `test_direction_collision_deletes_only_selected_receipt`                                                                                                                                      |
-| G29  | Terminal text/contact/settings/profile behavior remains an equal client contract. | Full `test_terminal_*`, chat, contact, settings, and profile suites                                                                                                                           |
-| G30  | Source, schemas, distributions, and version axes pass all repository gates.       | Ruff, Ruff format, MyPy, generated-doc validation, wheel builds, version validation, and full unittest discovery                                                                              |

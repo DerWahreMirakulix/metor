@@ -177,10 +177,7 @@ signature.
 
 The `metor-ui-gui` distribution uses `requirements/gui.lock`. The canonical
 `all` builder, CI and release workflow include its package, dependency closure,
-installed-consumer and ZIP-installer checks. Functional desktop/simulator scope
-is implemented, while the support manifest still names mandatory native
-lifecycle/media reruns. Workflow inclusion is not release approval.
-[GUI.md](./contracts/GUI.md) records the current status.
+installed-consumer and ZIP-installer checks. Desktop and simulator capabilities are described in [GUI.md](./contracts/GUI.md). Workflow inclusion is not release approval; record native lifecycle and media results as release evidence.
 Wheel metadata validation checks GUI ownership and matching versions whenever
 a GUI wheel is supplied. Full installed-artifact acceptance requires all four.
 

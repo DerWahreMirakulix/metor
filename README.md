@@ -17,13 +17,12 @@ system model, then use the focused references when you need exact contracts.
   [canonical terminology](docs/GLOSSARY.md).
 - Build against the daemon with the generated [IPC API reference](docs/generated/API.md)
   and [settings reference](docs/generated/SETTINGS.md).
-- Work on the native GUI through the [GUI contract and development status](docs/contracts/GUI.md)
-  and the [frontend-neutral Core boundary](docs/contracts/FRONTENDS.md).
-- Contribute using the [contribution guide](docs/CONTRIBUTE.md) and
-  [security audit checklist](docs/governance/AUDIT.md).
+- Use the native GUI through its [GUI contract and startup guide](docs/contracts/GUI.md).
+- Integrate a frontend through the [frontend-neutral contract](docs/contracts/FRONTENDS.md).
+- Contribute and review security-sensitive changes with the
+  [contribution guide](docs/CONTRIBUTE.md).
 - Prepare a release with the [release and versioning guide](docs/RELEASING.md).
-- Review GUI implementation evidence and open acceptance gates in the
-  [GUI acceptance report](docs/audits/GUI_IMPLEMENTATION_2026-09-12.md).
+- Check the [GUI contract](docs/contracts/GUI.md) for current capabilities and limitations; consult release evidence for a particular platform claim.
 
 ## 🌟 Key Features
 
@@ -44,16 +43,10 @@ system model, then use the focused references when you need exact contracts.
 - **Remote Capability (VPS / SSH):**
   Run the Metor daemon 24/7 on a secure remote server and securely connect your local laptop UI to it via an SSH tunnel forwarding the IPC port.
 
-## Supported Hosts
+## Supported hosts
 
-- **Linux x86-64:** Runtime wheel bundles and desktop/simulator GUI installation
-  have dated test evidence. Native lifecycle and media limits are listed in the
-  [GUI support manifest](docs/contracts/gui/support.json).
-- **Windows x86-64:** Runtime wheel bundles and desktop/simulator GUI
-  installation have dated test evidence. Source installs still build
-  `sqlcipher3` from source; a fresh hosted Windows/Linux × Python 3.11/3.13 CI
-  run and the current native lifecycle/media reruns remain explicit acceptance
-  gates in the support manifest.
+Desktop and simulator claims are capability- and evidence-based. The [GUI contract](docs/contracts/GUI.md) describes current capabilities. No physical appliance, universal
+audio route, speaker AEC, or complete screen-reader certification is claimed.
 
 For Windows source installs from a checkout, make sure the Microsoft C++ Build Tools are available before running `pip install`.
 
@@ -66,7 +59,7 @@ Recommended reading order:
 - [Architecture guide](docs/ARCHITECTURE.md) for the high-level design and long-lived decisions.
 - [Settings reference](docs/generated/SETTINGS.md) for all supported settings, defaults, constraints, and security notes.
 - [IPC API reference](docs/generated/API.md) for the exact client-daemon wire contract.
-- [Audit checklist](docs/governance/AUDIT.md) and [contribution guide](docs/CONTRIBUTE.md) if you are reviewing or changing code.
+- [Contribution guide](docs/CONTRIBUTE.md) for development, testing, and the integrated security/architecture review checklist.
 
 ### OPSEC & Security Concepts
 
@@ -82,12 +75,12 @@ For security reasons and to prevent supply-chain attacks, Metor **does not** bun
 
 Metor is split into four non-overlapping packages:
 
-| Package                 | Contents                                                                                     | Typical Use Case                                                          | Install Target                  |
-| :---------------------- | :------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------ | :------------------------------ |
-| **`metor-sdk`**         | IPC client, typed API/wire DTOs, proof helpers, and the public frontend launcher contract    | Client integration or a third-party frontend                              | `pip install metor-sdk`         |
-| **`metor`**             | General CLI, daemon, storage, Tor and local profile/process orchestration; no interactive UI | Headless/base installation                                                | `pip install metor`             |
-| **`metor-ui-terminal`** | Interactive Terminal chat, slash-command help, rendering, theme and frontend resources       | Current interactive frontend                                              | `pip install metor-ui-terminal` |
-| **`metor-ui-gui`**      | Native Kivy desktop/simulator GUI and bundled local assets                                   | Desktop GUI within the [declared support boundary](docs/contracts/GUI.md) | `pip install metor-ui-gui`      |
+| Package                 | Contents                                                                                     | Typical Use Case                                             | Install Target                  |
+| :---------------------- | :------------------------------------------------------------------------------------------- | :----------------------------------------------------------- | :------------------------------ |
+| **`metor-sdk`**         | IPC client, typed API/wire DTOs, proof helpers, and the public frontend launcher contract    | Client integration or a third-party frontend                 | `pip install metor-sdk`         |
+| **`metor`**             | General CLI, daemon, storage, Tor and local profile/process orchestration; no interactive UI | Headless/base installation                                   | `pip install metor`             |
+| **`metor-ui-terminal`** | Interactive Terminal chat, slash-command help, rendering, theme and frontend resources       | Terminal interactive frontend                                | `pip install metor-ui-terminal` |
+| **`metor-ui-gui`**      | Native Kivy desktop/simulator GUI and bundled local assets                                   | Desktop GUI within the [GUI contract](docs/contracts/GUI.md) | `pip install metor-ui-gui`      |
 
 Official package versions are coordinated exactly. `metor` depends on the
 matching SDK; installing the Terminal UI pulls in matching base and SDK
@@ -235,7 +228,10 @@ metor chat --ui terminal
 metor chat --ui gui
 ```
 
-Inside the Chat UI, you have access to the following slash commands:
+GUI-specific installation, simulator/device selection, ordinary operation, and
+troubleshooting are consolidated in the [GUI contract](docs/contracts/GUI.md).
+
+Inside the running Terminal UI, you have access to the following slash commands:
 
 | Command                         | Description                                                          |
 | :------------------------------ | :------------------------------------------------------------------- |
@@ -362,7 +358,7 @@ Generated documentation is part of the project maintenance pipeline.
 - `npm run check` (or `npm run ready`): Runs nonmutating Markdown/Python format checks, linting, type checking, dependency boundaries, generated-reference freshness, and the discovered unit/integration suite.
 - `npm run format:md`, `npm run format:py`, and `npm run fix:py`: Apply intentional Markdown formatting, Python formatting, or Ruff fixes; these mutating commands are separate from readiness checks.
 
-Before changing architecture, security boundaries, or contributor-facing workflows, review the [architecture guide](docs/ARCHITECTURE.md), [audit checklist](docs/governance/AUDIT.md), and [contribution guide](docs/CONTRIBUTE.md).
+Before changing architecture, security boundaries, or contributor-facing workflows, review the [architecture guide](docs/ARCHITECTURE.md) and [contribution guide](docs/CONTRIBUTE.md).
 
 ## 🛡️ Security Disclaimer
 

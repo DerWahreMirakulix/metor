@@ -1,228 +1,277 @@
-# Metor GUI runtime contract
+# Metor GUI
 
-**Implementation status: functional desktop/simulator scope implemented; final
-acceptance remains pending on the native lifecycle and media reruns named in
-the support manifest. No physical-appliance adapter is claimed.**
-This is the current GUI entry point. The approved
-[functional v1.0](../specs/METOR_GUI_SPEC.md) and
-[layout v1.0](../specs/METOR_GUI_LAYOUT_SPEC.md) remain the implementation
-authority; the copies preserve the exact input bytes. This document reports
-implementation facts and does not weaken those requirements.
+This document owns the current GUI behavior, device configuration, and visual
+rules. [FRONTENDS.md](FRONTENDS.md) owns the shared frontend boundary;
+[ARCHITECTURE.md](../ARCHITECTURE.md) explains system decisions. The GUI uses
+Core through the public SDK and typed IPC. It does not own authentication,
+delivery, transport, persistence, or profile truth.
 
-Implementation resumed from commit `3a2cee6` on 20 September. The owner clarified
-that the platform boundary must be frontend-independent and typed, with hardware
-status, inputs and controlling actions kept separate. See the
-[platform decision](GUI_PLATFORM_ADR.md) for current ownership and migration.
-The owner previously paused implementation on 15 September. See the
-[implementation report](../audits/GUI_IMPLEMENTATION_2026-09-12.md#final-gui-implementation-closure--20-september-2026)
-for the final source state, exact verification checkpoints and historical audit.
-The dated Linux/Windows package and native evidence cover the retained root,
-SDK platform contracts, fallback fonts, pointer tooltips and native
-accessibility integration at its recorded revisions. The GUI-owned
-suspend/input-loss and full-duplex contracts were implemented at commit
-`da5ca681dc6a2a569688deb85f7c4fad2a0c6ba3`. The report separates this
-implementation from unclaimed physical-appliance support. Current software
-regressions and a fresh Linux 3.11 renderer/install run pass; fresh hosted
-Linux/Windows × Python 3.11/3.13 CI and the native lifecycle/media reruns remain
-acceptance gates.
+## Installation and startup
 
-## Current implementation
-
-`metor-ui-gui` owns only `metor.ui.gui` and local visual assets. It depends on
-matching `metor`/`metor-sdk`, Kivy 2.3.1, sounddevice 0.5.3, qrcode 8.2 and
-AccessKit 0.7.0.
-It does not depend on Terminal. The launcher imports Kivy only after explicit
-GUI selection and device-description validation. Application version remains
-0.2.0; no release or tag is created. Schema 4 adds protected GUI metadata with
-a transactional migration from schema 3; IPC 2 gains additive DTOs/capabilities.
-
-The implementation includes graphical profile entry/create/picker and deferred
-host prompts; a native responsive root and peer text composition; public SDK
-bootstrap/snapshot and bounded DROP reads; volatile drafts; exact-ID send
-duplicate barriers; and explicit non-destructive simulator mode. It does not
-invent communication or hardware actions from navigation. The complete required
-V/A inventory is implemented. Protected settings and application lock
-use protected preferences and Core restriction/reauthorization;
-bounded notifications, exact pending-call handles and the complete required
-settings/media presentation are implemented.
-
-No GUI code imports profile storage, daemon or transport implementation modules.
-Desktop close now waits for this GUI's capture finalization, requests owner
-release, detaches its client and clears volatile references. It preserves shared
-Core activity; only explicit profile switch invokes public normal exit/hard lock.
-V20 provides a bounded local catalog, exact-target create/rename/remove/default
-operations, full-password change and stopped-profile address generation/readback. Existing
-Core identity keys are reused; the GUI explains this before requesting full
-target-password authorization.
-Switch uses actual phases, independent target credentials and complete hydration;
-unknown preparation never automatically unlocks the old profile. Injected
-`PlatformBindings` now connect bounded hardware status, ordered Power/PTT input
-and separate actuator ports to V21/V22. Normal Power off finalizes this GUI's
-capture/owner, rejects another active local runtime, confirms
-`PrepareProfileExit`, disconnects, then invokes the fixed shutdown port. Optional
-actuators are filtered by their explicit device-configuration tables. The
-five-second physical chord requests exactly one authorized
-purge; locked use requires Core's prior-authenticated `device_lifecycle` grant.
-V22 observes actual Core destruction milestones through the original initiating
-SDK connection, with distinct unconfirmed, safe and cleanup-failed results.
-Shutdown follows only combined safe plus terminal cleanup, or the specified
-bounded wait after safe when terminal reporting is lost. No production physical
-adapter or actual OS shutdown is registered or claimed. Peer views expose headset-qualified
-PTT and exact-owner DROP review. Core owner leases, allocation journaling and interrupted LIVE
-recovery are implemented and tested; GUI bootstrap registers its disposable owner.
-Bounded PCM playback, manual output priority and foreground auto-play are implemented;
-bounded foreground text handoff and archive pagination are implemented. Capture
-and playback remain independent during local PTT, while permission/device failures
-stop only the affected unsafe action. Shared root/peer actions implement protected
-pins, DROP-only cleanup, selective/bulk LIVE fallback and ended-context dismissal.
-End/Cancel and Change route carry exact Core lifecycle qualifiers. Explicit Retry
-finalization rechecks the original owner's accepted audio and never sends a DROP.
-The earlier named-device duplex probe and GUI capture/review evidence establish
-only that dated route at their recorded source revisions. The current generic
-full-GUI harness requires explicit capability-compatible input/output selection,
-headset confirmation and verified source/installed provenance. Its native rerun
-remains pending; neither result claims speaker AEC or universal device support.
-
-Own delivered LIVE text and complete retained PCM can be explicitly resent as a
-new DROP with a new ID. The contextual action rechecks source availability;
-received LIVE has no forwarding action. Playback and resend lease complete
-sources within the shared 16 MiB volatile cache. A lost resend reply reads the new
-ID's receipt without repeating append or commit. A confirmed incomplete new
-Voice draft stays unsent and offers explicit discard. Cache eviction, local
-deletion or privacy teardown removes corresponding source availability.
-
-Settings reads permitted Core descriptors and effective profile values. Editors
-show scope, source and constraints, preserve unsaved input during updates and
-reject stale saves. Advanced contains safe Core technical controls and explicit
-content-free platform diagnostics. Activity history displays paged Core metadata,
-including recording-off state; Raw activity history is an explicit Advanced
-selection. Clear activity history confirms the full underlying profile ledger
-and unused discovered-contact effects while preserving messages. Unknown saves
-or clears recheck state without automatically repeating the mutation.
-
-Saved Contacts and the intent picker now render at most 64 rows per page and
-keep the native search field through snapshot refresh. Manage supports up to 128
-explicit selected identities and one confirmed Remove selected batch. Removal
-uses Core's exact peer guard and stops at uncertainty; saved metadata is read
-before another batch. New contacts never join the captured selection. The
-native contact QR was independently decoded from its unchanged framebuffer;
-camera input remains unavailable with manual entry.
-
-Uncertain DROP cleanup and LIVE fallback read only the original displayed
-identities. Core returns receipt status and optional archive presence without
-reading payloads. Only positive absence/conversion releases corresponding GUI
-copies; later arrivals, other directions and owned Voice reviews are excluded.
-
-## Development installation and launch
-
-Use the existing repository developer environment, then:
+`metor-ui-gui` is the native Kivy frontend. Install it with compatible `metor`
+and `metor-sdk` packages from the same release wheelhouse. The common launcher
+selects a frontend using explicit `--ui`, then `METOR_UI`, then
+`client.default_ui`, then Terminal. Installing the GUI does not select it by
+default. A normal desktop start needs an SDL2/OpenGL display:
 
 ```sh
-python -m pip install -r requirements/gui.lock
-python -m pip install --no-deps --no-build-isolation -e packaging/gui
 metor chat --ui gui
 metor chat --ui gui --simulator
 metor chat --ui gui --simulator --device-config docs/examples/gui-simulator.toml
 ```
 
-No requested file means desktop. `--device-config` overrides nonempty
-`METOR_DEVICE_CONFIG`; explicit relative paths become absolute in the common
-launcher. Invalid files do not fall back. Device flags on Terminal are usage
-errors. All help paths run independently of toolkit/device/auth initialization.
+The GUI can open before profile authentication and presents authentication and
+local daemon autostart choices graphically. Autostart follows the shared
+`never`/`ask`/`always` policy; a remote endpoint never creates a substitute local
+daemon. Optional audio or camera failure leaves available text actions usable.
+The repository has no registered production physical appliance adapter. A
+simulator run demonstrates GUI behavior and cannot establish physical, acoustic,
+or accessibility acceptance.
 
-Build through the canonical bundle machinery:
+## Device configuration (`device.toml`)
 
-```sh
-python scripts/build_release_wheelhouse.py --variant gui --skip-pip-upgrade
-```
+An explicit device file describes display, input, and locally available platform
+capabilities. It is UTF-8 TOML, read only by the GUI, and does not hold profile
+selection, credentials, contacts, messages, peer destinations, or GUI styling.
+[gui-simulator.toml](../examples/gui-simulator.toml) is a working simulator
+example. The Python `read_configuration` implementation is the executable
+validator of this contract.
 
-`gui` is an explicit development variant, also included in the canonical `all`
-group and CI/release validation. Installed-consumer checks cover both UI removal
-orders, and the installer validator requires all four bundles. Linux and Windows
-canonical ZIP installers and installed consumers, including both UI uninstall
-orders, pass in the dated evidence. Fresh current-source Linux bundles pass the
-same checks; current native Windows execution remains a hosted CI/release gate.
-Final-source artifact hashes and remaining product acceptance are recorded
-separately in the closure worklog.
+Pass a file with `--device-config PATH`, or set nonempty `METOR_DEVICE_CONFIG`;
+the option wins. Relative paths resolve once against the invocation directory.
+Metor does not search for an implicit file. Without a requested file, the GUI
+uses built-in desktop defaults, or simulator defaults when `--simulator` is
+explicit. A file never enables simulation by itself. An explicit missing,
+unreadable, malformed, untrusted, or unsupported file fails before daemon
+startup and driver activation; no desktop fallback occurs.
 
-For an already assembled native wheelhouse, the actual independent package can
-be installed without source checkout/editable paths:
+The supported top-level names are `schema_version`, `[display]`, `[input]`,
+`[audio]`, `[camera]`, `[indicator]`, `[haptics]`, `[power]`, `[clipboard]`, and
+`[drivers]`. `schema_version = 1`, `[display]`, and `[input]` are required.
+Unknown fields and versions fail. The current parser accepts an empty
+`[drivers]` table only; it does not load arbitrary driver names or commands.
 
-```sh
-python -m pip install --no-index --find-links ./wheelhouse metor-ui-gui
-```
+| Table                                 | Current contract                                                                                                                                                                  |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `[display]`                           | `adapter`, positive bounded native `width_px` and `height_px`; optional `rotation_deg` in 0/90/180/270 and finite `scale` from 0.25 through 8. `output` is currently unsupported. |
+| `[input]`                             | `adapter`, exact `ptt_binding = "ptt"` and `power_binding = "power"`; optional boolean `touch`. PTT and Power have separate meanings.                                             |
+| `[audio]`, `[camera]`                 | Optional `adapter = "none"` only in the current implementation; absence means unavailable.                                                                                        |
+| `[indicator]`, `[haptics]`, `[power]` | Optional `adapter = "none"`, or the matching injected physical adapter ID when that port exists. Undeclared ports remain disabled.                                                |
+| `[clipboard]`                         | Optional `policy = "disabled"` only.                                                                                                                                              |
 
-Linux needs a working SDL2/OpenGL display and PortAudio for the candidate audio
-port. Optional unavailable capture/output must not fabricate playback or
-consume Voice. The tested environment offers SDL offscreen rendering and zero
-audio devices on Linux. An isolated native Windows Python 3.11.9 runtime also
-launched the installed GUI. A user-authorized Razer BlackShark capture/playback
-probe passed as dated historical evidence. The native GUI also passed a short
-focused-key PTT/review test against an actual temporary encrypted Core and that
-same recorded route. This does not prove
-physical-key input, acoustic quality, AEC, the full duplex matrix or unplug recovery.
+`adapter` is a registered identity, not a Python import path. In simulator mode,
+required display and input adapters are `simulator`, and physical
+`PlatformBindings` are rejected. In physical mode, both required adapters must
+match the injected `PlatformBindings.adapter_id`; without those bindings the
+configuration fails. The optional physical ports must belong to that same
+identity and be explicitly selected. Describing a port in TOML cannot create a
+production driver or authorize Core actions. Simulator controls cannot call
+production power or destruction paths.
 
-## Everyday operation
+Rotation transforms native dimensions before scale is applied. The resulting
+usable display must be at least **360 × 640 logical units**. Desktop defaults
+to 1180 × 760 logical units. A 480 × 800 native display at scale 1 and a
+960 × 1600 display at scale 2 describe the same logical size. Unsupported
+geometry fails instead of clipping essential controls.
 
-Choose or create a profile on entry and complete its graphical authentication.
-In Settings → Profiles, changing the selected profile uses its own credentials;
-read the displayed draft/shared-runtime consequences before continuing. Address
-generation is available for a stopped local profile only, requires its full
-password, and reuses existing Core identity keys. After an uncertain result,
-Check address performs a read instead of repeating generation.
+The file is bounded to 64 KiB and must be a trusted regular file. The parser
+does not follow symlinks or accept multiply linked files. On POSIX it requires
+current-user ownership and rejects group or world write permission; Windows
+uses native handle trust checks. Parsing uses strict types, field allowlists,
+finite numeric bounds, and no evaluation of shell fragments, imports, or URLs.
+Errors report a safe reason; configuration content and secrets must not enter
+logs.
 
-DROP and LIVE select separate conversation projections. Selecting a tab or
-opening a conversation does not call its peer. Use Start Live explicitly; Accept
-answers the exact displayed incoming request, while Open only navigates to it.
-Use Contacts for saved identities or Scan QR; when no camera is available,
-manual entry preserves the original Save/Open/Start intent. My contact displays
-only your public address/QR. Clipboard export is disabled.
+## Navigation and communication
 
-Configure microphone/output and confirm the headset route in audio settings.
-PTT records only while its original pointer/key is held; release finalizes that
-turn. Losing focus stops capture and requires an actual release before another
-press. DROP recordings offer Play, Delete recording and Send Drop separately;
-recording or reviewing does not send them. Playback starts manually unless you
-explicitly enable eligible foreground Auto-play. The waveform seeks audio;
-Go live jumps to the available live edge, while the timeline's new-items control
-only changes scrolling. Unsupported audio formats/routes remain unavailable.
+The root is a DROP/LIVE communication overview, with access to Notifications,
+Saved Contacts, and Settings. DROP and LIVE are distinct projections of the
+same peer. Opening a view, changing a selector, Back, unlocking, or reattaching
+does not connect, reconnect, accept, disconnect, change route, or fall back.
+Those actions require explicit controls and typed Core commands. The GUI does
+not infer online presence from a cached connection or change delivery semantics
+because a view changed.
 
-More opens actions for the displayed item. Right-click, long press or focused
-Shift+F10 reaches the same actions. Arrow keys move focus within conversation,
-contact and DROP/LIVE groups; Enter activates. Resend is available only for your
-eligible retained LIVE content and creates a new DROP. An uncertain operation
-checks its original identity instead of silently submitting another one.
+Core owns message IDs, peer identities, delivery, receipts, unread and pending
+counts, recovery, fallback, and authorization. A local message identity includes
+profile instance, peer, direction, and `msg_id`; aliases are mutable labels.
+Pending LIVE-to-DROP fallback preserves `msg_id`. Resending an already
+delivered own LIVE item creates a new DROP identity. A locally queued message,
+remote delivery, and a read receipt are different facts. Unknown operation
+outcomes are reconciled under the original identity before retry.
 
-Lock covers private content using Core restriction and the configured policy.
-Unlock restores current authorized facts. Closing the desktop window finalizes
-this GUI's capture, releases its disposable ownership and detaches; it preserves
-other clients' Core activity. It is not appliance Power off. Physical Power/PTT,
-purge triggering and host shutdown use the typed platform contracts when a
-deployment injects an explicitly configured adapter. This repository registers
-no production appliance adapter and therefore makes no hardware-support claim.
-Simulator descriptions never gain real destructive or shutdown access.
+Text drafts are separate per peer and DROP/LIVE projection and survive
+same-runtime navigation. They clear only after confirmed local acceptance;
+rejection or unknown result retains the draft. Current GUI drafts are
+disposable on GUI exit, restart, profile switch, hard lock, and purge. Core
+pending or unseen content is never discarded because a GUI cache evicts it.
+Peer-linked pins and preferences use the protected public profile boundary,
+not a plaintext address or content side store.
 
-## Contracts and evidence
+## Contacts, notifications, and settings
 
-- [Public integration map](GUI_INTEGRATION_MAP.md): actual SDK capabilities,
-  ownership and failure contracts.
-- [Platform ADR](GUI_PLATFORM_ADR.md): native dependencies, framing and support limits.
-- [Device schema](gui/device.schema.json) and [simulator example](../examples/gui-simulator.toml).
-- [Support manifest](gui/support.json): renderer/install evidence versus untested targets.
-- [Acceptance report](../audits/GUI_IMPLEMENTATION_2026-09-12.md): final closure,
-  work packages, GAT/view/action coverage, exact checks and evidence limits.
-- [Frontend-neutral Core boundary](FRONTENDS.md): shared Core/SDK behavior for
-  Terminal, GUI, and third-party clients.
+Saved Contacts is the address book. Discovered peers appear in communication
+views only while Core reports relevant state. Contact add, rename, removal,
+and promotion use Core identity and results. Removing a saved contact can demote
+its label without disconnecting active communication; old aliases must leave
+notifications, accessibility nodes, and cached presentation. A QR scan is an
+explicit camera action using the accepted contact format, bounded validation,
+and the user's current intent. It cannot execute a URL or command, duplicate a
+saved identity, or start a LIVE call without an explicit Start Live intent.
+Address regeneration is a confirmed profile action and does not imply that old
+contacts or conversations move automatically.
 
-Assets and their license/revision/SHA-256 records live in
-`src/metor/ui/gui/assets/manifest.json`. Native captures use synthetic identities
-only. Extra glyph coverage uses packaged DejaVu Sans regular/bold with its license;
-unsupported glyphs remain replacement characters without changing stored text.
-Icon-only actions also expose pointer tooltips; touch operation does not depend
-on hover. Installed operation performs no font/icon downloads, telemetry or update
-checks. Clipboard export is disabled in composer and credential fields.
+Notification Center entries are profile-scoped, bounded, and volatile. They
+carry permitted kind, action reference, count, timestamp, and source identity,
+never arbitrary remote details or message previews. Opening or clearing the
+center does not mark messages read, delete history, accept calls, or reconnect.
+Actionable state comes from Core and remains recoverable after an informational
+entry is evicted. In restricted mode, Show all may show an authorized alias and
+event kind, Anonymize shows only a non-identifying kind and permitted handle,
+and Off suppresses unsolicited UI, badges, wake, and indicators. Anonymize is
+the default. A post-unlock count is shown only if the GUI actually retained
+privacy-permitted facts; it is never reconstructed from unread totals.
 
-This code's RAM lifetime is not an OS secure-erasure guarantee. Hardened
-swap/crash-dump/screenshot policy and certification of a future concrete device
-belong to its deployment/support profile. They also do not waive the explicitly
-pending native desktop acceptance gates.
+Settings present user concepts under Live, Privacy, Device, Profiles, and
+Advanced. Core descriptors own types, limits, scope, effective values, and
+policy. The GUI shows only supported controls and displays failed updates as
+failures. Auto-play, locked LIVE continuation, locked-call acceptance, lock
+notification privacy, application idle timeout, profile-name visibility,
+keyboard layout, and pins are distinct preferences; changing one does not
+silently grant another. Auto-play and locked LIVE continuation default Off;
+manual locked-call acceptance defaults None. A profile password is the default
+unlock method until a stronger explicit setup. Core-owned receipt, fallback,
+history, resource, and contact policies retain their registry defaults. The GUI
+does not add a second settings database or expose dangerous debug controls as
+ordinary options. Activity history is Core metadata, separate from DROP
+message history and the Notification Center.
+
+## Voice and media
+
+One PTT press has one input-source owner, bound profile, peer, delivery, GUI
+generation, and logical message ID. Autorepeat, a second source, or a stale
+release cannot create or retarget a recording. Losing the owning release,
+focus, authorization, or device capability safely stops admission. Long I/O and
+decode work stay off the UI thread; queues, caches, capture, and playback are
+bounded and report overload rather than silently dropping accepted content.
+
+DROP Voice enters an explicit review stage before commit or cancellation.
+Uncommitted review drafts follow this GUI's disposable owner policy. LIVE Voice
+uses the authorized current connection and keeps accepted data recoverable
+under Core's owner-loss rules. Capture and playback may run concurrently where
+the selected route supports them. A headset route is distinct from proven
+speaker echo cancellation; unavailable routes are reported honestly. Playback
+and range reads do not implicitly consume Voice. Release follows the public
+safe handoff contract, and auto-play requires current foreground eligibility.
+Scroll position and audio position are separate controls.
+
+No microphone or camera starts on boot, navigation, reattach, or unlock.
+Permissions are requested at explicit use. Missing optional media capability
+disables dependent controls while text remains available.
+
+## Privacy and lifecycle
+
+Notifications contain no message body or Voice preview. Notification Center,
+playback position, consumed LIVE presentation, and other GUI caches are bounded
+volatile state. Application lock covers pixels, accessibility text, tooltips,
+input, media, and indicators before private content can leak. A restricted
+client is distinct from a hard-locked profile runtime; only an explicitly
+authorized continued LIVE context may remain active. OS lock, suspend, and
+resume keep the GUI covered until SDK/Core generation and authorization are
+revalidated. Resume never reconstructs held PTT, starts capture, auto-plays,
+or unlocks automatically.
+
+Profile switch is a public lifecycle transaction: stop local producers,
+preserve accepted Core work, clear old presentation, and attach the new profile
+only after the old boundary is safe. A failed transition shows its actual phase
+and never reuses credentials or revives old callbacks. Desktop window close
+detaches this GUI; it does not power off the host, purge the profile, or end
+other clients' LIVE activity. Physical Power and shutdown require configured
+local bindings and confirmed safe Core preservation. The emergency Power+PTT
+chord requires a prior Core lifecycle capability; hardware input never grants
+authorization. Power-off after purge requires the documented combined safe
+milestone, not request initiation, EOF, timeout, or keyslot removal alone.
+Simulation cannot invoke production destruction or shutdown.
+
+Peer text, aliases, and errors render as bounded plain content. The GUI makes
+no automatic URL requests, rich previews, telemetry, or cloud font fetches.
+Clipboard export is disabled by the current device configuration parser.
+Volatile application state is not a promise against host swap, screenshots,
+crash dumps, or physical media recovery.
+
+## Lock and control semantics
+
+Application Lock or short configured Power restricts this client while the
+daemon and other authenticated clients may continue. It does not issue a Core
+hard-lock command. Core validates PIN, password, cooldown, and locked-action
+scope. A PIN cannot authenticate a cold or new client, and PIN-only access
+cannot weaken profile credentials. Forgot PIN requests a password challenge.
+An unconfirmed restriction stays covered and cannot create a second
+unrestricted connection. Continued locked LIVE, when explicitly enabled, is
+limited to the exact authorized foreground context generation; ending that
+context revokes it even if the same peer calls again. Auto-accept from saved
+contacts, manual locked-call acceptance, and auto-play are independent policies.
+
+The software keyboard is local and offers QWERTY and QWERTZ without cloud
+suggestions or a learned persistent dictionary. Desktop typing uses the
+physical keyboard by default. Focus order follows visible reading order;
+selection alone does not start communication. A focused PTT control may own
+Space down/up, but text fields and global shortcuts cannot capture that press.
+The text composer uses Enter for newline and Ctrl+Enter for explicit Send.
+Incoming call UI does not steal an active typing or PTT owner. Modal focus
+returns to a safe invoker; Escape/Back closes a reversible overlay before
+navigating and cannot dismiss a privacy cover or accepted destructive work.
+
+## Design and accessibility
+
+The minimum usable client rectangle is **360 × 640 logical units**, excluding
+window decoration and platform insets. Below 960 logical width, use one
+foreground panel; from 960, a 360-unit master pane may stay beside the detail.
+Crossing the breakpoint preserves route, selected IDs, focus, drafts, and
+scroll anchor without a communication command. Controls must remain operable
+at 1.5 text scale and with long content; wrap or grow rows and scroll forms
+instead of shrinking text or hiding required actions. A keyboard inset must not
+cover focused input or required actions.
+
+DROP and LIVE require distinct labels as well as color. Status, disabled state,
+focus, recording, errors, and destructive consequences cannot rely on color,
+motion, or a physical LED alone. Accessible names and focus order follow
+visible action meaning. Covers revoke private accessibility and tooltip text
+before a lock or profile transition. The application uses packaged local
+assets. Native rendering and accessibility claims require evidence on the
+declared platform; simulator or offscreen rendering is not that evidence.
+
+An unavailable physical adapter, audio route, microphone, camera, or display
+has a truthful startup or capability error. Do not claim appliance support,
+universal audio-device support, speaker echo cancellation, or screen-reader
+certification from typed ports or simulator tests.
+
+### Components and visual language
+
+The root selector changes the master DROP/LIVE list. A selected peer owns the
+foreground detail pane; root selection alone cannot promote a background peer
+into a media owner. On a compact viewport, Back returns to the originating root
+tab. In a wide viewport, Back clears the detail to a neutral conversation
+prompt. Contacts, Notifications, and Settings replace the foreground detail,
+while authentication, restriction, profile transition, and purge cover the whole
+application. Incoming-call presentation cannot obscure or steal an existing
+PTT owner. Confirmation and authentication sheets show the relevant current
+identity and consequence; stale asynchronous results cannot close a newer
+sheet or reveal an old profile.
+
+Message rows grow with content. Own and incoming direction, DROP/LIVE delivery,
+local acceptance, pending, delivered, read, and failed outcomes remain
+visually distinct without relying on color alone. The text composer, recording
+state, DROP Voice review, and playback controls are separate states. Timeline
+scrolling and audio seeking have separate affordances. Status notices align
+with the active content column and do not create extra communication actions.
+Required controls stay visible or reachable at the minimum viewport and text
+scale. Buttons and touch targets use at least 48 logical units where the
+current component permits it; labels wrap or controls stack when necessary.
+
+The packaged Inter Tight face is the visual baseline. The current core palette
+uses background `#101619`, surface `#171F22`, primary text `#F3F7F6`, DROP
+`#4ED7C8`, LIVE `#FFB454`, danger `#FF6474`, and success `#72D68C`.
+Components may use related surface and outline tokens, but privacy, delivery,
+and authorization meaning must stay legible in native rendering, with keyboard
+focus and accessible names. Reduced motion preserves all state and safety cues.

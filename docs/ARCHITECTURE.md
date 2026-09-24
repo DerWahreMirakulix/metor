@@ -1,8 +1,47 @@
 # Metor Architecture Decisions Guide
 
-This document is the canonical architecture guide for the repository.
-It records the long-lived design boundaries that should survive feature work, refactors, and UI changes.
-Future architecture decisions should extend this file instead of creating separate top-level notes.
+This document is the canonical architecture guide for the repository. It records
+the long-lived boundaries that survive feature work, refactors, and frontend
+changes. Future decisions extend this file instead of creating parallel notes.
+
+## System model
+
+Metor is a Tor-based messenger with a strict client-daemon boundary. Four
+distributions share a PEP 420 namespace without overlapping files:
+
+| Distribution        | Owner                                                                         |
+| ------------------- | ----------------------------------------------------------------------------- |
+| `metor-sdk`         | Typed IPC DTOs, `metor.client`, proof helpers, version and platform contracts |
+| `metor`             | General CLI, daemon, Tor, persistence and host implementations                |
+| `metor-ui-terminal` | Interactive Terminal chat and its in-session help                             |
+| `metor-ui-gui`      | Native GUI presentation, local assets and concrete desktop adapters           |
+
+Frontends own interaction and presentation state. Core owns authorization, Tor,
+message identity, delivery, persistence, recovery and cryptographic lifecycle.
+Local platform ports own capture, playback, display, hardware input, indicators,
+haptics and host power without gaining Core authority. A frontend never reads
+SQL, Tor keys or profile runtime files directly.
+
+```text
+Terminal or GUI -> metor.client / typed IPC -> managed daemon -> Tor peers
+                        |                       |
+                  local host ports       protected profile state
+```
+
+DROP is durable asynchronous delivery; LIVE is interactive ephemeral delivery
+with Core-owned crash-safe pending state. Text and Voice share stable logical
+message identities. Navigation is never a transport command.
+
+## Documentation map
+
+- [README.md](../README.md) is the human entry point.
+- [CONTRIBUTE.md](./CONTRIBUTE.md) owns development, testing and review rules.
+- [FRONTENDS.md](contracts/FRONTENDS.md) owns public frontend integration.
+- [GUI.md](./contracts/GUI.md) owns GUI operation, device configuration, behavior, and presentation.
+- [API.md](./generated/API.md), [SETTINGS.md](./generated/SETTINGS.md), and
+  generated JSON references are code-owned and must be regenerated, not edited.
+- [GLOSSARY.md](./GLOSSARY.md) and [RELEASING.md](./RELEASING.md) own terminology
+  and version/release procedure.
 
 ## Daemon lock lifecycle
 
@@ -308,29 +347,7 @@ content DTO is a blob reference. Voice uses the same ACK, dedupe, pending,
 reconnect/replay, selective fallback, consume, and DROP history semantics as
 text. `FILE` and `PAYMENT_REQUEST` remain extension examples.
 
-## Purpose
-
-Use this document when you need to answer one of these questions:
-
-- Which layer is allowed to own state or side effects?
-- Which behaviors should remain configurable, and which should stay hard safety guardrails?
-- How should new IPC, transport, or persistence features fit into the existing design?
-- Which other repository documents should be updated when architecture changes?
-
-## Document Map
-
-- [README.md](../README.md): Master entry point for installation, usage, and repository navigation.
-- [SETTINGS.md](./generated/SETTINGS.md): Generated, first-class reference for user-facing settings and structural profile config keys.
-- [API.md](./generated/API.md): Generated, first-class reference for the typed IPC contract.
-- [api.schema.json](./generated/api.schema.json): Generated JSON Schema wire contract for the typed IPC DTOs.
-- [GLOSSARY.md](./GLOSSARY.md): Canonical terminology reference for settings namespaces, transport fields, and renamed symbols.
-- [FRONTENDS.md](./contracts/FRONTENDS.md): Shared frontend ownership, platform ports, projections, recovery rules, and contract matrix.
-- [GUI.md](./contracts/GUI.md): Native GUI contract, approved v1.0 inputs,
-  platform decision and implementation gates.
-- [AUDIT.md](./governance/AUDIT.md): Review checklist for security, OPSEC, concurrency, and architecture risks.
-- [CONTRIBUTE.md](./CONTRIBUTE.md): Coding rules, import boundaries, typing requirements, and formatting standards.
-
-## Core System Boundaries
+## Core system boundaries
 
 ### Frontend-independent, typed platform contracts
 
@@ -401,6 +418,42 @@ cryptographic format change. Existing compatibility generations remain unchanged
 
 4. Remote profiles are still client profiles.
    UI-local settings remain on the client machine, while daemon settings are routed over IPC to the daemon host.
+
+## GUI platform decisions
+
+The production GUI uses Kivy 2.3.1 with SDL2/OpenGL and a small native widget
+kit. Fonts and icons are packaged locally; the application has no webview,
+hosted asset service, runtime font/icon fetch, telemetry, update check, or
+package download. A web frontend was rejected because it would add a different
+runtime and security boundary rather than implement the same native product.
+
+The GUI owns its AccessKit accessibility projection and native UIA/AT-SPI
+adapters. Covering private content synchronously revokes native nodes, tooltips,
+and pending assistive actions before repaint. Password values and counts are not
+exposed. Accessibility is a presentation surface, never an authorization path or
+a second message inventory. Concrete screen-reader and desktop-environment
+support requires evidence for the declared platform and capability.
+
+Desktop focus loss revokes focus-owned input and media; it is not promoted to an
+OS lock. Actual Windows session/power events and validated Linux logind or
+supported screen-lock signals enter one bounded typed lifecycle path. Privacy
+departure wins over resume under pressure. Resume keeps the cover and never
+reconstructs PTT, starts capture/playback, or unlocks automatically. Unsupported
+desktop providers remain unclaimed rather than inferred from a working window.
+
+The current Voice candidate is `pcm_s16le_16000_mono`: complete 16-bit samples
+are decoder checkpoints and incomplete samples are rejected. Capture and output
+workers are independent and bounded. A route must be explicitly enumerated and
+capability-compatible. Speaker output is not AEC-capable without a separately
+validated echo canceller; absent media capability leaves text usable. Current
+native evidence and reruns are release evidence, not architecture.
+
+Strict device TOML selects registered platform capabilities. Simulator mode uses
+the same GUI state machines but receives no production destruction or shutdown
+port. No production physical adapter is registered by this repository, and typed
+ports alone do not establish appliance support. The former GUI-local `embedded`
+platform prototype is retired; frontend-neutral contracts belong to
+`metor.client.platform`, while concrete adapters remain distribution-owned.
 
 ## Configuration Model
 
@@ -953,7 +1006,7 @@ When you add a new architecture-relevant behavior:
 1. Decide whether it belongs in fixed guardrails, cascading settings, or structural profile config.
 2. Extend the typed IPC contract if the UI must observe or control it.
 3. Update the generated [settings](./generated/SETTINGS.md) or [IPC API](./generated/API.md) references through their generators; [api.schema.json](./generated/api.schema.json) is generated with the API reference.
-4. Update the [audit checklist](./governance/AUDIT.md) and [contribution guide](./CONTRIBUTE.md) if the new behavior changes review or implementation rules.
+4. Update the [contribution and review rules](./CONTRIBUTE.md) if the new behavior changes review or implementation rules.
 
 ## CLI and frontend distribution boundary
 

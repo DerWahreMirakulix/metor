@@ -1,5 +1,4 @@
 # Immutable approved inputs; formatting would invalidate their recorded hashes.
-docs/specs/
 
 # Generated Markdown is formatted only by its owning generators.
 docs/generated/
