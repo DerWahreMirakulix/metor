@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import test_gui_producers as support
+from metor.client import FrontendProfileState
 from metor.client import (
     FrontendLaunchContext,
     MetorClient,
@@ -101,7 +102,16 @@ class NativeLifecycleTests(unittest.TestCase):
         Returns:
             None
         """
-        self.gui = GuiController(FrontendLaunchContext('lifecycle', Mock()))
+        self.gui = GuiController(
+            FrontendLaunchContext(
+                'lifecycle',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'lifecycle', True, False, False
+                    )
+                ),
+            )
+        )
         self.addCleanup(self.gui.close)
         self.gui.inputs = Mock()
         self.gui.voice = Mock()
@@ -179,6 +189,9 @@ class GuiLifecycleCoreTests(unittest.TestCase):
         self.h.setUp()
         self.addCleanup(self.h.doCleanups)
         self.host = Mock()
+        self.host.profile_state.return_value = FrontendProfileState(
+            'voice-owned', True, False, True
+        )
         self.gui = GuiController(FrontendLaunchContext('voice-owned', self.host))
         self.addCleanup(self.gui.close)
         self.gui.client = self.h.client

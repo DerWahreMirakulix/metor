@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import Mock
 
 import test_gui_producers as support
+from metor.client import FrontendProfileState
 from metor.client import FrontendLaunchContext
 from metor.core.api import (
     ContentType,
@@ -88,7 +89,16 @@ class ArchivePageTests(unittest.TestCase):
         """The production controller installs older pages and rejects departed-route callbacks."""
         for identity in ('one', 'two', 'three'):
             self.queue(identity)
-        gui = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        gui = GuiController(
+            FrontendLaunchContext(
+                'voice-owned',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'voice-owned', True, False, False
+                    )
+                ),
+            )
+        )
         self.addCleanup(gui.close)
         gui.client = self.h.client
         gui.state.snapshot = self.h.client.runtime_snapshot()
@@ -129,7 +139,16 @@ class PageContractTests(unittest.TestCase):
 
     def test_inventory_cursor_reset_and_stale_result(self) -> None:
         """A route replacement cannot adopt a previous cursor or metadata page."""
-        gui = GuiController(FrontendLaunchContext('fixture', Mock()))
+        gui = GuiController(
+            FrontendLaunchContext(
+                'fixture',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'fixture', True, False, False
+                    )
+                ),
+            )
+        )
         gui.state.covered = False
         gui.state.route = Route('V09', 'peer', Delivery.LIVE)
         gui.inventory.page = RetainedMessagesEvent(next_cursor='exact-cursor')

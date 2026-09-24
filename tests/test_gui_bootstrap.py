@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import Mock
 
 from metor.client import (
+    FrontendProfileState,
     FrontendBootstrapResult,
     FrontendLaunchContext,
     OneUseSecretProvider,
@@ -91,6 +92,9 @@ class BootstrapTransportTests(unittest.TestCase):
             thread = threading.Thread(target=serve, daemon=True)
             thread.start()
             host = Mock()
+            host.profile_state.return_value = FrontendProfileState(
+                'test', True, False, True
+            )
             host.bootstrap.return_value = FrontendBootstrapResult(
                 'test',
                 False,

@@ -35,6 +35,7 @@ from metor.data import (
     ProfileManager,
     ProfileSecurityMode,
     SettingKey,
+    Settings,
 )
 from metor.shared import escape_terminal_text
 from metor.cli.prompt import (
@@ -130,6 +131,7 @@ class CommandHandlers:
         start_locked: bool = False,
         startup_session_auth_stdin: bool = False,
         non_interactive: bool = False,
+        chat_owner: tuple[int, float] | None = None,
     ) -> int:
         """
         Authenticates the user and starts the background Daemon subsystem.
@@ -288,6 +290,7 @@ class CommandHandlers:
                     start_locked=True,
                     status_callback=status_cb,
                     preparation=preparation,
+                    chat_owner=chat_owner,
                 )
             except InvalidDaemonPasswordError:
                 msg, _ = Translator.get(EventType.INVALID_PASSWORD)
@@ -321,6 +324,7 @@ class CommandHandlers:
                 start_locked=False,
                 status_callback=status_cb,
                 preparation=preparation,
+                chat_owner=chat_owner,
             )
         except InvalidDaemonPasswordError:
             msg, _ = Translator.get(EventType.INVALID_PASSWORD)
@@ -429,13 +433,15 @@ class CommandHandlers:
 
     @staticmethod
     def handle_chat(
-        pm: ProfileManager,
+        pm: ProfileManager | None,
         start_daemon_override: Optional[bool] = None,
         frontend_id: Optional[str] = None,
         list_uis: bool = False,
         loaded_frontend: Optional[LoadedFrontend] = None,
         device_config: Optional[str] = None,
         simulator: bool = False,
+        debug: bool = False,
+        initial_profile: str | None = None,
     ) -> int:
         """
         Validates daemon state and launches the interactive Chat UI.
@@ -457,7 +463,11 @@ class CommandHandlers:
         selected_frontend: str = (
             frontend_id
             or os.environ.get('METOR_UI')
-            or pm.config.get_str(SettingKey.DEFAULT_UI)
+            or (
+                pm.config.get_str(SettingKey.DEFAULT_UI)
+                if pm is not None
+                else Settings.get_str(SettingKey.DEFAULT_UI, persist_defaults=False)
+            )
         )
         if loaded_frontend is None:
             try:
@@ -466,18 +476,32 @@ class CommandHandlers:
                 sys.stderr.write(f'{exc}\n')
                 return 2
 
+        selected_name = pm.profile_name if pm is not None else initial_profile
+        host = create_local_frontend_host(
+            pm if pm is not None else selected_name, start_daemon_override
+        )
         context = FrontendLaunchContext(
-            profile=pm.profile_name,
-            host=create_local_frontend_host(pm, start_daemon_override),
+            profile=selected_name,
+            host=host,
             start_daemon=start_daemon_override,
             device_config=device_config,
             simulator=simulator,
+            debug=debug,
         )
+        status = 0
         try:
-            return invoke_frontend(loaded_frontend, context)
+            status = invoke_frontend(loaded_frontend, context)
         except FrontendLaunchError as exc:
             sys.stderr.write(f'{exc}\n')
-            return 2
+            status = 2
+        finally:
+            try:
+                host.close()
+            except (OSError, RuntimeError):
+                sys.stderr.write('Metor chat cleanup failed [owned-daemon].\n')
+                if status == 0:
+                    status = 1
+        return status
 
     @staticmethod
     def handle_cleanup(force: bool = False) -> None:

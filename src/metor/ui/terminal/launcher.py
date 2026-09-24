@@ -1,5 +1,8 @@
 """Public launcher entry point for the independently installed Terminal UI."""
 
+import sys
+import time
+
 from metor.client import (
     FRONTEND_LAUNCH_CONTRACT_VERSION,
     FrontendBootstrapError,
@@ -16,6 +19,7 @@ from metor.ui.terminal import (
 )
 from metor.shared import escape_terminal_text
 from metor.ui.terminal.chat import Chat
+from metor.versioning import APP_VERSION
 
 
 class _TerminalInteractions(FrontendInteractions):
@@ -95,18 +99,31 @@ def launch(context: FrontendLaunchContext) -> int:
             'The installed Terminal frontend uses an incompatible launch contract.'
         )
     interactions = _TerminalInteractions()
+    started = time.monotonic()
     try:
         bootstrap = context.host.bootstrap(interactions)
     except FrontendBootstrapError as exc:
         if str(exc):
             print(interactions._spacer.format(escape_terminal_text(str(exc))))
+        if context.debug:
+            sys.stderr.write(
+                f'Metor {APP_VERSION} Terminal [host-bootstrap]: '
+                f'{exc.reason.value}; status {exc.exit_code}; '
+                f'elapsed {time.monotonic() - started:.3f}s\n'
+            )
         return exc.exit_code
     chat = Chat(
         bootstrap,
         startup_session_auth_provider=bootstrap.session_auth.take,
     )
-    chat.run()
-    return 0
+    if chat.run():
+        return 0
+    if context.debug:
+        sys.stderr.write(
+            f'Metor {APP_VERSION} Terminal [pre-chat]: status 1; '
+            f'elapsed {time.monotonic() - started:.3f}s\n'
+        )
+    return 1
 
 
 # Entry-point metadata cannot express the typed contract generation. Publishing

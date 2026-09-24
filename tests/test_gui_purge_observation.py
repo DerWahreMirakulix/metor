@@ -42,7 +42,16 @@ class PurgeObservationTests(unittest.TestCase):
         Returns:
             None
         """
-        self.gui = GuiController(FrontendLaunchContext('fixture', Mock()))
+        self.gui = GuiController(
+            FrontendLaunchContext(
+                'fixture',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'fixture', True, False, False
+                    )
+                ),
+            )
+        )
         self.gui.state.covered = False
         self.gui.state.snapshot = RuntimeSnapshotEvent('fixture', '', epoch='epoch')
         self.gui.state.route = Route('V08', 'private-peer', Delivery.DROP)
@@ -305,4 +314,4 @@ class PurgeObservationCoreTests(unittest.TestCase):
         self.assertEqual(gui.purge.detail, 'Powering off.')
         shutdown.request_shutdown.assert_called_once_with()
         self.assertIsNone(gui.client)
-        host.profile_state.assert_called_once_with()
+        self.assertEqual(host.profile_state.call_count, 2)

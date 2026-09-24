@@ -4,7 +4,10 @@ from collections.abc import Callable
 import threading
 
 from metor.client import (
+    FrontendBootstrapError,
     FrontendLaunchContext,
+    IpcDisconnectedError,
+    IpcTimeoutError,
     MetorClient,
     MetorRequestRejectedError,
 )
@@ -103,6 +106,39 @@ class GuiController:
         self.calls = IncomingCalls(self)
         self._unknown_actions: set[str] = set()
         self.profiles = ProfileCatalog(self)
+        self.initial_missing_profile: str | None = None
+        if not simulator:
+            selected = context.host.profile_state()
+            if selected is None or not selected.exists or selected.issue:
+                available = context.host.list_profiles()
+                damaged = any(entry.issue for entry in available)
+                self.state.route = Route('V03' if not available else 'V02')
+                self.initial_missing_profile = (
+                    context.profile
+                    if selected is not None and not selected.exists
+                    else None
+                )
+                if damaged:
+                    self.state.status = (
+                        'Some profiles are unavailable or damaged. '
+                        'Choose another profile or create one.'
+                    )
+                elif not available:
+                    self.state.status = 'No profiles exist yet.'
+                    if self.initial_missing_profile is not None:
+                        self.state.status = (
+                            f"Profile '{self.initial_missing_profile}' is unavailable. "
+                            + self.state.status
+                        )
+                elif self.initial_missing_profile is not None:
+                    self.state.status = (
+                        f"Profile '{self.initial_missing_profile}' is unavailable. "
+                        'Choose or create a profile.'
+                    )
+                else:
+                    self.state.status = 'Choose a profile to continue.'
+                if available:
+                    self.profiles.reload()
         self.lifecycle = ProfileTransition(self)
         self.identity = ProfileIdentity(self)
         self.resend = ResendActions(self)
@@ -205,7 +241,11 @@ class GuiController:
                         update = Update(
                             generation,
                             operation,
-                            status='Operation could not be confirmed',
+                            status=(
+                                'Profile opening was cancelled or rejected.'
+                                if operation == 'bootstrap'
+                                else 'Operation could not be confirmed'
+                            ),
                         )
                 except MetorRequestRejectedError as exc:
                     update = Update(
@@ -214,9 +254,29 @@ class GuiController:
                         exc.event,
                         status='Operation was rejected',
                     )
+                except FrontendBootstrapError as exc:
+                    update = Update(generation, operation, status=str(exc))
+                except IpcTimeoutError:
+                    update = Update(
+                        generation,
+                        operation,
+                        status='Connection timed out. Retry opening the profile.',
+                    )
+                except IpcDisconnectedError:
+                    update = Update(
+                        generation,
+                        operation,
+                        status='Connection lost. Retry opening the profile.',
+                    )
                 except Exception:
                     update = Update(
-                        generation, operation, status='Operation could not be confirmed'
+                        generation,
+                        operation,
+                        status=(
+                            'Profile opening failed. Retry or choose another profile.'
+                            if operation == 'bootstrap'
+                            else 'Operation could not be confirmed'
+                        ),
                     )
                 self.mailbox.put(update)
 
@@ -523,6 +583,7 @@ class GuiController:
                         'Could not open profile. Retry or choose a profile.'
                     )
             elif update.operation == 'create':
+                self.initial_missing_profile = None
                 self.state.route = Route('V01')
                 self.state.status = 'Profile created. Open profile to continue.'
             elif isinstance(update.event, GuiPreferencesEvent):

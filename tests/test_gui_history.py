@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import test_gui_producers as support
+from metor.client import FrontendProfileState
 from metor.client import FrontendLaunchContext
 from metor.core.api import (
     ClearHistoryCommand,
@@ -158,7 +159,16 @@ class GuiHistoryTests(unittest.TestCase):
         h = self.harness()
         self.populate(h, 2)
         retained = h.capture('retained-review')
-        gui = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        gui = GuiController(
+            FrontendLaunchContext(
+                'voice-owned',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'voice-owned', True, False, False
+                    )
+                ),
+            )
+        )
         self.addCleanup(gui.close)
         gui.client = h.client
         gui.state.capabilities = frozenset(h.client.init_event.capabilities)

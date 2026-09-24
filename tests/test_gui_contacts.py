@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import test_gui_producers as support
+from metor.client import FrontendProfileState
 from metor.client import FrontendLaunchContext
 from metor.core.api import (
     AliasNotFoundEvent,
@@ -61,7 +62,16 @@ class ContactCoreTests(unittest.TestCase):
 
     def test_public_save_completes_original_drop_intent(self) -> None:
         """A real public save opens the correct DROP only after Core acknowledges it."""
-        gui = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        gui = GuiController(
+            FrontendLaunchContext(
+                'voice-owned',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'voice-owned', True, False, False
+                    )
+                ),
+            )
+        )
         self.addCleanup(gui.close)
         gui.client = self.h.client
         gui.state.snapshot = self.h.client.runtime_snapshot()
@@ -97,7 +107,16 @@ class ContactCoreTests(unittest.TestCase):
             self.assertTrue(
                 self.h.contacts.add_contact('selected' + str(index), peer).success
             )
-        gui = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        gui = GuiController(
+            FrontendLaunchContext(
+                'voice-owned',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'voice-owned', True, False, False
+                    )
+                ),
+            )
+        )
         self.addCleanup(gui.close)
         gui.client = self.h.client
         gui.state.snapshot = self.h.client.runtime_snapshot()
@@ -146,7 +165,16 @@ class ContactIntentTests(unittest.TestCase):
 
     def setUp(self) -> None:
         """Creates typed current state and records only explicit command intentions."""
-        self.gui = GuiController(FrontendLaunchContext('fixture', Mock()))
+        self.gui = GuiController(
+            FrontendLaunchContext(
+                'fixture',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'fixture', True, False, False
+                    )
+                ),
+            )
+        )
         self.gui.state.covered = False
         self.gui.state.route = Route('V12')
         self.gui.state.snapshot = RuntimeSnapshotEvent(
@@ -220,7 +248,16 @@ class ContactIntentTests(unittest.TestCase):
             ('drop', Route('V11', delivery=Delivery.DROP)),
             ('live', Route('V11', delivery=Delivery.LIVE)),
         ):
-            gui = GuiController(FrontendLaunchContext('fixture', Mock()))
+            gui = GuiController(
+                FrontendLaunchContext(
+                    'fixture',
+                    Mock(
+                        profile_state=lambda: FrontendProfileState(
+                            'fixture', True, False, False
+                        )
+                    ),
+                )
+            )
             self.addCleanup(gui.close)
             gui.state.covered = False
             gui.state.route = route

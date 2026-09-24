@@ -371,8 +371,10 @@ class DeviceLifecycle:
                 IpcEvent | None: Exact accepted destruction identity or no acceptance.
             """
             host_state = controller.context.host.profile_state()
-            if host_state.remote or (
-                profile is not None and host_state.profile != profile
+            if (
+                host_state is None
+                or host_state.remote
+                or (profile is not None and host_state.profile != profile)
             ):
                 return None
             return client.request(

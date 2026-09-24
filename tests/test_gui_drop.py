@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 import test_gui_producers as support
 from test_gui_contacts import address
+from metor.client import FrontendProfileState
 from metor.client import FrontendLaunchContext
 from metor.core.api import (
     ContentType,
@@ -41,7 +42,16 @@ class DropCoreTests(unittest.TestCase):
         self.addCleanup(self.h.doCleanups)
         self.h.onion = address(17)
         self.h.contacts.ensure_alias_for_onion(self.h.onion)
-        self.gui = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        self.gui = GuiController(
+            FrontendLaunchContext(
+                'voice-owned',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'voice-owned', True, False, False
+                    )
+                ),
+            )
+        )
         self.addCleanup(self.gui.close)
         self.gui.client = self.h.client
         self.gui.state.snapshot = self.h.client.runtime_snapshot()

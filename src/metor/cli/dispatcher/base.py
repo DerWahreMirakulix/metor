@@ -152,6 +152,13 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                         'non_interactive',
                         False,
                     ),
+                    chat_owner=(
+                        int(self._args.chat_owner_pid),
+                        float(self._args.chat_owner_created),
+                    )
+                    if getattr(self._args, 'chat_owner_pid', None) is not None
+                    and getattr(self._args, 'chat_owner_created', None) is not None
+                    else None,
                 )
 
         elif cmd == 'unlock':
@@ -201,6 +208,7 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                         list_uis=getattr(self._args, 'list_uis', False),
                         device_config=getattr(self._args, 'device_config', None),
                         simulator=getattr(self._args, 'simulator', False),
+                        debug=getattr(self._args, 'debug', False),
                     )
                 else:
                     self._exit_code = CommandHandlers.handle_chat(
@@ -211,6 +219,7 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                         loaded_frontend=loaded_frontend,
                         device_config=getattr(self._args, 'device_config', None),
                         simulator=getattr(self._args, 'simulator', False),
+                        debug=getattr(self._args, 'debug', False),
                     )
 
         elif cmd == 'cleanup':

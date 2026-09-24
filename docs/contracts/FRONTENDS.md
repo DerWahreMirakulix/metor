@@ -48,6 +48,29 @@ Opening a view is never a network action. A frontend must issue explicit typed
 commands for connect, reconnect, fallback, accept, reject, disconnect, consume,
 or dismiss behavior.
 
+## Startup selection and invocation lifetime
+
+The catalog, persisted default, initial selection and authenticated active
+profile are separate facts. First successful creation sets the default. A stale
+or missing default resolves to the sole valid profile; several profiles without
+a valid default require a choice. Rename follows the default; permitted removal
+reconciles it to the sole survivor or clears it when none remain. Empty storage
+has no synthetic selected profile. Syntactically valid missing or damaged names
+are reported safely, and explicit `-p` never changes the persisted default.
+
+The common `FrontendHost` evaluates ASK, ALWAYS and NEVER only when the selected
+profile is activated. GUI interactions are graphical even when launched from a
+shell; Terminal prompts before chat. A remote profile never triggers local daemon
+spawn. Each chat invocation retains the exact local daemon process it spawned
+and stops it at final close or when that profile is retired. An already running
+local daemon is borrowed and is only detached. The child also observes owner
+process disappearance so a lost parent cannot leave a session daemon running.
+
+Cold encrypted unlock has a bounded initialization wait distinct from the
+ordinary IPC request timeout. Frontends report failed bootstrap or lost
+connection without claiming that an unauthenticated session succeeded. `--debug`
+adds safe diagnostic locations; secrets and payloads are excluded.
+
 ## Attach and race-safe recovery
 
 After the normal IPC version/auth handshake, a rich frontend must:

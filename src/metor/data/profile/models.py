@@ -166,6 +166,7 @@ class ProfileOperationType(str, Enum):
     PROFILE_REMOVED = 'profile_removed'
     CANNOT_RENAME_RUNNING = 'cannot_rename_running'
     PROFILE_RENAMED = 'profile_renamed'
+    RENAMED_DEFAULT_UNCONFIRMED = 'renamed_default_unconfirmed'
     CANNOT_CLEAR_RUNNING_DB = 'cannot_clear_running_db'
     DATABASE_NOT_FOUND = 'database_not_found'
     DATABASE_CLEARED = 'database_cleared'

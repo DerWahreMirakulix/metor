@@ -165,8 +165,10 @@ class PowerFlow:
             outcome = PlatformActionResult.UNKNOWN
             try:
                 host_state = controller.context.host.profile_state()
-                if host_state.remote or (
-                    profile is not None and host_state.profile != profile
+                if (
+                    host_state is None
+                    or host_state.remote
+                    or (profile is not None and host_state.profile != profile)
                 ):
                     outcome = PlatformActionResult.DENIED
                     return None

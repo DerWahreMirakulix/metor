@@ -1,0 +1,7 @@
+# Run from the repository root. Metor projects come from this checkout.
+-r dev.lock
+-r gui.lock
+-e ./packaging/sdk
+-e .
+-e ./packaging/terminal
+-e ./packaging/gui

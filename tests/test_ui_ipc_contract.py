@@ -8,7 +8,7 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Any, Optional, cast
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 import nacl.pwhash
 
@@ -1192,6 +1192,8 @@ class UiIpcContractTests(unittest.TestCase):
         pm.uses_plaintext_storage.return_value = False
         pm.uses_encrypted_storage.return_value = True
         pm.config = Mock()
+        pm.config.get_int.return_value = 3
+        pm.config.get_float.return_value = 15.0
         pm.config.get_str.return_value = 'ask'
         interactions = _DeferredInteractions(confirmation=True)
 
@@ -1216,6 +1218,8 @@ class UiIpcContractTests(unittest.TestCase):
             cast(ProfileManager, pm),
             start_locked=True,
             session_auth_password=None,
+            diagnostics=ANY,
+            chat_owner=ANY,
         )
         self.assertEqual(interactions.statuses, ['Starting local daemon...'])
         self.assertTrue(interactions.started)
@@ -1242,6 +1246,8 @@ class UiIpcContractTests(unittest.TestCase):
         pm.uses_plaintext_storage.return_value = False
         pm.uses_encrypted_storage.return_value = True
         pm.config = Mock()
+        pm.config.get_int.return_value = 3
+        pm.config.get_float.return_value = 15.0
         pm.config.get_str.return_value = 'never'
         interactions = _DeferredInteractions()
 
@@ -1268,6 +1274,8 @@ class UiIpcContractTests(unittest.TestCase):
             cast(ProfileManager, pm),
             start_locked=True,
             session_auth_password=None,
+            diagnostics=ANY,
+            chat_owner=ANY,
         )
 
     def test_handle_chat_no_start_override_beats_always_policy(self) -> None:
@@ -1337,6 +1345,8 @@ class UiIpcContractTests(unittest.TestCase):
         pm.uses_plaintext_storage.return_value = True
         pm.uses_encrypted_storage.return_value = False
         pm.config = Mock()
+        pm.config.get_int.return_value = 3
+        pm.config.get_float.return_value = 15.0
         pm.config.get_str.return_value = 'always'
         pm.config.get_bool.side_effect = lambda key: (
             key is SettingKey.REQUIRE_LOCAL_AUTH
@@ -1366,6 +1376,8 @@ class UiIpcContractTests(unittest.TestCase):
             cast(ProfileManager, pm),
             start_locked=False,
             session_auth_password='session-secret',
+            diagnostics=ANY,
+            chat_owner=ANY,
         )
         self.assertTrue(interactions.started)
         assert interactions.result is not None

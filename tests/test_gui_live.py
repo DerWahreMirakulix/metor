@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import test_gui_producers as support
+from metor.client import FrontendProfileState
 from metor.client import FrontendLaunchContext
 from metor.core.api import (
     ContentType,
@@ -36,7 +37,16 @@ class LiveCoreTests(unittest.TestCase):
         self.h = support.GuiProducerTests()
         self.h.setUp()
         self.addCleanup(self.h.doCleanups)
-        self.gui = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        self.gui = GuiController(
+            FrontendLaunchContext(
+                'voice-owned',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'voice-owned', True, False, False
+                    )
+                ),
+            )
+        )
         self.addCleanup(self.gui.close)
         self.gui.client = self.h.client
         self.gui.state.snapshot = self.h.client.runtime_snapshot()
@@ -274,7 +284,15 @@ class LocalLiveTests(unittest.TestCase):
             None
         """
         self.gui = GuiController(
-            FrontendLaunchContext('fixture', Mock()), simulator=True
+            FrontendLaunchContext(
+                'fixture',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'fixture', True, False, False
+                    )
+                ),
+            ),
+            simulator=True,
         )
         self.gui.state.covered = False
         self.gui.state.snapshot = RuntimeSnapshotEvent('fixture', 'self')

@@ -5,6 +5,7 @@ import time
 import unittest
 
 import test_gui_producers as support
+from metor.client import FrontendProfileState
 from metor.core.api import (
     AcceptCommand,
     RejectCommand,
@@ -209,7 +210,15 @@ class CallPresentationTests(unittest.TestCase):
         from metor.ui.gui.state import Route
 
         self.gui = GuiController(
-            FrontendLaunchContext('fixture', Mock()), simulator=True
+            FrontendLaunchContext(
+                'fixture',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'fixture', True, False, False
+                    )
+                ),
+            ),
+            simulator=True,
         )
         self.gui.state.covered = False
         self.gui.state.route = Route('V08', 'alice')

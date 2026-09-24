@@ -97,9 +97,15 @@ class Help:
 
     GLOBAL_OPTIONS: Tuple[OptionDef, ...] = (
         OptionDef(
+            ('--debug',),
+            'debug',
+            'Show privacy-safe startup stages and stack locations.',
+            action='store_true',
+        ),
+        OptionDef(
             ('-p', '--profile'),
             'profile',
-            "Set the active profile (default: 'default').",
+            'Select the initial profile; GUI selection can change later.',
             'PROFILE',
         ),
         OptionDef(
@@ -165,6 +171,19 @@ class Help:
                     'non_interactive',
                     'Disable terminal prompts for managed child execution.',
                     action='store_true',
+                ),
+                OptionDef(
+                    ('--chat-owner-pid',),
+                    'chat_owner_pid',
+                    'Invocation owner process ID.',
+                    value_type='int',
+                    hidden=True,
+                ),
+                OptionDef(
+                    ('--chat-owner-created',),
+                    'chat_owner_created',
+                    'Invocation owner process creation time.',
+                    hidden=True,
                 ),
                 OptionDef(
                     ('--startup-session-auth-stdin',),
@@ -502,7 +521,7 @@ class Help:
         profile_options: Tuple[OptionDef, ...] = tuple(
             option
             for option in cls.GLOBAL_OPTIONS
-            if option.destination in ('profile', 'remote', 'port')
+            if option.destination in ('profile', 'remote', 'port', 'debug')
         )
         for option in command.options + profile_options:
             if option.hidden:

@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import test_gui_producers as support
+from metor.client import FrontendProfileState
 from metor.core.api import (
     Delivery,
     GuiPreferencesEvent,
@@ -275,7 +276,16 @@ class CaptureIntegrationTests(unittest.TestCase):
             self.addCleanup(connection.close)
         self.h.daemon._transport_state.add_active_connection(self.h.onion, local)
 
-        controller = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        controller = GuiController(
+            FrontendLaunchContext(
+                'voice-owned',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'voice-owned', True, False, False
+                    )
+                ),
+            )
+        )
         self.addCleanup(controller.close)
         provider = Mock()
         provider.get_session_auth_proof.side_effect = lambda challenge, salt: (
@@ -562,7 +572,16 @@ class CaptureIntegrationTests(unittest.TestCase):
 
     def test_gui_departure_keeps_exact_review_and_requires_release(self) -> None:
         """Navigation finalizes Alice's draft while blocking text and target theft."""
-        controller = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        controller = GuiController(
+            FrontendLaunchContext(
+                'voice-owned',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'voice-owned', True, False, False
+                    )
+                ),
+            )
+        )
         self.addCleanup(controller.close)
         controller.client = self.h.client
         controller.state.snapshot = self.h.client.runtime_snapshot()
@@ -596,7 +615,16 @@ class CaptureIntegrationTests(unittest.TestCase):
     def test_unknown_review_commit_reconciles_once_without_resending(self) -> None:
         """A lost commit success cannot enable a duplicate Send or draft cancellation."""
         self.run_capture([b'\x00\x01' * 320])
-        controller = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        controller = GuiController(
+            FrontendLaunchContext(
+                'voice-owned',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'voice-owned', True, False, False
+                    )
+                ),
+            )
+        )
         self.addCleanup(controller.close)
         controller.client = self.h.client
         controller.state.snapshot = self.h.client.runtime_snapshot()
@@ -716,7 +744,16 @@ class CaptureIntegrationTests(unittest.TestCase):
         Returns:
             GuiController: Real coordinator retaining the failed binding.
         """
-        controller = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        controller = GuiController(
+            FrontendLaunchContext(
+                'voice-owned',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'voice-owned', True, False, False
+                    )
+                ),
+            )
+        )
         self.addCleanup(controller.close)
         controller.client = self.h.client
         controller.state.snapshot = self.h.client.runtime_snapshot()

@@ -4,6 +4,17 @@ Metor is a highly critical, secure, Tor-based terminal messenger. Code quality, 
 
 When contributing to this repository, you MUST strictly adhere to the following rules:
 
+## Checkout installation
+
+From the repository root, in the Python environment selected for development,
+run `python -m pip install -r requirements/dev.txt`, then `python -m pip check`
+and `python -m metor chat --list-uis`. This manifest installs SDK, Base, Terminal
+and GUI from local editable projects while reusing the pinned third-party
+requirements. A plain `pip install .` selects only Base. For Base and SDK without
+GUI or Terminal, use the applicable `requirements/base.lock` pins and install
+`./packaging/sdk` and `.` together. Independent wheel and installed-consumer
+tests remain necessary: editable source imports do not prove wheel ownership.
+
 ## 1. Language & Naming
 
 - **English Only:** All code, variables, comments, commit messages, and docstrings MUST be written in English.

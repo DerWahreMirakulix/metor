@@ -5,6 +5,7 @@ import json
 import unittest
 from unittest.mock import Mock
 
+from metor.client import FrontendProfileState
 from metor.client import FrontendLaunchContext
 from metor.core.api import (
     ConnectionRetryEvent,
@@ -82,7 +83,16 @@ class NotificationProjectionTests(unittest.TestCase):
     """Exercises the production coordinator without any message-body notification path."""
 
     def setUp(self) -> None:
-        self.gui = GuiController(FrontendLaunchContext('fixture', Mock()))
+        self.gui = GuiController(
+            FrontendLaunchContext(
+                'fixture',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'fixture', True, False, False
+                    )
+                ),
+            )
+        )
         self.gui.state.covered = False
         self.gui.state.route = Route('V06')
         self.gui.state.snapshot = RuntimeSnapshotEvent(

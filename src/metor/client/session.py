@@ -1,6 +1,7 @@
 """High-level endpoint-based reference client for interacting with a Metor daemon."""
 
 from typing import Callable, Optional, Type, TypeVar, cast
+import time
 
 from metor.client.auth import (
     AuthProvider,
@@ -15,6 +16,7 @@ from metor.core.api import (
     CancelVoiceCommand,
     CommitVoiceCommand,
     DaemonLockedEvent,
+    EventType,
     Delivery,
     InitCommand,
     InitEvent,
@@ -116,6 +118,7 @@ class MetorClient:
         on_event: Optional[Callable[[IpcEvent], None]] = None,
         on_disconnect: Optional[Callable[[], None]] = None,
         timeout: float = Constants.DEFAULT_IPC_TIMEOUT,
+        unlock_timeout: float = Constants.MAX_UNLOCK_INITIALIZATION_WAIT_SEC,
         client_version: str = APP_VERSION,
     ) -> None:
         """
@@ -127,6 +130,7 @@ class MetorClient:
             on_event (Optional[Callable[[IpcEvent], None]]): Callback for incoming async events.
             on_disconnect (Optional[Callable[[], None]]): Callback fired if socket connection drops.
             timeout (float): Socket connect and read timeout.
+            unlock_timeout: Bounded runtime initialization wait after unlock.
             client_version (str): Client application version reported in handshake.
 
         Returns:
@@ -139,6 +143,9 @@ class MetorClient:
         self._on_event: Callable[[IpcEvent], None] = on_event or (lambda _e: None)
         self._on_disconnect: Callable[[], None] = on_disconnect or (lambda: None)
         self._timeout: float = timeout
+        self._unlock_timeout: float = min(
+            unlock_timeout, Constants.MAX_UNLOCK_INITIALIZATION_WAIT_SEC
+        )
         self._client_version: str = client_version
 
         self._ipc: IpcClient = IpcClient(
@@ -507,9 +514,15 @@ class MetorClient:
                 request_id, lease
             )
 
+            unlock_deadline: float | None = None
             while True:
+                remaining = (
+                    max(0.0, unlock_deadline - time.monotonic())
+                    if unlock_deadline is not None
+                    else None
+                )
                 event: Optional[IpcEvent] = self._ipc.wait_for_response(
-                    request_id, lease
+                    request_id, lease, timeout=remaining
                 )
 
                 if event is None:
@@ -517,6 +530,13 @@ class MetorClient:
 
                 auth_result: IpcAuthResult = auth_exchange.handle(event)
                 if auth_result.handled:
+                    if event.event_type in (
+                        EventType.DAEMON_LOCKED,
+                        EventType.INVALID_PASSWORD,
+                    ):
+                        unlock_deadline = time.monotonic() + self._unlock_timeout
+                    elif event.event_type is EventType.DAEMON_UNLOCKED:
+                        unlock_deadline = None
                     if auth_result.resend_original_command:
                         self._ipc.send_command(cmd, lease)
                         continue

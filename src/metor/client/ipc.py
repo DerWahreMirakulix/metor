@@ -338,12 +338,12 @@ class IpcClient:
             self._notify_disconnect(generation, sock=sock)
             raise IpcSendError('IPC command could not be sent.') from exc
 
-    def read_event(self) -> Optional[IpcEvent]:
+    def read_event(self, timeout: float | None = None) -> Optional[IpcEvent]:
         """
         Reads one IPC event synchronously from the connected socket.
 
         Args:
-            None
+            timeout: Optional operation-specific read deadline.
 
         Returns:
             Optional[IpcEvent]: The decoded event, or None when the stream ends.
@@ -354,7 +354,16 @@ class IpcClient:
         if self._listener_thread is not None and self._listener_thread.is_alive():
             raise RuntimeError('The active listener owns all IPC reads.')
 
-        return self._reader.read_from_socket(self._socket)
+        if timeout is None:
+            return self._reader.read_from_socket(self._socket)
+        if timeout <= 0:
+            raise socket.timeout('IPC operation deadline elapsed.')
+        previous_timeout = self._socket.gettimeout()
+        try:
+            self._socket.settimeout(timeout)
+            return self._reader.read_from_socket(self._socket)
+        finally:
+            self._socket.settimeout(previous_timeout)
 
     def begin_request(self, request_id: str) -> RequestLease:
         """Registers one correlated response stream before sending its command.
@@ -386,17 +395,22 @@ class IpcClient:
         return lease
 
     def wait_for_response(
-        self, request_id: str, lease: RequestLease | None = None
+        self,
+        request_id: str,
+        lease: RequestLease | None = None,
+        timeout: float | None = None,
     ) -> Optional[IpcEvent]:
         """Waits for the sole reader thread to demultiplex one response event.
 
         Args:
             request_id (str): Registered request correlation identifier.
+            lease: Active request ownership and connection generation.
+            timeout: Optional operation-specific wait window.
 
         Returns:
             Optional[IpcEvent]: Next correlated event, or None on timeout/loss.
         """
-        deadline = time.monotonic() + self._timeout
+        deadline = time.monotonic() + (self._timeout if timeout is None else timeout)
         with self._response_condition:
             generation = (
                 lease.generation

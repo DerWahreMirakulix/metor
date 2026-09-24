@@ -20,10 +20,28 @@ metor chat --ui gui --simulator
 metor chat --ui gui --simulator --device-config docs/examples/gui-simulator.toml
 ```
 
+The GUI opens its graphical shell before profile authentication, including when
+started from a terminal. With no profiles it opens Create profile and says
+`No profiles exist yet.` With several profiles and no valid default it opens the
+picker. `-p NAME` is only an initial selection: a missing valid name stays in the
+GUI for create/select recovery, and users may switch profiles later. A damaged
+profile is shown as unavailable without treating the catalog as empty.
+
 The GUI can open before profile authentication and presents authentication and
 local daemon autostart choices graphically. Autostart follows the shared
 `never`/`ask`/`always` policy; a remote endpoint never creates a substitute local
-daemon. Optional audio or camera failure leaves available text actions usable.
+daemon. `--start-daemon` starts a missing local daemon upon profile activation;
+`--no-start-daemon` leaves a missing daemon unavailable with a retry path. ASK
+uses a graphical confirmation and passwords remain graphical, regardless of
+terminal stdin. A daemon spawned by this chat invocation ends when the GUI closes
+or switches away; an already running daemon is borrowed and survives. Optional
+audio or camera failure leaves available text actions usable.
+
+`--debug` adds safe exception class and stack locations to fatal stderr output.
+Fatal toolkit startup and unexpected event-loop termination return nonzero with a
+safe stage summary even without debug. Normal first-run Close returns zero. A
+missing display or native graphics dependency remains a platform prerequisite;
+GUI setup does not switch to Terminal or start a simulator implicitly.
 The repository has no registered production physical appliance adapter. A
 simulator run demonstrates GUI behavior and cannot establish physical, acoustic,
 or accessibility acceptance.

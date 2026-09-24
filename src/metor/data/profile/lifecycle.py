@@ -2,8 +2,8 @@
 
 from typing import Optional
 
-from metor.data import SettingKey, Settings, SqlManager
-from metor.utils import Constants, secure_remove_path
+from metor.data import SettingKey, Settings, SettingValidationError, SqlManager
+from metor.utils import Constants, FileLock, secure_remove_path
 
 # Local Package Imports
 from metor.data.profile import migration
@@ -15,6 +15,7 @@ from metor.data.profile.models import (
 )
 from metor.data.profile.paths import Paths
 from metor.data.profile.support import normalize_profile_name
+from metor.data.profile.catalog import get_all_profiles, load_default_profile
 
 
 def recover_profile_security_migration(profile_name: str) -> None:
@@ -47,6 +48,37 @@ def add_profile_folder(
 
     Returns:
         ProfileOperationResult: Structured local outcome for the CLI layer.
+    """
+    from metor.utils import create_private_directory_tree
+
+    create_private_directory_tree(Constants.DATA, ())
+    with FileLock(Constants.DATA / '.profile-catalog'):
+        previous_profiles = get_all_profiles()
+        result = _add_profile_folder_locked(
+            name, is_remote, port, security_mode, master_password
+        )
+        if result.success and not previous_profiles:
+            Settings.set(SettingKey.DEFAULT_PROFILE, normalize_profile_name(name))
+        return result
+
+
+def _add_profile_folder_locked(
+    name: str,
+    is_remote: bool,
+    port: Optional[int],
+    security_mode: ProfileSecurityMode,
+    master_password: Optional[str],
+) -> ProfileOperationResult:
+    """Complete one profile creation while the shared catalog lock is held.
+
+    Args:
+        name: Requested profile name.
+        is_remote: Whether this is a remote entry.
+        port: Optional static endpoint.
+        security_mode: Local storage protection.
+        master_password: One-use initial storage secret.
+    Returns:
+        ProfileOperationResult: Actual creation result.
     """
     from metor.data.profile.manager import ProfileManager
 
@@ -168,6 +200,24 @@ def remove_profile_folder(
     name: str,
     active_profile: Optional[str] = None,
 ) -> ProfileOperationResult:
+    """Serialize confirmed removal with creation and default reconciliation.
+
+    Args:
+        name: Requested profile name.
+        active_profile: Authenticated active profile to protect.
+    Returns:
+        ProfileOperationResult: Actual removal and default outcome.
+    """
+    if not Constants.DATA.exists():
+        return _remove_profile_folder_locked(name, active_profile)
+    with FileLock(Constants.DATA / '.profile-catalog'):
+        return _remove_profile_folder_locked(name, active_profile)
+
+
+def _remove_profile_folder_locked(
+    name: str,
+    active_profile: Optional[str] = None,
+) -> ProfileOperationResult:
     """Removes one profile completely.
 
     Args:
@@ -177,11 +227,10 @@ def remove_profile_folder(
     Returns:
         ProfileOperationResult: Structured local outcome for the CLI layer.
     """
-    from metor.data.profile.catalog import load_default_profile
     from metor.data.profile.manager import ProfileManager
 
     default = load_default_profile()
-    active = active_profile if active_profile else default
+    active = active_profile
     safe_name = normalize_profile_name(name)
     if not safe_name:
         return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
@@ -192,10 +241,6 @@ def remove_profile_folder(
     if active == safe_name:
         return ProfileOperationResult(
             False, ProfileOperationType.CANNOT_REMOVE_ACTIVE, {}
-        )
-    if default == safe_name:
-        return ProfileOperationResult(
-            False, ProfileOperationType.CANNOT_REMOVE_DEFAULT, {}
         )
     if not target_dir.exists():
         return ProfileOperationResult(
@@ -211,12 +256,34 @@ def remove_profile_folder(
     from metor.core.profile_destruction import destroy_profile_storage
 
     destroy_profile_storage(pm)
+    remaining = get_all_profiles()
+    if default == safe_name or (len(remaining) == 1 and default not in remaining):
+        Settings.set(
+            SettingKey.DEFAULT_PROFILE, remaining[0] if len(remaining) == 1 else ''
+        )
     return ProfileOperationResult(
         True, ProfileOperationType.PROFILE_REMOVED, {'profile': safe_name}
     )
 
 
 def rename_profile_folder(old_name: str, new_name: str) -> ProfileOperationResult:
+    """Serialize rename with catalog creation and default reconciliation.
+
+    Args:
+        old_name: Existing profile name.
+        new_name: Requested replacement name.
+    Returns:
+        ProfileOperationResult: Actual rename and default outcome.
+    """
+    if not Constants.DATA.exists():
+        return _rename_profile_folder_locked(old_name, new_name)
+    with FileLock(Constants.DATA / '.profile-catalog'):
+        return _rename_profile_folder_locked(old_name, new_name)
+
+
+def _rename_profile_folder_locked(
+    old_name: str, new_name: str
+) -> ProfileOperationResult:
     """Renames one existing profile directory.
 
     Args:
@@ -253,6 +320,17 @@ def rename_profile_folder(old_name: str, new_name: str) -> ProfileOperationResul
             {'old_profile': safe_old},
         )
     old_dir.rename(new_dir)
+    if load_default_profile() == safe_old:
+        try:
+            Settings.set(SettingKey.DEFAULT_PROFILE, safe_new, expected_value=safe_old)
+        except SettingValidationError:
+            pass
+        except OSError:
+            return ProfileOperationResult(
+                False,
+                ProfileOperationType.RENAMED_DEFAULT_UNCONFIRMED,
+                {'old_profile': safe_old, 'new_profile': safe_new},
+            )
     return ProfileOperationResult(
         True,
         ProfileOperationType.PROFILE_RENAMED,

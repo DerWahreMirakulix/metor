@@ -307,6 +307,8 @@ class IndependentCliContractTests(unittest.TestCase):
                 pm = Mock(spec=ProfileManager)
                 pm.profile_name = 'profile-a'
                 pm.config = Mock()
+                pm.config.get_int.return_value = 3
+                pm.config.get_float.return_value = 15.0
                 pm.config.get_str.return_value = configured
                 pm.exists.return_value = True
                 pm.is_daemon_running.return_value = True

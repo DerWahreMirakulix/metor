@@ -128,6 +128,11 @@ class ProfileEditor(ActionSheet):
         ):
             self.feedback.text = 'Enter matching, nonempty new passwords.'
             return
+        selected = self.selected
+        if selected is None and self.mode != 'create':
+            self.feedback.text = 'Choose a profile first.'
+            return
+        selected_name = selected or ''
         if self.mode in {'password', 'address'}:
             if not self.current_password.text:
                 self.feedback.text = 'Enter the full current profile password.'
@@ -135,7 +140,7 @@ class ProfileEditor(ActionSheet):
             admitted = (
                 self.controller.identity.offline_address(
                     self.profile,
-                    self.selected,
+                    selected_name,
                     self.current_password.text,
                     generate=generate,
                 )
@@ -150,7 +155,7 @@ class ProfileEditor(ActionSheet):
                 FrontendProfileChange(
                     FrontendProfileAction.RENAME,
                     self.profile,
-                    self.selected,
+                    selected_name,
                     self.name.text,
                 )
             )

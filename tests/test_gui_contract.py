@@ -8,6 +8,7 @@ import threading
 import unittest
 from unittest.mock import Mock, patch
 
+from metor.client import FrontendProfileState
 from metor.client import (
     FrontendLaunchContext,
     OneUseSecretProvider,
@@ -148,7 +149,16 @@ class PresentationTests(unittest.TestCase):
 
     def test_navigation_has_no_communication_side_effect(self) -> None:
         """Peer LIVE, selectors and secondary routes never initiate calls."""
-        controller = GuiController(FrontendLaunchContext('test', Mock()))
+        controller = GuiController(
+            FrontendLaunchContext(
+                'test',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'test', True, False, False
+                    )
+                ),
+            )
+        )
         client = Mock()
         controller.client = client
         controller.state.covered = False
@@ -209,7 +219,16 @@ class PresentationTests(unittest.TestCase):
 
     def test_stale_activation_cannot_install_snapshot(self) -> None:
         """Abandoned profile callbacks cannot uncover a new profile."""
-        controller = GuiController(FrontendLaunchContext('test', Mock()))
+        controller = GuiController(
+            FrontendLaunchContext(
+                'test',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'test', True, False, False
+                    )
+                ),
+            )
+        )
         old = controller.state.generation
         controller.close()
         controller.mailbox.put(
@@ -231,7 +250,16 @@ class PresentationTests(unittest.TestCase):
 
     def test_double_submit_and_unknown_send_keep_one_identity(self) -> None:
         """One pending turn survives a lost result without a second send."""
-        controller = GuiController(FrontendLaunchContext('test', Mock()))
+        controller = GuiController(
+            FrontendLaunchContext(
+                'test',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'test', True, False, False
+                    )
+                ),
+            )
+        )
         controller.state.covered = False
         controller.state.set_draft('alice', Delivery.DROP, 'hello')
         arrived, finish = threading.Event(), threading.Event()
@@ -256,7 +284,16 @@ class PresentationTests(unittest.TestCase):
 
     def test_confirmed_send_clears_only_matching_draft(self) -> None:
         """New typing is preserved when an older submission is accepted."""
-        controller = GuiController(FrontendLaunchContext('test', Mock()))
+        controller = GuiController(
+            FrontendLaunchContext(
+                'test',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'test', True, False, False
+                    )
+                ),
+            )
+        )
         controller.text.operations['A11:one'] = ('alice', Delivery.DROP, 'old')
         controller.state.set_draft('alice', Delivery.DROP, 'new')
         controller.mailbox.put(Update(0, 'A11:one', DropQueuedEvent('Alice', 'alice')))
@@ -265,7 +302,16 @@ class PresentationTests(unittest.TestCase):
 
     def test_wrong_identity_or_absent_receipt_never_clears_unknown_text(self) -> None:
         """A correlated response still needs the captured message identity."""
-        controller = GuiController(FrontendLaunchContext('test', Mock()))
+        controller = GuiController(
+            FrontendLaunchContext(
+                'test',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'test', True, False, False
+                    )
+                ),
+            )
+        )
         controller.text.operations['A11:one'] = ('alice', Delivery.LIVE, 'keep')
         controller.state.set_draft('alice', Delivery.LIVE, 'keep')
         controller.mailbox.put(Update(0, 'A11:one', TextAcceptedEvent('bob', 'one')))
@@ -328,6 +374,9 @@ class PresentationTests(unittest.TestCase):
     def test_failed_bootstrap_disconnects_and_remains_covered(self) -> None:
         """A failed SDK snapshot cannot leak its authenticated connection."""
         host, client = Mock(), Mock()
+        host.profile_state.return_value = FrontendProfileState(
+            'test', True, False, True
+        )
         secret = OneUseSecretProvider('unused')
         host.bootstrap.return_value.session_auth = secret
         host.bootstrap.return_value.port = 1234
@@ -358,7 +407,15 @@ class BackgroundAdmissionTests(unittest.TestCase):
         import threading
 
         controller = GuiController(
-            FrontendLaunchContext('fixture', Mock()), simulator=True
+            FrontendLaunchContext(
+                'fixture',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'fixture', True, False, False
+                    )
+                ),
+            ),
+            simulator=True,
         )
         release = threading.Event()
         self.addCleanup(release.set)

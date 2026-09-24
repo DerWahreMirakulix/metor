@@ -10,14 +10,6 @@ inputs:
     description: Pip version to install before dependency setup.
     required: false
     default: "26.0.1"
-  dev-lockfile:
-    description: Path to the locked development requirements file.
-    required: false
-    default: "requirements/dev.lock"
-  install-target:
-    description: Package installation target passed to pip.
-    required: false
-    default: "--no-deps --no-build-isolation -e ."
   ruff-check-paths:
     description: Space-delimited paths for ruff check.
     required: false
@@ -62,12 +54,7 @@ runs:
       shell: bash
       run: |
         python -m pip install --upgrade "pip==${{ inputs.pip-version }}"
-        pip install -r "${{ inputs.dev-lockfile }}"
-        pip install -r requirements/gui.lock
-        pip install --no-deps --no-build-isolation -e packaging/sdk
-        pip install ${{ inputs.install-target }}
-        pip install --no-deps --no-build-isolation -e packaging/terminal
-        pip install --no-deps --no-build-isolation -e packaging/gui
+        python -m pip install -r requirements/dev.txt
         python -m pip check
         python scripts/check_boundaries.py
 

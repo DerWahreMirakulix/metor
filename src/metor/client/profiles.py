@@ -73,8 +73,8 @@ class FrontendProfileCatalog:
     """One finite metadata page; no paths, keys, credentials or remote host internals."""
 
     entries: tuple[FrontendProfileState, ...]
-    selected_profile: str
-    default_profile: str
+    selected_profile: str | None
+    default_profile: str | None
     next_after: str | None = None
 
 

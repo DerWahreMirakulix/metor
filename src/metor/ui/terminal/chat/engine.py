@@ -5,6 +5,7 @@ Acts as a clean Facade, orchestrating the Session, Renderer, Commands, and Event
 
 import secrets
 import socket
+import time
 import threading
 from datetime import datetime, timezone
 from typing import Callable, Dict, Optional, TypeVar
@@ -221,12 +222,18 @@ class Chat:
             failure_limit=self._pm.config.get_int('daemon.local_auth_failure_limit'),
         )
 
+        unlock_deadline: float | None = None
         while True:
             try:
-                event: Optional[IpcEvent] = self._ipc.read_event()
+                remaining = (
+                    max(0.0, unlock_deadline - time.monotonic())
+                    if unlock_deadline is not None
+                    else None
+                )
+                event: Optional[IpcEvent] = self._ipc.read_event(timeout=remaining)
             except socket.timeout:
                 self._print_prechat_message(
-                    f'{Theme.RED}IPC Timeout:{Theme.RESET} The daemon is not responding. If this is a remote profile, check your SSH tunnel.'
+                    f'{Theme.RED}IPC Timeout:{Theme.RESET} The daemon did not answer the requested startup operation.'
                 )
                 return None
             except (OSError, ValueError):
@@ -255,6 +262,13 @@ class Chat:
                 return None
 
             if auth_result.handled:
+                if event.event_type in (
+                    EventType.DAEMON_LOCKED,
+                    EventType.INVALID_PASSWORD,
+                ):
+                    unlock_deadline = time.monotonic() + self._pm.unlock_timeout
+                elif event.event_type is EventType.DAEMON_UNLOCKED:
+                    unlock_deadline = None
                 if event.event_type in (
                     EventType.AUTH_REQUIRED,
                     EventType.DAEMON_LOCKED,
@@ -313,7 +327,7 @@ class Chat:
             skip_prompt=True,
         )
 
-    def run(self) -> None:
+    def run(self) -> bool:
         """
         Starts the main chat UI loop, establishes the IPC Client, and handles inputs.
 
@@ -321,7 +335,7 @@ class Chat:
             None
 
         Returns:
-            None
+            bool: Whether the chat loop was entered successfully.
         """
         ipc_port: Optional[int] = self._pm.get_daemon_port()
         self._disconnect_event.clear()
@@ -332,7 +346,7 @@ class Chat:
                 msg_type=ChatMessageType.STATUS,
                 tone=StatusTone.SYSTEM,
             )
-            return
+            return False
 
         self._ipc = IpcClient(
             port=ipc_port,
@@ -347,11 +361,11 @@ class Chat:
                 msg_type=ChatMessageType.STATUS,
                 tone=StatusTone.SYSTEM,
             )
-            return
+            return False
 
         if not self._bootstrap_ipc_session():
             self._shutdown()
-            return
+            return False
 
         self._handler = EventHandler(
             self._ipc,
@@ -414,6 +428,8 @@ class Chat:
             self._renderer.clear_input_area()
         finally:
             self._shutdown()
+
+        return True
 
     def _shutdown(self) -> None:
         """
@@ -692,7 +708,7 @@ class Chat:
                 return False
 
             self._renderer.print_message(
-                f'{Theme.RED}IPC Timeout:{Theme.RESET} The daemon is not responding. If this is a remote profile, check your SSH tunnel.',
+                f'{Theme.RED}IPC Timeout:{Theme.RESET} The daemon did not answer the requested operation.',
                 msg_type=ChatMessageType.STATUS,
                 tone=StatusTone.ERROR,
             )

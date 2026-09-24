@@ -4,6 +4,10 @@ from typing import Optional
 from collections.abc import Iterator
 from contextlib import contextmanager
 import threading
+import os
+import subprocess
+
+import psutil
 
 from metor.client import (
     FRONTEND_LAUNCH_CONTRACT_VERSION,
@@ -28,13 +32,19 @@ from metor.data import (
     ProfileManager,
     ProfileSecurityMode,
     SettingKey,
-    Settings,
-    SettingValidationError,
 )
 from metor.utils import Constants, TypeCaster, ProcessManager
+from metor.data.profile.catalog import (
+    get_unavailable_profile_names,
+    valid_default_profile,
+)
 
 # Local Package Imports
-from ..runtime import PlaintextLockedDaemonError, start_managed_daemon_process
+from ..runtime import (
+    DaemonStartDiagnostics,
+    PlaintextLockedDaemonError,
+    start_managed_daemon_process,
+)
 from .settings import LocalFrontendSettings
 from .identity import profile_address
 
@@ -84,7 +94,7 @@ class LocalFrontendHost:
     contract_version = FRONTEND_LAUNCH_CONTRACT_VERSION
 
     def __init__(
-        self, profile: ProfileManager, start_daemon_override: Optional[bool]
+        self, profile: ProfileManager | None, start_daemon_override: Optional[bool]
     ) -> None:
         """Initializes one deferred host for a selected profile.
 
@@ -96,11 +106,63 @@ class LocalFrontendHost:
             None
         """
         self._profile = profile
+        self._unavailable_name: str | None = None
         self._start_daemon_override = start_daemon_override
         self._attempt_lock = threading.Lock()
         self._started_processes: dict[str, int | None] = {}
+        self._owned_processes: dict[str, subprocess.Popen[bytes]] = {}
 
-    def profile_state(self) -> FrontendProfileState:
+    def _close_owned_profile(self, profile: str) -> None:
+        """Stop only the child process spawned by this invocation for a profile.
+
+        Args:
+            profile: Exact owned profile identity.
+        Returns:
+            None
+        """
+        process = self._owned_processes.get(profile)
+        if process is None:
+            return
+        if process.poll() is None:
+            if process.stdin is not None:
+                try:
+                    process.stdin.close()
+                except OSError:
+                    if process.poll() is None:
+                        raise
+                try:
+                    process.wait(timeout=Constants.OWNED_DAEMON_SHUTDOWN_TIMEOUT_SEC)
+                except subprocess.TimeoutExpired:
+                    pass
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
+        self._owned_processes.pop(profile, None)
+        self._started_processes.pop(profile, None)
+
+    def close(self) -> None:
+        """Release every exact daemon child created by this chat invocation.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        with self._attempt_lock:
+            failures: list[Exception] = []
+            for profile in tuple(self._owned_processes):
+                try:
+                    self._close_owned_profile(profile)
+                except (OSError, subprocess.SubprocessError) as exc:
+                    failures.append(exc)
+            if failures:
+                raise OSError('Owned daemon cleanup could not be confirmed.')
+
+    def profile_state(self) -> FrontendProfileState | None:
         """Returns read-only state for a frontend first-run route.
 
         Args:
@@ -109,13 +171,34 @@ class LocalFrontendHost:
         Returns:
             FrontendProfileState: Selected profile metadata.
         """
-        exists = self._profile.exists()
-        return FrontendProfileState(
-            profile=self._profile.profile_name,
-            exists=exists,
-            remote=self._profile.is_remote() if exists else False,
-            daemon_running=self._profile.is_daemon_running() if exists else False,
-        )
+        if self._profile is None:
+            if self._unavailable_name is None:
+                return None
+            return FrontendProfileState(
+                self._unavailable_name, True, False, False, 'invalid_storage'
+            )
+        return self._catalog_state(self._profile.profile_name)
+
+    @staticmethod
+    def _catalog_state(name: str) -> FrontendProfileState:
+        """Read one safe profile fact without treating damage as absence.
+
+        Args:
+            name: Syntactically valid profile name.
+        Returns:
+            FrontendProfileState: Usable, missing, or safely unavailable entry.
+        """
+        try:
+            candidate = ProfileManager(name)
+            exists = candidate.exists()
+            return FrontendProfileState(
+                name,
+                exists,
+                candidate.is_remote() if exists else False,
+                candidate.is_daemon_running() if exists else False,
+            )
+        except (ValueError, OSError):
+            return FrontendProfileState(name, True, False, False, 'invalid_storage')
 
     def _ensure_unused(self) -> None:
         """Rejects concurrent routing while bootstrap owns the selection boundary.
@@ -142,18 +225,9 @@ class LocalFrontendHost:
             tuple[FrontendProfileState, ...]: Available profile states.
         """
         self._ensure_unused()
-        states = []
-        for profile_name in ProfileManager.get_all_profiles():
-            candidate = ProfileManager(profile_name)
-            states.append(
-                FrontendProfileState(
-                    profile=profile_name,
-                    exists=candidate.exists(),
-                    remote=candidate.is_remote(),
-                    daemon_running=candidate.is_daemon_running(),
-                )
-            )
-        return tuple(states)
+        names = set(ProfileManager.get_all_profiles())
+        names.update(get_unavailable_profile_names())
+        return tuple(self._catalog_state(name) for name in sorted(names))
 
     def select_profile(self, profile: str) -> FrontendProfileState:
         """Selects a profile through the public base profile manager.
@@ -175,8 +249,16 @@ class LocalFrontendHost:
                 reason=FrontendBootstrapReason.BUSY,
             )
         try:
+            if self._profile is not None and self._profile.profile_name != profile:
+                self._close_owned_profile(self._profile.profile_name)
             self._profile = ProfileManager(profile)
-            return self.profile_state()
+            self._unavailable_name = None
+            return FrontendProfileState(
+                profile,
+                self._profile.exists(),
+                self._profile.is_remote() if self._profile.exists() else False,
+                self._profile.is_daemon_running() if self._profile.exists() else False,
+            )
         except ValueError:
             raise FrontendBootstrapError(
                 'Invalid profile configuration.',
@@ -268,26 +350,19 @@ class LocalFrontendHost:
         if after is not None and not valid_frontend_profile_name(after):
             raise ValueError('Invalid profile bookmark')
         with self._catalog_boundary():
-            names = [
+            names = sorted(
                 name
-                for name in ProfileManager.get_all_profiles()
+                for name in set(ProfileManager.get_all_profiles())
+                | set(get_unavailable_profile_names())
                 if valid_frontend_profile_name(name) and (after is None or name > after)
-            ]
-            entries = []
-            for name in names[:limit]:
-                profile = ProfileManager(name)
-                entries.append(
-                    FrontendProfileState(
-                        name,
-                        profile.exists(),
-                        profile.is_remote(),
-                        profile.is_daemon_running(),
-                    )
-                )
+            )
+            entries = tuple(self._catalog_state(name) for name in names[:limit])
             return FrontendProfileCatalog(
-                tuple(entries),
-                self._profile.profile_name,
-                ProfileManager.load_default_profile(),
+                entries,
+                self._profile.profile_name
+                if self._profile is not None
+                else self._unavailable_name,
+                valid_default_profile(),
                 names[limit - 1] if len(names) > limit else None,
             )
 
@@ -303,7 +378,10 @@ class LocalFrontendHost:
         """
         change.__post_init__()
         with self._catalog_boundary():
-            if change.selected_profile != self._profile.profile_name:
+            if (
+                self._profile is None
+                or change.selected_profile != self._profile.profile_name
+            ):
                 return FrontendProfileOperationResult(
                     False, 'selection_changed', change.profile
                 )
@@ -320,19 +398,6 @@ class LocalFrontendHost:
                 )
                 if result.success and self._profile.profile_name == change.profile:
                     self._profile = renamed
-                if result.success:
-                    try:
-                        Settings.set(
-                            SettingKey.DEFAULT_PROFILE,
-                            change.new_name,
-                            expected_value=change.profile,
-                        )
-                    except SettingValidationError:
-                        pass
-                    except Exception:
-                        return FrontendProfileOperationResult(
-                            False, 'renamed_default_unconfirmed', change.new_name
-                        )
             else:
                 return FrontendProfileOperationResult(
                     False, 'unsupported', change.profile
@@ -341,7 +406,10 @@ class LocalFrontendHost:
                 result.success,
                 result.operation_type.value,
                 change.new_name
-                if result.success
+                if (
+                    result.success
+                    or result.operation_type.value == 'renamed_default_unconfirmed'
+                )
                 and change.action is FrontendProfileAction.RENAME
                 and change.new_name
                 else change.profile,
@@ -381,7 +449,10 @@ class LocalFrontendHost:
         try:
             request.__post_init__()
             with self._catalog_boundary():
-                if request.selected_profile != self._profile.profile_name:
+                if (
+                    self._profile is None
+                    or request.selected_profile != self._profile.profile_name
+                ):
                     return FrontendProfileOperationResult(
                         False, 'selection_changed', request.profile
                     )
@@ -451,6 +522,11 @@ class LocalFrontendHost:
             FrontendBootstrapResult: The resulting value.
         """
         profile = self._profile
+        if profile is None:
+            raise FrontendBootstrapError(
+                'No profiles exist yet.',
+                reason=FrontendBootstrapReason.MISSING_PROFILE,
+            )
         if not profile.exists():
             raise FrontendBootstrapError(
                 f"Profile '{profile.profile_name}' does not exist.",
@@ -493,11 +569,15 @@ class LocalFrontendHost:
                         'Aborted.', 130, reason=FrontendBootstrapReason.CANCELLED
                     )
             interactions.show_status('Starting local daemon...')
+            diagnostics = DaemonStartDiagnostics()
+            owner = psutil.Process(os.getpid())
             try:
                 daemon_started = start_managed_daemon_process(
                     profile,
                     start_locked=profile.uses_encrypted_storage(),
                     session_auth_password=startup_secret,
+                    diagnostics=diagnostics,
+                    chat_owner=(owner.pid, owner.create_time()),
                 )
             except PlaintextLockedDaemonError as exc:
                 startup_secret = None
@@ -518,10 +598,17 @@ class LocalFrontendHost:
                 ) from None
             if not daemon_started:
                 startup_secret = None
-                raise FrontendBootstrapError(
-                    "Could not start the local daemon. Run 'metor daemon' to "
-                    'inspect foreground startup errors.'
+                status = (
+                    f', status {diagnostics.return_code}'
+                    if diagnostics.return_code is not None
+                    else ''
                 )
+                raise FrontendBootstrapError(
+                    f'Could not start the local daemon [{diagnostics.phase}{status}]. '
+                    "Run 'metor daemon' to inspect foreground startup errors."
+                )
+            if diagnostics.process is not None:
+                self._owned_processes[profile.profile_name] = diagnostics.process
             self._started_processes[profile.profile_name] = profile.get_daemon_pid()
         port = profile.get_daemon_port()
         if type(port) is not int or not 0 < port < 65536:
@@ -530,6 +617,22 @@ class LocalFrontendHost:
                 'No active daemon endpoint is available.',
                 reason=FrontendBootstrapReason.UNREACHABLE,
             )
+        retries = profile.config.get_int(SettingKey.MAX_TOR_RETRIES)
+        unlock_timeout = min(
+            Constants.MAX_UNLOCK_INITIALIZATION_WAIT_SEC,
+            max(
+                profile.config.get_float(SettingKey.IPC_TIMEOUT),
+                retries * Constants.UNIX_TOR_TIMEOUT
+                + max(0, retries - 1) * Constants.TOR_BOOTSTRAP_RETRY_SEC
+                + Constants.TOR_HOSTNAME_POLL_RETRIES * Constants.TOR_BOOTSTRAP_POLL_SEC
+                + Constants.TOR_PROXY_READY_ATTEMPTS
+                * (
+                    Constants.TOR_PROXY_READY_TIMEOUT_SEC
+                    + Constants.TOR_PROXY_READY_RETRY_SEC
+                )
+                + Constants.LISTENER_READY_TIMEOUT,
+            ),
+        )
         return FrontendBootstrapResult(
             profile=profile.profile_name,
             remote=profile.is_remote(),
@@ -538,11 +641,12 @@ class LocalFrontendHost:
             session_auth=OneUseSecretProvider(startup_secret),
             config=LocalFrontendSettings(profile.config),
             encrypted=profile.uses_encrypted_storage(),
+            unlock_timeout=unlock_timeout,
         )
 
 
 def create_local_frontend_host(
-    profile: str | ProfileManager = 'default',
+    profile: str | ProfileManager | None = None,
     start_daemon_override: Optional[bool] = None,
 ) -> FrontendHost:
     """Creates the public deferred host implemented by the base distribution.
@@ -554,7 +658,12 @@ def create_local_frontend_host(
     Returns:
         FrontendHost: Versioned frontend-neutral host boundary.
     """
-    return LocalFrontendHost(
-        ProfileManager(profile) if isinstance(profile, str) else profile,
-        start_daemon_override,
-    )
+    if isinstance(profile, str):
+        try:
+            selected = ProfileManager(profile)
+        except (ValueError, OSError):
+            host = LocalFrontendHost(None, start_daemon_override)
+            host._unavailable_name = profile
+            return host
+        return LocalFrontendHost(selected, start_daemon_override)
+    return LocalFrontendHost(profile, start_daemon_override)

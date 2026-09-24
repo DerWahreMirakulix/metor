@@ -55,7 +55,9 @@ class ProfileManager:
             None
         """
         self.profile_name: str = (
-            profile_name if profile_name is not None else self.load_default_profile()
+            profile_name
+            if profile_name is not None
+            else self.load_default_profile() or 'default'
         )
         self.paths: Paths = Paths(self.profile_name)
         self.config: Config = Config(self.paths)

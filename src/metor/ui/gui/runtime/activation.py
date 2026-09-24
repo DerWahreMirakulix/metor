@@ -127,6 +127,7 @@ class ProfileActivation:
         return MetorClient(
             result.port,
             auth_provider=interactions,
+            unlock_timeout=result.unlock_timeout,
             on_event=on_event,
             on_disconnect=on_disconnect,
         )

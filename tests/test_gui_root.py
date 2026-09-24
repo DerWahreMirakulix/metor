@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import Mock
 
 from test_gui_contacts import address
+from metor.client import FrontendProfileState
 from metor.client import FrontendLaunchContext
 from metor.core.api import (
     Delivery,
@@ -33,7 +34,15 @@ class RootProjectionTests(unittest.TestCase):
             None
         """
         self.gui = GuiController(
-            FrontendLaunchContext('fixture', Mock()), simulator=True
+            FrontendLaunchContext(
+                'fixture',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'fixture', True, False, False
+                    )
+                ),
+            ),
+            simulator=True,
         )
         self.gui.state.covered = False
         self.gui.state.snapshot = RuntimeSnapshotEvent('fixture', address(1))

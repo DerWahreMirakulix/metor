@@ -48,6 +48,7 @@ class Constants:
     TOR_V3_CHECKSUM_BYTES: int = 2  # Checksum bytes embedded in v3 onions
     TOR_V3_VERSION_BYTE: int = 3  # Tor v3 onion address version marker
     DEFAULT_IPC_TIMEOUT: float = 15.0  # Default client IPC socket timeout in seconds
+    MAX_UNLOCK_INITIALIZATION_WAIT_SEC: float = 180.0  # Bounded cold Tor startup
     THREAD_POLL_TIMEOUT: float = 1.0  # Timeout for non-blocking accept/recv loops
     IPC_AUTH_FAILURE_LIMIT: int = (
         3  # Maximum invalid local auth attempts per IPC session before disconnect

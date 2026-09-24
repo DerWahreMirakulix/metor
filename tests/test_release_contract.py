@@ -448,6 +448,7 @@ class ReleaseContractTests(unittest.TestCase):
             list_uis=False,
             device_config=None,
             simulator=False,
+            debug=False,
         )
 
     def test_config_defaults_to_list_when_no_subcommand_is_given(self) -> None:

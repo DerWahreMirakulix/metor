@@ -518,6 +518,8 @@ class ProcessManager:
         """
         remaining: list[str] = []
         selected_profile: Optional[str] = None
+        owner_pid: int | None = None
+        owner_created: float | None = None
         index: int = 0
         while index < len(arguments):
             token = arguments[index]
@@ -530,11 +532,34 @@ class ProcessManager:
                     return False
                 index += 1
                 selected_profile = arguments[index]
+            elif token in ('--chat-owner-pid', '--chat-owner-created'):
+                if index + 1 >= len(arguments):
+                    return False
+                index += 1
+                try:
+                    if token == '--chat-owner-pid':
+                        if owner_pid is not None:
+                            return False
+                        owner_pid = int(arguments[index])
+                        if owner_pid <= 0:
+                            return False
+                    else:
+                        if owner_created is not None:
+                            return False
+                        owner_created = float(arguments[index])
+                        if not math.isfinite(owner_created) or owner_created <= 0:
+                            return False
+                except ValueError:
+                    return False
             else:
                 remaining.append(token)
             index += 1
 
         if not remaining or remaining.pop(0) != 'daemon':
+            return False
+        if (owner_pid is None) != (owner_created is None):
+            return False
+        if owner_pid is not None and '--non-interactive' not in remaining:
             return False
         allowed_flags: set[str] = {
             '--locked',

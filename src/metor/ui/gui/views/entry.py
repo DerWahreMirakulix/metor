@@ -126,6 +126,7 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
             foreground_color=color('text'),
             background_color=color('raised'),
         )
+        name.text = controller.initial_missing_profile or ''
         column.add_widget(name)
         column.add_widget(Label('Password', role='support'))
         password = SecretInput()
@@ -166,10 +167,13 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
         )
         column.add_widget(Action('Back', lambda: navigate('V01'), disabled=state.busy))
     else:
+        selected = (
+            None if controller.simulator else controller.context.host.profile_state()
+        )
         profile_name = (
             'Simulator'
             if controller.simulator
-            else controller.context.host.profile_state().profile
+            else (selected.profile if selected is not None else 'Choose profile')
         )
         column.add_widget(Label(profile_name, role='peer'))
         column.add_widget(

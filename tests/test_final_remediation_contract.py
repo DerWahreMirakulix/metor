@@ -359,6 +359,8 @@ class FinalRemediationContractTests(unittest.TestCase):
         pm = Mock(spec=ProfileManager)
         pm.profile_name = 'default'
         pm.config = Mock()
+        pm.config.get_int.return_value = 3
+        pm.config.get_float.return_value = 15.0
         pm.config.get_str.return_value = 'always'
         pm.exists.side_effect = lambda: started.is_set()
         pm.is_daemon_running.return_value = False

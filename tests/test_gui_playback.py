@@ -6,6 +6,7 @@ import struct
 import unittest
 from unittest.mock import Mock
 
+from metor.client import FrontendProfileState
 from metor.core.api import (
     Delivery,
     MessageDirectionCode,
@@ -308,7 +309,16 @@ class AutoPlaybackTests(unittest.TestCase):
 
     def setUp(self) -> None:
         """Creates an inert GUI with synthetic public context descriptors."""
-        self.gui = GuiController(FrontendLaunchContext('fixture', Mock()))
+        self.gui = GuiController(
+            FrontendLaunchContext(
+                'fixture',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'fixture', True, False, False
+                    )
+                ),
+            )
+        )
         self.gui.state.covered = False
         self.gui.state.route = Route('V09', 'peer', Delivery.LIVE)
         self.gui.state.snapshot = RuntimeSnapshotEvent(

@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock, patch
 
+from metor.client import FrontendProfileState
 from metor.client import FrontendLaunchContext, MetorClient, build_session_auth_proof
 from metor.core.api import (
     ClientUnlockMethod,
@@ -76,7 +77,16 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
         self.daemon._ipc.start()
         self.client = self.make_client()
         self.other = self.make_client()
-        self.controller = GuiController(FrontendLaunchContext('gui-secured', Mock()))
+        self.controller = GuiController(
+            FrontendLaunchContext(
+                'gui-secured',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'gui-secured', True, False, False
+                    )
+                ),
+            )
+        )
         self.controller.client = self.client
         self.controller.state.capabilities = frozenset(
             self.client.init_event.capabilities

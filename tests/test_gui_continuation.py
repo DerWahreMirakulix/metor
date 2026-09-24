@@ -5,6 +5,7 @@ import time
 import unittest
 
 import test_gui_producers as support
+from metor.client import FrontendProfileState
 from metor.core.api import (
     ClientRestrictedEvent,
     ClientUnlockMethod,
@@ -231,7 +232,16 @@ class ContinuedGuiTests(unittest.TestCase):
         self.addCleanup(local.close)
         self.addCleanup(remote.close)
         self.h.daemon._transport_state.add_active_connection(self.h.onion, local)
-        self.gui = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        self.gui = GuiController(
+            FrontendLaunchContext(
+                'voice-owned',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'voice-owned', True, False, False
+                    )
+                ),
+            )
+        )
         self.addCleanup(self.gui.close)
         self.gui.client = self.h.client
         self.gui.state.snapshot = self.h.client.runtime_snapshot()

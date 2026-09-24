@@ -236,7 +236,7 @@ class Settings:
             description='Selects the profile used when the CLI is started without `-p`.',
             constraints='Non-empty profile name using letters, numbers, `-`, or `_`.',
             allow_profile_override=False,
-            allow_empty_string=False,
+            allow_empty_string=True,
         ),
         SettingKey.DEFAULT_UI: SettingSpec(
             key=SettingKey.DEFAULT_UI,

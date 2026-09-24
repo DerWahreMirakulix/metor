@@ -46,26 +46,33 @@ def profiles_body(
         )
     else:
         if not startup:
-            body.add_widget(Label('Current: ' + page.selected_profile, role='peer'))
+            body.add_widget(
+                Label('Current: ' + (page.selected_profile or 'none'), role='peer')
+            )
             body.add_widget(
                 Label(
-                    'Default: ' + page.default_profile,
+                    'Default: ' + (page.default_profile or 'none'),
                     role='support',
                     tone='textSecondary',
                 )
             )
         if not page.entries:
-            body.add_widget(Label('No profiles', role='peer'))
+            body.add_widget(Label('No profiles exist yet.', role='peer'))
         for profile in page.entries:
             row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
             label = profile.profile + (
-                ' · Default' if profile.profile == page.default_profile else ''
+                ' · Unavailable'
+                if profile.issue
+                else ' · Default'
+                if profile.profile == page.default_profile
+                else ''
             )
             row.add_widget(
                 Action(
                     label,
                     partial(select_profile, controller, profile.profile, startup),
                     disabled=state.busy
+                    or profile.issue is not None
                     or (not startup and profile.profile == page.selected_profile),
                 )
             )
@@ -208,9 +215,10 @@ def profile_menu(controller: GuiController, profile: FrontendProfileState) -> No
             None
         """
         sheet.dismiss(animation=False)
-        controller.profiles.change(
-            FrontendProfileChange(action, profile.profile, selected)
-        )
+        if selected is not None:
+            controller.profiles.change(
+                FrontendProfileChange(action, profile.profile, selected)
+            )
 
     def remove() -> None:
         """Shows one effects confirmation for exactly this local profile entry.

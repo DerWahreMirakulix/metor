@@ -3,6 +3,7 @@
 from unittest.mock import Mock, patch
 import unittest
 
+from metor.client import FrontendProfileState
 from metor.client import FrontendLaunchContext
 from metor.core.api import (
     AckEvent,
@@ -32,7 +33,15 @@ class TextAdmissionTests(unittest.TestCase):
             None
         """
         self.gui = GuiController(
-            FrontendLaunchContext('fixture', Mock()), simulator=True
+            FrontendLaunchContext(
+                'fixture',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'fixture', True, False, False
+                    )
+                ),
+            ),
+            simulator=True,
         )
         self.gui.state.covered = False
         self.gui.state.capabilities = frozenset({'local_text_acceptance'})

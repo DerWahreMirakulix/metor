@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import Mock
 
 import test_gui_producers as support
+from metor.client import FrontendProfileState
 from metor.client import FrontendLaunchContext
 from metor.core.api import (
     ContentType,
@@ -64,7 +65,16 @@ class TextHandoffTests(unittest.TestCase):
     def test_result_survives_route_departure_and_opaque_lock_cover(self) -> None:
         """A consumed original-peer batch is retained privately even after navigation/lock."""
         self.queue('foreground', Delivery.LIVE, 'protected foreground payload')
-        gui = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        gui = GuiController(
+            FrontendLaunchContext(
+                'voice-owned',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'voice-owned', True, False, False
+                    )
+                ),
+            )
+        )
         self.addCleanup(gui.close)
         gui.client = self.h.client
         gui.state.snapshot = self.h.client.runtime_snapshot()

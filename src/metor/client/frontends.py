@@ -8,6 +8,8 @@ from importlib import metadata
 import threading
 from typing import Optional, Protocol, cast
 
+from metor.shared.constants import Constants
+
 from .platform import PlatformBindings
 
 
@@ -46,6 +48,7 @@ class FrontendBootstrapError(RuntimeError):
         Args:
             message (str): Safe user-facing failure text.
             exit_code (int): Process status returned by the selected frontend.
+            reason: Typed bootstrap failure category.
 
         Returns:
             None
@@ -160,6 +163,7 @@ class FrontendBootstrapResult:
     session_auth: OneUseSecretProvider
     config: FrontendSettings
     encrypted: bool
+    unlock_timeout: float = Constants.MAX_UNLOCK_INITIALIZATION_WAIT_SEC
 
     def get_daemon_port(self) -> int:
         """Returns the endpoint resolved by base bootstrap.
@@ -280,6 +284,7 @@ class FrontendProfileState:
     exists: bool
     remote: bool
     daemon_running: bool
+    issue: str | None = None
 
 
 class FrontendHost(Protocol):
@@ -287,7 +292,17 @@ class FrontendHost(Protocol):
 
     contract_version: int
 
-    def profile_state(self) -> FrontendProfileState:
+    def close(self) -> None:
+        """Release exact chat-created runtime resources after frontend detach.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        ...
+
+    def profile_state(self) -> FrontendProfileState | None:
         """Returns non-secret first-run state without starting work.
 
         Args:
@@ -365,13 +380,14 @@ class FrontendLaunchContext:
         None
     """
 
-    profile: str
+    profile: str | None
     host: FrontendHost
     start_daemon: bool | None = None
     contract_version: int = FRONTEND_LAUNCH_CONTRACT_VERSION
     device_config: str | None = None
     simulator: bool = False
     platform: PlatformBindings | None = None
+    debug: bool = False
 
 
 class FrontendEntry(Protocol):

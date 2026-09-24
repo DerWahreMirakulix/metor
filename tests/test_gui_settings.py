@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import test_gui_producers as support
+from metor.client import FrontendProfileState
 from metor.client import FrontendLaunchContext
 from metor.core.api import (
     GetGuiPreferencesCommand,
@@ -40,7 +41,16 @@ class SettingsCoreTests(unittest.TestCase):
         Returns:
             None
         """
-        gui = GuiController(FrontendLaunchContext('fixture', Mock()))
+        gui = GuiController(
+            FrontendLaunchContext(
+                'fixture',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'fixture', True, False, False
+                    )
+                ),
+            )
+        )
         self.addCleanup(gui.close)
         gui.state.covered = True
         gui.core_settings.install(
@@ -66,7 +76,16 @@ class SettingsCoreTests(unittest.TestCase):
         h = support.GuiProducerTests()
         h.setUp()
         self.addCleanup(h.doCleanups)
-        gui = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        gui = GuiController(
+            FrontendLaunchContext(
+                'voice-owned',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'voice-owned', True, False, False
+                    )
+                ),
+            )
+        )
         self.addCleanup(gui.close)
         gui.client = h.client
         gui.state.covered = False
@@ -117,7 +136,16 @@ class SettingsCoreTests(unittest.TestCase):
         h = support.GuiProducerTests()
         h.setUp()
         self.addCleanup(h.doCleanups)
-        gui = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        gui = GuiController(
+            FrontendLaunchContext(
+                'voice-owned',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'voice-owned', True, False, False
+                    )
+                ),
+            )
+        )
         self.addCleanup(gui.close)
         gui.client = h.client
         gui.state.covered = False
@@ -199,7 +227,16 @@ class SettingsCoreTests(unittest.TestCase):
         h = support.GuiProducerTests()
         h.setUp()
         self.addCleanup(h.doCleanups)
-        gui = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        gui = GuiController(
+            FrontendLaunchContext(
+                'voice-owned',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'voice-owned', True, False, False
+                    )
+                ),
+            )
+        )
         self.addCleanup(gui.close)
         gui.client = h.client
         gui.state.covered = False
@@ -258,7 +295,16 @@ class SettingsCoreTests(unittest.TestCase):
         h = support.GuiProducerTests()
         h.setUp()
         self.addCleanup(h.doCleanups)
-        gui = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        gui = GuiController(
+            FrontendLaunchContext(
+                'voice-owned',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'voice-owned', True, False, False
+                    )
+                ),
+            )
+        )
         self.addCleanup(gui.close)
         gui.client = h.client
         gui.state.covered = False

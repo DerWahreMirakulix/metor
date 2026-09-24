@@ -48,7 +48,7 @@ system model, then use the focused references when you need exact contracts.
 Desktop and simulator claims are capability- and evidence-based. The [GUI contract](docs/contracts/GUI.md) describes current capabilities. No physical appliance, universal
 audio route, speaker AEC, or complete screen-reader certification is claimed.
 
-For Windows source installs from a checkout, make sure the Microsoft C++ Build Tools are available before running `pip install`.
+For Windows source installs from a checkout, make sure the Microsoft C++ Build Tools are available before running `python -m pip`.
 
 ## 🏗️ Architecture & API
 
@@ -143,34 +143,43 @@ cd metor
 ```
 
 ```bash
-# Recommended security-conscious runtime installation
-python -m pip install --upgrade pip==26.0.1
-pip install -r requirements/base.lock
-pip install --no-deps --no-build-isolation packaging/sdk
-pip install --no-deps --no-build-isolation .
-pip install --no-deps --no-build-isolation packaging/terminal
-
-# Recommended security-conscious developer installation
-python -m pip install --upgrade pip==26.0.1
-pip install -r requirements/dev.lock
-pip install -r requirements/gui.lock
-pip install --no-deps --no-build-isolation -e packaging/sdk
-pip install --no-deps --no-build-isolation -e .
-pip install --no-deps --no-build-isolation -e packaging/terminal
-pip install --no-deps --no-build-isolation -e packaging/gui
+# Complete developer installation in the selected Python environment, from the repository root
+python -m pip install -r requirements/dev.txt
 python -m pip check
 python -m metor chat --list-uis
 ```
 
-For deliberately base-only development omit both UI installs and GUI dependencies,
-retaining the SDK.
+The manifest explicitly selects all four Metor projects from this checkout and
+reuses the pinned third-party dependencies. `python -m pip install .` or
+`python -m pip install -e .` alone installs only the Base project; neither is a
+checkout-wide install. Isolated builds may obtain build requirements from the
+configured package index. The Metor projects in this checkout need not be
+published there.
+
+For Base and SDK only, install the applicable pins and both local projects:
+
+```bash
+python -m pip install -r requirements/base.lock
+python -m pip install -e ./packaging/sdk -e .
+python -m pip check
+```
+
+For a non-editable source installation, pass the desired local projects together
+without `-e` and leave build isolation enabled:
+
+```bash
+python -m pip install ./packaging/sdk . ./packaging/terminal ./packaging/gui
+python -m pip check
+```
+
+SDK-only users may install `./packaging/sdk` independently.
 Source visibility alone does not register frontend entry points. Managed daemon
 startup uses the base-owned `metor daemon` command and remains distinct from the
 short-lived offline executor used by applicable one-shot CLI commands.
 
 The lock files pin the full tested dependency set so normal resolver drift does not silently pull newer transitive packages.
 
-Unlike the release bundle installer, this path installs into whichever Python environment you chose before running `pip install`.
+Unlike the release bundle installer, this path installs into whichever Python environment you chose before running `python -m pip`.
 
 On Linux the source install path selects the prebuilt `sqlcipher3-binary` wheel. On Windows it selects `sqlcipher3`, which builds the bundled SQLCipher sources locally. If you maintain your own SQLCipher toolchain, Metor also accepts `pysqlcipher3` as a manual fallback backend.
 
@@ -215,7 +224,7 @@ Encrypted profiles enable `daemon.require_local_auth` by default, so every CLI c
 
 ### 2. The Live Chat (Multiplexed UI)
 
-Open a second terminal window to start the interactive user interface:
+Start the interactive user interface:
 
 ```bash
 metor chat
@@ -227,6 +236,19 @@ Select an installed frontend explicitly when needed:
 metor chat --ui terminal
 metor chat --ui gui
 ```
+
+The GUI opens its graphical Create profile or picker view even with no existing
+profile or daemon. `-p NAME` chooses only its initial profile; creation,
+selection, authentication and later switching stay graphical, including when
+started from a shell. Terminal chat requires a usable profile before its chat
+loop and directs a fresh installation to `metor profiles add NAME`. The first
+successfully created profile becomes the default; a sole survivor is selected
+automatically. A chat invocation stops only the local daemon it started.
+Separately started daemons remain running when chat closes. Use
+`--start-daemon` to start a missing local daemon upon activation,
+`--no-start-daemon` to prevent that start, and `--debug` for safe extra fatal
+startup locations. Native display and Tor prerequisites must be installed
+separately.
 
 GUI-specific installation, simulator/device selection, ordinary operation, and
 troubleshooting are consolidated in the [GUI contract](docs/contracts/GUI.md).

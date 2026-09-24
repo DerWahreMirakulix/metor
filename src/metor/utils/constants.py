@@ -43,6 +43,7 @@ class Constants(ContractConstants):
         1.0  # Timeout for local SOCKS readiness probe connections
     )
     TOR_KILL_TIMEOUT_SEC: float = 2.0  # Timeout for Tor process termination
+    OWNED_DAEMON_SHUTDOWN_TIMEOUT_SEC: float = 10.0  # Graceful chat child exit
 
     # Security-Critical File Operations
     SECURE_SHRED_BLOCK_BYTES: int = 65536
