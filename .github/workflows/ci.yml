@@ -9,6 +9,7 @@ on:
       - main
       - embeddedui
   pull_request:
+  workflow_dispatch:
 
 # Superseded revisions on the same branch/PR do not need another full matrix.
 concurrency:
@@ -16,7 +17,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      mode: ${{ steps.impact.outputs.mode }}
+      matrix: ${{ steps.impact.outputs.matrix }}
+      modules: ${{ steps.impact.outputs.modules }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - name: Classify exact candidate diff
+        id: impact
+        shell: bash
+        run: |
+          if [[ '${{ github.event_name }}' == 'push' && '${{ github.ref }}' == 'refs/heads/embeddedui' ]]; then
+            python -m scripts.ci_impact --base '${{ github.event.before }}' --head '${{ github.sha }}' --github-output "$GITHUB_OUTPUT"
+          else
+            python -m scripts.ci_impact --full --github-output "$GITHUB_OUTPUT"
+          fi
+
   python-quality:
+    needs: plan
     name: Python Quality (${{ matrix.os }}, Python ${{ matrix.python-version }})
     # PR merge refs and branch commits are distinct acceptance candidates.
     runs-on: ${{ matrix.os }}
@@ -24,13 +48,7 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-        python-version:
-          - "3.11"
-          - "3.13"
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
 
     steps:
       - name: Checkout repository
@@ -44,9 +62,30 @@ jobs:
           ruff-format-paths: "src/metor/ scripts/ tests/"
           mypy-paths: "src/metor/ scripts/"
           run-tests: "true"
-          test-command: python scripts/run_tests.py --suite all
+          test-command: ${{ needs.plan.outputs.mode == 'full' && 'python scripts/run_tests.py --suite all' || 'python scripts/run_tests.py --suite fast' }}
+
+      - name: Run selected integration modules
+        if: needs.plan.outputs.mode == 'fast' && needs.plan.outputs.modules != ''
+        shell: bash
+        run: |
+          cp build/test-report.txt build/test-report-fast.txt
+          module_args=()
+          for module in ${{ needs.plan.outputs.modules }}; do
+            module_args+=(--module "$module")
+          done
+          python scripts/run_tests.py --suite integration "${module_args[@]}"
+
+      - name: Upload bounded unittest report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unittest-report-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: build/test-report*.txt
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Build and validate all wheels
+        if: needs.plan.outputs.mode == 'full'
         shell: bash
         run: |
           python -m pip wheel --no-deps --no-build-isolation . -w dist
@@ -56,30 +95,32 @@ jobs:
           python scripts/validate_wheel_versions.py dist/*.whl
 
       - name: Validate Central Version Registry
+        if: needs.plan.outputs.mode == 'full'
         run: python scripts/versioning.py validate
 
       - name: Validate generated references against checked-in copies
+        if: needs.plan.outputs.mode == 'full'
         run: python scripts/validate_generated_docs.py
 
       - name: Provision native Tor for installed daemon acceptance
-        if: matrix.python-version == '3.11'
+        if: needs.plan.outputs.mode == 'full' && matrix.python-version == '3.11'
         uses: ./.github/actions/native-tor
 
       - name: Build native offline bundles
-        if: matrix.python-version == '3.11'
+        if: needs.plan.outputs.mode == 'full' && matrix.python-version == '3.11'
         shell: bash
         run: python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir closure-bundles
 
       - name: Validate installed consumers
-        if: matrix.python-version == '3.11'
+        if: needs.plan.outputs.mode == 'full' && matrix.python-version == '3.11'
         run: python scripts/validate_installed_artifacts.py closure-bundles
 
       - name: Validate native offline installers
-        if: matrix.python-version == '3.11'
+        if: needs.plan.outputs.mode == 'full' && matrix.python-version == '3.11'
         run: python scripts/validate_release_installers.py closure-bundles
 
       - name: Provision and verify Linux EGL software rendering
-        if: runner.os == 'Linux' && matrix.python-version == '3.11'
+        if: needs.plan.outputs.mode == 'full' && runner.os == 'Linux' && matrix.python-version == '3.11'
         shell: bash
         run: |
           sudo apt-get update
@@ -87,7 +128,7 @@ jobs:
           python -c "import ctypes; ctypes.CDLL('libEGL.so.1')"
 
       - name: Run native GUI fixtures outside unittest discovery
-        if: runner.os == 'Linux' && matrix.python-version == '3.11'
+        if: needs.plan.outputs.mode == 'full' && runner.os == 'Linux' && matrix.python-version == '3.11'
         shell: bash
         env:
           SDL_VIDEODRIVER: offscreen
@@ -99,14 +140,14 @@ jobs:
           python tests/gui_native_capture.py --view setting_keyboard --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/setting-keyboard.png" 2>&1 | tee "${RUNNER_TEMP}/setting-keyboard.log"
 
       - name: Run bounded synthetic stream fixture outside unittest discovery
-        if: runner.os == 'Linux' && matrix.python-version == '3.11'
+        if: needs.plan.outputs.mode == 'full' && runner.os == 'Linux' && matrix.python-version == '3.11'
         shell: bash
         run: |
           set -o pipefail
           python tests/gui_stream_pressure.py --result "${RUNNER_TEMP}/stream-pressure.json" 2>&1 | tee "${RUNNER_TEMP}/stream-pressure.log"
 
       - name: Upload native GUI and stream evidence
-        if: always() && runner.os == 'Linux' && matrix.python-version == '3.11'
+        if: always() && needs.plan.outputs.mode == 'full' && runner.os == 'Linux' && matrix.python-version == '3.11'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: gui-native-evidence-linux-py311
@@ -119,3 +160,21 @@ jobs:
             ${{ runner.temp }}/stream-pressure.log
           if-no-files-found: warn
           retention-days: 14
+
+  acceptance:
+    if: always()
+    needs: [plan, python-quality]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every planned quality and acceptance job
+        shell: bash
+        env:
+          PLAN: ${{ needs.plan.result }}
+          QUALITY: ${{ needs['python-quality'].result }}
+          MODE: ${{ needs.plan.outputs.mode }}
+        run: |
+          if [[ "$PLAN" != success || "$QUALITY" != success ]]; then
+            echo "Required $MODE candidate checks are incomplete or failed." >&2
+            exit 1
+          fi
+          echo "$MODE candidate checks passed."

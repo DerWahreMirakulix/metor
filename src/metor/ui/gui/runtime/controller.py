@@ -6,6 +6,8 @@ import threading
 from metor.client import (
     FrontendBootstrapError,
     FrontendLaunchContext,
+    FrontendProfileManagement,
+    FrontendSelection,
     FrontendSelectionKind,
     IpcDisconnectedError,
     IpcTimeoutError,
@@ -31,6 +33,7 @@ from metor.core.api import (
     RuntimeStateChangedEvent,
 )
 from metor.ui.gui.constants import GuiLimits
+from metor.ui.gui.launcher import report_worker_failure
 from metor.ui.gui.state import GuiState, Route
 from metor.ui.gui.state.mailbox import Mailbox, Update
 
@@ -111,8 +114,26 @@ class GuiController:
         if not simulator:
             selection = context.host.initial_selection()
             if selection.kind is not FrontendSelectionKind.RESOLVED:
-                available = context.host.list_profiles()
-                self.state.route = Route('V03' if not available else 'V02')
+                available = selection.kind is FrontendSelectionKind.CHOICE_REQUIRED
+                if selection.kind is FrontendSelectionKind.REQUESTED_MISSING:
+                    try:
+                        available = (
+                            bool(context.host.profile_catalog(limit=1).entries)
+                            if isinstance(context.host, FrontendProfileManagement)
+                            else True
+                        )
+                    except (OSError, ValueError):
+                        selection = FrontendSelection(
+                            FrontendSelectionKind.UNAVAILABLE,
+                            selection.requested,
+                            None,
+                            None,
+                        )
+                self.state.route = Route(
+                    'V02'
+                    if available or selection.kind is FrontendSelectionKind.UNAVAILABLE
+                    else 'V03'
+                )
                 self.initial_missing_profile = (
                     selection.requested
                     if selection.kind is FrontendSelectionKind.REQUESTED_MISSING
@@ -270,7 +291,9 @@ class GuiController:
                         operation,
                         status='Connection lost. Retry opening the profile.',
                     )
-                except Exception:
+                except Exception as exc:
+                    if self.context.debug:
+                        report_worker_failure(exc)
                     update = Update(
                         generation,
                         operation,

@@ -205,11 +205,32 @@ class TerminalVoiceTests(unittest.TestCase):
         self.handler.handle(
             RetainedMessagesUnavailableEvent(reason='stale', request_id=request_id)
         )
+        self.assertIn(
+            'metadata is unavailable', self.renderer.print_message.call_args.args[0]
+        )
         self.handler.handle(RetainedMessagesEvent(messages=[self._entry('ignored')]))
         self.assertEqual(self.ipc.send_command.call_count, 1)
         for index in range(Constants.VOICE_NOTICE_IDS + 1):
             self.handler._voice.announce(None, 'peer.onion', 'peer', str(index))
         self.assertEqual(len(self.handler._voice._seen), Constants.VOICE_NOTICE_IDS)
+
+    def test_failed_metadata_send_keeps_inbox_action_visible(self) -> None:
+        """A failed metadata request reports incomplete display without audio reads.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self.ipc.send_command.side_effect = OSError('credential=private')
+        self.handler._voice.request_inventory()
+        self.assertIn(
+            'metadata is unavailable', self.renderer.print_message.call_args.args[0]
+        )
+        self.assertNotIn(
+            'credential=private', self.renderer.print_message.call_args.args[0]
+        )
+        self.assertEqual(self.handler._voice._pages_remaining, 0)
 
     def test_unrelated_responses_do_not_advance_or_cancel_scan(self) -> None:
         """Only the outstanding request may supply a page or fail it.

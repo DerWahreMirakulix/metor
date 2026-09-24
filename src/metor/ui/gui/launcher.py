@@ -165,3 +165,27 @@ class GuiEntry:
 
 
 launch = GuiEntry()
+
+
+def report_worker_failure(error: Exception) -> None:
+    """Print bounded debug evidence for a caught GUI worker failure.
+
+    Args:
+        error: Failure caught by the worker boundary.
+    Returns:
+        None
+    """
+    try:
+        stream = sys.stderr
+        stream.write(f'Metor GUI worker [work]: {GuiEntry._safe_reason(error)}.\n')
+        gui_root = Path(__file__).resolve().parent
+        frames = traceback.extract_tb(error.__traceback__)[-8:]
+        for frame in frames:
+            path = Path(frame.filename).resolve()
+            if path.is_file() and path.is_relative_to(gui_root):
+                stream.write(
+                    f'  {path.relative_to(gui_root).as_posix()}:{frame.lineno}\n'
+                )
+        stream.flush()
+    except OSError:
+        pass

@@ -156,6 +156,7 @@ class VoiceNotices:
                 self._pages_remaining = 0
                 self._pending_request_id = None
                 self._next_peers.clear()
+                self._incomplete()
             if self._pages_remaining:
                 if target and (target, delivery) != (
                     self._target_onion,
@@ -217,7 +218,22 @@ class VoiceNotices:
         except Exception:
             self._pages_remaining = 0
             self._pending_request_id = None
-            raise
+            self._next_peers.clear()
+            self._incomplete()
+
+    def _incomplete(self) -> None:
+        """Show that a bounded metadata scan ended without complete inbox facts.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self._handler._renderer.print_message(
+            'Voice inbox metadata is unavailable. Retry /inbox to check remaining messages.',
+            msg_type=ChatMessageType.STATUS,
+            tone=StatusTone.SYSTEM,
+        )
 
     def handle(self, event: IpcEvent) -> bool:
         """Consumes only Voice control/metadata events, never audio payloads.
@@ -258,6 +274,7 @@ class VoiceNotices:
                 ):
                     return True
                 if isinstance(event, RetainedMessagesUnavailableEvent):
+                    self._incomplete()
                     self._finish_scan()
                     return True
                 self._pages_remaining -= 1

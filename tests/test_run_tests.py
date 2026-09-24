@@ -3,13 +3,14 @@
 from contextlib import redirect_stderr, redirect_stdout
 import io
 from pathlib import Path
+import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import time
 import unittest
 from unittest.mock import Mock, patch
 
-from scripts import run_tests
+from scripts import ci_impact, run_tests
 
 
 class FastExample(unittest.TestCase):
@@ -263,6 +264,10 @@ class RunnerTests(unittest.TestCase):
                     status = run_tests.main(['--suite', 'integration'])
                 self.assertEqual(status, 1)
                 self.assertIn('1 import errors', stream.getvalue())
+                self.assertIn(
+                    'Import test_runner_integration_fixture: RuntimeError',
+                    stream.getvalue(),
+                )
                 self.assertNotIn('token=do-not-log', stream.getvalue())
                 self.assertNotIn(
                     'token=do-not-log',
@@ -327,7 +332,7 @@ class RunnerTests(unittest.TestCase):
         module.Coverage.return_value.save.assert_called_once_with()
 
     def test_ci_runs_full_matrix_and_keeps_branch_acceptance(self) -> None:
-        """Prevent fast-only matrix entries and lost active-branch push coverage.
+        """Keep full PR/main acceptance and a distinct fast branch route.
 
         Args:
             None
@@ -340,10 +345,17 @@ class RunnerTests(unittest.TestCase):
         release = (run_tests.ROOT / '.github' / 'workflows' / 'release.yml').read_text(
             encoding='utf-8'
         )
-        for entry in ('- ubuntu-latest', '- windows-latest', '- "3.11"', '- "3.13"'):
-            self.assertIn(entry, ci)
-        self.assertIn('test-command: python scripts/run_tests.py --suite all', ci)
-        self.assertNotIn('timeout-minutes:', ci)
+        impact = (run_tests.ROOT / 'scripts' / 'ci_impact.py').read_text(
+            encoding='utf-8'
+        )
+        for entry in ('ubuntu-latest', 'windows-latest', "'3.11'", "'3.13'"):
+            self.assertIn(entry, impact)
+        self.assertIn('fromJSON(needs.plan.outputs.matrix)', ci)
+        self.assertIn('python scripts/run_tests.py --suite all', ci)
+        self.assertIn('python scripts/run_tests.py --suite fast', ci)
+        self.assertIn('workflow_dispatch:', ci)
+        self.assertIn("mode == 'full'", ci)
+        self.assertIn('  acceptance:', ci)
         self.assertIn('cancel-in-progress: true', ci)
         self.assertIn('github.event.pull_request.number || github.ref', ci)
         self.assertIn('  pull_request:', ci)
@@ -352,6 +364,33 @@ class RunnerTests(unittest.TestCase):
         self.assertIn('      - main', ci)
         self.assertIn('tests/gui_native_capture.py --view root_refresh', ci)
         self.assertIn('python scripts/run_tests.py --suite all', release)
+
+    def test_conservative_ci_impact(self) -> None:
+        """Use a small GUI group only for known views and full for shared work.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        root = run_tests.ROOT
+        self.assertEqual(
+            ci_impact.decide(['src/metor/ui/gui/views/root/panel.py'], root),
+            ('fast', ('test_gui_contract', 'test_gui_root')),
+        )
+        self.assertEqual(ci_impact.decide(['docs/GLOSSARY.md'], root), ('fast', ()))
+        for name in (
+            'README.md',
+            'src/metor/ui/gui/views/profiles/lifecycle.py',
+            'src/metor/ui/terminal/chat/renderer/input.py',
+            'src/metor/client/frontends.py',
+            'src/metor/data/profile/catalog.py',
+            'requirements/dev.txt',
+            '.github/workflows/ci.yml',
+            'unknown-path.py',
+        ):
+            self.assertEqual(ci_impact.decide([name], root), ('full', ()))
+        self.assertEqual(ci_impact.decide([], root), ('full', ()))
 
     def test_output_is_bounded(self) -> None:
         """Limit captured text even if a test writes much more.
@@ -366,6 +405,175 @@ class RunnerTests(unittest.TestCase):
             buffer.write('x' * (run_tests.MAX_OUTPUT * 2)), run_tests.MAX_OUTPUT * 2
         )
         self.assertEqual(buffer.size, run_tests.MAX_OUTPUT)
+
+    def test_standard_result_semantics_and_failfast(self) -> None:
+        """Exercise failure, error, subtest, cleanup, xfail and xpass callbacks.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        visited: list[str] = []
+
+        class Synthetic(unittest.TestCase):
+            def test_failure(self) -> None:
+                visited.append('failure')
+                self.fail('secret=must-stay-private')
+
+            def test_error(self) -> None:
+                visited.append('error')
+                raise ValueError('secret=must-stay-private')
+
+            def test_subtest(self) -> None:
+                visited.append('subtest')
+                with self.subTest(secret='must-stay-private'):
+                    self.fail('secret=must-stay-private')
+
+            def test_cleanup(self) -> None:
+                visited.append('cleanup')
+                self.addCleanup(lambda: self.fail('secret=must-stay-private'))
+
+            def test_after(self) -> None:
+                visited.append('after')
+
+            @unittest.expectedFailure
+            def test_expected(self) -> None:
+                self.fail('secret=must-stay-private')
+
+            @unittest.expectedFailure
+            def test_unexpected(self) -> None:
+                pass
+
+        for failing in ('test_failure', 'test_error', 'test_subtest', 'test_cleanup'):
+            visited.clear()
+            result = run_tests.TimedResult()
+            result.failfast = True
+            unittest.TestSuite([Synthetic(failing), Synthetic('test_after')]).run(
+                result
+            )
+            self.assertEqual(visited, [failing.removeprefix('test_')])
+            self.assertFalse(result.wasSuccessful())
+            self.assertTrue(result.shouldStop)
+            self.assertNotIn('must-stay-private', str(result.failures + result.errors))
+            self.assertNotIn('must-stay-private', str(result.diagnostics))
+            visited.clear()
+            result = run_tests.TimedResult()
+            unittest.TestSuite([Synthetic(failing), Synthetic('test_after')]).run(
+                result
+            )
+            self.assertIn('after', visited)
+            self.assertFalse(result.wasSuccessful())
+        expected = run_tests.TimedResult()
+        unittest.TestSuite([Synthetic('test_expected')]).run(expected)
+        self.assertTrue(expected.wasSuccessful())
+        self.assertEqual(expected.statuses[next(iter(expected.statuses))], 'xfail')
+        unexpected = run_tests.TimedResult()
+        unittest.TestSuite([Synthetic('test_unexpected')]).run(unexpected)
+        self.assertFalse(unexpected.wasSuccessful())
+        self.assertEqual(unexpected.statuses[next(iter(unexpected.statuses))], 'xpass')
+
+    def test_subprocess_exit_and_safe_diagnostic(self) -> None:
+        """Run a real child process over a disposable synthetic module.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'test_synthetic.py').write_text(
+                'import os, unittest\n'
+                'class Example(unittest.TestCase):\n'
+                '    def test_a(self):\n'
+                '        os.write(1, b"credential=native-hidden\\n")\n'
+                '        os.write(2, b"credential=native-hidden\\n")\n'
+                '        self.fail("credential=hidden")\n'
+                '    def test_b(self): print("AFTER_MARKER")\n',
+                encoding='utf-8',
+            )
+            program = (
+                'import sys; from pathlib import Path; from scripts import run_tests as r; '
+                'r.TESTS=Path(sys.argv[1]); r.REPORT=r.TESTS/"report.txt"; '
+                'r.FAST_MODULES=("test_synthetic",); r.INTEGRATION_MODULES=(); '
+                'sys.exit(r.main(sys.argv[2:]))'
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    '-c',
+                    program,
+                    directory,
+                    '--suite',
+                    'fast',
+                    '--failfast',
+                ],
+                cwd=run_tests.ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn('Ran 1/2', result.stdout)
+            self.assertIn('AssertionError at', result.stdout)
+            self.assertNotIn('credential=hidden', result.stdout)
+            self.assertNotIn('credential=native-hidden', result.stdout)
+            self.assertNotIn('credential=native-hidden', result.stderr)
+            report = (root / 'report.txt').read_text(encoding='utf-8')
+            self.assertNotIn('credential=hidden', report)
+            self.assertIn('Incomplete: 1 selected cases', report)
+
+    def test_abrupt_worker_exit_zero_is_rejected(self) -> None:
+        """A child that bypasses result finalization cannot certify the suite.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        sink = io.StringIO()
+        with redirect_stdout(sink):
+            status = run_tests.supervised(
+                [sys.executable, '-c', 'import os; os._exit(0)']
+            )
+        self.assertEqual(status, 1)
+        self.assertIn('without a bounded, completed result', sink.getvalue())
+
+    def test_fixture_skip_and_error_accounting(self) -> None:
+        """Class fixture skips count as covered; fixture errors leave cases incomplete.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+
+        class Skipped(unittest.TestCase):
+            @classmethod
+            def setUpClass(cls) -> None:
+                raise unittest.SkipTest('Windows-native fixture')
+
+            def test_one(self) -> None:
+                self.fail('never reached')
+
+        class Broken(unittest.TestCase):
+            @classmethod
+            def setUpClass(cls) -> None:
+                raise RuntimeError('credential=hidden')
+
+            def test_one(self) -> None:
+                self.fail('never reached')
+
+        status, output = self.invoke([Skipped('test_one')])
+        self.assertEqual(status, 0)
+        self.assertIn('skips=1', output)
+        self.assertNotIn('Incomplete:', output)
+        status, output = self.invoke([Broken('test_one')])
+        self.assertEqual(status, 1)
+        self.assertIn('Incomplete: 1', output)
+        self.assertIn('Setup', output)
+        self.assertNotIn('credential=hidden', output)
 
 
 if __name__ == '__main__':

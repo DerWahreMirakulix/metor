@@ -89,9 +89,12 @@ for toolkit in ("accesskit", "kivy", "sounddevice"):
     assert toolkit not in sys.modules and find_spec(toolkit) is None
 print("BASE_ONLY_WITHOUT_UI_OK", metor.cli.__file__)
 """
-FAKE_FRONTEND = """from metor.client import MetorClient
+FAKE_FRONTEND = """from metor.client import MetorClient, FRONTEND_LAUNCH_CONTRACT_VERSION, FrontendSelectionKind
 def launch(context):
     print("FAKE_STARTED_BEFORE_HOST")
+    selection = context.host.initial_selection()
+    assert selection.kind is FrontendSelectionKind.RESOLVED
+    assert selection.profile == context.profile
     class Interaction:
         def confirm_daemon_start(self): raise AssertionError("unexpected prompt")
         def request_session_auth_secret(self): raise AssertionError("unexpected secret")
@@ -110,7 +113,7 @@ def launch(context):
     finally:
         client.disconnect()
     return 0
-launch.contract_version = 2
+launch.contract_version = FRONTEND_LAUNCH_CONTRACT_VERSION
 """
 FAKE_HARNESS = """import atexit, tempfile, sys
 from pathlib import Path

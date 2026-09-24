@@ -26,6 +26,7 @@ python scripts/run_tests.py --suite fast
 python scripts/run_tests.py --suite integration
 python scripts/run_tests.py --suite all
 python scripts/run_tests.py --suite all --match test_profile_storage_security --failfast
+python scripts/run_tests.py --suite integration --module test_startup_selection --match test_selection_metadata
 python scripts/run_tests.py --suite all --durations 20
 ```
 
@@ -36,27 +37,40 @@ Fast imports only fast modules (and their own dependencies); keep fast test
 imports independent of integration fixtures. `all` includes every classified
 module and is the CI/release gate. `--list` prints **every full unittest ID** in
 the selected suite, without executing cases; `--match` filters full IDs by
-substring. Empty selections, import failures, duplicate IDs and unexpected
-case modules fail closed. For a failed import or test, the console and ignored
-`build/test-report.txt` contain safe IDs and counts, **not** exception strings,
-tracebacks or captured output. The ignored report also lists the status and
-setup-to-cleanup runtime of each case; the console shows only the slowest cases
-measured from before `setUp` through `tearDown` and cleanups. Class/module
-fixtures are in overall elapsed time, not attributed to an individual case.
+substring. `--module` selects exact manifest modules before importing tests and
+may be repeated; direct `python -m unittest` remains available for one-case
+diagnosis. Empty selections, import failures, duplicate IDs and unexpected
+case modules fail closed. For failures, the console and ignored
+`build/test-report.txt` contain bounded IDs, phase, known-safe error category
+and source-verified relative locations. Exception values, subtest parameters,
+locals and captured output are never printed. The report lists each executed
+case's status and setup-to-cleanup runtime; fixture skips count as skipped
+coverage, while failed fixtures and interrupted runs leave untested cases
+incomplete. XFAIL and XPASS appear separately, and XPASS fails the run. The
+script supervises its test worker; an abrupt process exit without a completed
+result is also a failed run. Direct output from child processes is discarded.
+The console shows only the requested number of slow cases. Class/module fixture
+costs remain in overall elapsed time, not attributed to an individual case.
 
 Optional coverage requires `coverage.py` already installed in the same Python
 environment; the pinned development manifest does not install it. Run
 `python scripts/run_tests.py --suite all --coverage` to emit a terminal summary
 for `metor` and save detailed data in ignored `build/.coverage`. CI does
-not install coverage or claim a coverage threshold. CI runs `--suite all` on
-**every** Linux/Windows × Python 3.11/3.13 job; the release quality gate also
-runs all tests. Fast is an optional local check, never a substitute for CI.
-The CI workflow cancels superseded runs per branch/PR. Pushes to `main` and the
-active `embeddedui` branch get the full matrix. PRs get the full merge-ref
-matrix, even when the source branch is already push-covered: a branch commit
-cannot certify a different merge tree. There is no added job-level test timeout. Explicit native
-GUI and stream fixtures remain separate from unittest discovery; the runner
-does not replace installed-consumer, Tor, or physical-device acceptance.
+not install coverage or claim a coverage threshold. PR merge refs, `main`
+pushes, and manually dispatched CI runs execute the full Linux/Windows ×
+Python 3.11/3.13 software matrix. A push to `embeddedui` uses `scripts/ci_impact.py`
+to run Fast and explicitly selected integration modules on Linux 3.11 only for
+known isolated edits. Shared, security-sensitive, packaging, workflow, unknown
+or unresolvable diffs fall back to the full matrix. The glossary is treated as
+text-only; README installation examples, profile lifecycle views, executable
+examples and packaged resources use the full path. The final `acceptance` job
+requires all planned matrix jobs to pass.
+Run the CI workflow manually on the desired branch/ref for full branch
+acceptance without a PR; a Fast branch push is not a full release gate. The
+release quality gate still runs all tests. CI cancels superseded runs per
+branch/PR; branch commits and PR merge refs are separate candidates. Explicit
+native GUI and stream fixtures remain separate from unittest discovery; the
+runner does not replace installed-consumer, Tor, or physical-device acceptance.
 
 ## 1. Language & Naming
 

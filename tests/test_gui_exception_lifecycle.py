@@ -2,6 +2,8 @@
 
 import threading
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
 from unittest.mock import Mock, patch
 
 from metor.client import FrontendLaunchContext, FrontendProfileState
@@ -141,6 +143,43 @@ class GuiExceptionLifecycleTests(unittest.TestCase):
             self.assertEqual(
                 controller.state.status, 'Profile opening was cancelled or rejected.'
             )
+        finally:
+            controller.close()
+
+    def test_caught_worker_failure_has_safe_debug_location(self) -> None:
+        """Keep the GUI recovery status and reveal only source-checked debug data.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        sentinel = 'credential-private'
+        custom_error = type(sentinel, (Exception,), {})
+        controller = GuiController(
+            FrontendLaunchContext(None, Mock(), debug=True), simulator=True
+        )
+        output = StringIO()
+
+        def fail() -> None:
+            """Raise an untrusted exception inside a controlled worker.
+
+            Args:
+                None
+            Returns:
+                None
+            """
+            raise custom_error(sentinel)
+
+        try:
+            with redirect_stderr(output):
+                self.assertTrue(controller.submit('bootstrap', fail))
+                controller._worker.join(5)
+            controller.poll()
+            self.assertIn('Profile opening failed', controller.state.status)
+            self.assertIn('Metor GUI worker [work]: Exception.', output.getvalue())
+            self.assertIn('runtime/controller.py:', output.getvalue())
+            self.assertNotIn(sentinel, output.getvalue())
         finally:
             controller.close()
 

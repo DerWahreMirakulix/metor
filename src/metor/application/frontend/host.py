@@ -2,7 +2,7 @@
 
 from typing import Optional
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import threading
 import os
 import subprocess
@@ -35,7 +35,7 @@ from metor.data import (
     ProfileSecurityMode,
     SettingKey,
 )
-from metor.utils import Constants, TypeCaster, ProcessManager
+from metor.utils import Constants, FileLock, TypeCaster, ProcessManager
 from metor.data.profile.catalog import (
     get_unavailable_profile_names,
     resolve_initial_profile,
@@ -97,22 +97,25 @@ class LocalFrontendHost:
     contract_version = FRONTEND_LAUNCH_CONTRACT_VERSION
 
     def __init__(
-        self, profile: ProfileManager | None, start_daemon_override: Optional[bool]
+        self,
+        profile: ProfileManager | None,
+        start_daemon_override: Optional[bool],
+        requested_name: str | None = None,
     ) -> None:
         """Initializes one deferred host for a selected profile.
 
         Args:
             profile (ProfileManager): Initially selected profile service.
             start_daemon_override (Optional[bool]): Invocation startup override.
+            requested_name: Original explicit request, if any.
 
         Returns:
             None
         """
         self._profile = profile
         self._unavailable_name: str | None = None
-        self._requested_name: str | None = (
-            profile.profile_name if profile is not None else None
-        )
+        self._requested_name = requested_name
+        self._catalog_unavailable = False
         self._start_daemon_override = start_daemon_override
         self._attempt_lock = threading.Lock()
         self._closed = threading.Event()
@@ -179,11 +182,21 @@ class LocalFrontendHost:
             FrontendSelection: Typed initial state without catalog contents.
         """
         requested = self._requested_name
-        selected = self.profile_state()
+        if self._catalog_unavailable:
+            return FrontendSelection(
+                FrontendSelectionKind.UNAVAILABLE, requested, None, None
+            )
         try:
-            names = ProfileManager.get_all_profiles()
-            unavailable = get_unavailable_profile_names()
-            default = valid_default_profile(names)
+            boundary = (
+                FileLock(Constants.DATA / '.profile-catalog')
+                if Constants.DATA.exists()
+                else nullcontext()
+            )
+            with boundary:
+                selected = self.profile_state()
+                names = ProfileManager.get_all_profiles()
+                unavailable = get_unavailable_profile_names()
+                default = valid_default_profile(names)
         except (OSError, ValueError):
             return FrontendSelection(
                 FrontendSelectionKind.UNAVAILABLE, requested, None, None
@@ -400,21 +413,28 @@ class LocalFrontendHost:
         if after is not None and not valid_frontend_profile_name(after):
             raise ValueError('Invalid profile bookmark')
         with self._catalog_boundary():
-            names = sorted(
-                name
-                for name in set(ProfileManager.get_all_profiles())
-                | set(get_unavailable_profile_names())
-                if valid_frontend_profile_name(name) and (after is None or name > after)
+            boundary = (
+                FileLock(Constants.DATA / '.profile-catalog')
+                if Constants.DATA.exists()
+                else nullcontext()
             )
-            entries = tuple(self._catalog_state(name) for name in names[:limit])
-            return FrontendProfileCatalog(
-                entries,
-                self._profile.profile_name
-                if self._profile is not None
-                else self._unavailable_name,
-                valid_default_profile(),
-                names[limit - 1] if len(names) > limit else None,
-            )
+            with boundary:
+                names = sorted(
+                    name
+                    for name in set(ProfileManager.get_all_profiles())
+                    | set(get_unavailable_profile_names())
+                    if valid_frontend_profile_name(name)
+                    and (after is None or name > after)
+                )
+                entries = tuple(self._catalog_state(name) for name in names[:limit])
+                return FrontendProfileCatalog(
+                    entries,
+                    self._profile.profile_name
+                    if self._profile is not None
+                    else self._unavailable_name,
+                    valid_default_profile(),
+                    names[limit - 1] if len(names) > limit else None,
+                )
 
     def manage_profile(
         self, change: FrontendProfileChange
@@ -729,15 +749,26 @@ def create_local_frontend_host(
     Returns:
         FrontendHost: Versioned frontend-neutral host boundary.
     """
+    requested_name = (
+        profile
+        if isinstance(profile, str)
+        else profile.profile_name
+        if profile is not None
+        else None
+    )
     if profile is None:
-        profile = resolve_initial_profile()
+        try:
+            profile = resolve_initial_profile()
+        except (OSError, ValueError):
+            host = LocalFrontendHost(None, start_daemon_override)
+            host._catalog_unavailable = True
+            return host
     if isinstance(profile, str):
         try:
             selected = ProfileManager(profile)
         except (ValueError, OSError):
-            host = LocalFrontendHost(None, start_daemon_override)
+            host = LocalFrontendHost(None, start_daemon_override, requested_name)
             host._unavailable_name = profile
-            host._requested_name = profile
             return host
-        return LocalFrontendHost(selected, start_daemon_override)
-    return LocalFrontendHost(profile, start_daemon_override)
+        return LocalFrontendHost(selected, start_daemon_override, requested_name)
+    return LocalFrontendHost(profile, start_daemon_override, requested_name)

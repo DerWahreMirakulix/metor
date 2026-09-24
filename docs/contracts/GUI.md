@@ -41,7 +41,9 @@ audio or camera failure leaves available text actions usable.
 stderr output without printing untrusted exception text, class names or locals.
 Fatal toolkit startup and unexpected event-loop termination return nonzero with a
 safe stage summary even without debug. Normal first-run Close returns zero. A
-missing display or native graphics dependency remains a platform prerequisite;
+caught worker exception keeps the graphical recovery status and prints a bounded
+work phase, safe built-in category and GUI-source location only with `--debug`.
+A missing display or native graphics dependency remains a platform prerequisite;
 GUI setup does not switch to Terminal or start a simulator implicitly.
 The repository has no registered production physical appliance adapter. A
 simulator run demonstrates GUI behavior and cannot establish physical, acoustic,

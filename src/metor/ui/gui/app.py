@@ -442,16 +442,17 @@ class MetorApp(App):
         with ExitStack() as cleanup:
             cleanup.callback(ActionSheet.reconcile)
             cleanup.callback(self.controller.close)
-            cleanup.callback(
-                Window.unbind,
-                on_request_close=self._close,
-                on_keyboard=self._keyboard,
-                on_key_down=self._key_down,
-                on_key_up=self._key_up,
-                on_touch_down=self._activity,
-                on_touch_up=self._touch_up,
-                focus=self._focus,
-            )
+            if Window is not None:
+                cleanup.callback(
+                    Window.unbind,
+                    on_request_close=self._close,
+                    on_keyboard=self._keyboard,
+                    on_key_down=self._key_down,
+                    on_key_up=self._key_up,
+                    on_touch_down=self._activity,
+                    on_touch_up=self._touch_up,
+                    focus=self._focus,
+                )
             cleanup.callback(self.controller.device.close)
             cleanup.callback(setattr, TextField, 'keyboard_owner', None)
             if self.input_dock is not None:

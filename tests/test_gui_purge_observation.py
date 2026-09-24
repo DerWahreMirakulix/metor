@@ -3,6 +3,7 @@
 import threading
 import time
 import unittest
+from typing import Any
 from unittest.mock import Mock, patch
 
 from metor.client import (
@@ -29,6 +30,12 @@ from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
 from metor.ui.gui.state.mailbox import Update
+from metor.core.profile_destruction import (
+    ProfileDestructionResult,
+    destroy_profile_storage,
+)
+from metor.data import ProfileManager
+from metor.utils import secure_remove_path
 
 import test_gui_producers as support
 
@@ -291,18 +298,71 @@ class PurgeObservationCoreTests(unittest.TestCase):
         gui.state.covered = False
         keyslot = fixture.pm.paths.get_keyslot_file()
         self.assertTrue(keyslot.exists())
-        now = time.monotonic()
-        for sample in (
-            ButtonSample(0, now, False, False),
-            ButtonSample(1, now + 1, True, True),
-            ButtonSample(2, now + 1 + GuiLimits.PURGE_SECONDS, True, True),
+        cleanup_entered = threading.Event()
+        release_cleanup = threading.Event()
+
+        def delayed_destroy(
+            pm: ProfileManager, **options: Any
+        ) -> ProfileDestructionResult:
+            """Hold only the test profile's real cleanup after the safe milestone.
+
+            Args:
+                pm: Temporary encrypted profile.
+                **options: Production lifecycle callbacks.
+            Returns:
+                ProfileDestructionResult: Real destructive phase result.
+            """
+
+            def cleanup(path: Any) -> None:
+                """Keep the real cleanup phase pending during GUI ticks.
+
+                Args:
+                    path: Temporary profile path.
+                Returns:
+                    None
+                """
+                cleanup_entered.set()
+                if not release_cleanup.wait(5):
+                    raise TimeoutError('Controlled cleanup did not resume')
+                secure_remove_path(path)
+
+            return destroy_profile_storage(pm, cleanup=cleanup, **options)
+
+        with patch(
+            'metor.core.daemon.managed.engine.lifecycle.destroy_profile_storage',
+            side_effect=delayed_destroy,
         ):
-            gui.device.receive(sample)
-            gui.device.poll()
-        deadline = time.monotonic() + 20
-        # Wait for Core's terminal fact before GUI polling can detach a slow cleanup.
-        while not terminal.is_set() and time.monotonic() < deadline:
-            terminal.wait(0.01)
+            now = time.monotonic()
+            for sample in (
+                ButtonSample(0, now, False, False),
+                ButtonSample(1, now + 1, True, True),
+                ButtonSample(2, now + 1 + GuiLimits.PURGE_SECONDS, True, True),
+            ):
+                gui.device.receive(sample)
+                gui.device.poll()
+            deadline = time.monotonic() + 20
+            try:
+                while not cleanup_entered.is_set() and time.monotonic() < deadline:
+                    gui.poll()
+                    cleanup_entered.wait(0.01)
+                self.assertTrue(cleanup_entered.is_set())
+                milestone_deadline = time.monotonic() + 3
+                while (
+                    gui.purge.title != 'Profile access destroyed'
+                    and time.monotonic() < milestone_deadline
+                ):
+                    gui.poll()
+                    terminal.wait(0.01)
+                self.assertTrue(gui.state.covered)
+                self.assertEqual(gui.state.route, Route('V22'))
+                self.assertEqual(gui.purge.title, 'Profile access destroyed')
+                self.assertFalse(terminal.is_set())
+                shutdown.request_shutdown.assert_not_called()
+            finally:
+                release_cleanup.set()
+            while not terminal.is_set() and time.monotonic() < deadline:
+                gui.poll()
+                terminal.wait(0.01)
         self.assertTrue(terminal.is_set(), 'Core did not report terminal cleanup')
         while not shutdown.request_shutdown.called and time.monotonic() < deadline:
             gui.poll()

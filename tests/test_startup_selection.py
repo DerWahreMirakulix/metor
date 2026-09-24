@@ -2,6 +2,7 @@
 
 import threading
 import unittest
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -16,9 +17,9 @@ from metor.client import (
 )
 from metor.cli.entry import run_cli
 from metor.data import ProfileManager, SettingKey, Settings
-from metor.data.profile.catalog import resolve_initial_profile
+from metor.data.profile.catalog import resolve_initial_profile, set_default_profile
 from metor.ui.gui.runtime import GuiController
-from metor.utils import Constants
+from metor.utils import Constants, FileLock
 
 
 class StartupSelectionTests(unittest.TestCase):
@@ -220,6 +221,49 @@ class StartupSelectionTests(unittest.TestCase):
         self.assertEqual(resolve_initial_profile(), 'first')
         self.assertEqual(Settings.get_str(SettingKey.DEFAULT_PROFILE), 'first')
 
+    def test_selection_metadata_preserves_request_origin(self) -> None:
+        """Separate explicit requests from default and later host selection.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self._add_remote('alpha', 44112)
+        implicit = create_local_frontend_host()
+        selection = implicit.initial_selection()
+        self.assertEqual(selection.kind, FrontendSelectionKind.RESOLVED)
+        self.assertIsNone(selection.requested)
+        self.assertEqual((selection.profile, selection.default), ('alpha', 'alpha'))
+        explicit = create_local_frontend_host('alpha')
+        self.assertEqual(explicit.initial_selection().requested, 'alpha')
+        direct = create_local_frontend_host(ProfileManager('alpha'))
+        self.assertEqual(direct.initial_selection().requested, 'alpha')
+        self.assertEqual(Settings.get_str(SettingKey.DEFAULT_PROFILE), 'alpha')
+
+    def test_implicit_catalog_failure_reaches_gui_selection(self) -> None:
+        """An early catalog I/O failure remains a graphical unavailable state.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        with patch(
+            'metor.application.frontend.host.resolve_initial_profile',
+            side_effect=OSError('credential=private'),
+        ):
+            host = create_local_frontend_host()
+        selection = host.initial_selection()
+        self.assertEqual(selection.kind, FrontendSelectionKind.UNAVAILABLE)
+        self.assertIsNone(selection.requested)
+        with patch.object(
+            host, 'list_profiles', side_effect=AssertionError('unbounded')
+        ):
+            controller = GuiController(FrontendLaunchContext(None, host))
+        self.assertEqual(controller.state.route.view, 'V02')
+        self.assertIn('unavailable', controller.state.status)
+
     def test_repair_holds_catalog_lock_until_default_is_written(self) -> None:
         """A rename cannot enter between singleton inspection and settings repair.
 
@@ -266,6 +310,169 @@ class StartupSelectionTests(unittest.TestCase):
                 self.assertTrue(renamed.result().success)
         self.assertEqual(Settings.get_str(SettingKey.DEFAULT_PROFILE), 'beta')
         self.assertEqual(resolve_initial_profile(), 'beta')
+
+    def _race_repair_with_mutation(
+        self, mutate: Callable[[], object], expected_default: str
+    ) -> None:
+        """Hold singleton repair while one mutation reaches the same lock.
+
+        Args:
+            mutate: Catalog operation to run after the resolver reaches settings.
+            expected_default: Final persisted default.
+        Returns:
+            None
+        """
+        self._add_remote('alpha', 44113)
+        Settings.set(SettingKey.DEFAULT_PROFILE, 'stale')
+        repairing = threading.Event()
+        release = threading.Event()
+        mutation_at_lock = threading.Event()
+        original_set = Settings.set
+        original_enter = FileLock.__enter__
+
+        def delayed_set(
+            key: SettingKey, value: str, *, expected_value: str | None = None
+        ) -> None:
+            """Hold only the real resolver's settings write.
+
+            Args:
+                key: Settings key.
+                value: New default.
+                expected_value: Compare-and-swap expected default.
+            Returns:
+                None
+            """
+            if threading.current_thread().name.startswith('resolver'):
+                repairing.set()
+                self.assertTrue(release.wait(5))
+            original_set(key, value, expected_value=expected_value)
+
+        def observed_enter(lock: FileLock) -> FileLock:
+            """Signal the competing thread's actual catalog-lock attempt.
+
+            Args:
+                lock: Acquiring file lock.
+            Returns:
+                FileLock: Acquired lock.
+            """
+            if threading.current_thread().name.startswith(
+                'mutator'
+            ) and '.profile-catalog.lock' in str(lock.lock_path):
+                mutation_at_lock.set()
+            return original_enter(lock)
+
+        with (
+            patch.object(Settings, 'set', side_effect=delayed_set),
+            patch.object(FileLock, '__enter__', observed_enter),
+            ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix='resolver'
+            ) as resolver,
+            ThreadPoolExecutor(max_workers=1, thread_name_prefix='mutator') as mutator,
+        ):
+            future = resolver.submit(resolve_initial_profile)
+            try:
+                self.assertTrue(repairing.wait(5))
+                mutation = mutator.submit(mutate)
+                self.assertTrue(mutation_at_lock.wait(5))
+                self.assertFalse(mutation.done())
+            finally:
+                release.set()
+            self.assertEqual(future.result(), 'alpha')
+            self.assertTrue(getattr(mutation.result(), 'success'))
+        self.assertEqual(Settings.get_str(SettingKey.DEFAULT_PROFILE), expected_default)
+
+    def test_repair_serializes_remove(self) -> None:
+        """Removal cannot slip between singleton inspection and repair.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self._race_repair_with_mutation(
+            lambda: ProfileManager.remove_profile_folder('alpha'), ''
+        )
+
+    def test_repair_serializes_second_creation(self) -> None:
+        """A second creation cannot redirect the pending singleton repair.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self._race_repair_with_mutation(
+            lambda: ProfileManager.add_profile_folder(
+                'beta', is_remote=True, port=44114
+            ),
+            'alpha',
+        )
+
+    def test_resolution_serializes_explicit_default_choice(self) -> None:
+        """An intentional new default wins after an in-flight catalog resolution.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self._add_remote('alpha', 44115)
+        self._add_remote('beta', 44116)
+        entered = threading.Event()
+        release = threading.Event()
+        at_lock = threading.Event()
+        original_load = Settings.get_str
+        original_enter = FileLock.__enter__
+
+        def delayed_load(key: SettingKey, *args: object, **kwargs: object) -> str:
+            """Hold the resolver while it owns the catalog lock.
+
+            Args:
+                key: Requested setting.
+                *args: Existing settings options.
+                **kwargs: Existing settings options.
+            Returns:
+                str: Current setting.
+            """
+            if (
+                key is SettingKey.DEFAULT_PROFILE
+                and threading.current_thread().name.startswith('resolver')
+            ):
+                entered.set()
+                self.assertTrue(release.wait(5))
+            return original_load(key, *args, **kwargs)
+
+        def observed_enter(lock: FileLock) -> FileLock:
+            """Signal the explicit default operation at its lock boundary.
+
+            Args:
+                lock: Acquiring file lock.
+            Returns:
+                FileLock: Acquired lock.
+            """
+            if threading.current_thread().name.startswith('mutator'):
+                at_lock.set()
+            return original_enter(lock)
+
+        with (
+            patch.object(Settings, 'get_str', side_effect=delayed_load),
+            patch.object(FileLock, '__enter__', observed_enter),
+            ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix='resolver'
+            ) as resolver,
+            ThreadPoolExecutor(max_workers=1, thread_name_prefix='mutator') as mutator,
+        ):
+            resolved = resolver.submit(resolve_initial_profile)
+            try:
+                self.assertTrue(entered.wait(5))
+                choice = mutator.submit(set_default_profile, 'beta')
+                self.assertTrue(at_lock.wait(5))
+                self.assertFalse(choice.done())
+            finally:
+                release.set()
+            self.assertEqual(resolved.result(), 'alpha')
+            self.assertTrue(choice.result().success)
+        self.assertEqual(Settings.get_str(SettingKey.DEFAULT_PROFILE), 'beta')
 
     def test_neutral_frontend_selects_via_host_without_cli_exception(self) -> None:
         """A third frontend can implement a picker using the ordinary launch host.

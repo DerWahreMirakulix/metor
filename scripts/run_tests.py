@@ -2,14 +2,18 @@
 
 import argparse
 from collections import Counter
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 import importlib
 import io
+import os
 from pathlib import Path
+import subprocess
 import sys
+from tempfile import TemporaryDirectory
 import time
 from types import TracebackType
 import unittest
+from collections.abc import Iterator
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +26,7 @@ FAST_MODULES: tuple[str, ...] = (
     'test_quality_gate_contract',
     'test_run_tests',
     'test_source_documentation',
+    'test_terminal_voice',
     'test_ui_boundaries',
 )
 INTEGRATION_MODULES: tuple[str, ...] = (
@@ -30,6 +35,7 @@ INTEGRATION_MODULES: tuple[str, ...] = (
     'test_application_runtime_contract',
     'test_chat_contract',
     'test_chat_owned_lifetime',
+    'test_cold_unlock_budget',
     'test_client_demux_contract',
     'test_closure_architecture',
     'test_closure_frontend',
@@ -96,7 +102,7 @@ INTEGRATION_MODULES: tuple[str, ...] = (
     'test_startup_selection',
     'test_terminal_bootstrap_status',
     'test_terminal_rendering_security',
-    'test_terminal_voice',
+    'test_terminal_voice_core',
     'test_tor_path_resolution',
     'test_ui_ipc_contract',
     'test_versioning_release',
@@ -107,6 +113,7 @@ INTEGRATION_MODULES: tuple[str, ...] = (
 REPORT = ROOT / 'build' / 'test-report.txt'
 MAX_OUTPUT = 8192
 MAX_DETAILS = 10
+MAX_RUNNER_OUTPUT = 1024 * 1024
 ExcInfo = (
     tuple[type[BaseException], BaseException, TracebackType] | tuple[None, None, None]
 )
@@ -137,6 +144,31 @@ class CappedOutput(io.TextIOBase):
         return len(text)
 
 
+@contextmanager
+def discard_native_output() -> Iterator[None]:
+    """Hide direct file-descriptor writes from tests and their child processes.
+
+    Args:
+        None
+    Returns:
+        None
+    """
+    sys.stdout.flush()
+    sys.stderr.flush()
+    original_stdout = os.dup(1)
+    original_stderr = os.dup(2)
+    try:
+        with open(os.devnull, 'w', encoding='utf-8') as sink:
+            os.dup2(sink.fileno(), 1)
+            os.dup2(sink.fileno(), 2)
+            yield
+    finally:
+        os.dup2(original_stdout, 1)
+        os.dup2(original_stderr, 2)
+        os.close(original_stdout)
+        os.close(original_stderr)
+
+
 class TimedResult(unittest.TestResult):
     """Record whole-test timings while retaining only bounded failure details."""
 
@@ -156,6 +188,52 @@ class TimedResult(unittest.TestResult):
         self.error_count = 0
         self.skip_count = 0
         self.statuses: dict[str, str] = {}
+        self.diagnostics: list[str] = []
+
+    def _exc_info_to_string(self, err: ExcInfo, test: unittest.case.TestCase) -> str:
+        """Keep only a known category and source-verified repository locations.
+
+        Args:
+            err: Exception triple supplied by unittest.
+            test: Case or fixture associated with the exception.
+        Returns:
+            Bounded diagnostic without exception values or local variables.
+        """
+        category = (
+            'AssertionError'
+            if err[0] and issubclass(err[0], AssertionError)
+            else (
+                err[0].__name__
+                if err[0]
+                in (
+                    OSError,
+                    ValueError,
+                    TypeError,
+                    ImportError,
+                    ModuleNotFoundError,
+                    RuntimeError,
+                    TimeoutError,
+                    PermissionError,
+                    FileNotFoundError,
+                )
+                else 'Exception'
+            )
+        )
+        locations: list[str] = []
+        traceback = err[2]
+        while traceback is not None:
+            path = Path(traceback.tb_frame.f_code.co_filename)
+            try:
+                relative = path.resolve().relative_to(ROOT.resolve())
+            except ValueError:
+                traceback = traceback.tb_next
+                continue
+            if path.is_file() and relative.parts[0] in ('src', 'tests', 'scripts'):
+                location = f'{relative.as_posix()}:{traceback.tb_lineno}'
+                if location not in locations:
+                    locations.append(location)
+            traceback = traceback.tb_next
+        return f'{category} at {", ".join(locations[-3:]) if locations else "repository location unavailable"}'
 
     def startTest(self, test: unittest.case.TestCase) -> None:
         """Start timing before the case's setUp method.
@@ -199,6 +277,7 @@ class TimedResult(unittest.TestResult):
         Returns:
             None
         """
+        super().addSuccess(test)
         self.statuses.setdefault(test.id(), 'ok')
 
     def addFailure(self, test: unittest.case.TestCase, err: ExcInfo) -> None:
@@ -210,9 +289,11 @@ class TimedResult(unittest.TestResult):
         Returns:
             None
         """
+        super().addFailure(test, err)
         self.failure_count += 1
         self.statuses[test.id()] = 'fail'
         self._record('FAIL', test)
+        self._diagnose(test, err)
 
     def addError(self, test: unittest.case.TestCase, err: ExcInfo) -> None:
         """Count an unexpected error, including discovery import errors.
@@ -223,9 +304,11 @@ class TimedResult(unittest.TestResult):
         Returns:
             None
         """
+        super().addError(test, err)
         self.error_count += 1
         self.statuses[test.id()] = 'error'
         self._record('ERROR', test)
+        self._diagnose(test, err)
 
     def addSkip(self, test: unittest.case.TestCase, reason: str) -> None:
         """Count skipped cases without retaining unbounded reason strings.
@@ -236,8 +319,19 @@ class TimedResult(unittest.TestResult):
         Returns:
             None
         """
+        super().addSkip(test, reason)
         self.skip_count += 1
         self.statuses[test.id()] = 'skip'
+        if len(self.diagnostics) < MAX_DETAILS:
+            # Only fixed, source-verified skip categories are published.
+            category = (
+                'platform'
+                if 'platform' in reason.lower()
+                or 'windows' in reason.lower()
+                or 'linux' in reason.lower()
+                else 'condition'
+            )
+            self.diagnostics.append(f'SKIP {test.id()}: {category}')
 
     def addSubTest(
         self,
@@ -254,6 +348,7 @@ class TimedResult(unittest.TestResult):
         Returns:
             None
         """
+        super().addSubTest(test, subtest, err)
         if err is not None:
             if err[0] is not None and issubclass(err[0], test.failureException):
                 self.statuses[test.id()] = 'fail'
@@ -263,6 +358,7 @@ class TimedResult(unittest.TestResult):
                 self.statuses[test.id()] = 'error'
                 self.error_count += 1
                 self._record('ERROR', test)
+            self._diagnose(test, err)
 
     def wasSuccessful(self) -> bool:
         """Treat all recorded errors and assertion failures as unsuccessful.
@@ -272,7 +368,65 @@ class TimedResult(unittest.TestResult):
         Returns:
             True only if no failures or errors occurred.
         """
-        return not (self.failure_count or self.error_count)
+        return super().wasSuccessful()
+
+    def addExpectedFailure(self, test: unittest.case.TestCase, err: ExcInfo) -> None:
+        """Retain unittest's expected-failure state without exception values.
+
+        Args:
+            test: Expected failing case.
+            err: Exception triple.
+        Returns:
+            None
+        """
+        super().addExpectedFailure(test, err)
+        self.statuses[test.id()] = 'xfail'
+
+    def addUnexpectedSuccess(self, test: unittest.case.TestCase) -> None:
+        """Retain unittest's fail-fast and unsuccessful XPASS semantics.
+
+        Args:
+            test: Unexpectedly successful case.
+        Returns:
+            None
+        """
+        super().addUnexpectedSuccess(test)
+        self.statuses[test.id()] = 'xpass'
+        self._record('XPASS', test)
+
+    def _diagnose(self, test: unittest.case.TestCase, err: ExcInfo) -> None:
+        """Add a bounded phase and safe source category for a failed callback.
+
+        Args:
+            test: Parent case or fixture holder.
+            err: Exception triple.
+        Returns:
+            None
+        """
+        if len(self.diagnostics) >= MAX_DETAILS:
+            return
+        names: list[str] = []
+        traceback = err[2]
+        while traceback is not None:
+            names.append(traceback.tb_frame.f_code.co_name)
+            traceback = traceback.tb_next
+        phase = (
+            'Import'
+            if is_import_error(test)
+            else 'Cleanup'
+            if 'doCleanups' in names
+            or 'doClassCleanups' in names
+            or 'doModuleCleanups' in names
+            or 'tearDown' in names
+            or 'tearDownClass' in names
+            or 'tearDownModule' in names
+            else 'Setup'
+            if 'setUp' in names or 'setUpClass' in names or 'setUpModule' in names
+            else 'Test'
+        )
+        self.diagnostics.append(
+            f'{phase} {test.id()}: {self._exc_info_to_string(err, test)}'
+        )
 
 
 def cases(suite: unittest.TestSuite) -> list[unittest.case.TestCase]:
@@ -331,7 +485,37 @@ def validate_manifest() -> str | None:
     return None
 
 
-def discover(modules: tuple[str, ...]) -> tuple[list[unittest.case.TestCase], int]:
+def safe_category(error: BaseException | None) -> str:
+    """Name only a fixed known built-in exception family.
+
+    Args:
+        error: Exception object whose value remains private.
+    Returns:
+        Safe category label.
+    """
+    kind = type(error)
+    return (
+        kind.__name__
+        if kind
+        in {
+            AssertionError,
+            OSError,
+            ValueError,
+            TypeError,
+            ImportError,
+            ModuleNotFoundError,
+            RuntimeError,
+            TimeoutError,
+            PermissionError,
+            FileNotFoundError,
+        }
+        else 'Exception'
+    )
+
+
+def discover(
+    modules: tuple[str, ...],
+) -> tuple[list[unittest.case.TestCase], list[tuple[str, str]]]:
     """Import only selected modules and count unexpected import exceptions.
 
     Args:
@@ -341,13 +525,13 @@ def discover(modules: tuple[str, ...]) -> tuple[list[unittest.case.TestCase], in
     """
     loader = unittest.TestLoader()
     found: list[unittest.case.TestCase] = []
-    failed_modules = 0
+    failed_modules: list[tuple[str, str]] = []
     for module in modules:
         try:
             found.extend(cases(loader.loadTestsFromName(module)))
-        except (Exception, SystemExit):
+        except (Exception, SystemExit) as exc:
             # No exception messages or traceback may reach CI or the report.
-            failed_modules += 1
+            failed_modules.append((module, safe_category(exc)))
     return found, failed_modules
 
 
@@ -368,7 +552,7 @@ def is_import_error(test: unittest.case.TestCase) -> bool:
 def validate_cases(
     found: list[unittest.case.TestCase],
     modules: tuple[str, ...],
-    failed_modules: int = 0,
+    failed_modules: int | list[tuple[str, str]] = 0,
 ) -> str | None:
     """Reject empty, imported-failure, duplicate-ID, or unexpected test suites.
 
@@ -379,7 +563,9 @@ def validate_cases(
     Returns:
         A safe diagnostic or None if all cases belong to this suite.
     """
-    imports = failed_modules + sum(is_import_error(test) for test in found)
+    imports = (
+        len(failed_modules) if isinstance(failed_modules, list) else failed_modules
+    ) + sum(is_import_error(test) for test in found)
     duplicates = sum(
         count - 1
         for count in Counter(test.id() for test in found).values()
@@ -428,6 +614,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument('--match', help='substring of full unittest test ID')
     parser.add_argument(
+        '--module',
+        action='append',
+        default=[],
+        help='explicit manifest module to import (repeatable)',
+    )
+    parser.add_argument(
         '--failfast', action='store_true', help='stop after first failure'
     )
     parser.add_argument(
@@ -461,12 +653,36 @@ def main(argv: list[str] | None = None) -> int:
         if args.suite == 'integration'
         else FAST_MODULES + INTEGRATION_MODULES
     )
+    if args.module:
+        if len(args.module) != len(set(args.module)) or any(
+            module not in modules for module in args.module
+        ):
+            emit(['Invalid or duplicate module selection.'])
+            return 1
+        modules = tuple(module for module in modules if module in args.module)
     output = CappedOutput()
-    with redirect_stdout(output), redirect_stderr(output):
+    with discard_native_output(), redirect_stdout(output), redirect_stderr(output):
         found, failed_modules = discover(modules)
     invalid = validate_cases(found, modules, failed_modules)
     if invalid is not None:
-        emit([invalid])
+        failed_names = failed_modules.copy() if isinstance(failed_modules, list) else []
+        for test in found:
+            if is_import_error(test):
+                name = getattr(test, '_testMethodName', '')
+                error = getattr(test, '_exception', None)
+                failed_names.append(
+                    (
+                        name if name in modules else 'unclassified module',
+                        safe_category(error),
+                    )
+                )
+        emit(
+            [invalid]
+            + [
+                f'  Import {name}: {category}'
+                for name, category in failed_names[:MAX_DETAILS]
+            ]
+        )
         return 1
     counts = Counter(group(test) for test in found)
     inventory = (
@@ -502,24 +718,48 @@ def main(argv: list[str] | None = None) -> int:
         coverage.start()
     result = TimedResult()
     result.failfast = args.failfast
+    interrupted = False
     try:
-        with redirect_stdout(output), redirect_stderr(output):
+        with discard_native_output(), redirect_stdout(output), redirect_stderr(output):
             unittest.TestSuite(selected).run(result)
+    except (Exception, KeyboardInterrupt, SystemExit):
+        interrupted = True
     finally:
         if coverage is not None:
             coverage.stop()
             coverage.save()
     elapsed = time.perf_counter() - started
+    for test in selected:
+        result.statuses.setdefault(test.id(), 'unknown')
+    # unittest reports fixture skips on synthetic holders rather than each case.
+    for holder, _reason in result.skipped:
+        holder_id = holder.id()
+        if holder_id.startswith('setUpClass (') or holder_id.startswith(
+            'setUpModule ('
+        ):
+            target = holder_id.split('(', 1)[1].rstrip(')')
+            for test in selected:
+                if (
+                    test.id().startswith(target + '.')
+                    and result.statuses[test.id()] == 'unknown'
+                ):
+                    result.statuses[test.id()] = 'skip'
+    unknown = sum(result.statuses[test.id()] == 'unknown' for test in selected)
+    selected_skips = sum(result.statuses[test.id()] == 'skip' for test in selected)
     lines = [
         inventory,
         f'Ran {result.testsRun}/{len(selected)} {args.suite} tests in {elapsed:.3f}s '
-        f'(failures={result.failure_count}, errors={result.error_count}, skips={result.skip_count})',
+        f'(failures={result.failure_count}, errors={result.error_count}, skips={selected_skips}, '
+        f'xfail={len(result.expectedFailures)}, xpass={len(result.unexpectedSuccesses)})',
     ]
     lines.extend(
         f'  slow {seconds:.3f}s {name}'
         for seconds, name in sorted(result.durations, reverse=True)[: args.durations]
     )
     lines.extend(f'  {detail}' for detail in result.failure_details)
+    lines.extend(f'  {detail}' for detail in result.diagnostics)
+    if interrupted:
+        lines.append('  Run interrupted before complete results.')
     if result.failure_count + result.error_count > MAX_DETAILS:
         lines.append(
             f'  ... {result.failure_count + result.error_count - MAX_DETAILS} more failures/errors'
@@ -529,14 +769,63 @@ def main(argv: list[str] | None = None) -> int:
     if coverage is not None:
         percent = coverage.report(file=CappedOutput())
         lines.append(f'Coverage (metor): {percent:.1f}% (build/.coverage)')
+    if unknown:
+        lines.append(f'  Incomplete: {unknown} selected cases have no result.')
     emit(lines)
     with REPORT.open('a', encoding='utf-8') as report:
+        timed_ids: set[str] = set()
         for seconds, name in result.durations:
+            timed_ids.add(name)
             report.write(
                 f'{name}\t{result.statuses.get(name, "unknown")}\t{seconds:.6f}\n'
             )
-    return 0 if result.wasSuccessful() and result.testsRun == len(selected) else 1
+        for test in selected:
+            if test.id() not in timed_ids:
+                report.write(f'{test.id()}\t{result.statuses[test.id()]}\t-\n')
+    return 0 if result.wasSuccessful() and not interrupted and not unknown else 1
+
+
+def supervised(command: list[str]) -> int:
+    """Require a child completion marker so abrupt exits cannot look green.
+
+    Args:
+        command: Exact worker process command.
+    Returns:
+        Child status, or failure when its result was incomplete.
+    """
+    with TemporaryDirectory(prefix='metor-tests-') as directory:
+        marker = Path(directory) / 'complete'
+        environment = os.environ.copy()
+        environment['METOR_TEST_COMPLETION'] = str(marker)
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            print('Test worker could not start.')
+            return 1
+        if not marker.is_file() or len(completed.stdout) > MAX_RUNNER_OUTPUT:
+            print('Test worker ended without a bounded, completed result.')
+            return 1
+        sys.stdout.write(completed.stdout)
+        if completed.stderr:
+            print(
+                'Test worker stderr suppressed; use the bounded report for diagnosis.'
+            )
+        return completed.returncode
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    if '-h' in sys.argv[1:] or '--help' in sys.argv[1:]:
+        sys.exit(main())
+    completion = os.environ.get('METOR_TEST_COMPLETION')
+    if completion:
+        status = main()
+        Path(completion).write_text('complete', encoding='ascii')
+        sys.exit(status)
+    sys.exit(supervised([sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]]))

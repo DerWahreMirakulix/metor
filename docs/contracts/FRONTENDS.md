@@ -54,8 +54,14 @@ The catalog, persisted default, requested `-p` name, initial selection and
 authenticated active profile are separate facts. `FrontendHost.initial_selection()`
 returns one bounded `FrontendSelection` with a typed kind (resolved, choice
 required, empty, requested missing, or unavailable), requested name, resolved
-name and valid stored default. It is an explicitly requested initial resolution;
-paginated `profile_catalog()` reads never repair a default. The general CLI loads
+name and valid stored default. The host resolves the initial choice once;
+`requested` is `None` for an implicit stored-default or singleton resolution,
+even when `profile` is resolved. A directly supplied `ProfileManager` counts as
+an explicit request. Catalog I/O failures during implicit resolution yield the
+unavailable state for frontend presentation; they are never interpreted as an
+empty catalog. The GUI reads at most one bounded catalog page to distinguish a
+missing requested name from an empty catalog, then uses paginated reads for the
+picker. Paginated `profile_catalog()` reads never repair a default. The general CLI loads
 any installed frontend and passes the host without profile-dependent UI-name
 exceptions. GUI renders create/picker/error routes; Terminal currently prints
 selection guidance and exits before chat/daemon startup. A future Terminal picker
@@ -170,6 +176,8 @@ chunks, issue `ReleaseVoiceCommand`, or mark Voice read; `/inbox` retains its
 text-consumption behavior. Playback and Voice release require a capable client
 and an explicit handoff. Pending outbound IDs
 also provide the public discovery path for selective fallback after restart.
+If a bounded metadata page fails or becomes stale, Terminal reports that its
+Voice inbox display is incomplete and offers another explicit `/inbox` action.
 
 Peer wire generation 3 separates `/ack` (LIVE text), `/drop_ack` (DROP text),
 `/voice_ack <id> <offset>` (resumable progress), and

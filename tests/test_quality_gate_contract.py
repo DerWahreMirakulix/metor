@@ -51,9 +51,11 @@ class QualityGateContractTests(unittest.TestCase):
         workflow = (ROOT / '.github' / 'workflows' / 'ci.yml').read_text(
             encoding='utf-8'
         )
+        impact = (ROOT / 'scripts' / 'ci_impact.py').read_text(encoding='utf-8')
 
-        self.assertIn('- "3.11"', workflow)
-        self.assertIn('- "3.13"', workflow)
+        self.assertIn("('3.11', '3.13')", impact)
+        self.assertIn('fromJSON(needs.plan.outputs.matrix)', workflow)
+        self.assertIn("mode == 'full'", workflow)
         self.assertIn('tests/gui_native_capture.py --view root_refresh', workflow)
         self.assertIn('tests/gui_native_capture.py --view setting_keyboard', workflow)
         self.assertIn('tests/gui_stream_pressure.py --result', workflow)
