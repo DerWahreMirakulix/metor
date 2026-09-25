@@ -370,25 +370,76 @@ class CiImpactTests(unittest.TestCase):
         self.assertEqual(self.classify(base, head), ('full', ()))
 
     def test_unusual_file_names_remain_intact_and_conservative(self) -> None:
-        """NUL parsing preserves whitespace and newlines in a Git path.
+        """Real checkouts preserve host-valid whitespace in Git paths.
 
         Args:
             None
         Returns:
             None
         """
-        for name in ('docs/space name.md', 'docs/line\nbreak.md'):
-            with self.subTest(name=name):
-                self.write(name, 'before')
-                base = self.commit()
-                self.write(name, 'after')
-                head = self.commit()
-                for quote_path in ('true', 'false'):
-                    self.git('config', 'core.quotePath', quote_path)
-                    self.assertEqual(
-                        ci_impact.changed_regular_paths(base, head, self.root), [name]
-                    )
-                    self.assertEqual(self.classify(base, head), ('full', ()))
+        name = 'docs/space name.md'
+        self.write(name, 'before')
+        base = self.commit()
+        self.write(name, 'after')
+        head = self.commit()
+        for quote_path in ('true', 'false'):
+            with self.subTest(quote_path=quote_path):
+                self.git('config', 'core.quotePath', quote_path)
+                self.assertEqual(
+                    ci_impact.changed_regular_paths(base, head, self.root), [name]
+                )
+                self.assertEqual(self.classify(base, head), ('full', ()))
+
+    def test_nul_parser_preserves_line_feed_in_one_path(self) -> None:
+        """A line feed remains inside one complete binary Git path record.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        name = 'docs/line\nbreak.md'
+        self.assertEqual(
+            ci_impact._parse_diff_records(b'M\0docs/line\nbreak.md\0'), [name]
+        )
+        for invalid in (
+            b'M\0docs/line\nbreak.md',
+            b'M\0docs/line\nbreak.md\0M\0docs/line\nbreak.md\0',
+            b'Q\0docs/line\nbreak.md\0',
+        ):
+            with self.subTest(invalid=invalid):
+                self.assertIsNone(ci_impact._parse_diff_records(invalid))
+
+    def test_git_object_diff_preserves_line_feed_without_checkout(self) -> None:
+        """Git plumbing exercises an LF path without creating a host file.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        name = 'docs/line\nbreak.md'
+        commits: list[str] = []
+        for content in (b'before', b'after'):
+            blob = self.git('hash-object', '-w', '--stdin', input_bytes=content)
+            docs_tree = self.git(
+                'mktree',
+                '-z',
+                input_bytes=f'100644 blob {blob}\tline\nbreak.md\0'.encode(),
+            )
+            root_tree = self.git(
+                'mktree',
+                '-z',
+                input_bytes=f'040000 tree {docs_tree}\tdocs\0'.encode(),
+            )
+            arguments = ['commit-tree', root_tree, '-m', 'fixture']
+            if commits:
+                arguments.extend(('-p', commits[-1]))
+            commits.append(self.git(*arguments))
+        base, head = commits
+        self.git('update-ref', 'HEAD', head)
+        self.assertEqual(ci_impact.changed_regular_paths(base, head, self.root), [name])
+        self.assertEqual(self.classify(base, head), ('full', ()))
 
     def test_missing_or_unproven_commit_diff_requires_full(self) -> None:
         """Invalid references, stale head and empty diffs never imply fast.

@@ -31,6 +31,7 @@ RUNNER_DRAIN_SEC = 1.0
 RUNNER_STOP_SEC = 3.0
 RUNNER_READ_CHUNK = 65536
 COMPLETION_VERSION = 1
+_CLOCK = time.monotonic
 _SUPERVISOR_LOCK = threading.Lock()
 
 
@@ -269,7 +270,7 @@ def _supervised_locked(
             threading.Thread(target=stderr.drain, args=(process.stderr,), daemon=True),
         ]
         reason: str | None = None
-        deadline = time.monotonic() + timeout
+        deadline = _CLOCK() + timeout
         cleanup_confirmed = False
         scope_restored = False
         try:
@@ -282,7 +283,7 @@ def _supervised_locked(
                 if stdout.read_failed.is_set() or stderr.read_failed.is_set():
                     reason = 'stream-read-error'
                     break
-                if time.monotonic() >= deadline:
+                if _CLOCK() >= deadline:
                     reason = 'timeout'
                     break
                 time.sleep(RUNNER_POLL_SEC)

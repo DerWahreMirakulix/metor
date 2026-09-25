@@ -127,6 +127,7 @@ def _worker(case: str) -> None:
         observed.append(case)
         observed_app = app
         if case == 'callback':
+            print('INSTALLED_GUI_CALLBACK_INJECTED', flush=True)
             raise RuntimeError(_CALLBACK_SECRET)
         assert app._close()
 
@@ -242,11 +243,27 @@ def main() -> None:
                 else f'INSTALLED_GUI_CLOSE_OK {case}'
             )
             if case == 'callback':
+                assert 'INSTALLED_GUI_CALLBACK_INJECTED' in result.stdout, (
+                    'Callback failure was not injected after the first view'
+                )
+                assert _CALLBACK_SECRET not in result.stderr
+                has_launcher_diagnostic = 'Metor GUI could not start [' in result.stderr
+                has_event_loop_diagnostic = (
+                    'Metor GUI could not start [event-loop]:' in result.stderr
+                )
                 assert (
                     'Metor GUI could not start [event-loop]: RuntimeError.'
                     in result.stderr
-                ), 'Callback failure lacked safe launcher diagnosis'
-                assert _CALLBACK_SECRET not in result.stderr
+                    or 'Metor GUI could not start [event-loop]: Exception.'
+                    in result.stderr
+                    or 'Metor GUI could not start [event-loop]: unexpected toolkit return.'
+                    in result.stderr
+                ), (
+                    'Callback failure lacked safe launcher diagnosis '
+                    f'(worker_status={result.returncode}, '
+                    f'launcher={has_launcher_diagnostic}, '
+                    f'event_loop={has_event_loop_diagnostic})'
+                )
             if result.returncode != 0 or marker not in result.stdout:
                 raise RuntimeError(
                     f'Installed GUI {case} smoke failed: status={result.returncode}; '

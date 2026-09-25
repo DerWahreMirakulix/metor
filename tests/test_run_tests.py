@@ -1102,10 +1102,14 @@ class SupervisorTests(unittest.TestCase):
         """
         with TemporaryDirectory() as directory:
             root = Path(directory)
+            entered = root / 'entered.txt'
             (root / 'test_supervision_fixture.py').write_text(
                 'import time,unittest\n'
+                'from pathlib import Path\n'
                 'class Example(unittest.TestCase):\n'
-                '    def test_hang(self): time.sleep(10)\n',
+                '    def test_hang(self):\n'
+                f'        Path({str(entered)!r}).write_text("entered",encoding="ascii")\n'
+                '        time.sleep(60)\n',
                 encoding='utf-8',
             )
             program = (
@@ -1120,12 +1124,33 @@ class SupervisorTests(unittest.TestCase):
                 'sys.exit(runner.main(["--suite","fast"]))\n'
             )
             sink = io.StringIO()
-            with redirect_stdout(sink):
+            real_clock = time.monotonic
+            clock_started = False
+
+            def after_test_start() -> float:
+                """Expire the worker guard only after the test body has started.
+
+                Args:
+                    None
+                Returns:
+                    Controlled supervisor clock value.
+                """
+                nonlocal clock_started
+                if not clock_started:
+                    clock_started = True
+                    return real_clock()
+                return real_clock() + (31.0 if entered.exists() else 0.0)
+
+            with (
+                redirect_stdout(sink),
+                patch.object(test_supervision, '_CLOCK', side_effect=after_test_start),
+            ):
                 status = run_tests.supervised(
                     [sys.executable, '-c', program, directory],
-                    timeout=2.0,
+                    timeout=30.0,
                     report_path=root / 'report.txt',
                 )
+            self.assertTrue(entered.exists(), 'Synthetic test body did not start')
             self.assertEqual(status, 1)
             self.assertIn(
                 'Last running test: test_supervision_fixture.Example.test_hang',
@@ -1203,13 +1228,23 @@ class SupervisorTests(unittest.TestCase):
             action.split('    - name: Run Tests\n', 1)[1].split('      run: |\n', 1)[1]
         )
         self.assertNotIn(' | tee ', body)
-        if shutil.which('bash') is None:
+        bash = shutil.which('bash')
+        if sys.platform == 'win32':
+            git_exec = subprocess.run(
+                ['git', '--exec-path'],
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            bash = str(Path(git_exec).parents[2] / 'bin' / 'bash.exe')
+            self.assertTrue(Path(bash).is_file())
+        elif bash is None:
             self.skipTest('Bash unavailable for composite action test')
         for status in (0, 7):
             command = f'(exit {status})'
             shell = body.replace('${{ inputs.test-command }}', command)
             completed = subprocess.run(
-                ['bash', '-e', '-o', 'pipefail', '-c', shell],
+                [bash, '--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', shell],
                 text=True,
                 capture_output=True,
                 check=False,
@@ -1219,7 +1254,16 @@ class SupervisorTests(unittest.TestCase):
             '${{ inputs.test-command }}', '(exit 7)'
         )
         completed = subprocess.run(
-            ['bash', '-e', '-o', 'pipefail', '-c', annotation_fails],
+            [
+                bash,
+                '--noprofile',
+                '--norc',
+                '-e',
+                '-o',
+                'pipefail',
+                '-c',
+                annotation_fails,
+            ],
             text=True,
             capture_output=True,
             check=False,
