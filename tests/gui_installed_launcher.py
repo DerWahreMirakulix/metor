@@ -1,8 +1,14 @@
-"""Exercise the wheel-installed CLI and native GUI through deliberate close."""
+"""Exercise the wheel-installed CLI and native GUI through deliberate close.
+
+Use ``--case callback`` to run only the isolated callback-failure worker.
+"""
 
 import argparse
+import builtins
+import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -15,6 +21,200 @@ _APP_READY_SECONDS = 30.0
 _WORKER_SECONDS = 60.0
 _POLL_SECONDS = 0.1
 _CALLBACK_SECRET = 'synthetic-callback-secret'
+_OBSERVATION_MARKER = 'INSTALLED_GUI_CALLBACK_OBSERVATION '
+_OBSERVATION_LIMIT = 4
+_OBSERVATION_MAX_CHARS = 2048
+_CATEGORY_MAX_CHARS = 80
+_FATAL_STAGES = frozenset(
+    {'toolkit-import', 'platform-activation', 'app-build', 'event-loop', 'app-cleanup'}
+)
+_SOURCE_NAME = re.compile(
+    r'(?:kivy|metor)/[A-Za-z0-9_./-]+\.py|tests/gui_installed_launcher\.py'
+)
+
+
+def _safe_category(value: object) -> bool:
+    """Accept only bounded built-in exception names or fixed launcher outcomes.
+
+    Args:
+        value: Candidate label from a worker observation.
+    Returns:
+        bool: Whether the label can be repeated in public test evidence.
+    """
+    if type(value) is not str or len(value) > _CATEGORY_MAX_CHARS:
+        return False
+    builtin = vars(builtins).get(value)
+    return bool(
+        (isinstance(builtin, type) and issubclass(builtin, BaseException))
+        or value == 'unexpected toolkit return'
+        or re.fullmatch(r'toolkit exited with status -?[0-9]{1,20}', value)
+    )
+
+
+def _source_locations(
+    error: BaseException, installed_root: Path, origin: str
+) -> list[dict[str, object]]:
+    """Retain only real installed source sites or this exact test fixture.
+
+    Args:
+        error: Exception whose traceback may contain private frame data.
+        installed_root: Current isolated wheel environment.
+        origin: Whether these frames belong to the outer error or its cause.
+    Returns:
+        list[dict[str, object]]: Up to four verified relative source sites.
+    """
+    sites: list[dict[str, object]] = []
+    frame = error.__traceback__
+    fixture = Path(__file__).resolve()
+    while frame is not None:
+        path = Path(frame.tb_frame.f_code.co_filename).resolve()
+        if path == fixture:
+            source = 'tests/gui_installed_launcher.py'
+        elif path.is_file() and path.is_relative_to(installed_root):
+            relative = path.relative_to(installed_root).parts
+            source = (
+                '/'.join(relative[relative.index('site-packages') + 1 :])
+                if 'site-packages' in relative
+                else ''
+            )
+        else:
+            source = ''
+        if _SOURCE_NAME.fullmatch(source) and type(frame.tb_lineno) is int:
+            sites.append({'origin': origin, 'source': source, 'line': frame.tb_lineno})
+        frame = frame.tb_next
+    return sites[-_OBSERVATION_LIMIT:]
+
+
+def _read_callback_observation(stdout: str) -> dict[str, object] | None:
+    """Read one bounded, typed observation from the isolated worker.
+
+    Args:
+        stdout: Captured worker stdout, never included raw in failures.
+    Returns:
+        dict[str, object] | None: Safe observation or None for invalid transport.
+    """
+    records = [
+        line[len(_OBSERVATION_MARKER) :]
+        for line in stdout.splitlines()
+        if line.startswith(_OBSERVATION_MARKER)
+    ]
+    if len(records) != 1 or len(records[0]) > _OBSERVATION_MAX_CHARS:
+        return None
+    try:
+        value = json.loads(records[0])
+    except (ValueError, TypeError):
+        return None
+    if type(value) is not dict or set(value) != {
+        'case',
+        'injection_observed',
+        'application_status',
+        'cleanup_complete',
+        'diagnostics',
+    }:
+        return None
+    if (
+        value['case'] != 'callback'
+        or type(value['injection_observed']) is not bool
+        or type(value['application_status']) is not int
+        or type(value['cleanup_complete']) is not bool
+        or type(value['diagnostics']) is not list
+        or len(value['diagnostics']) > _OBSERVATION_LIMIT
+    ):
+        return None
+    for diagnostic in value['diagnostics']:
+        if (
+            type(diagnostic) is not dict
+            or set(diagnostic)
+            != {
+                'stage',
+                'reason',
+                'exception_chain',
+                'locations',
+            }
+            or type(diagnostic['stage']) is not str
+            or diagnostic['stage'] not in _FATAL_STAGES
+            or not _safe_category(diagnostic['reason'])
+            or type(diagnostic['exception_chain']) is not list
+            or len(diagnostic['exception_chain']) > _OBSERVATION_LIMIT
+            or any(
+                not _safe_category(category)
+                for category in diagnostic['exception_chain']
+            )
+            or type(diagnostic['locations']) is not list
+            or len(diagnostic['locations']) > 2 * _OBSERVATION_LIMIT
+        ):
+            return None
+        for location in diagnostic['locations']:
+            if (
+                type(location) is not dict
+                or set(location) != {'origin', 'source', 'line'}
+                or type(location['origin']) is not str
+                or location['origin'] not in {'outer', 'cause'}
+                or type(location['source']) is not str
+                or not _SOURCE_NAME.fullmatch(location['source'])
+                or any(
+                    part in {'', '.', '..'} for part in location['source'].split('/')
+                )
+                or type(location['line']) is not int
+                or not 0 < location['line'] < 100000
+            ):
+                return None
+    return value
+
+
+def _verify_callback_result(
+    result: subprocess.CompletedProcess[str],
+) -> dict[str, object]:
+    """Require injection, native failure, safe stderr, and confirmed cleanup.
+
+    Args:
+        result: One isolated installed callback worker result.
+    Returns:
+        dict[str, object]: Bounded verified evidence for the callback case.
+    """
+    if _CALLBACK_SECRET in result.stdout or _CALLBACK_SECRET in result.stderr:
+        raise AssertionError('gui-smoke-secret-leak')
+    if 'INSTALLED_GUI_CALLBACK_INJECTED' not in result.stdout.splitlines():
+        raise AssertionError('gui-smoke-injection-missing')
+    observation = _read_callback_observation(result.stdout)
+    if observation is None:
+        raise AssertionError('gui-smoke-observation-invalid')
+    if (
+        result.returncode != 0
+        or 'INSTALLED_GUI_CALLBACK_FAILURE_OK' not in result.stdout.splitlines()
+        or not observation['injection_observed']
+        or observation['application_status'] == 0
+        or not observation['cleanup_complete']
+    ):
+        raise AssertionError(f'gui-smoke-outcome-mismatch {observation}')
+    diagnostics = observation['diagnostics']
+    assert isinstance(diagnostics, list)
+    if len(diagnostics) != 1:
+        raise AssertionError(f'gui-smoke-diagnostic-mismatch {observation}')
+    diagnostic = diagnostics[0]
+    assert isinstance(diagnostic, dict)
+    reason = diagnostic['reason']
+    chain = diagnostic['exception_chain']
+    locations = diagnostic['locations']
+    assert isinstance(locations, list)
+    injection_origin = 'cause' if reason == 'SystemError' else 'outer'
+    has_injection_site = any(
+        location['origin'] == injection_origin
+        and location['source'] == 'tests/gui_installed_launcher.py'
+        for location in locations
+    )
+    if diagnostic['stage'] != 'event-loop' or not (
+        (
+            (reason == 'RuntimeError' and chain == [])
+            or (reason == 'SystemError' and chain == ['RuntimeError'])
+        )
+        and has_injection_site
+    ):
+        raise AssertionError(f'gui-smoke-diagnostic-mismatch {observation}')
+    expected_line = f'Metor GUI could not start [event-loop]: {reason}.'
+    if expected_line not in result.stderr.splitlines():
+        raise AssertionError(f'gui-smoke-stderr-mismatch {observation}')
+    return observation
 
 
 def _worker(case: str) -> None:
@@ -48,7 +248,84 @@ def _worker(case: str) -> None:
 
     observed: list[str] = []
     observed_app: object | None = None
+    diagnostics: list[dict[str, object]] = []
     started = time.monotonic()
+
+    from metor.ui.gui.launcher import GuiEntry
+
+    original_report = GuiEntry._report_fatal
+
+    def observe_fatal(
+        stream: object,
+        stage: str,
+        reason: str,
+        debug: bool,
+        error: BaseException | None = None,
+        *,
+        elapsed: float = 0.0,
+    ) -> None:
+        """Record only safe categories while preserving the actual fatal report.
+
+        Args:
+            stream: The launcher's original stderr destination.
+            stage: Internal launch phase.
+            reason: The launcher's safe reason.
+            debug: Whether bounded source locations are enabled.
+            error: Optional exception whose messages remain private.
+            elapsed: Launch duration passed to the original reporter.
+        Returns:
+            None
+        """
+        if len(diagnostics) < _OBSERVATION_LIMIT:
+            try:
+                chain: list[str] = []
+                seen: set[int] = set()
+                current = (
+                    error.__cause__ or error.__context__ if error is not None else None
+                )
+                locations = (
+                    _source_locations(error, installed_root, 'outer')
+                    if error is not None
+                    else []
+                )
+                if current is not None:
+                    locations.extend(
+                        _source_locations(current, installed_root, 'cause')
+                    )
+                while current is not None and len(chain) < _OBSERVATION_LIMIT:
+                    if id(current) in seen:
+                        break
+                    seen.add(id(current))
+                    category = GuiEntry._safe_reason(current)
+                    chain.append(category if _safe_category(category) else 'Exception')
+                    current = current.__cause__ or current.__context__
+                safe_reason = (
+                    GuiEntry._safe_reason(error)
+                    if error is not None
+                    else 'unexpected toolkit return'
+                    if reason == 'unexpected toolkit return'
+                    else 'Exception'
+                )
+                diagnostics.append(
+                    {
+                        'stage': stage if stage in _FATAL_STAGES else 'unknown',
+                        'reason': safe_reason
+                        if _safe_category(safe_reason)
+                        else 'Exception',
+                        'exception_chain': chain,
+                        'locations': locations,
+                    }
+                )
+            except Exception:
+                diagnostics.append(
+                    {
+                        'stage': stage if stage in _FATAL_STAGES else 'unknown',
+                        'reason': 'Exception',
+                        'exception_chain': [],
+                        'locations': [],
+                    }
+                )
+        original_report(stream, stage, reason, debug, error, elapsed=elapsed)
 
     def observe(_elapsed: float) -> None:
         """Inspect the usable first view, then invoke the application's close path.
@@ -156,14 +433,18 @@ def _worker(case: str) -> None:
         arguments.extend(('-p', 'missing'))
     try:
         # The host OS lifecycle bus is outside this display and Close software gate.
-        with patch.object(
-            native_lifecycle, 'create_desktop_lifecycle_source', return_value=None
-        ) as lifecycle_port:
+        with (
+            patch.object(
+                native_lifecycle, 'create_desktop_lifecycle_source', return_value=None
+            ) as lifecycle_port,
+            patch.object(GuiEntry, '_report_fatal', staticmethod(observe_fatal)),
+        ):
             status = run_cli(arguments)
         lifecycle_port.assert_called_once()
     finally:
         arming_done.set()
         observer_thread.join(2)
+        assert not observer_thread.is_alive(), 'GUI observer thread did not stop'
     if case != 'callback':
         assert status == 0, f'GUI launcher returned {status} before a clean close'
     assert observed == [case], observed
@@ -178,6 +459,24 @@ def _worker(case: str) -> None:
         worker.join(2)
         assert not worker.is_alive()
     if case == 'callback':
+        print(
+            _OBSERVATION_MARKER
+            + json.dumps(
+                {
+                    'case': case,
+                    'injection_observed': observed == [case],
+                    'application_status': status,
+                    'cleanup_complete': observed_app._stopped
+                    and observed_app.controller.client is None
+                    and observed_app.controller.interactions.prompt is None
+                    and not observer_thread.is_alive()
+                    and (worker is None or not worker.is_alive()),
+                    'diagnostics': diagnostics,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
         assert status != 0, status
         print('INSTALLED_GUI_CALLBACK_FAILURE_OK')
     else:
@@ -196,7 +495,14 @@ def main() -> None:
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--worker', choices=('empty', 'picker', 'callback'))
+    parser.add_argument(
+        '--case',
+        choices=('empty', 'picker', 'callback'),
+        help='Run one isolated installed GUI case; default runs all cases.',
+    )
     arguments = parser.parse_args()
+    if arguments.worker is not None and arguments.case is not None:
+        parser.error('--case cannot be combined with --worker')
     if arguments.worker is not None:
         _worker(arguments.worker)
         return
@@ -208,7 +514,16 @@ def main() -> None:
         raise RuntimeError('Installed GUI native smoke requires a window display.')
     with tempfile.TemporaryDirectory(prefix='metor-gui-launch-') as directory:
         root = Path(directory)
-        for case in ('empty', 'picker', 'callback'):
+        cases = (
+            (arguments.case,)
+            if arguments.case is not None
+            else (
+                'empty',
+                'picker',
+                'callback',
+            )
+        )
+        for case in cases:
             data_parent = root / case
             data_parent.mkdir()
             (data_parent / '.gui-smoke-owner').write_text(
@@ -242,36 +557,26 @@ def main() -> None:
                 if case == 'callback'
                 else f'INSTALLED_GUI_CLOSE_OK {case}'
             )
-            if case == 'callback':
-                assert 'INSTALLED_GUI_CALLBACK_INJECTED' in result.stdout, (
-                    'Callback failure was not injected after the first view'
-                )
-                assert _CALLBACK_SECRET not in result.stderr
-                has_launcher_diagnostic = 'Metor GUI could not start [' in result.stderr
-                has_event_loop_diagnostic = (
-                    'Metor GUI could not start [event-loop]:' in result.stderr
-                )
-                assert (
-                    'Metor GUI could not start [event-loop]: RuntimeError.'
-                    in result.stderr
-                    or 'Metor GUI could not start [event-loop]: Exception.'
-                    in result.stderr
-                    or 'Metor GUI could not start [event-loop]: unexpected toolkit return.'
-                    in result.stderr
-                ), (
-                    'Callback failure lacked safe launcher diagnosis '
-                    f'(worker_status={result.returncode}, '
-                    f'launcher={has_launcher_diagnostic}, '
-                    f'event_loop={has_event_loop_diagnostic})'
-                )
-            if result.returncode != 0 or marker not in result.stdout:
+            observation = (
+                _verify_callback_result(result) if case == 'callback' else None
+            )
+            if result.returncode != 0 or marker not in result.stdout.splitlines():
                 raise RuntimeError(
                     f'Installed GUI {case} smoke failed: status={result.returncode}; '
                     f'launcher_diagnostic={"Metor GUI could not start" in result.stderr}'
                 )
+            if observation is not None:
+                print(
+                    _OBSERVATION_MARKER + json.dumps(observation, sort_keys=True),
+                    flush=True,
+                )
             print(marker, flush=True)
         assert not tuple(root.rglob('device.toml'))
-    print('INSTALLED_GUI_REAL_LAUNCH_OK desktop')
+    print(
+        'INSTALLED_GUI_REAL_LAUNCH_OK desktop'
+        if arguments.case is None
+        else f'INSTALLED_GUI_CASE_OK {arguments.case}'
+    )
 
 
 if __name__ == '__main__':

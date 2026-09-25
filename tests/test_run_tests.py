@@ -668,6 +668,129 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn('secret=', str(result.diagnostics))
 
 
+class ProgressRecordTests(unittest.TestCase):
+    """Keep supervised test progress in one strict binary record format."""
+
+    _TEST_ID = 'test_supervision_fixture.Example.test_hang'
+
+    def test_progress_record_writer_uses_exact_lf_bytes(self) -> None:
+        """Avoid platform text-newline translation in the actual writer.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'progress.txt'
+            environment = {
+                'METOR_TEST_PROGRESS': str(path),
+                'METOR_TEST_PROGRESS_OWNER': str(os.getpid()),
+            }
+            with (
+                patch.dict(os.environ, environment),
+                patch.object(
+                    Path,
+                    'write_text',
+                    side_effect=AssertionError('Implicit host text newline conversion'),
+                ),
+            ):
+                test_supervision.write_progress(self._TEST_ID)
+            self.assertEqual(path.read_bytes(), (self._TEST_ID + '\n').encode('ascii'))
+            self.assertEqual(test_supervision._last_progress(path), self._TEST_ID)
+            self.assertFalse(path.with_suffix('.partial').exists())
+
+    def test_progress_record_rejects_foreign_owner_and_invalid_ids(self) -> None:
+        """Reject writes without this worker's ownership or a safe test ID.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'progress.txt'
+            original = (self._TEST_ID + '\n').encode('ascii')
+            path.write_bytes(original)
+            environment = {
+                'METOR_TEST_PROGRESS': str(path),
+                'METOR_TEST_PROGRESS_OWNER': 'different-worker',
+            }
+            with patch.dict(os.environ, environment):
+                test_supervision.write_progress('other.Example.test_case')
+            self.assertEqual(path.read_bytes(), original)
+            environment['METOR_TEST_PROGRESS_OWNER'] = str(os.getpid())
+            for invalid in (
+                '',
+                'bad\rname',
+                'bad\nname',
+                'bad\tname',
+                'tést',
+                'a' * 257,
+            ):
+                with self.subTest(invalid=ascii(invalid)):
+                    with patch.dict(os.environ, environment):
+                        test_supervision.write_progress(invalid)
+                    self.assertEqual(path.read_bytes(), original)
+
+    def test_progress_record_rejects_noncanonical_and_oversize_bytes(self) -> None:
+        """Do not repair malformed bytes or expose arbitrary progress text.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'progress.txt'
+            self.assertIsNone(test_supervision._last_progress(path))
+            records = (
+                b'bad\r\n',
+                b'bad\nsecond\n',
+                b'bad\x00name\n',
+                b'bad\xffname\n',
+                b'bad\tname\n',
+                b'bad',
+                b'bad\n\n',
+                b'a' * (test_supervision.MAX_PROGRESS_RECORD + 1),
+            )
+            for record in records:
+                with self.subTest(record=record[:16]):
+                    path.write_bytes(record)
+                    self.assertIsNone(test_supervision._last_progress(path))
+            with patch.object(Path, 'open', side_effect=OSError('private path')):
+                self.assertIsNone(test_supervision._last_progress(path))
+
+    def test_progress_record_write_failures_do_not_complete_record(self) -> None:
+        """Keep failed writes private and never treat partial bytes as complete.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'progress.txt'
+            environment = {
+                'METOR_TEST_PROGRESS': str(path),
+                'METOR_TEST_PROGRESS_OWNER': str(os.getpid()),
+            }
+            output = io.StringIO()
+            with (
+                patch.dict(os.environ, environment),
+                redirect_stdout(output),
+                redirect_stderr(output),
+            ):
+                with patch.object(Path, 'write_bytes', side_effect=OSError('private')):
+                    test_supervision.write_progress(self._TEST_ID)
+                self.assertFalse(path.exists())
+                with patch.object(Path, 'replace', side_effect=OSError('private')):
+                    test_supervision.write_progress(self._TEST_ID)
+            self.assertEqual(output.getvalue(), '')
+            self.assertFalse(path.exists())
+            self.assertIsNone(test_supervision._last_progress(path))
+
+
 class SupervisorTests(unittest.TestCase):
     """Exercise worker supervision using only short synthetic processes."""
 

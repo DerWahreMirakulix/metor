@@ -58,6 +58,11 @@ runs:
         python -m pip check
         python scripts/check_boundaries.py
 
+    - name: Verify test progress record
+      if: ${{ inputs.run-tests == 'true' }}
+      shell: bash
+      run: python scripts/run_tests.py --suite fast --module test_run_tests --match test_progress_record --failfast
+
     - name: Run Ruff (Linting)
       shell: bash
       run: |

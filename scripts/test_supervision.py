@@ -187,7 +187,7 @@ def write_progress(test_id: str) -> None:
         return
     temporary = Path(path).with_suffix('.partial')
     try:
-        temporary.write_text(test_id + '\n', encoding='ascii')
+        temporary.write_bytes((test_id + '\n').encode('ascii'))
         temporary.replace(path)
     except OSError:
         return
@@ -206,7 +206,9 @@ def _last_progress(path: Path) -> str | None:
             content = source.read(MAX_PROGRESS_RECORD + 1)
         if len(content) > MAX_PROGRESS_RECORD:
             return None
-        test_id = content.decode('ascii').removesuffix('\n')
+        if not content.endswith(b'\n'):
+            return None
+        test_id = content[:-1].decode('ascii')
         return test_id if SAFE_TEST_ID.fullmatch(test_id) else None
     except (OSError, UnicodeError):
         return None

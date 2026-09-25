@@ -2,6 +2,7 @@
 
 from contextlib import redirect_stderr
 from io import StringIO
+import json
 import os
 import subprocess
 import sys
@@ -14,6 +15,8 @@ from unittest.mock import patch
 
 from metor.client import FrontendHost, FrontendLaunchContext
 from metor.ui.gui.launcher import GuiEntry
+
+import gui_installed_launcher as installed_fixture
 
 
 class GuiStartupDiagnosticsTests(unittest.TestCase):
@@ -265,3 +268,170 @@ sys.exit(GuiEntry()(FrontendLaunchContext(None, object())))
         )
         self.assertNotIn('synthetic-secret-sentinel', result.stderr)
         self.assertNotIn('launcher.py:', result.stderr)
+
+
+class InstalledGuiSmokeContractTests(unittest.TestCase):
+    """Check the installed callback gate without starting a native toolkit."""
+
+    @staticmethod
+    def _result(
+        *,
+        application_status: int = 1,
+        worker_status: int = 0,
+        injected: bool = True,
+        cleanup: bool = True,
+        reason: str = 'SystemError',
+        chain: list[str] | None = None,
+        stderr: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        """Build one synthetic worker result with independent status layers.
+
+        Args:
+            application_status: Actual GUI CLI exit status.
+            worker_status: Isolated test worker exit status.
+            injected: Whether the deliberate callback ran after first view.
+            cleanup: Whether the worker confirmed application cleanup.
+            reason: Bounded launcher's safe exception category.
+            chain: Safe cause or context categories.
+            stderr: Optional caller-visible stderr override.
+        Returns:
+            subprocess.CompletedProcess[str]: Result for the pure parent verifier.
+        """
+        if chain is None:
+            chain = ['RuntimeError']
+        observation = {
+            'case': 'callback',
+            'injection_observed': injected,
+            'application_status': application_status,
+            'cleanup_complete': cleanup,
+            'diagnostics': [
+                {
+                    'stage': 'event-loop',
+                    'reason': reason,
+                    'exception_chain': chain,
+                    'locations': [
+                        {
+                            'origin': 'cause' if reason == 'SystemError' else 'outer',
+                            'source': 'tests/gui_installed_launcher.py',
+                            'line': 1,
+                        }
+                    ],
+                }
+            ],
+        }
+        output = '\n'.join(
+            (
+                'INSTALLED_GUI_CALLBACK_INJECTED',
+                installed_fixture._OBSERVATION_MARKER
+                + json.dumps(observation, sort_keys=True),
+                'INSTALLED_GUI_CALLBACK_FAILURE_OK',
+            )
+        )
+        return subprocess.CompletedProcess(
+            ['isolated-worker'],
+            worker_status,
+            output,
+            stderr
+            if stderr is not None
+            else f'Metor GUI could not start [event-loop]: {reason}.\n',
+        )
+
+    def test_callback_gate_accepts_verified_native_and_direct_failure(self) -> None:
+        """The native Kivy wrapper and direct callback error retain causality.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        observed = installed_fixture._verify_callback_result(self._result())
+        self.assertEqual(observed['application_status'], 1)
+        direct = self._result(reason='RuntimeError', chain=[])
+        installed_fixture._verify_callback_result(direct)
+
+    def test_callback_gate_rejects_false_or_incomplete_outcomes(self) -> None:
+        """The parent refuses missing injection, diagnostics, cleanup, or status.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        base = self._result()
+        cases = {
+            'application success': self._result(application_status=0),
+            'worker failure': self._result(worker_status=1),
+            'missing injection': self._result(injected=False),
+            'missing injection marker': subprocess.CompletedProcess(
+                base.args,
+                0,
+                base.stdout.replace('INSTALLED_GUI_CALLBACK_INJECTED\n', ''),
+                base.stderr,
+            ),
+            'missing worker success marker': subprocess.CompletedProcess(
+                base.args,
+                0,
+                base.stdout.replace('INSTALLED_GUI_CALLBACK_FAILURE_OK', ''),
+                base.stderr,
+            ),
+            'missing observation': subprocess.CompletedProcess(
+                base.args,
+                0,
+                '\n'.join(
+                    line
+                    for line in base.stdout.splitlines()
+                    if not line.startswith(installed_fixture._OBSERVATION_MARKER)
+                ),
+                base.stderr,
+            ),
+            'wrong diagnostic phase': subprocess.CompletedProcess(
+                base.args,
+                0,
+                base.stdout.replace('"stage": "event-loop"', '"stage": "app-cleanup"'),
+                base.stderr,
+            ),
+            'missing stderr': self._result(stderr=''),
+            'incomplete cleanup': self._result(cleanup=False),
+            'unrelated SystemError': self._result(chain=[]),
+            'missing callback source': subprocess.CompletedProcess(
+                base.args,
+                0,
+                base.stdout.replace('tests/gui_installed_launcher.py', 'kivy/base.py'),
+                base.stderr,
+            ),
+            'secret in stdout': subprocess.CompletedProcess(
+                base.args,
+                0,
+                base.stdout + '\nsynthetic-callback-secret',
+                base.stderr,
+            ),
+            'secret in stderr': self._result(
+                stderr=base.stderr + 'synthetic-callback-secret'
+            ),
+        }
+        for label, result in cases.items():
+            with self.subTest(case=label):
+                with self.assertRaisesRegex(AssertionError, 'gui-smoke-'):
+                    installed_fixture._verify_callback_result(result)
+
+    def test_callback_observation_parser_rejects_untrusted_records(self) -> None:
+        """Unknown labels and malformed or excessive records never reach CI.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        valid = self._result().stdout
+        marker = installed_fixture._OBSERVATION_MARKER
+        records = (
+            valid + '\n' + valid,
+            marker + '{',
+            marker + 'x' * 2049,
+            valid.replace('SystemError', 'UntrustedException'),
+            valid.replace('tests/gui_installed_launcher.py', '/private/secret.py'),
+            valid.replace('tests/gui_installed_launcher.py', 'kivy/../private.py'),
+        )
+        for record in records:
+            with self.subTest(length=len(record)):
+                self.assertIsNone(installed_fixture._read_callback_observation(record))
