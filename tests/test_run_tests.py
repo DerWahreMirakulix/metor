@@ -8,6 +8,7 @@ import sys
 from tempfile import TemporaryDirectory
 import time
 import unittest
+from typing import cast
 from unittest.mock import Mock, patch
 
 from scripts import ci_impact, run_tests
@@ -158,7 +159,10 @@ class RunnerTests(unittest.TestCase):
         Returns:
             None
         """
-        failed = unittest.loader._FailedTest('test_broken', ImportError('broken'))
+        failed = cast(
+            unittest.TestCase,
+            next(iter(unittest.TestLoader().loadTestsFromName('test_broken'))),
+        )
         for args in (('--suite', 'fast'), ('--list',), ('--match', 'exercise_fast')):
             status, text = self.invoke([FastExample('exercise_fast'), failed], *args)
             self.assertEqual(status, 1)

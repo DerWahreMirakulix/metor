@@ -117,10 +117,12 @@ class GuiExceptionLifecycleTests(unittest.TestCase):
             try:
                 self.assertTrue(controller.lifecycle.start('target'))
                 self.assertTrue(entered.wait(5))
+                worker = controller._worker
+                assert worker is not None
                 controller.close()
                 release.set()
-                controller._worker.join(5)
-                self.assertFalse(controller._worker.is_alive())
+                worker.join(5)
+                self.assertFalse(worker.is_alive())
                 host.bootstrap.assert_not_called()
             finally:
                 release.set()
@@ -137,8 +139,10 @@ class GuiExceptionLifecycleTests(unittest.TestCase):
         controller = GuiController(FrontendLaunchContext(None, Mock()), simulator=True)
         try:
             self.assertTrue(controller.submit('bootstrap', lambda: None))
-            controller._worker.join(5)
-            self.assertFalse(controller._worker.is_alive())
+            worker = controller._worker
+            assert worker is not None
+            worker.join(5)
+            self.assertFalse(worker.is_alive())
             controller.poll()
             self.assertEqual(
                 controller.state.status, 'Profile opening was cancelled or rejected.'
@@ -174,7 +178,9 @@ class GuiExceptionLifecycleTests(unittest.TestCase):
         try:
             with redirect_stderr(output):
                 self.assertTrue(controller.submit('bootstrap', fail))
-                controller._worker.join(5)
+                worker = controller._worker
+                assert worker is not None
+                worker.join(5)
             controller.poll()
             self.assertIn('Profile opening failed', controller.state.status)
             self.assertIn('Metor GUI worker [work]: Exception.', output.getvalue())

@@ -16,6 +16,7 @@ import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Callable, cast
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
@@ -143,9 +144,22 @@ class ClosureStreamTests(unittest.TestCase):
 
         losses = []
         client._on_event = callback
-        client._on_disconnect = lambda: (losses.append('lost'), lost.set())
+
+        def on_disconnect() -> None:
+            """Record exactly one callback queue loss notification.
+
+            Args:
+                None
+            Returns:
+                None
+            """
+            losses.append('lost')
+            lost.set()
+
+        client._on_disconnect = on_disconnect
         lease = client.begin_request('pending')
         worker = client._event_thread
+        assert worker is not None
         payload = (AckEvent(msg_id='async').to_json() + '\n').encode()
         peer.sendall(payload)
         self.assertTrue(entered.wait(1))
@@ -255,8 +269,10 @@ class ClosureDaemonTests(unittest.TestCase):
     def client(
         self, daemon: Daemon, events: list[IpcEvent] | None = None
     ) -> MetorClient:
+        port = daemon._ipc.port
+        assert port is not None
         client = MetorClient(
-            daemon._ipc.port,
+            port,
             timeout=2,
             on_event=(events if events is not None else []).append,
         )
@@ -286,6 +302,7 @@ class ClosureDaemonTests(unittest.TestCase):
         client = self.client(daemon)
         snapshot = client.runtime_snapshot()
         self.assertIsInstance(snapshot, RuntimeSnapshotEvent)
+        assert snapshot is not None
         self.assertEqual(snapshot.profile, 'sender')
         self.assertEqual(snapshot.onion, self.fixture.sender_onion)
         self.assertIsNotNone(snapshot.epoch)
@@ -318,10 +335,23 @@ class ClosureDaemonTests(unittest.TestCase):
         )
         final = client.finalize_voice('fallback', 30)
         self.assertIsInstance(final, VoiceFinalizedEvent)
+        assert final is not None
         self.assertEqual(final.delivery, Delivery.DROP)
         delivered = threading.Event()
         original = client._on_event
-        client._on_event = lambda event: (original(event), delivered.set())
+
+        def on_event(event: IpcEvent) -> None:
+            """Forward the event and mark the controlled delivery barrier.
+
+            Args:
+                event: Delivered SDK event.
+            Returns:
+                None
+            """
+            original(event)
+            delivered.set()
+
+        client._on_event = on_event
         client._ipc.dispatch_async_event(AckEvent(msg_id='barrier'))
         self.assertTrue(delivered.wait(2))
         self.assertEqual(sum(isinstance(e, FallbackSuccessEvent) for e in events), 1)
@@ -408,15 +438,21 @@ class ClosureDaemonTests(unittest.TestCase):
         )
         first = daemon._session_access.filter_restricted_event(recipient, event)
         duplicate = daemon._session_access.filter_restricted_event(recipient, event)
+        assert isinstance(first, IncomingConnectionEvent)
+        assert isinstance(duplicate, IncomingConnectionEvent)
         self.assertEqual(first.action_handle, duplicate.action_handle)
         self.assertIsNotNone(first.action_handle)
+        action_handle = first.action_handle
+        assert action_handle is not None
         state.pop_pending_connection(onion)
         state.add_pending_connection(onion, two, b'', expiry_deadline=time.time() + 20)
-        client.send_command(RejectCommand(first.action_handle))
+        client.send_command(RejectCommand(action_handle))
         # Same stream barrier confirms rejection dispatch has completed.
         with self.assertRaises(MetorRequestRejectedError):
             client.request(RestrictClientCommand(), ClientRestrictedEvent)
-        self.assertIs(state.pending_identity(onion)[0], two)
+        pending = state.pending_identity(onion)
+        assert pending is not None
+        self.assertIs(pending[0], two)
 
     def test_release_failure_attempts_all_resources_and_retries_stop(self) -> None:
         """F06: actual normal exit fails truthfully, then stop retries all releases."""
@@ -424,6 +460,8 @@ class ClosureDaemonTests(unittest.TestCase):
         client = self.client(daemon)
         key = daemon._km
         blobs = daemon._blob_store
+        assert key is not None
+        assert blobs is not None
         with (
             patch(
                 'metor.core.daemon.managed.engine.lifecycle.SqlManager.close_connection',
@@ -500,11 +538,11 @@ class ClosureDaemonTests(unittest.TestCase):
         update = f.receiver_messages.update_inbound_voice_metadata
 
         def queue_then_raise(**kwargs: object) -> None:
-            self.assertTrue(queue(**kwargs))
+            self.assertTrue(cast(Callable[..., bool], queue)(**kwargs))
             raise OSError('committed begin')
 
         def update_then_raise(*args: object) -> None:
-            self.assertTrue(update(*args))
+            self.assertTrue(cast(Callable[..., bool], update)(*args))
             raise OSError('committed update')
 
         with patch.object(f.receiver_messages, 'queue_message', queue_then_raise):
@@ -545,6 +583,7 @@ class ClosureDaemonTests(unittest.TestCase):
                 FrameAdmission.ACCEPTED,
             )
         record = f.receiver_messages.get_inbound_voice(f.sender_onion, 'inbound-commit')
+        assert record is not None
         metadata = json.loads(record.payload)
         self.assertTrue(metadata['finalized'])
         self.assertEqual(
@@ -570,6 +609,7 @@ class ClosureDaemonTests(unittest.TestCase):
             promote_voice_callback=voice.promote_fallback,
         )
         unrelated = f.sender_contacts.ensure_alias_for_onion('c' * 56)
+        assert unrelated is not None
         self.assertFalse(router.force_fallback(unrelated)[0])
         self.assertIs(voice._outbound['draft'], turn)
         self.assertFalse(turn.finalized)
@@ -637,6 +677,7 @@ class ClosureDaemonTests(unittest.TestCase):
                 committed = f.sender_messages.get_voice_payload(
                     f.receiver_onion, msg_id, MessageDirection.OUT
                 )
+                assert committed is not None
                 self.assertEqual(committed.delivery, Delivery.DROP)
                 self.assertTrue(json.loads(committed.payload)['fallback_committed'])
                 self.assertTrue(f.sender_blobs.exists(ids[0], BlobLifecycle.PERSISTENT))
@@ -680,6 +721,7 @@ class ClosureDaemonTests(unittest.TestCase):
         record = f.sender_messages.get_voice_payload(
             f.receiver_onion, 'ambiguous', MessageDirection.OUT
         )
+        assert record is not None
         chunk = json.loads(record.payload)['chunk_ids'][0]
         self.assertEqual(
             f.sender_blobs.read(chunk, BlobLifecycle.TEMPORARY), b'recoverable'
@@ -730,7 +772,9 @@ class ClosureDaemonTests(unittest.TestCase):
                         )
                     target = self.daemon(sender=profile == 'sender')
                     targets.append(target)
-                    candidate = MetorClient(target._ipc.port, timeout=2)
+                    port = target._ipc.port
+                    assert port is not None
+                    candidate = MetorClient(port, timeout=2)
                     self.addCleanup(candidate.disconnect)
                     return candidate
 
@@ -745,25 +789,27 @@ class ClosureDaemonTests(unittest.TestCase):
                 retained = f.sender_messages.get_voice_payload(
                     f.receiver_onion, voice_id, MessageDirection.OUT
                 )
+                assert retained is not None
                 self.assertEqual(
                     retained.delivery, Delivery.DROP if fallback else Delivery.LIVE
                 )
-                rows = (
-                    f.sender_messages.get_pending_outbox()
-                    if fallback
-                    else f.sender_messages.get_pending_live_outbox()
-                )
-                identities = (
-                    {row[4] for row in rows}
-                    if fallback
-                    else {row.msg_id for row in rows}
-                )
+                if fallback:
+                    identities = {
+                        row[4] for row in f.sender_messages.get_pending_outbox()
+                    }
+                else:
+                    identities = {
+                        row.msg_id
+                        for row in f.sender_messages.get_pending_live_outbox()
+                    }
                 self.assertTrue({text_id, voice_id} <= identities)
                 # A real locked target fails bootstrap without publishing a candidate.
                 failed = self.daemon(sender=False)
                 self.assertTrue(failed._lock_runtime())
-                coordinator._client_factory = lambda _: MetorClient(
-                    failed._ipc.port, timeout=1
+                failed_port = failed._ipc.port
+                assert failed_port is not None
+                coordinator._client_factory = lambda _, endpoint=failed_port: (
+                    MetorClient(endpoint, timeout=1)
                 )
                 current = coordinator.client
                 with self.assertRaises(ProfileSwitchError) as error:
@@ -778,6 +824,7 @@ class ClosureDaemonTests(unittest.TestCase):
         daemon = self.daemon()
         client = self.client(daemon)
         initial = client.runtime_snapshot()
+        assert initial is not None
         entered, release, finished = (
             threading.Event(),
             threading.Event(),
@@ -826,6 +873,7 @@ class ClosureDaemonTests(unittest.TestCase):
         reader.join(2)
         self.assertTrue(finished.is_set())
         snapshot = snapshots[0]
+        assert snapshot is not None
         self.assertEqual(snapshot.epoch, initial.epoch)
         self.assertGreater(snapshot.revision, initial.revision)
         self.assertTrue(
@@ -852,7 +900,11 @@ class ClosureDaemonTests(unittest.TestCase):
         def failure(peer: str, failed: socket.socket) -> None:
             entered.set()
             self.assertTrue(release.wait(2))
-            daemon._network._controller.disconnect(
+            network = daemon._network
+            assert network is not None
+            controller = network._controller
+            assert controller is not None
+            controller.disconnect(
                 peer, initiated_by_self=False, is_fallback=True, socket_to_close=failed
             )
             finished.set()

@@ -413,7 +413,9 @@ class FinalRemediationContractTests(unittest.TestCase):
         def fake_gui(context: FrontendLaunchContext) -> int:
             nonlocal started
             started = True
-            self.assertFalse(context.host.profile_state().exists)
+            state = context.host.profile_state()
+            assert state is not None
+            self.assertFalse(state.exists)
             with self.assertRaises(FrontendBootstrapError) as raised:
                 context.host.bootstrap(_Interactions())
             self.assertIn('does not exist', str(raised.exception))
@@ -459,7 +461,9 @@ class FinalRemediationContractTests(unittest.TestCase):
                 secret,
             )
             self.assertTrue(result.success)
-            self.assertEqual(context.host.profile_state().profile, 'created')
+            state = context.host.profile_state()
+            assert state is not None
+            self.assertEqual(state.profile, 'created')
             return 0
 
         setattr(fake_gui, 'contract_version', FRONTEND_LAUNCH_CONTRACT_VERSION)

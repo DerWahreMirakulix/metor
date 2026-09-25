@@ -76,7 +76,7 @@ def run_cli(argv: List[str]) -> int:
             '--startup-session-auth-stdin requires daemon --non-interactive.\n'
         )
         return 2
-    if args.command == 'chat' and not extra:
+    if args.command == 'chat':
         selected_frontend: str = (
             args.ui
             or os.environ.get('METOR_UI')
@@ -104,8 +104,6 @@ def run_cli(argv: List[str]) -> int:
             sys.stderr.write(f'{exc}\n')
             return 2
         args.loaded_frontend = loaded_frontend
-
-    if args.command == 'chat':
         if args.profile is not None and not valid_frontend_profile_name(args.profile):
             sys.stderr.write('Invalid profile name.\n')
             return 2

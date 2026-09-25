@@ -41,6 +41,7 @@ from metor.core.daemon.managed.engine.session_access import SessionAccessControl
 from metor.core.daemon.managed.models import TorCommand
 from metor.core.daemon.managed.writer import BoundedSocketWriter, FrameQueueFull
 from metor.core.daemon.managed.handlers.network import NetworkCommandHandler
+from metor.core.daemon.managed.network import NetworkManager
 from metor.core.daemon.managed.network.router import MessageRouter
 from metor.core.daemon.managed.network.router.admission import FrameAdmission
 from metor.core.daemon.managed.network.state import StateTracker
@@ -149,11 +150,12 @@ class AcceptanceRepairContractTests(unittest.TestCase):
         self.receiver_messages = MessageManager(self.receiver_pm)
         self.sender_onion = 'a' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
         self.receiver_onion = 'b' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
-        self.receiver_alias = self.sender_contacts.ensure_alias_for_onion(
+        receiver_alias = self.sender_contacts.ensure_alias_for_onion(
             self.receiver_onion
         )
         self.receiver_contacts.ensure_alias_for_onion(self.sender_onion)
-        assert self.receiver_alias is not None
+        assert receiver_alias is not None
+        self.receiver_alias: str = receiver_alias
         self.sender_blobs = EncryptedBlobStore(
             root / 'sender-persistent', root / 'sender-temporary', b's' * 32
         )
@@ -352,7 +354,7 @@ class AcceptanceRepairContractTests(unittest.TestCase):
         voice = self._voice(sender=False)
         conn_obj = _VoiceSocket()
         conn = cast(socket.socket, conn_obj)
-        begin = {'id': 'duplicate', 'codec': 'opus'}
+        begin: dict[str, object] = {'id': 'duplicate', 'codec': 'opus'}
         chunk = base64.b64encode(b'abc').decode('ascii')
         self.assertIs(
             voice.receive_begin(conn, self.sender_onion, begin),
@@ -400,7 +402,7 @@ class AcceptanceRepairContractTests(unittest.TestCase):
         voice = self._voice(sender=False)
         conn_obj = _VoiceSocket()
         conn = cast(socket.socket, conn_obj)
-        begin = {'id': 'repeat-end', 'codec': 'opus'}
+        begin: dict[str, object] = {'id': 'repeat-end', 'codec': 'opus'}
         chunk = {
             'id': 'repeat-end',
             'offset': 0,
@@ -433,7 +435,7 @@ class AcceptanceRepairContractTests(unittest.TestCase):
         """G05/G06: receiver promotion strengthens one identity in place."""
         voice = self._voice(sender=False)
         conn = cast(socket.socket, _VoiceSocket())
-        begin = {'id': 'same-id', 'codec': 'opus'}
+        begin: dict[str, object] = {'id': 'same-id', 'codec': 'opus'}
         first = base64.b64encode(b'abc').decode('ascii')
         second = base64.b64encode(b'def').decode('ascii')
         self.assertFalse(voice.receive_begin(conn, self.sender_onion, begin))
@@ -711,7 +713,7 @@ class AcceptanceRepairContractTests(unittest.TestCase):
         broadcasts: list[IpcEvent] = []
         handler = object.__new__(NetworkCommandHandler)
         handler._cm = self.receiver_contacts
-        handler._network = cast(object, _NetworkBoundary())
+        handler._network = cast(NetworkManager, _NetworkBoundary())
         handler._send_to = lambda _conn, event: events.append(event)
         handler._broadcast = broadcasts.append
         request_conn = cast(socket.socket, object())
@@ -853,8 +855,10 @@ class AcceptanceRepairContractTests(unittest.TestCase):
         handler._network = Mock()
         handler._cm = self.receiver_contacts
         handler._tm = Mock(onion=self.receiver_onion)
-        handler._is_self_target = lambda _target: False
-        with patch.object(self.receiver_pm.config, 'get_bool', side_effect=get_bool):
+        with (
+            patch.object(handler, '_is_self_target', return_value=False),
+            patch.object(self.receiver_pm.config, 'get_bool', side_effect=get_bool),
+        ):
             handler.handle(
                 BeginVoiceCommand(
                     self.sender_onion, Delivery.DROP, 'local-disabled', 'opus'
@@ -1186,10 +1190,12 @@ class AcceptanceRepairContractTests(unittest.TestCase):
         self.assertEqual(len(delivered_a), 1)
         self.assertEqual(len(delivered_b), 1)
         self.assertIsInstance(delivered_a[0], RuntimeStateChangedEvent)
-        self.assertEqual(delivered_a[0].onion, self.sender_onion)
+        event_a = cast(RuntimeStateChangedEvent, delivered_a[0])
+        self.assertEqual(event_a.onion, self.sender_onion)
         self.assertIsNone(delivered_a[0].request_id)
         self.assertIsInstance(delivered_b[0], RuntimeStateChangedEvent)
-        self.assertIsNone(delivered_b[0].onion)
+        event_b = cast(RuntimeStateChangedEvent, delivered_b[0])
+        self.assertIsNone(event_b.onion)
         self.assertFalse(hasattr(delivered_b[0], 'content'))
 
     def test_normal_exit_preserves_pending_text_and_voice_locally(self) -> None:

@@ -116,11 +116,15 @@ class BootstrapTransportTests(unittest.TestCase):
                     )
                 self.assertTrue(controller.state.covered)
                 bridge.answer('test-password')
-                controller._worker.join(5)
-                self.assertFalse(controller._worker.is_alive())
+                worker = controller._worker
+                assert worker is not None
+                worker.join(5)
+                self.assertFalse(worker.is_alive())
                 controller.poll()
                 self.assertFalse(controller.state.covered)
-                self.assertEqual(controller.state.snapshot.epoch, 'test-epoch')
+                snapshot = controller.state.snapshot
+                assert snapshot is not None
+                self.assertEqual(snapshot.epoch, 'test-epoch')
                 self.assertEqual(
                     commands,
                     [

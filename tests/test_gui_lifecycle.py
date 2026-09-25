@@ -4,6 +4,7 @@ import atexit
 import socket
 import unittest
 from unittest.mock import Mock, patch
+from typing import cast
 
 import test_gui_producers as support
 from metor.client import FrontendProfileState
@@ -116,7 +117,7 @@ class NativeLifecycleTests(unittest.TestCase):
         self.gui.inputs = Mock()
         self.gui.voice = Mock()
         self.gui.playback = Mock()
-        self.gui.playback.auto.focused = True
+        cast(Mock, self.gui.playback).auto.focused = True
         self.gui.security = Mock()
 
     def test_native_departure_revokes_input_and_both_audio_directions(self) -> None:
@@ -128,10 +129,10 @@ class NativeLifecycleTests(unittest.TestCase):
             None
         """
         self.gui.native_departure()
-        self.gui.inputs.focus_lost.assert_called_once_with()
-        self.gui.voice.depart.assert_called_once_with()
-        self.gui.playback.stop.assert_called_once_with()
-        self.gui.security.lock.assert_not_called()
+        cast(Mock, self.gui.inputs).focus_lost.assert_called_once_with()
+        cast(Mock, self.gui.voice).depart.assert_called_once_with()
+        cast(Mock, self.gui.playback).stop.assert_called_once_with()
+        cast(Mock, self.gui.security).lock.assert_not_called()
 
     def test_suspend_adds_privacy_cover_without_synthesizing_resume_input(self) -> None:
         """Suspend disables auto-play and locks after the lost-input barrier.
@@ -142,11 +143,11 @@ class NativeLifecycleTests(unittest.TestCase):
             None
         """
         self.gui.suspend()
-        self.assertFalse(self.gui.playback.auto.focused)
-        self.gui.inputs.focus_lost.assert_called_once_with()
-        self.gui.voice.depart.assert_called_once_with()
-        self.gui.playback.stop.assert_called_once_with()
-        self.gui.security.lock.assert_called_once_with()
+        self.assertFalse(cast(Mock, self.gui.playback).auto.focused)
+        cast(Mock, self.gui.inputs).focus_lost.assert_called_once_with()
+        cast(Mock, self.gui.voice).depart.assert_called_once_with()
+        cast(Mock, self.gui.playback).stop.assert_called_once_with()
+        cast(Mock, self.gui.security).lock.assert_called_once_with()
 
     def test_resume_retains_revoked_input_and_never_unlocks_or_starts_media(
         self,
@@ -156,11 +157,11 @@ class NativeLifecycleTests(unittest.TestCase):
 
         self.gui.resume()
 
-        self.assertFalse(self.gui.playback.auto.focused)
-        self.gui.inputs.focus_lost.assert_called_once_with()
-        self.gui.voice.depart.assert_called_once_with()
-        self.gui.playback.stop.assert_called_once_with()
-        self.gui.security.unlock.assert_not_called()
+        self.assertFalse(cast(Mock, self.gui.playback).auto.focused)
+        cast(Mock, self.gui.inputs).focus_lost.assert_called_once_with()
+        cast(Mock, self.gui.voice).depart.assert_called_once_with()
+        cast(Mock, self.gui.playback).stop.assert_called_once_with()
+        cast(Mock, self.gui.security).unlock.assert_not_called()
 
     def test_resume_disconnect_discards_old_generation_behind_cover(self) -> None:
         """A dead transport cannot remain an apparently authorized resume target."""
@@ -198,7 +199,9 @@ class GuiLifecycleCoreTests(unittest.TestCase):
         self.gui.state.snapshot = self.h.client.runtime_snapshot()
         self.gui.state.covered = False
         self.gui.state.route = Route('V20')
-        self.gui.state.capabilities = frozenset(self.h.client.init_event.capabilities)
+        init_event = self.h.client.init_event
+        assert init_event is not None
+        self.gui.state.capabilities = frozenset(init_event.capabilities)
         self.gui.voice_owner.token = self.h.owner
 
     def settle(self) -> None:
@@ -258,6 +261,7 @@ class GuiLifecycleCoreTests(unittest.TestCase):
             msg_id='discard-on-close',
         )
         self.assertIsInstance(retained, RetainedMessagesEvent)
+        assert retained is not None
         self.assertEqual(retained.messages, [])
 
     def test_failed_target_after_actual_preparation_stays_covered_without_rollback(
@@ -305,6 +309,7 @@ class GuiLifecycleCoreTests(unittest.TestCase):
         profile.initialize()
         key_manager = KeyManager(profile, 'target-password')
         key = key_manager.get_database_key()
+        assert key is not None
         self.addCleanup(SqlManager.close_connection, profile.paths.get_db_file())
         contacts = ContactManager(profile, key)
         messages = MessageManager(profile, key)
@@ -329,10 +334,12 @@ class GuiLifecycleCoreTests(unittest.TestCase):
         atexit.unregister(target.stop)
         self.addCleanup(target.stop)
         target._ipc.start()
+        target_port = target._ipc.port
+        assert target_port is not None
         self.host.bootstrap.return_value = FrontendBootstrapResult(
             'target',
             False,
-            target._ipc.port,
+            target_port,
             False,
             OneUseSecretProvider('target-password'),
             Mock(),
@@ -357,18 +364,21 @@ class GuiLifecycleCoreTests(unittest.TestCase):
             self.settle()
         self.assertFalse(self.gui.lifecycle.failed, self.gui.state.status)
         self.assertFalse(self.gui.state.covered, self.gui.state.status)
-        self.assertEqual(self.gui.state.snapshot.profile, 'target')
+        snapshot = self.gui.state.snapshot
+        assert snapshot is not None
+        self.assertEqual(snapshot.profile, 'target')
         self.assertEqual(self.gui.state.generation, generation + 1)
         self.assertIsNotNone(self.gui.voice_owner.token)
-        self.assertEqual(
-            self.gui.state.preferences.profile_instance_id,
-            self.gui.state.snapshot.profile_instance_id,
-        )
+        preferences = self.gui.state.preferences
+        assert preferences is not None
+        self.assertEqual(preferences.profile_instance_id, snapshot.profile_instance_id)
         self.gui.mailbox.put(Update(generation, 'lost', status='old callback'))
         self.gui.poll()
         self.assertFalse(self.gui.state.covered)
-        self.assertTrue(self.gui.client.is_connected)
-        self.assertIsNotNone(self.gui.client.runtime_snapshot())
+        client = self.gui.client
+        assert client is not None
+        self.assertTrue(client.is_connected)
+        self.assertIsNotNone(client.runtime_snapshot())
         # Disconnect the GUI before stopping the target's temporary Core.
         self.gui.close()
 
@@ -444,7 +454,9 @@ class GuiLifecycleCoreTests(unittest.TestCase):
         provider.get_session_auth_proof.side_effect = lambda challenge, salt: (
             build_session_auth_proof('test-password', challenge, salt)
         )
-        client = MetorClient(self.h.daemon._ipc.port, auth_provider=provider)
+        port = self.h.daemon._ipc.port
+        assert port is not None
+        client = MetorClient(port, auth_provider=provider)
         self.addCleanup(client.disconnect)
         self.assertIsNotNone(client.bootstrap())
         self.gui.client = client
@@ -462,7 +474,9 @@ class GuiLifecycleCoreTests(unittest.TestCase):
         self.assertTrue(
             self.gui.identity.change_password('test-password', 'new-test-password')
         )
-        self.gui._worker.join(5)
+        worker = self.gui._worker
+        assert worker is not None
+        worker.join(5)
         self.gui.poll()
         self.assertEqual(self.gui.identity.outcome, 'saved')
         for secret, accepted in (('test-password', False), ('new-test-password', True)):
@@ -485,9 +499,9 @@ class GuiLifecycleCoreTests(unittest.TestCase):
                 )
 
             provider.get_session_auth_proof.side_effect = proof
-            candidate = MetorClient(
-                self.h.daemon._ipc.port, auth_provider=provider, timeout=2
-            )
+            port = self.h.daemon._ipc.port
+            assert port is not None
+            candidate = MetorClient(port, auth_provider=provider, timeout=2)
             try:
                 self.assertEqual(candidate.bootstrap() is not None, accepted)
             finally:
@@ -507,7 +521,9 @@ class GuiLifecycleCoreTests(unittest.TestCase):
         self.assertTrue(
             self.gui.identity.change_password('wrong-password', 'new-test-password')
         )
-        self.gui._worker.join(5)
+        worker = self.gui._worker
+        assert worker is not None
+        worker.join(5)
         self.gui.poll()
         self.assertEqual(self.gui.identity.outcome, 'rejected')
         self.assertFalse(self.gui.identity.unknown)
@@ -523,7 +539,9 @@ class GuiLifecycleCoreTests(unittest.TestCase):
         self.assertTrue(
             self.gui.identity.change_password('test-password', 'new-test-password')
         )
-        self.gui._worker.join(5)
+        worker = self.gui._worker
+        assert worker is not None
+        worker.join(5)
         self.gui.poll()
         self.assertEqual(self.gui.identity.outcome, 'saved')
         self.assertFalse(self.gui.identity.unknown)

@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
-from metor.data.profile import ProfileManager
+from metor.client import FrontendBootstrapResult, FrontendSettings, OneUseSecretProvider
 from metor.versioning import IPC_PROTOCOL_MIN_SUPPORTED, IPC_PROTOCOL_VERSION
 from metor.core.api import (
     AcceptCommand,
@@ -89,36 +89,23 @@ class _DummyConfig:
         return 3
 
 
-class _DummyProfileManager:
+def _bootstrap_result() -> FrontendBootstrapResult:
+    """Provide the terminal with a typed disposable host projection.
+
+    Args:
+        None
+    Returns:
+        FrontendBootstrapResult: Isolated client settings and endpoint.
     """
-    Provides a dummy profile manager test double.
-    """
-
-    def __init__(self) -> None:
-        """
-        Initializes the dummy profile manager helper.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-
-        self.config: _DummyConfig = _DummyConfig()
-
-    def get_daemon_port(self) -> int:
-        """
-        Returns daemon port for the test scenario.
-
-        Args:
-            None
-
-        Returns:
-            int: The computed return value.
-        """
-
-        return 43111
+    return FrontendBootstrapResult(
+        'test',
+        True,
+        43111,
+        False,
+        OneUseSecretProvider(None),
+        cast(FrontendSettings, _DummyConfig()),
+        False,
+    )
 
 
 class ChatContractTests(unittest.TestCase):
@@ -144,7 +131,7 @@ class ChatContractTests(unittest.TestCase):
             patch('metor.ui.terminal.chat.engine.EventHandler'),
             patch('metor.ui.terminal.chat.engine.CommandDispatcher'),
         ):
-            return Chat(cast(ProfileManager, _DummyProfileManager()))
+            return Chat(_bootstrap_result())
 
     def test_disconnect_exit_message_skips_prompt_during_chat_loop(self) -> None:
         """
@@ -342,7 +329,7 @@ class ChatContractTests(unittest.TestCase):
             patch('metor.ui.terminal.chat.engine.CommandDispatcher'),
         ):
             chat = Chat(
-                cast(ProfileManager, _DummyProfileManager()),
+                _bootstrap_result(),
                 startup_session_auth_provider=lambda: 'session-secret',
             )
 
@@ -1224,8 +1211,8 @@ class LivePushContentTests(unittest.TestCase):
             msg_id='m1',
         )
         self.assertTrue(handle_content_event(handler, event))
-        handler._renderer.print_message.assert_not_called()
-        handler._ipc.send_command.assert_not_called()
+        cast(Mock, handler._renderer).print_message.assert_not_called()
+        cast(Mock, handler._ipc).send_command.assert_not_called()
         handler._queue_buffered_notification.assert_called_once_with(
             'bob', 'bob.onion', 1
         )
@@ -1249,9 +1236,9 @@ class LivePushContentTests(unittest.TestCase):
             msg_id='m1',
         )
         self.assertTrue(handle_content_event(handler, event))
-        handler._renderer.print_message.assert_called_once()
-        handler._ipc.send_command.assert_called_once()
-        command = handler._ipc.send_command.call_args.args[0]
+        cast(Mock, handler._renderer).print_message.assert_called_once()
+        cast(Mock, handler._ipc).send_command.assert_called_once()
+        command = cast(Mock, handler._ipc).send_command.call_args.args[0]
         self.assertIsInstance(command, MarkReadCommand)
         self.assertEqual(command.target, 'alice')
 
@@ -1275,7 +1262,7 @@ class LivePushContentTests(unittest.TestCase):
             msg_id='m1',
         )
         handle_content_event(handler, push)
-        handler._renderer.reset_mock()
+        cast(Mock, handler._renderer).reset_mock()
         consume_response = UnreadMessagesEvent(
             alias='bob',
             onion='bob.onion',
@@ -1289,7 +1276,7 @@ class LivePushContentTests(unittest.TestCase):
             ],
         )
         self.assertTrue(handle_content_event(handler, consume_response))
-        handler._renderer.print_messages_batch.assert_called_once()
+        cast(Mock, handler._renderer).print_messages_batch.assert_called_once()
 
     def test_mark_read_response_does_not_rerender_pushed_live_message(self) -> None:
         """
@@ -1310,7 +1297,7 @@ class LivePushContentTests(unittest.TestCase):
             msg_id='m1',
         )
         handle_content_event(handler, push)
-        handler._renderer.reset_mock()
+        cast(Mock, handler._renderer).reset_mock()
         consume_response = UnreadMessagesEvent(
             alias='alice',
             onion='alice.onion',
@@ -1324,7 +1311,7 @@ class LivePushContentTests(unittest.TestCase):
             ],
         )
         self.assertTrue(handle_content_event(handler, consume_response))
-        handler._renderer.print_messages_batch.assert_not_called()
+        cast(Mock, handler._renderer).print_messages_batch.assert_not_called()
 
     def test_mark_read_response_still_renders_fresh_messages(self) -> None:
         """
@@ -1345,7 +1332,7 @@ class LivePushContentTests(unittest.TestCase):
             msg_id='m1',
         )
         handle_content_event(handler, push)
-        handler._renderer.reset_mock()
+        cast(Mock, handler._renderer).reset_mock()
         consume_response = UnreadMessagesEvent(
             alias='alice',
             onion='alice.onion',
@@ -1359,7 +1346,7 @@ class LivePushContentTests(unittest.TestCase):
             ],
         )
         self.assertTrue(handle_content_event(handler, consume_response))
-        handler._renderer.print_messages_batch.assert_called_once()
+        cast(Mock, handler._renderer).print_messages_batch.assert_called_once()
 
     def test_chat_help_lists_slash_help_command(self) -> None:
         """

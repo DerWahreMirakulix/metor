@@ -8,10 +8,11 @@ import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType, SimpleNamespace
+from typing import Callable, cast
 import unittest
 from unittest.mock import patch
 
-from metor.client import FrontendLaunchContext
+from metor.client import FrontendHost, FrontendLaunchContext
 from metor.ui.gui.launcher import GuiEntry
 
 
@@ -88,7 +89,9 @@ class GuiStartupDiagnosticsTests(unittest.TestCase):
             patch.dict(os.environ, {'SDL_VIDEODRIVER': 'offscreen'}),
             redirect_stderr(sink),
         ):
-            status = GuiEntry()(FrontendLaunchContext(None, SimpleNamespace()))
+            status = GuiEntry()(
+                FrontendLaunchContext(None, cast(FrontendHost, SimpleNamespace()))
+            )
         return status, sink.getvalue()
 
     def test_deliberate_first_run_close_succeeds(self) -> None:
@@ -214,7 +217,7 @@ sys.exit(GuiEntry()(FrontendLaunchContext(None, object(), debug=True)))
             compile('def fail():\n    raise RuntimeError()', secret, 'exec'), namespace
         )
         try:
-            namespace['fail']()
+            cast(Callable[[], None], namespace['fail'])()
         except RuntimeError as error:
             sink = StringIO()
             GuiEntry._report_fatal(sink, 'event-loop', 'RuntimeError', True, error)

@@ -24,6 +24,7 @@ class SqlCipherCursor(Protocol):
         Returns:
             'SqlCipherCursor': The resulting value.
         """
+        ...
 
     def fetchone(self) -> object:
         """Returns the next row from the current result set.
@@ -34,6 +35,7 @@ class SqlCipherCursor(Protocol):
         Returns:
             object: The resulting value.
         """
+        ...
 
     def fetchall(self) -> list[tuple[object, ...]]:
         """Returns all rows from the current result set.
@@ -44,6 +46,7 @@ class SqlCipherCursor(Protocol):
         Returns:
             list[tuple[object, ...]]: The resulting value.
         """
+        ...
 
 
 class SqlCipherConnection(Protocol):
@@ -58,6 +61,7 @@ class SqlCipherConnection(Protocol):
         Returns:
             'SqlCipherConnection': The resulting value.
         """
+        ...
 
     def __exit__(
         self,
@@ -75,6 +79,7 @@ class SqlCipherConnection(Protocol):
         Returns:
             object: The resulting value.
         """
+        ...
 
     def cursor(self) -> SqlCipherCursor:
         """Creates one database cursor.
@@ -85,12 +90,13 @@ class SqlCipherConnection(Protocol):
         Returns:
             SqlCipherCursor: The resulting value.
         """
+        ...
 
     def execute(
         self,
         query: str,
         params: Tuple[SqlParam, ...] = (),
-    ) -> object:
+    ) -> SqlCipherCursor:
         """Executes one SQL statement directly on the connection.
 
         Args:
@@ -98,8 +104,9 @@ class SqlCipherConnection(Protocol):
             params (Tuple[SqlParam, ...]): The params input.
 
         Returns:
-            object: The resulting value.
+            SqlCipherCursor: The resulting cursor.
         """
+        ...
 
     def commit(self) -> None:
         """Commits the current transaction.
@@ -110,6 +117,7 @@ class SqlCipherConnection(Protocol):
         Returns:
             None
         """
+        ...
 
     def close(self) -> None:
         """Closes the database connection.
@@ -120,6 +128,7 @@ class SqlCipherConnection(Protocol):
         Returns:
             None
         """
+        ...
 
 
 class SqlCipherDbApi(Protocol):
@@ -144,6 +153,7 @@ class SqlCipherDbApi(Protocol):
         Returns:
             SqlCipherConnection: The resulting value.
         """
+        ...
 
 
 def _import_sqlcipher_module(module_name: str) -> SqlCipherDbApi:

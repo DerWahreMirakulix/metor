@@ -48,6 +48,7 @@ class MessageArchitectureContractTests(unittest.TestCase):
             command = SendMessageCommand('peer', delivery, content, 'msg-1')
             decoded = IpcCommand.from_dict(json.loads(command.to_json()))
             self.assertIsInstance(decoded, SendMessageCommand)
+            decoded = cast(SendMessageCommand, decoded)
             self.assertIs(decoded.delivery, delivery)
             self.assertEqual(decoded.content, content)
             self.assertIs(decoded.content.type, ContentType.TEXT)

@@ -285,11 +285,24 @@ class PurgeObservationCoreTests(unittest.TestCase):
         provider.get_session_auth_proof.side_effect = lambda challenge, salt: (
             build_session_auth_proof('test-password', challenge, salt)
         )
+        port = fixture.daemon._ipc.port
+        assert port is not None
+
+        def on_disconnect() -> None:
+            """Mark the observed operation lost when this test client detaches.
+
+            Args:
+                None
+            Returns:
+                None
+            """
+            gui.purge.lost(generation)
+
         client = MetorClient(
-            fixture.daemon._ipc.port,
+            port,
             auth_provider=provider,
             on_event=event_received,
-            on_disconnect=lambda: gui.purge.lost(generation),
+            on_disconnect=on_disconnect,
         )
         self.addCleanup(client.disconnect)
         self.assertIsNotNone(client.bootstrap())

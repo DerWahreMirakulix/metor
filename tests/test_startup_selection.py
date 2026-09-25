@@ -6,11 +6,15 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import cast
 from unittest.mock import Mock, patch
 
 from metor.application import create_local_frontend_host
+from metor.application.frontend.host import LocalFrontendHost
 from metor.client import (
+    FRONTEND_LAUNCH_CONTRACT_VERSION,
     FrontendBootstrapError,
+    FrontendEntry,
     FrontendLaunchContext,
     FrontendSelectionKind,
     LoadedFrontend,
@@ -185,7 +189,8 @@ class StartupSelectionTests(unittest.TestCase):
             seen.append((context.profile, controller.state.route.view))
             return 0
 
-        frontend = LoadedFrontend(Mock(frontend_id='gui'), enter)
+        setattr(enter, 'contract_version', FRONTEND_LAUNCH_CONTRACT_VERSION)
+        frontend = LoadedFrontend(Mock(frontend_id='gui'), cast(FrontendEntry, enter))
         with (
             patch('metor.cli.entry.initialize_runtime_environment'),
             patch('metor.cli.entry.load_frontend', return_value=frontend),
@@ -500,7 +505,10 @@ class StartupSelectionTests(unittest.TestCase):
             self.assertEqual(context.host.initial_selection().profile, 'beta')
             return 0
 
-        frontend = LoadedFrontend(Mock(frontend_id='other'), picker)
+        setattr(picker, 'contract_version', FRONTEND_LAUNCH_CONTRACT_VERSION)
+        frontend = LoadedFrontend(
+            Mock(frontend_id='other'), cast(FrontendEntry, picker)
+        )
         with (
             patch('metor.cli.entry.initialize_runtime_environment'),
             patch('metor.cli.entry.load_frontend', return_value=frontend),
@@ -539,7 +547,7 @@ class StartupSelectionTests(unittest.TestCase):
                 bootstrap = pool.submit(host.bootstrap, Mock())
                 self.assertTrue(entered.wait(5))
                 closing = pool.submit(host.close)
-                self.assertTrue(host._closed.wait(5))
+                self.assertTrue(cast(LocalFrontendHost, host)._closed.wait(5))
                 resume.set()
                 with self.assertRaises(FrontendBootstrapError):
                     bootstrap.result()

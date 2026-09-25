@@ -1,6 +1,7 @@
 """Native SDL/Kivy application lifecycle and generation-safe GUI polling."""
 
 from contextlib import ExitStack
+from typing import Literal
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -394,7 +395,7 @@ class MetorApp(App):
             'Desktop lifecycle monitoring failed. Metor remains locked.'
         )
 
-    def on_pause(self) -> bool:
+    def on_pause(self) -> Literal[True]:
         """Covers and safely stops capture on supported native suspend notifications.
 
         Args:
