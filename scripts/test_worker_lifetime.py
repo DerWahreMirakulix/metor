@@ -101,6 +101,8 @@ class _PosixLifetime:
         Returns:
             None
         """
+        if sys.platform == 'win32':
+            raise OSError('POSIX worker lifetime is unavailable on Windows')
         self.parent = psutil.Process(os.getpid())
         children = self.parent.children()
         # A Linux subreaper cannot reconstruct the original parent of an
@@ -190,6 +192,8 @@ class _PosixLifetime:
         Returns:
             None
         """
+        if sys.platform == 'win32':
+            raise OSError('POSIX worker lifetime is unavailable on Windows')
         process = self.process
         if process is None:
             return
@@ -252,6 +256,8 @@ class _PosixLifetime:
         Returns:
             None
         """
+        if sys.platform == 'win32':
+            raise OSError('POSIX worker lifetime is unavailable on Windows')
         process = self.process
         if process is None:
             return
@@ -327,7 +333,7 @@ class _PosixLifetime:
         Returns:
             None
         """
-        if self.old_subreaper is None:
+        if sys.platform == 'win32' or self.old_subreaper is None:
             return
         for child, created in self.known.values():
             try:
