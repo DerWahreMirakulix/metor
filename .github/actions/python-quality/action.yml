@@ -29,7 +29,7 @@ inputs:
   test-command:
     description: Shell command used to execute the test suite.
     required: false
-    default: "python -m unittest discover -s tests -p 'test_*.py'"
+    default: "python scripts/run_tests.py --suite all"
 
 runs:
   using: composite
@@ -77,19 +77,11 @@ runs:
       if: ${{ inputs.run-tests == 'true' }}
       shell: bash
       run: |
-        test_log="${RUNNER_TEMP}/metor-unittest.log"
         set +e
-        ${{ inputs.test-command }} 2>&1 | tee "${test_log}"
-        test_status=${PIPESTATUS[0]}
-        set -e
+        ${{ inputs.test-command }}
+        test_status=$?
         if (( test_status != 0 )); then
-          test_summary="$(tail -c 4096 "${test_log}")"
-          test_summary="${test_summary//"${GITHUB_WORKSPACE}"/'<redacted>'}"
-          test_summary="${test_summary//"${RUNNER_TEMP}"/'<redacted>'}"
-          test_summary="${test_summary//"${HOME}"/'<redacted>'}"
-          test_summary="${test_summary//'%'/'%25'}"
-          test_summary="${test_summary//$'\r'/'%0D'}"
-          test_summary="${test_summary//$'\n'/'%0A'}"
-          echo "::error title=Python quality tests failed::${test_summary}"
+          echo '::error title=Python quality tests failed::See the bounded unittest report artifact.'
           exit "${test_status}"
         fi
+        set -e

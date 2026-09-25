@@ -49,6 +49,18 @@ The repository has no registered production physical appliance adapter. A
 simulator run demonstrates GUI behavior and cannot establish physical, acoustic,
 or accessibility acceptance.
 
+The installed GUI smoke runs
+`python scripts/validate_installed_artifacts.py BUNDLE_ROOT --gui-smoke` with a
+compatible window display. It starts the wheel-installed
+common CLI and actual Kivy event loop against temporary data, checks the usable
+Create profile and missing-selection picker views, closes through the native
+Close handler, and verifies that an unexpected callback returns a safe nonzero
+status. A generic X11 display such as Xvfb is suitable for this software gate;
+the offscreen and simulator modes are not counted as a native window result.
+The OS lifecycle notification source is replaced by an inert test adapter;
+the real toolkit, app, frontend discovery and CLI still run. This smoke does
+not exercise microphone, media, OS suspend, or physical devices.
+
 ## Device configuration (`device.toml`)
 
 An explicit device file describes display, input, and locally available platform

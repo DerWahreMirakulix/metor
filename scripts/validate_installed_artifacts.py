@@ -154,6 +154,34 @@ TERMINAL_HARNESS = FAKE_HARNESS.replace(
     '        print("TERMINAL_LOOP_HELP_REDRAW_OK")',
 )
 
+TERMINAL_MINIMAL_PROBE = """from importlib import metadata
+from importlib.util import find_spec
+from pathlib import Path
+import sys
+import threading
+from unittest.mock import Mock
+import metor.client, metor.cli, metor.ui.terminal
+from metor.client import discover_frontends
+from metor.core.api import Delivery, MessageDirectionCode, VoiceFinalizedEvent
+from metor.ui.terminal.chat.event.handler import EventHandler
+from metor.ui.terminal.chat.session import Session
+prefix = Path(sys.prefix).resolve()
+for module in (metor.client, metor.cli, metor.ui.terminal):
+    assert Path(module.__file__).resolve().is_relative_to(prefix), module.__file__
+assert set(discover_frontends()) == {"terminal"}, discover_frontends()
+assert {item.metadata["Name"] for item in metadata.distributions() if item.metadata["Name"].startswith("metor")} == {"metor", "metor-sdk", "metor-ui-terminal"}
+for name in ("metor.ui.gui", "kivy", "sounddevice", "accesskit"):
+    assert find_spec(name) is None, name
+ipc, renderer = Mock(), Mock()
+handler = EventHandler(ipc, Session(), renderer, threading.Event(), threading.Event(), lambda: 0.0, lambda: False)
+handler.handle(VoiceFinalizedEvent(msg_id="synthetic-voice", size_bytes=4, onion="a" * 56 + ".onion", delivery=Delivery.DROP, direction=MessageDirectionCode.IN))
+assert renderer.print_message.call_count == 1
+assert "Playback is not supported" in renderer.print_message.call_args.args[0]
+assert "/inbox" in renderer.print_message.call_args.args[0]
+ipc.send_command.assert_not_called()
+print("TERMINAL_MINIMAL_VOICE_METADATA_OK", metor.ui.terminal.__file__)
+"""
+
 
 def audit_wheel_records(wheels: tuple[Path, ...]) -> None:
     """Checks real RECORD hashes, disjoint ownership and namespace marker placement."""
@@ -229,8 +257,15 @@ def audit_wheel_records(wheels: tuple[Path, ...]) -> None:
         )
 
 
-def run_acceptance(bundle_root: Path) -> None:
-    """Runs sequential install/uninstall and external positive/negative typing gates."""
+def run_acceptance(bundle_root: Path, *, gui_smoke: bool = False) -> None:
+    """Run installed consumer and optional native display gates.
+
+    Args:
+        bundle_root: Completed platform wheelhouse bundle directory.
+        gui_smoke: Exercise the installed GUI on a supplied native display.
+    Returns:
+        None
+    """
     wheels = tuple(bundle_root.resolve().rglob('*.whl'))
     audit_wheel_records(wheels)
     wheel_dirs = sorted({str(path.parent) for path in wheels})
@@ -336,6 +371,55 @@ def run_acceptance(bundle_root: Path) -> None:
         if 'metor-ui-terminal' not in missing:
             raise RuntimeError('Missing frontend did not name its distribution.')
 
+        # A fresh consumer proves that Terminal has no residual GUI dependencies.
+        venv.EnvBuilder(with_pip=True, symlinks=os.name != 'nt').create(
+            root / 'terminal-minimal'
+        )
+        minimal_python = (
+            root
+            / 'terminal-minimal'
+            / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+        )
+        run(
+            [
+                str(minimal_python),
+                '-m',
+                'pip',
+                'install',
+                *wheel_sources,
+                'metor-sdk',
+                'metor',
+                'metor-ui-terminal',
+            ]
+        )
+        run([str(minimal_python), '-m', 'pip', 'check'])
+        run([str(minimal_python), '-I', '-c', TERMINAL_MINIMAL_PROBE])
+        run([str(minimal_python), '-I', '-m', 'metor', '--help'])
+        run(
+            [
+                str(minimal_python),
+                '-I',
+                '-m',
+                'metor',
+                'chat',
+                '--ui',
+                'terminal',
+                '--help',
+            ]
+        )
+        minimal_inventory = run(
+            [str(minimal_python), '-I', '-m', 'metor', 'chat', '--list-uis']
+        )
+        if 'terminal' not in minimal_inventory or 'gui' in minimal_inventory:
+            raise RuntimeError('Minimal Terminal discovery was not isolated.')
+        minimal_chat = run([str(minimal_python), '-I', '-c', TERMINAL_HARNESS])
+        if (
+            'TERMINAL_LOOP_HELP_REDRAW_OK' not in minimal_chat
+            or '/connect' not in minimal_chat
+        ):
+            raise RuntimeError('Minimal Terminal did not complete its chat loop.')
+        print('TERMINAL_MINIMAL_INSTALLATION_OK')
+
         managed_spawn = (
             Path(__file__).resolve().parents[1] / 'tests' / 'installed_managed_spawn.py'
         )
@@ -415,6 +499,17 @@ py-modules = ["closure_fake"]
         if 'gui' not in gui_inventory or 'terminal' in gui_inventory:
             raise RuntimeError('GUI-only installation inventory was not isolated.')
         print('GUI_ONLY_INSTALLATION_OK')
+        if gui_smoke:
+            gui_launcher = (
+                Path(__file__).resolve().parents[1]
+                / 'tests'
+                / 'gui_installed_launcher.py'
+            )
+            output = run([str(executable), '-I', str(gui_launcher)])
+            if 'INSTALLED_GUI_REAL_LAUNCH_OK desktop' not in output:
+                raise RuntimeError(
+                    'Installed GUI did not finish its native close gate.'
+                )
         install('metor-ui-terminal')
         terminal_output = run([str(executable), '-I', '-c', TERMINAL_HARNESS])
         if (
@@ -465,10 +560,18 @@ py-modules = ["closure_fake"]
 
 
 def main() -> None:
-    """Parses the native built-bundle directory and executes artifact acceptance."""
+    """Parse the native bundle and explicit display gate selection.
+
+    Args:
+        None
+    Returns:
+        None
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('bundle_root', type=Path)
-    run_acceptance(parser.parse_args().bundle_root)
+    parser.add_argument('--gui-smoke', action='store_true')
+    arguments = parser.parse_args()
+    run_acceptance(arguments.bundle_root, gui_smoke=arguments.gui_smoke)
 
 
 if __name__ == '__main__':

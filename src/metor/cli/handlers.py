@@ -158,7 +158,7 @@ class CommandHandlers:
             print('Plaintext profiles cannot be started in locked mode.')
             return 1
         except ValueError as exc:
-            print(format_safe_local_runtime_error(exc))
+            print(format_safe_local_runtime_error(exc), file=sys.stderr)
             return 1
 
         if preparation.already_running:
@@ -312,7 +312,10 @@ class CommandHandlers:
                 )
                 return 1
             except ValueError as exc:
-                print(output_spacer.format(format_safe_local_runtime_error(exc)))
+                print(
+                    output_spacer.format(format_safe_local_runtime_error(exc)),
+                    file=sys.stderr,
+                )
                 return 1
             return 0
 
@@ -339,7 +342,10 @@ class CommandHandlers:
             )
             return 1
         except ValueError as exc:
-            print(output_spacer.format(format_safe_local_runtime_error(exc)))
+            print(
+                output_spacer.format(format_safe_local_runtime_error(exc)),
+                file=sys.stderr,
+            )
             return 1
         except PlaintextLockedDaemonError:
             print(

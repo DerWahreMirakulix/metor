@@ -2604,12 +2604,15 @@ class DaemonHardeningTests(unittest.TestCase):
 
         self.assertFalse(result)
         initialize_mock.assert_called_once()
-        stop_mock.assert_called_once()
+        stop_mock.assert_not_called()
         daemon._outbox.start.assert_not_called()
         status_cb.assert_called_once_with(
             DaemonStatus.RUNTIME_ERROR,
-            {'message': 'listener failed'},
+            {'message': 'Daemon startup failed [network_listener]: RuntimeError.'},
         )
+        self.assertIsNotNone(daemon._last_start_failure)
+        assert daemon._last_start_failure is not None
+        self.assertEqual(daemon._last_start_failure.phase, 'network_listener')
 
     def test_locked_daemon_rejects_self_destruct_command(self) -> None:
         """

@@ -36,8 +36,6 @@ from metor.core.api import (
     VoiceOwnerReleasedEvent,
     VoiceStartedEvent,
     IpcEvent,
-    MessageOutcomeEvent,
-    MessageStatusCode,
 )
 from metor.core.daemon.managed.engine import Daemon
 from metor.core.daemon.managed.local_auth import create_session_auth_context
@@ -548,35 +546,6 @@ class GuiProducerTests(unittest.TestCase):
             )
         self.client.runtime_snapshot()
         self.assertIsNone(self.repository.get('ended-context'))
-
-    def test_receipt_outcome_wire_fields_are_validated_enums(self) -> None:
-        """Optional receipt enums cannot remain unchecked strings after IPC decoding."""
-        event = IpcEvent.from_dict(
-            json.loads(
-                MessageOutcomeEvent(
-                    self.onion,
-                    'receipt',
-                    MessageDirectionCode.OUT,
-                    Delivery.DROP,
-                    MessageStatusCode.DRAFT,
-                ).to_json()
-            )
-        )
-        self.assertIs(event.delivery, Delivery.DROP)
-        self.assertIs(event.status, MessageStatusCode.DRAFT)
-        payload = json.loads(event.to_json())
-        payload['status'] = 'invented-status'
-        with self.assertRaises((TypeError, ValueError)):
-            IpcEvent.from_dict(payload)
-        for context in (True, 0, -1):
-            with self.subTest(context=context), self.assertRaises(ValueError):
-                BeginVoiceCommand(
-                    self.onion,
-                    Delivery.LIVE,
-                    'context',
-                    'opus',
-                    context_generation=context,
-                )
 
     def test_restarted_owner_service_reclaims_orphans_without_restoring_gui_drafts(
         self,

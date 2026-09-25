@@ -7,13 +7,26 @@ import importlib
 import io
 import os
 from pathlib import Path
-import subprocess
 import sys
-from tempfile import TemporaryDirectory
 import time
 from types import TracebackType
 import unittest
 from collections.abc import Iterator
+
+if __package__ in (None, ''):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.test_supervision import supervised, write_completion, write_progress
+
+from metor.client import MetorRequestRejectedError
+from metor.client.ipc import (
+    IpcDisconnectedError,
+    IpcRequestLimitError,
+    IpcSendError,
+    IpcTimeoutError,
+)
+from metor.client.outcomes import MetorProtocolError
+from metor.core.api import EventType, IpcEvent
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +35,7 @@ TESTS = ROOT / 'tests'
 # integration modules as helpers; only explicitly selected modules are loaded.
 FAST_MODULES: tuple[str, ...] = (
     'test_cli_literal_boundary',
+    'test_ci_impact',
     'test_ipc_type_validation',
     'test_quality_gate_contract',
     'test_run_tests',
@@ -96,6 +110,7 @@ INTEGRATION_MODULES: tuple[str, ...] = (
     'test_refactor2_cli_contract',
     'test_release_contract',
     'test_remaining_closure_contract',
+    'test_runtime_start_transaction',
     'test_security_contract',
     'test_session_auth_contract',
     'test_settings_contract',
@@ -113,7 +128,6 @@ INTEGRATION_MODULES: tuple[str, ...] = (
 REPORT = ROOT / 'build' / 'test-report.txt'
 MAX_OUTPUT = 8192
 MAX_DETAILS = 10
-MAX_RUNNER_OUTPUT = 1024 * 1024
 ExcInfo = (
     tuple[type[BaseException], BaseException, TracebackType] | tuple[None, None, None]
 )
@@ -189,6 +203,9 @@ class TimedResult(unittest.TestResult):
         self.skip_count = 0
         self.statuses: dict[str, str] = {}
         self.diagnostics: list[str] = []
+        self.skip_diagnostics: list[str] = []
+        self.omitted_diagnostics = 0
+        self.omitted_skips = 0
 
     def _exc_info_to_string(self, err: ExcInfo, test: unittest.case.TestCase) -> str:
         """Keep only a known category and source-verified repository locations.
@@ -199,26 +216,8 @@ class TimedResult(unittest.TestResult):
         Returns:
             Bounded diagnostic without exception values or local variables.
         """
-        category = (
-            'AssertionError'
-            if err[0] and issubclass(err[0], AssertionError)
-            else (
-                err[0].__name__
-                if err[0]
-                in (
-                    OSError,
-                    ValueError,
-                    TypeError,
-                    ImportError,
-                    ModuleNotFoundError,
-                    RuntimeError,
-                    TimeoutError,
-                    PermissionError,
-                    FileNotFoundError,
-                )
-                else 'Exception'
-            )
-        )
+        category = safe_category(err[1])
+        outcome = safe_outcome(err[1])
         locations: list[str] = []
         traceback = err[2]
         while traceback is not None:
@@ -233,7 +232,10 @@ class TimedResult(unittest.TestResult):
                 if location not in locations:
                     locations.append(location)
             traceback = traceback.tb_next
-        return f'{category} at {", ".join(locations[-3:]) if locations else "repository location unavailable"}'
+        return (
+            f'{category}{f" outcome={outcome}" if outcome else ""} at '
+            f'{", ".join(locations[-3:]) if locations else "repository location unavailable"}'
+        )
 
     def startTest(self, test: unittest.case.TestCase) -> None:
         """Start timing before the case's setUp method.
@@ -243,6 +245,7 @@ class TimedResult(unittest.TestResult):
         Returns:
             None
         """
+        write_progress(test.id())
         self.started[test] = time.perf_counter()
         super().startTest(test)
 
@@ -322,7 +325,7 @@ class TimedResult(unittest.TestResult):
         super().addSkip(test, reason)
         self.skip_count += 1
         self.statuses[test.id()] = 'skip'
-        if len(self.diagnostics) < MAX_DETAILS:
+        if len(self.skip_diagnostics) < MAX_DETAILS:
             # Only fixed, source-verified skip categories are published.
             category = (
                 'platform'
@@ -331,7 +334,9 @@ class TimedResult(unittest.TestResult):
                 or 'linux' in reason.lower()
                 else 'condition'
             )
-            self.diagnostics.append(f'SKIP {test.id()}: {category}')
+            self.skip_diagnostics.append(f'SKIP {test.id()}: {category}')
+        else:
+            self.omitted_skips += 1
 
     def addSubTest(
         self,
@@ -404,6 +409,7 @@ class TimedResult(unittest.TestResult):
             None
         """
         if len(self.diagnostics) >= MAX_DETAILS:
+            self.omitted_diagnostics += 1
             return
         names: list[str] = []
         traceback = err[2]
@@ -486,7 +492,7 @@ def validate_manifest() -> str | None:
 
 
 def safe_category(error: BaseException | None) -> str:
-    """Name only a fixed known built-in exception family.
+    """Name only exact known built-in and SDK exception types.
 
     Args:
         error: Exception object whose value remains private.
@@ -494,6 +500,17 @@ def safe_category(error: BaseException | None) -> str:
         Safe category label.
     """
     kind = type(error)
+    if isinstance(error, AssertionError):
+        return 'AssertionError'
+    if kind in {
+        MetorRequestRejectedError,
+        MetorProtocolError,
+        IpcDisconnectedError,
+        IpcRequestLimitError,
+        IpcSendError,
+        IpcTimeoutError,
+    }:
+        return kind.__name__
     return (
         kind.__name__
         if kind
@@ -511,6 +528,25 @@ def safe_category(error: BaseException | None) -> str:
         }
         else 'Exception'
     )
+
+
+def safe_outcome(error: BaseException | None) -> str | None:
+    """Return a verified enum outcome from an exact SDK rejection type.
+
+    Args:
+        error: Exception whose message and event payload remain private.
+    Returns:
+        Known EventType value, or None when the DTO is not verified.
+    """
+    if not isinstance(error, (MetorRequestRejectedError, MetorProtocolError)) or type(
+        error
+    ) not in {MetorRequestRejectedError, MetorProtocolError}:
+        return None
+    event = error.event
+    if not isinstance(event, IpcEvent):
+        return None
+    outcome = vars(event).get('event_type', vars(type(event)).get('event_type'))
+    return outcome.value if type(outcome) is EventType else None
 
 
 def discover(
@@ -593,8 +629,12 @@ def emit(lines: list[str]) -> None:
     Returns:
         None
     """
-    REPORT.parent.mkdir(parents=True, exist_ok=True)
-    REPORT.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    try:
+        REPORT.parent.mkdir(parents=True, exist_ok=True)
+        REPORT.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    except OSError:
+        print('Test report could not be written.')
+        raise
     for line in lines:
         print(line)
     print('Report: build/test-report.txt')
@@ -758,6 +798,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     lines.extend(f'  {detail}' for detail in result.failure_details)
     lines.extend(f'  {detail}' for detail in result.diagnostics)
+    if result.omitted_diagnostics:
+        lines.append(f'  ... {result.omitted_diagnostics} failure diagnostics omitted')
+    lines.extend(f'  {detail}' for detail in result.skip_diagnostics)
+    if result.omitted_skips:
+        lines.append(f'  ... {result.omitted_skips} skip diagnostics omitted')
     if interrupted:
         lines.append('  Run interrupted before complete results.')
     if result.failure_count + result.error_count > MAX_DETAILS:
@@ -772,52 +817,21 @@ def main(argv: list[str] | None = None) -> int:
     if unknown:
         lines.append(f'  Incomplete: {unknown} selected cases have no result.')
     emit(lines)
-    with REPORT.open('a', encoding='utf-8') as report:
-        timed_ids: set[str] = set()
-        for seconds, name in result.durations:
-            timed_ids.add(name)
-            report.write(
-                f'{name}\t{result.statuses.get(name, "unknown")}\t{seconds:.6f}\n'
-            )
-        for test in selected:
-            if test.id() not in timed_ids:
-                report.write(f'{test.id()}\t{result.statuses[test.id()]}\t-\n')
+    try:
+        with REPORT.open('a', encoding='utf-8') as report:
+            timed_ids: set[str] = set()
+            for seconds, name in result.durations:
+                timed_ids.add(name)
+                report.write(
+                    f'{name}\t{result.statuses.get(name, "unknown")}\t{seconds:.6f}\n'
+                )
+            for test in selected:
+                if test.id() not in timed_ids:
+                    report.write(f'{test.id()}\t{result.statuses[test.id()]}\t-\n')
+    except OSError:
+        print('Test report could not be completed.')
+        raise
     return 0 if result.wasSuccessful() and not interrupted and not unknown else 1
-
-
-def supervised(command: list[str]) -> int:
-    """Require a child completion marker so abrupt exits cannot look green.
-
-    Args:
-        command: Exact worker process command.
-    Returns:
-        Child status, or failure when its result was incomplete.
-    """
-    with TemporaryDirectory(prefix='metor-tests-') as directory:
-        marker = Path(directory) / 'complete'
-        environment = os.environ.copy()
-        environment['METOR_TEST_COMPLETION'] = str(marker)
-        try:
-            completed = subprocess.run(
-                command,
-                cwd=ROOT,
-                env=environment,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except OSError:
-            print('Test worker could not start.')
-            return 1
-        if not marker.is_file() or len(completed.stdout) > MAX_RUNNER_OUTPUT:
-            print('Test worker ended without a bounded, completed result.')
-            return 1
-        sys.stdout.write(completed.stdout)
-        if completed.stderr:
-            print(
-                'Test worker stderr suppressed; use the bounded report for diagnosis.'
-            )
-        return completed.returncode
 
 
 if __name__ == '__main__':
@@ -825,7 +839,18 @@ if __name__ == '__main__':
         sys.exit(main())
     completion = os.environ.get('METOR_TEST_COMPLETION')
     if completion:
-        status = main()
-        Path(completion).write_text('complete', encoding='ascii')
+        REPORT = Path(os.environ['METOR_TEST_REPORT'])
+        os.environ['METOR_TEST_PROGRESS_OWNER'] = str(os.getpid())
+        try:
+            status = main()
+            write_completion(
+                Path(completion),
+                status,
+                REPORT,
+                os.environ['METOR_TEST_NONCE'],
+            )
+        except (OSError, ValueError):
+            print('Test worker could not finalize its bounded result.')
+            sys.exit(1)
         sys.exit(status)
     sys.exit(supervised([sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]]))

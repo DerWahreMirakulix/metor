@@ -159,19 +159,38 @@ class IpcServer:
         """
         self._stop_flag.clear()
         server: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-        static_port: Optional[int] = self._pm.get_static_port()
-        bind_port: int = static_port if static_port else 0
+            static_port: Optional[int] = self._pm.get_static_port()
+            bind_port: int = static_port if static_port else 0
 
-        server.bind((Constants.LOCALHOST, bind_port))
-        server.listen(Constants.SERVER_BACKLOG)
+            server.bind((Constants.LOCALHOST, bind_port))
+            server.listen(Constants.SERVER_BACKLOG)
 
-        self._server = server
-        self.port = server.getsockname()[1]
-        self._pm.set_daemon_port(self.port, os.getpid())
+            self._server = server
+            self.port = server.getsockname()[1]
+            self._pm.set_daemon_port(self.port, os.getpid())
 
-        threading.Thread(target=self._acceptor, daemon=True).start()
+            threading.Thread(target=self._acceptor, daemon=True).start()
+        except BaseException:
+            self._stop_flag.set()
+            failed_port = self.port
+            try:
+                server.close()
+            except Exception:
+                self._server = server
+            else:
+                self._server = None
+                self.port = None
+            if failed_port is not None:
+                try:
+                    self._pm.clear_daemon_port(
+                        expected_pid=os.getpid(), expected_port=failed_port
+                    )
+                except Exception:
+                    pass
+            raise
 
     def stop(self) -> None:
         """

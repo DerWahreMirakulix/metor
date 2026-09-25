@@ -6,7 +6,10 @@ from enum import Enum
 import threading
 import socket
 from typing import TYPE_CHECKING, Callable
-from .release import RuntimeReleaseResult, release_resources
+from metor.core.daemon.managed.runtime_release import (
+    RuntimeReleaseResult,
+    release_resources,
+)
 
 from metor.core.api import EventType, JsonValue, create_event
 from metor.core.daemon.managed.network import StateTracker
@@ -15,6 +18,7 @@ from metor.data.sql import SqlManager
 from metor.utils import Constants, secure_shred_file
 
 if TYPE_CHECKING:
+    from metor.core.daemon.managed.bootstrap import RuntimeBuildCleanupError
     from metor.core.daemon.managed.crypto import Crypto
     from metor.core.daemon.managed.engine.command_dispatch import (
         DaemonCommandDispatcher,
@@ -62,6 +66,7 @@ class DaemonLifecycleMixin:
     _mm: 'MessageManager | None'
     _network: 'NetworkManager | None'
     _outbox: 'OutboxWorker | None'
+    _partial_build_cleanup: 'RuntimeBuildCleanupError | None'
     _pm: 'ProfileManager'
     _runtime_stop_flag: threading.Event
     _session_access: 'SessionAccessController'
@@ -159,6 +164,9 @@ class DaemonLifecycleMixin:
             steps.append(('blob_keys', self._blob_store.close))
         if self._km is not None:
             steps.append(('profile_keys', self._km.clear_sensitive_state))
+        partial = getattr(self, '_partial_build_cleanup', None)
+        if partial is not None:
+            steps.append(('partial_build', partial.retry_cleanup))
         steps.append(
             ('runtime_handlers', self._command_dispatcher.clear_runtime_handlers)
         )
@@ -175,6 +183,7 @@ class DaemonLifecycleMixin:
             self._mm = None
             self._blob_store = None
             self._km = None
+            self._partial_build_cleanup = None
             self._transport_state = StateTracker()
         self._lifecycle = (
             DaemonLifecycle.LOCKED if cleanup_succeeded else DaemonLifecycle.LOCKING

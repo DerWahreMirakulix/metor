@@ -42,13 +42,19 @@ may be repeated; direct `python -m unittest` remains available for one-case
 diagnosis. Empty selections, import failures, duplicate IDs and unexpected
 case modules fail closed. For failures, the console and ignored
 `build/test-report.txt` contain bounded IDs, phase, known-safe error category
-and source-verified relative locations. Exception values, subtest parameters,
-locals and captured output are never printed. The report lists each executed
-case's status and setup-to-cleanup runtime; fixture skips count as skipped
-coverage, while failed fixtures and interrupted runs leave untested cases
-incomplete. XFAIL and XPASS appear separately, and XPASS fails the run. The
-script supervises its test worker; an abrupt process exit without a completed
-result is also a failed run. Direct output from child processes is discarded.
+and source-verified relative locations. A known SDK rejection includes only its
+verified `EventType` outcome; unknown exception names remain generic. Failure
+and skip diagnostics have separate budgets, with omitted counts shown. Exception
+values, subtest parameters, locals and captured output are never printed. The
+report lists each executed case's status and setup-to-cleanup runtime; fixture
+skips count as skipped coverage, while failed fixtures and interrupted runs leave
+untested cases incomplete. XFAIL and XPASS appear separately, and XPASS fails the run. The
+script supervises its test worker with a one-hour whole-worker guard, bounded
+stdout and stderr pipes, and a fresh completion record tied to the bounded
+report. Timeout, excess output, unexpected stderr, report failure and abrupt
+exit fail the run. A verified running test ID is retained for an aborted worker
+when available. Raw stderr is withheld; test and child-process output during
+test execution is discarded.
 The console shows only the requested number of slow cases. Class/module fixture
 costs remain in overall elapsed time, not attributed to an individual case.
 
@@ -60,11 +66,13 @@ not install coverage or claim a coverage threshold. PR merge refs, `main`
 pushes, and manually dispatched CI runs execute the full Linux/Windows ×
 Python 3.11/3.13 software matrix. A push to `embeddedui` uses `scripts/ci_impact.py`
 to run Fast and explicitly selected integration modules on Linux 3.11 only for
-known isolated edits. Shared, security-sensitive, packaging, workflow, unknown
-or unresolvable diffs fall back to the full matrix. The glossary is treated as
-text-only; README installation examples, profile lifecycle views, executable
-examples and packaged resources use the full path. The final `acceptance` job
-requires all planned matrix jobs to pass.
+known isolated edits. Fast selection requires a verified two-commit diff with
+only regular-file content modifications on recognized paths. Renames, additions,
+deletions, type changes, missing refs, shared, security-sensitive, packaging,
+workflow, unknown or unresolvable diffs fall back to the full matrix. The
+glossary is treated as text-only; README installation examples, profile
+lifecycle views, executable examples and packaged resources use the full path.
+The final `acceptance` job requires all planned matrix jobs to pass.
 Run the CI workflow manually on the desired branch/ref for full branch
 acceptance without a PR; a Fast branch push is not a full release gate. The
 release quality gate still runs all tests. CI cancels superseded runs per
@@ -259,11 +267,26 @@ path that was not exercised.
 
 ## 11. Native GUI Acceptance Gates
 
-Native acceptance is capability-selected and separately authorized. Never encode
-a headset brand, GPU, board model, or developer-machine path as a requirement.
+Native media and OS-lifecycle acceptance is capability-selected and separately
+authorized. Never encode a headset brand, GPU, board model, or developer-machine
+path as a requirement.
 Use a fresh installed GUI outside the checkout for an installed gate, record the
 exact source/artifact revision, and keep microphone bytes and temporary profiles
 out of durable artifacts.
+
+After building the current wheelhouse, run the installed consumer validator to
+exercise the independent SDK, Base, Terminal and GUI consumers. It also creates
+a fresh SDK + Base + Terminal environment without GUI or audio frontend packages
+and checks Terminal discovery and a Voice metadata path:
+
+```sh
+python scripts/validate_installed_artifacts.py dist/release
+```
+
+The optional installed GUI start-and-close smoke uses the same validator with
+`--gui-smoke` and requires a working native display provider. On Linux CI, run
+it with the generic X11/SDL2 software display used by the workflow; an EGL/GLX
+failure leaves this native gate open.
 
 Enumerate audio endpoints without opening a stream:
 

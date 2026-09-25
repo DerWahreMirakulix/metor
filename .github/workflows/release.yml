@@ -157,7 +157,26 @@ jobs:
         shell: bash
         run: python scripts/build_release_wheelhouse.py --output-dir dist/release --skip-pip-upgrade --variant all
 
-      - name: Validate installed consumers
+      - name: Provision a generic Linux GUI display
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends xvfb libegl1 libegl-mesa0 libgl1-mesa-dri
+          python -c "import ctypes; ctypes.CDLL('libEGL.so.1')"
+
+      - name: Validate installed consumers and native GUI on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          KIVY_WINDOW: sdl2
+          KIVY_CLIPBOARD: dummy
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          SDL_VIDEODRIVER: x11
+        run: xvfb-run -a --server-args='-screen 0 1280x1024x24' python scripts/validate_installed_artifacts.py dist/release --gui-smoke
+
+      - name: Validate installed consumers on Windows
+        if: runner.os == 'Windows'
         shell: bash
         run: python scripts/validate_installed_artifacts.py dist/release
 

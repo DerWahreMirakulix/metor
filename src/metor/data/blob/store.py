@@ -215,7 +215,12 @@ class EncryptedBlobStore:
         self._blob_key = bytearray(blob_key)
         self._max_blob_bytes = max_blob_bytes
         self._closed = False
-        _create_blob_directories(persistent_dir, temporary_dir)
+        try:
+            _create_blob_directories(persistent_dir, temporary_dir)
+        except BaseException:
+            secure_clear_buffer(self._blob_key)
+            self._closed = True
+            raise
 
     @staticmethod
     def _sync_directory(path: Path) -> None:

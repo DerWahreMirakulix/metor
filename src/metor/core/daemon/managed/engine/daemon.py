@@ -14,6 +14,7 @@ import atexit
 import os
 import signal
 import types
+from dataclasses import dataclass
 from typing import Optional, Callable, Dict, Union
 
 from metor.core.api import (
@@ -57,6 +58,8 @@ from metor.core.daemon.managed.bootstrap import (
     build_runtime,
     CorruptedStorageError,
     DaemonRuntime,
+    RuntimeBuildCleanupError,
+    release_uninstalled_runtime,
 )
 from metor.core.daemon.managed.handlers import (
     NetworkCommandHandler,
@@ -87,9 +90,55 @@ from metor.core.daemon.handlers import (
 from .command_dispatch import DaemonCommandDispatcher
 from .lifecycle import DaemonLifecycle as DaemonLifecycle
 from .lifecycle import DaemonLifecycleMixin
-from .release import release_resources
+from metor.core.daemon.managed.runtime_release import release_resources
 from .session_access import SessionAccessController
 from .session_maintenance import SessionMaintenance
+
+
+@dataclass(frozen=True)
+class RuntimeStartFailure:
+    """Safe local phase and category for an incomplete daemon start."""
+
+    phase: str
+    category: str
+
+
+class RuntimeStartupError(ValueError):
+    """Reports a failed foreground start without exposing exception values."""
+
+    def __init__(self, failure: RuntimeStartFailure) -> None:
+        """Retains the safe startup failure for the foreground CLI.
+
+        Args:
+            failure: Fixed startup phase and known-safe category.
+        Returns:
+            None
+        """
+        super().__init__(
+            f'Daemon startup failed [{failure.phase}]: {failure.category}.'
+        )
+        self.failure = failure
+
+
+def safe_start_category(error: BaseException) -> str:
+    """Classify an internal start exception without formatting its value.
+
+    Args:
+        error: Internal exception that remains in the local call chain.
+    Returns:
+        str: Known-safe category or a conservative fallback.
+    """
+    if isinstance(error, FileNotFoundError):
+        return 'FileNotFoundError'
+    if isinstance(error, PermissionError):
+        return 'PermissionError'
+    if isinstance(error, OSError):
+        return 'OSError'
+    if isinstance(error, RuntimeError):
+        return 'RuntimeError'
+    if isinstance(error, ValueError):
+        return 'ValueError'
+    return 'Exception'
 
 
 class Daemon(DaemonLifecycleMixin):
@@ -142,7 +191,7 @@ class Daemon(DaemonLifecycleMixin):
         ] = status_callback
 
         self._stop_flag: threading.Event = threading.Event()
-        self._stop_lock: threading.Lock = threading.Lock()
+        self._stop_lock: threading.RLock = threading.RLock()
         self._release_lock = threading.RLock()
         self._lifecycle: DaemonLifecycle = (
             DaemonLifecycle.LOCKED if start_locked else DaemonLifecycle.UNLOCKED
@@ -152,6 +201,8 @@ class Daemon(DaemonLifecycleMixin):
         self._domain_operation_lock = threading.RLock()
         self._purge_fence = threading.Event()
         self._purge_operation_id: str | None = None
+        self._last_start_failure: RuntimeStartFailure | None = None
+        self._partial_build_cleanup: RuntimeBuildCleanupError | None = None
         self._require_session_auth: bool = require_session_auth
         self._transport_state: StateTracker = StateTracker()
 
@@ -221,6 +272,7 @@ class Daemon(DaemonLifecycleMixin):
             ),
         )
 
+        atexit.register(self.stop)
         if (
             km is not None
             and tm is not None
@@ -228,19 +280,27 @@ class Daemon(DaemonLifecycleMixin):
             and hm is not None
             and mm is not None
         ):
-            self._install_runtime(
-                DaemonRuntime(
-                    km=km,
-                    tm=tm,
-                    cm=cm,
-                    hm=hm,
-                    mm=mm,
-                    blob_store=blob_store,
-                    session_auth=session_auth,
+            try:
+                self._install_runtime(
+                    DaemonRuntime(
+                        km=km,
+                        tm=tm,
+                        cm=cm,
+                        hm=hm,
+                        mm=mm,
+                        blob_store=blob_store,
+                        session_auth=session_auth,
+                    )
                 )
-            )
+            except Exception as error:
+                self._record_start_failure('runtime_install', error)
+                if self._lock_runtime(preserve_reliability=False):
+                    atexit.unregister(self.stop)
+                raise RuntimeStartupError(
+                    self._last_start_failure
+                    or RuntimeStartFailure('runtime_install', 'Exception')
+                ) from error
 
-        atexit.register(self.stop)
         if os.name != 'nt':
             signal.signal(signal.SIGINT, self._sig_handler)
             signal.signal(signal.SIGTERM, self._sig_handler)
@@ -433,7 +493,7 @@ class Daemon(DaemonLifecycleMixin):
             None
         """
         with self._domain_operation_lock:
-            if self._lifecycle is DaemonLifecycle.LOCKING:
+            if self._lifecycle is not DaemonLifecycle.UNLOCKED:
                 return
             if event.event_type is not EventType.RUNTIME_STATE_CHANGED:
                 stamp_request_id(event)
@@ -479,7 +539,7 @@ class Daemon(DaemonLifecycleMixin):
 
     def _sig_handler(self, signum: int, frame: Optional[types.FrameType]) -> None:
         """
-        Handles termination signals gracefully.
+        Requests shutdown; run() owns cleanup after any in-flight startup returns.
 
         Args:
             signum (int): The signal number.
@@ -488,7 +548,9 @@ class Daemon(DaemonLifecycleMixin):
         Returns:
             None
         """
-        self.stop()
+        with self._stop_lock:
+            self._stop_flag.set()
+            self._runtime_stop_flag.set()
 
     def run(self) -> None:
         """
@@ -501,12 +563,43 @@ class Daemon(DaemonLifecycleMixin):
             None
         """
         try:
-            if self._lifecycle is DaemonLifecycle.LOCKED:
-                self._ipc.start()
-                if self._status_cb:
-                    self._status_cb(DaemonStatus.LOCKED_MODE, {})
-            else:
-                self._start_subsystems()
+            with self._domain_operation_lock:
+                if self._stop_flag.is_set() or self._purge_fence.is_set():
+                    raise RuntimeStartupError(
+                        RuntimeStartFailure('cancelled', 'Cancelled')
+                    )
+                if self._lifecycle is DaemonLifecycle.LOCKED:
+                    try:
+                        self._ipc.start()
+                    except Exception as error:
+                        self._record_start_failure('ipc_listener', error)
+                        raise RuntimeStartupError(
+                            self._last_start_failure
+                            or RuntimeStartFailure('ipc_listener', 'Exception')
+                        ) from error
+                    if self._stop_flag.is_set() or self._purge_fence.is_set():
+                        raise RuntimeStartupError(
+                            RuntimeStartFailure('cancelled', 'Cancelled')
+                        )
+                    if self._status_cb:
+                        try:
+                            self._status_cb(DaemonStatus.LOCKED_MODE, {})
+                        except Exception:
+                            pass
+                else:
+                    self._lifecycle = DaemonLifecycle.UNLOCKING
+                    if not self._start_subsystems():
+                        failure = self._last_start_failure or RuntimeStartFailure(
+                            'runtime', 'Exception'
+                        )
+                        raise RuntimeStartupError(failure)
+                    with self._stop_lock:
+                        if self._stop_flag.is_set() or self._purge_fence.is_set():
+                            raise RuntimeStartupError(
+                                RuntimeStartFailure('cancelled', 'Cancelled')
+                            )
+                        self._lifecycle = DaemonLifecycle.UNLOCKED
+                        self._publish_active_status()
 
             while not self._stop_flag.is_set():
                 time.sleep(Constants.WORKER_SLEEP_SEC)
@@ -529,38 +622,103 @@ class Daemon(DaemonLifecycleMixin):
         Returns:
             bool: True if startup completed successfully.
         """
+        self._last_start_failure = None
         if self._tm is None or self._network is None or self._outbox is None:
-            self.stop()
+            self._record_start_failure('runtime_install')
             return False
 
-        self._pm.initialize()
-
-        success, event_type, params = self._tm.start()
-        if not success:
-            if self._status_cb and event_type is not None:
-                self._status_cb(event_type, params)
-            self.stop()
+        if self._stop_flag.is_set() or self._purge_fence.is_set():
+            self._record_start_failure('cancelled')
             return False
 
         try:
-            self._network.start_listener()
-        except RuntimeError as exc:
-            self._on_runtime_internal_error(str(exc))
-            self.stop()
+            self._pm.initialize()
+        except Exception as error:
+            self._record_start_failure('profile_initialize', error)
             return False
 
-        if not self._ipc.port:
-            self._ipc.start()
+        if self._stop_flag.is_set() or self._purge_fence.is_set():
+            self._record_start_failure('cancelled')
+            return False
 
-        self._outbox.start()
+        try:
+            success, event_type, _params = self._tm.start()
+        except Exception as error:
+            self._record_start_failure('tor_start', error)
+            return False
+        if not success:
+            if self._status_cb and event_type is not None:
+                try:
+                    self._status_cb(event_type, {})
+                except Exception:
+                    pass
+            self._record_start_failure('tor_start')
+            return False
 
-        if self._status_cb:
+        if self._stop_flag.is_set() or self._purge_fence.is_set():
+            self._record_start_failure('cancelled')
+            return False
+        try:
+            self._network.start_listener()
+        except Exception as error:
+            self._record_start_failure('network_listener', error)
+            return False
+
+        if self._stop_flag.is_set() or self._purge_fence.is_set():
+            self._record_start_failure('cancelled')
+            return False
+        try:
+            if not self._ipc.port:
+                self._ipc.start()
+        except Exception as error:
+            self._record_start_failure('ipc_listener', error)
+            return False
+
+        if self._stop_flag.is_set() or self._purge_fence.is_set():
+            self._record_start_failure('cancelled')
+            return False
+        try:
+            self._outbox.start()
+        except Exception as error:
+            self._record_start_failure('outbox', error)
+            return False
+
+        return True
+
+    def _publish_active_status(self) -> None:
+        """Publishes readiness only after the runtime commit point.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        if self._status_cb is None or self._tm is None:
+            return
+        try:
             self._status_cb(
                 DaemonStatus.ACTIVE,
                 {'onion': clean_onion(self._tm.onion or ''), 'port': self._ipc.port},
             )
+        except Exception:
+            pass
 
-        return True
+    def _record_start_failure(self, phase: str, error: Exception | None = None) -> None:
+        """Records only a fixed start phase and known-safe exception category.
+
+        Args:
+            phase: Internal startup step that did not complete.
+            error: Optional underlying exception, never formatted or retained.
+        Returns:
+            None
+        """
+        category = (
+            ('Cancelled' if phase == 'cancelled' else 'Rejected')
+            if error is None
+            else safe_start_category(error)
+        )
+        self._last_start_failure = RuntimeStartFailure(phase, category)
+        self._on_runtime_internal_error(f'Daemon startup failed [{phase}]: {category}.')
 
     def stop(self) -> None:
         """Serializes independently attempted release; failed phases remain retryable.
@@ -571,6 +729,8 @@ class Daemon(DaemonLifecycleMixin):
         Returns:
             None
         """
+        with self._stop_lock:
+            self._stop_flag.set()
         with self._domain_operation_lock, self._release_lock:
             self._stop_resources()
 
@@ -856,6 +1016,7 @@ class Daemon(DaemonLifecycleMixin):
                 return
 
             self._lifecycle = DaemonLifecycle.UNLOCKING
+            start_phase = 'runtime_build'
             try:
                 runtime = build_runtime(
                     self._pm,
@@ -891,15 +1052,87 @@ class Daemon(DaemonLifecycleMixin):
                 self._lifecycle = DaemonLifecycle.LOCKED
                 self._ipc.send_to(conn, create_event(EventType.DB_CORRUPTED))
                 return
-
-            self._install_runtime(runtime)
-
-            self._lifecycle = DaemonLifecycle.UNLOCKED
-            self._session_access.clear_connection_auth(conn)
-            self._session_access.mark_authenticated(conn)
-            if not self._start_subsystems():
+            except RuntimeBuildCleanupError as error:
+                self._partial_build_cleanup = error
+                self._record_start_failure(start_phase, error)
+                self._lock_runtime(preserve_reliability=False)
+                self._ipc.send_to(conn, create_event(EventType.INTERNAL_ERROR))
                 return
-            self._ipc.send_to(conn, create_event(EventType.DAEMON_UNLOCKED))
+            except Exception as error:
+                self._record_start_failure(start_phase, error)
+                self._lock_runtime(preserve_reliability=False)
+                self._ipc.send_to(conn, create_event(EventType.INTERNAL_ERROR))
+                return
+
+            try:
+                start_phase = 'runtime_install'
+                if (
+                    self._stop_flag.is_set()
+                    or self._purge_fence.is_set()
+                    or conn not in self._ipc.active_clients()
+                ):
+                    self._record_start_failure('cancelled')
+                    try:
+                        release_uninstalled_runtime(self._pm, runtime)
+                    except RuntimeBuildCleanupError as cleanup_error:
+                        self._partial_build_cleanup = cleanup_error
+                    self._lock_runtime(preserve_reliability=False)
+                    self._ipc.send_to(conn, create_event(EventType.INTERNAL_ERROR))
+                    return
+                self._install_runtime(runtime)
+                if (
+                    self._stop_flag.is_set()
+                    or self._purge_fence.is_set()
+                    or conn not in self._ipc.active_clients()
+                ):
+                    self._record_start_failure('cancelled')
+                    raise RuntimeStartupError(
+                        self._last_start_failure
+                        or RuntimeStartFailure('cancelled', 'Cancelled')
+                    )
+                start_phase = 'service_start'
+                if not self._start_subsystems():
+                    raise RuntimeStartupError(
+                        self._last_start_failure
+                        or RuntimeStartFailure(start_phase, 'Exception')
+                    )
+                if (
+                    self._stop_flag.is_set()
+                    or self._purge_fence.is_set()
+                    or conn not in self._ipc.active_clients()
+                ):
+                    self._record_start_failure('cancelled')
+                    raise RuntimeStartupError(
+                        self._last_start_failure
+                        or RuntimeStartFailure('cancelled', 'Cancelled')
+                    )
+                start_phase = 'session_commit'
+                with self._stop_lock:
+                    if (
+                        self._stop_flag.is_set()
+                        or self._purge_fence.is_set()
+                        or conn not in self._ipc.active_clients()
+                    ):
+                        self._record_start_failure('cancelled')
+                        raise RuntimeStartupError(
+                            self._last_start_failure
+                            or RuntimeStartFailure('cancelled', 'Cancelled')
+                        )
+                    self._session_access.clear_connection_auth(conn)
+                    self._session_access.mark_authenticated(conn)
+                    self._lifecycle = DaemonLifecycle.UNLOCKED
+                    self._ipc.send_to(conn, create_event(EventType.DAEMON_UNLOCKED))
+                    self._publish_active_status()
+            except Exception as error:
+                if not isinstance(error, RuntimeStartupError):
+                    self._record_start_failure(start_phase, error)
+                if not self._lock_runtime(preserve_reliability=False):
+                    self._on_runtime_internal_error(
+                        'Daemon startup cleanup remains incomplete.'
+                    )
+                self._ipc.send_to(conn, create_event(EventType.INTERNAL_ERROR))
+                return
+
             return
 
         if isinstance(cmd, LockCommand):

@@ -12,14 +12,20 @@ from typing import ForwardRef, Union, get_args, get_origin, get_type_hints
 
 from metor.client.stream import BufferedIpcEventReader
 from metor.core.api import (
+    BeginVoiceCommand,
     CMD_MAP,
+    Delivery,
     EVENT_MAP,
     EventType,
     IpcCommand,
     IpcEvent,
+    MessageDirectionCode,
+    MessageOutcomeEvent,
+    MessageStatusCode,
     SetSettingCommand,
 )
 from metor.core.daemon.managed.ipc import IpcServer
+from metor.utils import Constants
 
 
 class _DispatcherConfig:
@@ -91,6 +97,42 @@ def _sample_payload(dto_type: type[object]) -> dict[str, object]:
 
 class IpcTypeValidationTests(unittest.TestCase):
     """Covers strict recursive validation through real command and event decoders."""
+
+    def test_receipt_outcome_wire_fields_are_validated_enums(self) -> None:
+        """Validate receipt enums and call-context bounds without a Core fixture.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        onion = 'b' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
+        event = IpcEvent.from_dict(
+            json.loads(
+                MessageOutcomeEvent(
+                    onion,
+                    'receipt',
+                    MessageDirectionCode.OUT,
+                    Delivery.DROP,
+                    MessageStatusCode.DRAFT,
+                ).to_json()
+            )
+        )
+        self.assertIs(event.delivery, Delivery.DROP)
+        self.assertIs(event.status, MessageStatusCode.DRAFT)
+        payload = json.loads(event.to_json())
+        payload['status'] = 'invented-status'
+        with self.assertRaises((TypeError, ValueError)):
+            IpcEvent.from_dict(payload)
+        for context in (True, 0, -1):
+            with self.subTest(context=context), self.assertRaises(ValueError):
+                BeginVoiceCommand(
+                    onion,
+                    Delivery.LIVE,
+                    'context',
+                    'opus',
+                    context_generation=context,
+                )
 
     def test_every_registered_dto_accepts_a_valid_wire_sample(self) -> None:
         """Every registered route accepts its JSON-shaped baseline payload."""

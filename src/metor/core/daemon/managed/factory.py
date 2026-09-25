@@ -1,5 +1,6 @@
 """Public helpers for constructing one managed daemon runtime."""
 
+import atexit
 from typing import Callable, Dict, Optional, Union
 
 from metor.core.api import EventType, JsonValue
@@ -11,9 +12,16 @@ from metor.data.profile import ProfileManager
 from metor.core.daemon import InvalidMasterPasswordError
 from metor.core.daemon.managed.bootstrap import (
     CorruptedStorageError,
+    RuntimeBuildCleanupError,
     build_runtime,
+    release_uninstalled_runtime,
 )
-from metor.core.daemon.managed.engine import Daemon
+from metor.core.daemon.managed.engine import (
+    Daemon,
+    RuntimeStartFailure,
+    RuntimeStartupError,
+    safe_start_category,
+)
 from metor.core.daemon.managed.status import DaemonStatus
 
 
@@ -105,16 +113,38 @@ def create_managed_daemon(
         raise InvalidDaemonPasswordError() from exc
     except CorruptedStorageError as exc:
         raise CorruptedDaemonStorageError() from exc
+    except RuntimeBuildCleanupError as exc:
+        if not exc.retry_cleanup():
+            atexit.register(exc.retry_cleanup)
+        raise RuntimeStartupError(
+            RuntimeStartFailure('runtime_build', 'RuntimeError')
+        ) from exc
+    except Exception as exc:
+        raise RuntimeStartupError(
+            RuntimeStartFailure('runtime_build', safe_start_category(exc))
+        ) from exc
 
-    return Daemon(
-        pm,
-        runtime.km,
-        runtime.tm,
-        runtime.cm,
-        runtime.hm,
-        runtime.mm,
-        runtime.blob_store,
-        session_auth=runtime.session_auth,
-        require_session_auth=require_local_auth,
-        status_callback=status_callback,
-    )
+    try:
+        return Daemon(
+            pm,
+            runtime.km,
+            runtime.tm,
+            runtime.cm,
+            runtime.hm,
+            runtime.mm,
+            runtime.blob_store,
+            session_auth=runtime.session_auth,
+            require_session_auth=require_local_auth,
+            status_callback=status_callback,
+        )
+    except Exception as exc:
+        try:
+            release_uninstalled_runtime(pm, runtime)
+        except RuntimeBuildCleanupError as cleanup_error:
+            if not cleanup_error.retry_cleanup():
+                atexit.register(cleanup_error.retry_cleanup)
+        if isinstance(exc, RuntimeStartupError):
+            raise
+        raise RuntimeStartupError(
+            RuntimeStartFailure('daemon_construct', safe_start_category(exc))
+        ) from exc

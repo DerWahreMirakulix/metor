@@ -111,21 +111,31 @@ jobs:
         shell: bash
         run: python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir closure-bundles
 
-      - name: Validate installed consumers
-        if: needs.plan.outputs.mode == 'full' && matrix.python-version == '3.11'
+      - name: Provision a generic Linux GUI display
+        if: needs.plan.outputs.mode == 'full' && runner.os == 'Linux' && matrix.python-version == '3.11'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends xvfb libegl1 libegl-mesa0 libgl1-mesa-dri
+          python -c "import ctypes; ctypes.CDLL('libEGL.so.1')"
+
+      - name: Validate installed consumers and native GUI on Linux
+        if: needs.plan.outputs.mode == 'full' && runner.os == 'Linux' && matrix.python-version == '3.11'
+        shell: bash
+        env:
+          KIVY_WINDOW: sdl2
+          KIVY_CLIPBOARD: dummy
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          SDL_VIDEODRIVER: x11
+        run: xvfb-run -a --server-args='-screen 0 1280x1024x24' python scripts/validate_installed_artifacts.py closure-bundles --gui-smoke
+
+      - name: Validate installed consumers on Windows
+        if: needs.plan.outputs.mode == 'full' && runner.os == 'Windows' && matrix.python-version == '3.11'
         run: python scripts/validate_installed_artifacts.py closure-bundles
 
       - name: Validate native offline installers
         if: needs.plan.outputs.mode == 'full' && matrix.python-version == '3.11'
         run: python scripts/validate_release_installers.py closure-bundles
-
-      - name: Provision and verify Linux EGL software rendering
-        if: needs.plan.outputs.mode == 'full' && runner.os == 'Linux' && matrix.python-version == '3.11'
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri
-          python -c "import ctypes; ctypes.CDLL('libEGL.so.1')"
 
       - name: Run native GUI fixtures outside unittest discovery
         if: needs.plan.outputs.mode == 'full' && runner.os == 'Linux' && matrix.python-version == '3.11'
@@ -172,7 +182,38 @@ jobs:
           PLAN: ${{ needs.plan.result }}
           QUALITY: ${{ needs['python-quality'].result }}
           MODE: ${{ needs.plan.outputs.mode }}
+          MATRIX: ${{ needs.plan.outputs.matrix }}
         run: |
+          set -euo pipefail
+          if [[ "$MODE" != fast && "$MODE" != full ]]; then
+            echo 'CI plan has no recognized acceptance mode.' >&2
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          import os
+
+          expected = (
+              {('ubuntu-latest', '3.11'), ('ubuntu-latest', '3.13'),
+               ('windows-latest', '3.11'), ('windows-latest', '3.13')}
+              if os.environ['MODE'] == 'full'
+              else {('ubuntu-latest', '3.11')}
+          )
+          try:
+              matrix = json.loads(os.environ['MATRIX'])
+              rows = matrix['include']
+              actual = [(row['os'], row['python-version']) for row in rows]
+              valid = (
+                  set(matrix) == {'include'}
+                  and all(set(row) == {'os', 'python-version'} for row in rows)
+                  and len(actual) == len(expected)
+                  and set(actual) == expected
+              )
+          except (KeyError, TypeError, ValueError):
+              valid = False
+          if not valid:
+              raise SystemExit('CI plan has an incomplete or invalid required matrix.')
+          PY
           if [[ "$PLAN" != success || "$QUALITY" != success ]]; then
             echo "Required $MODE candidate checks are incomplete or failed." >&2
             exit 1

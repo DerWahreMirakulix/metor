@@ -2,7 +2,8 @@
 
 import argparse
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import re
 import subprocess
 
 from scripts.run_tests import INTEGRATION_MODULES
@@ -16,6 +17,147 @@ ISOLATED_GUI_MODULES: dict[str, tuple[str, ...]] = {
 ISOLATED_GUI_TESTS = frozenset(
     {'test_gui_buttons', 'test_gui_fonts', 'test_gui_pages', 'test_gui_root'}
 )
+_COMMIT_ID = re.compile(rb'[0-9a-f]{40,64}')
+_REGULAR_MODES = frozenset({b'100644', b'100755'})
+
+
+def _commit_id(reference: str, root: Path) -> str | None:
+    """Resolve a reference to an existing commit without accepting Git options.
+
+    Args:
+        reference: Commit reference supplied by the workflow.
+        root: Checked-out repository root.
+    Returns:
+        The full commit ID, or None when resolution fails.
+    """
+    try:
+        result = subprocess.run(
+            [
+                'git',
+                'rev-parse',
+                '--verify',
+                '--quiet',
+                '--end-of-options',
+                f'{reference}^{{commit}}',
+            ],
+            cwd=root,
+            capture_output=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    value = result.stdout.strip()
+    return value.decode('ascii') if _COMMIT_ID.fullmatch(value) else None
+
+
+def _regular_mode(reference: str, name: str, root: Path) -> bytes | None:
+    """Read a path's Git mode without following a worktree symlink.
+
+    Args:
+        reference: Verified commit ID.
+        name: Validated repository-relative path.
+        root: Checked-out repository root.
+    Returns:
+        A regular-file mode, or None for other Git objects and errors.
+    """
+    try:
+        result = subprocess.run(
+            ['git', 'ls-tree', '-z', reference, '--', f':(literal){name}'],
+            cwd=root,
+            capture_output=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    records = result.stdout.split(b'\0')
+    if len(records) != 2 or records[-1] != b'':
+        return None
+    metadata, separator, listed_name = records[0].partition(b'\t')
+    parts = metadata.split()
+    if separator != b'\t' or len(parts) != 3 or parts[1] != b'blob':
+        return None
+    if listed_name != name.encode('utf-8'):
+        return None
+    return parts[0] if parts[0] in _REGULAR_MODES else None
+
+
+def _parse_diff_records(data: bytes) -> list[str] | None:
+    """Parse only complete, unique regular modification records.
+
+    Args:
+        data: NUL-delimited Git name-status output.
+    Returns:
+        Changed paths, or None for malformed or nonmodification records.
+    """
+    fields = data.split(b'\0')
+    if fields[-1] != b'' or (len(fields) - 1) % 2:
+        return None
+    paths: list[str] = []
+    seen: set[str] = set()
+    for index in range(0, len(fields) - 1, 2):
+        if fields[index] != b'M':
+            return None
+        try:
+            name = fields[index + 1].decode('utf-8')
+        except UnicodeDecodeError:
+            return None
+        path = PurePosixPath(name)
+        if (
+            not name
+            or path.is_absolute()
+            or path.as_posix() != name
+            or any(part in ('.', '..') for part in path.parts)
+            or '\\' in name
+            or name in seen
+        ):
+            return None
+        paths.append(name)
+        seen.add(name)
+    return paths or None
+
+
+def changed_regular_paths(base: str, head: str, root: Path) -> list[str] | None:
+    """Read a complete two-commit diff or require full acceptance.
+
+    Args:
+        base: Workflow diff base reference.
+        head: Workflow candidate reference.
+        root: Checked-out repository root.
+    Returns:
+        Changed regular-file paths, or None for any uncertain diff.
+    """
+    base_id = _commit_id(base, root)
+    head_id = _commit_id(head, root)
+    if not base_id or not head_id or head_id != _commit_id('HEAD', root):
+        return None
+    try:
+        result = subprocess.run(
+            [
+                'git',
+                'diff',
+                '--no-ext-diff',
+                '--no-textconv',
+                '--no-renames',
+                '--name-status',
+                '-z',
+                base_id,
+                head_id,
+                '--',
+            ],
+            cwd=root,
+            capture_output=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    paths = _parse_diff_records(result.stdout)
+    if paths is None:
+        return None
+    for name in paths:
+        old_mode = _regular_mode(base_id, name, root)
+        if old_mode is None or _regular_mode(head_id, name, root) != old_mode:
+            return None
+    return paths
 
 
 def decide(paths: list[str], root: Path) -> tuple[str, tuple[str, ...]]:
@@ -32,7 +174,11 @@ def decide(paths: list[str], root: Path) -> tuple[str, tuple[str, ...]]:
     selected: set[str] = set()
     for name in paths:
         path = root / name
-        if not path.is_file() or not path.resolve().is_relative_to(root.resolve()):
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or not path.resolve().is_relative_to(root.resolve())
+        ):
             return 'full', ()
         if name == 'docs/GLOSSARY.md':
             continue
@@ -48,6 +194,8 @@ def decide(paths: list[str], root: Path) -> tuple[str, tuple[str, ...]]:
                 return 'full', ()
             selected.add(module)
             continue
+        return 'full', ()
+    if not selected.issubset(INTEGRATION_MODULES):
         return 'full', ()
     return 'fast', tuple(sorted(selected))
 
@@ -72,17 +220,9 @@ def main() -> int:
     if args.full or not args.base or not args.head:
         mode, modules = 'full', ()
     else:
-        try:
-            diff = subprocess.run(
-                ['git', 'diff', '--name-only', args.base, args.head, '--'],
-                cwd=root,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            mode, modules = decide(diff.stdout.splitlines(), root)
-        except (OSError, subprocess.CalledProcessError):
-            mode, modules = 'full', ()
+        mode, modules = decide(
+            changed_regular_paths(args.base, args.head, root) or [], root
+        )
     matrix = (
         {
             'include': [
