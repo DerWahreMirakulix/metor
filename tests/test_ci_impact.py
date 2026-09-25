@@ -3,7 +3,9 @@
 from contextlib import redirect_stdout
 from io import StringIO
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -85,6 +87,189 @@ class CiImpactTests(unittest.TestCase):
         """
         paths = ci_impact.changed_regular_paths(base, head, self.root)
         return ci_impact.decide(paths or [], self.root)
+
+    def install_plan_scripts(self) -> None:
+        """Copy the actual plan entrypoint and inventory into the Git fixture.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        source = Path(ci_impact.__file__).resolve().parent
+        destination = self.root / 'scripts'
+        destination.mkdir()
+        for name in ('ci_impact.py', 'test_inventory.py'):
+            shutil.copyfile(source / name, destination / name)
+
+    def invoke_isolated_plan(
+        self, *options: str, direct: bool = False
+    ) -> tuple[int, dict[str, str], str]:
+        """Run the real planner with site and checkout packages unavailable.
+
+        Args:
+            *options: Planner mode or diff references.
+            direct: Invoke the script path instead of the module entrypoint.
+        Returns:
+            Exit status, parsed GitHub output, and process output.
+        """
+        output = self.root / '.git' / 'plan-output.txt'
+        output.unlink(missing_ok=True)
+        target = ['scripts/ci_impact.py'] if direct else ['-m', 'scripts.ci_impact']
+        environment = os.environ.copy()
+        environment.pop('PYTHONPATH', None)
+        environment['PYTHONDONTWRITEBYTECODE'] = '1'
+        result = subprocess.run(
+            [
+                sys.executable,
+                '-S',
+                *target,
+                *options,
+                '--github-output',
+                str(output),
+            ],
+            cwd=self.root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        entries = (
+            dict(
+                line.split('=', 1)
+                for line in output.read_text(encoding='utf-8').splitlines()
+            )
+            if output.exists()
+            else {}
+        )
+        return result.returncode, entries, result.stdout + result.stderr
+
+    def test_isolated_plan_entrypoints_and_verified_diff(self) -> None:
+        """A checkout-only Python plans full and fast paths without site packages.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self.install_plan_scripts()
+        panel = 'src/metor/ui/gui/views/root/panel.py'
+        core = 'src/metor/core/tor.py'
+        self.write(panel, 'before')
+        self.write(core, 'before')
+        base = self.commit()
+        expected_matrix = {
+            ('ubuntu-latest', '3.11'),
+            ('ubuntu-latest', '3.13'),
+            ('windows-latest', '3.11'),
+            ('windows-latest', '3.13'),
+        }
+        for direct in (False, True):
+            with self.subTest(entrypoint='script' if direct else 'module'):
+                status, entries, output = self.invoke_isolated_plan(
+                    '--full', direct=direct
+                )
+                self.assertEqual(status, 0, output)
+                self.assertEqual(entries['mode'], 'full')
+                self.assertEqual(entries['modules'], '')
+                self.assertEqual(
+                    {
+                        (item['os'], item['python-version'])
+                        for item in json.loads(entries['matrix'])['include']
+                    },
+                    expected_matrix,
+                )
+        self.write(panel, 'after')
+        head = self.commit()
+        status, entries, output = self.invoke_isolated_plan(
+            '--base', base, '--head', head
+        )
+        self.assertEqual(status, 0, output)
+        self.assertEqual(entries['mode'], 'fast')
+        self.assertEqual(entries['modules'], 'test_gui_contract test_gui_root')
+        self.assertEqual(
+            json.loads(entries['matrix'])['include'],
+            [{'os': 'ubuntu-latest', 'python-version': '3.11'}],
+        )
+        for missing in ('missing-base', 'missing-head'):
+            with self.subTest(missing=missing):
+                old = missing if missing == 'missing-base' else base
+                new = missing if missing == 'missing-head' else head
+                status, entries, output = self.invoke_isolated_plan(
+                    '--base', old, '--head', new
+                )
+                self.assertEqual(status, 0, output)
+                self.assertEqual(entries['mode'], 'full')
+        self.write(core, 'after')
+        shared_head = self.commit()
+        status, entries, output = self.invoke_isolated_plan(
+            '--base', head, '--head', shared_head
+        )
+        self.assertEqual(status, 0, output)
+        self.assertEqual(entries['mode'], 'full')
+
+    def test_plan_imports_only_standard_library_and_inventory(self) -> None:
+        """The planner does not load runner, supervisor, SDK, or psutil.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self.install_plan_scripts()
+        code = (
+            'import builtins, sys\n'
+            'original = builtins.__import__\n'
+            'blocked = ("scripts.run_tests", "scripts.test_supervision", '
+            '"metor", "psutil")\n'
+            'def guarded(name, *args, **kwargs):\n'
+            '    if any(name == item or name.startswith(item + ".") '
+            'for item in blocked):\n'
+            '        raise AssertionError("planner loaded runtime dependency")\n'
+            '    return original(name, *args, **kwargs)\n'
+            'builtins.__import__ = guarded\n'
+            'import scripts.test_inventory, scripts.ci_impact\n'
+            'assert not any(name == item or name.startswith(item + ".") '
+            'for name in sys.modules for item in blocked)\n'
+        )
+        environment = os.environ.copy()
+        environment.pop('PYTHONPATH', None)
+        environment['PYTHONDONTWRITEBYTECODE'] = '1'
+        result = subprocess.run(
+            [sys.executable, '-S', '-c', code],
+            cwd=self.root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_unclassified_file_still_invalidates_runner_inventory(self) -> None:
+        """The shared inventory retains the runner's complete-file gate.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        from scripts import run_tests
+        from scripts.test_inventory import FAST_MODULES, INTEGRATION_MODULES
+
+        self.assertIs(run_tests.FAST_MODULES, FAST_MODULES)
+        self.assertIs(run_tests.INTEGRATION_MODULES, INTEGRATION_MODULES)
+        self.assertIs(ci_impact.INTEGRATION_MODULES, INTEGRATION_MODULES)
+        tests = self.root / 'tests'
+        tests.mkdir()
+        for module in FAST_MODULES + INTEGRATION_MODULES:
+            (tests / f'{module}.py').touch()
+        with patch.object(run_tests, 'TESTS', tests):
+            self.assertIsNone(run_tests.validate_manifest())
+            (tests / 'test_new_unclassified.py').touch()
+            self.assertIn(
+                '1 unclassified files, 0 missing files',
+                run_tests.validate_manifest() or '',
+            )
 
     def test_existing_gui_renderer_modification_selects_known_modules(self) -> None:
         """A content edit to the sole known renderer retains a narrow check.

@@ -6,8 +6,6 @@ import os
 from pathlib import Path
 import re
 import secrets
-import signal
-import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import threading
@@ -15,6 +13,8 @@ import time
 from typing import BinaryIO
 
 import psutil
+
+from scripts.test_worker_lifetime import _PosixLifetime, _WindowsLifetime
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +31,7 @@ RUNNER_DRAIN_SEC = 1.0
 RUNNER_STOP_SEC = 3.0
 RUNNER_READ_CHUNK = 65536
 COMPLETION_VERSION = 1
+_SUPERVISOR_LOCK = threading.Lock()
 
 
 class _StreamCapture:
@@ -71,95 +72,6 @@ class _StreamCapture:
             self.read_failed.set()
         finally:
             self.closed.set()
-
-
-def _owned_descendants(pid: int, started: float) -> list[psutil.Process]:
-    """Find only children whose parent chain leads to this new worker PID.
-
-    Args:
-        pid: Worker process ID assigned to this invocation.
-        started: Worker launch time on the wall clock.
-    Returns:
-        Known descendants created during this invocation.
-    """
-    parents = {pid}
-    descendants: dict[int, psutil.Process] = {}
-    try:
-        processes = list(psutil.process_iter(['pid', 'ppid', 'create_time']))
-    except psutil.Error:
-        return []
-    while True:
-        added = False
-        for candidate in processes:
-            try:
-                details = candidate.info
-                if (
-                    details['pid'] not in descendants
-                    and details['ppid'] in parents
-                    and isinstance(details['create_time'], (int, float))
-                    and details['create_time'] >= started - RUNNER_STOP_SEC
-                ):
-                    descendants[candidate.pid] = candidate
-                    parents.add(candidate.pid)
-                    added = True
-            except (psutil.Error, KeyError):
-                continue
-        if not added:
-            return list(descendants.values())
-
-
-def _stop_worker(process: subprocess.Popen[bytes], started: float) -> None:
-    """Stop the owned worker and its inherited process group within a bound.
-
-    Args:
-        process: Worker started by this supervisor.
-        started: Worker launch time on the wall clock.
-    Returns:
-        None
-    """
-    descendants = _owned_descendants(process.pid, started)
-    if os.name == 'nt':
-        try:
-            subprocess.run(
-                ['taskkill', '/T', '/F', '/PID', str(process.pid)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=RUNNER_STOP_SEC,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-        if process.poll() is None:
-            process.kill()
-    else:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-    try:
-        process.wait(timeout=RUNNER_STOP_SEC)
-    except subprocess.TimeoutExpired:
-        if os.name != 'nt':
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        process.kill()
-        try:
-            process.wait(timeout=RUNNER_STOP_SEC)
-        except subprocess.TimeoutExpired:
-            pass
-    for child in reversed(descendants):
-        try:
-            child.terminate()
-        except psutil.Error:
-            pass
-    _, live = psutil.wait_procs(descendants, timeout=RUNNER_STOP_SEC)
-    for child in live:
-        try:
-            child.kill()
-        except psutil.Error:
-            pass
 
 
 def _report_digest(report: Path) -> str:
@@ -299,7 +211,7 @@ def _last_progress(path: Path) -> str | None:
         return None
 
 
-def supervised(
+def _supervised_locked(
     command: list[str],
     *,
     timeout: float = RUNNER_WORKER_TIMEOUT_SEC,
@@ -307,7 +219,7 @@ def supervised(
     max_stderr: int = MAX_RUNNER_STDERR,
     report_path: Path | None = None,
 ) -> int:
-    """Supervise one worker with bounded pipes, lifetime and report evidence.
+    """Run one worker while this process exclusively owns its child scope.
 
     Args:
         command: Exact worker process command.
@@ -330,23 +242,24 @@ def supervised(
         environment['METOR_TEST_REPORT'] = str(report)
         environment['METOR_TEST_NONCE'] = nonce
         environment['METOR_TEST_PROGRESS'] = str(progress)
+        scope: _PosixLifetime | _WindowsLifetime | None = None
         try:
-            started_wall = time.time()
-            process = subprocess.Popen(
-                command,
-                cwd=ROOT,
-                env=environment,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                start_new_session=os.name != 'nt',
-                creationflags=(
-                    getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
-                    if os.name == 'nt'
-                    else 0
-                ),
-            )
-        except OSError:
+            scope = _WindowsLifetime() if os.name == 'nt' else _PosixLifetime()
+            process = scope.launch(command, environment)
+        except (OSError, psutil.Error):
+            cleanup_confirmed = True
+            if scope is not None:
+                try:
+                    cleanup_confirmed = scope.stop()
+                except BaseException:
+                    cleanup_confirmed = False
+                try:
+                    cleanup_confirmed = scope.close() and cleanup_confirmed
+                except BaseException:
+                    cleanup_confirmed = False
             print('Test worker could not start.')
+            if not cleanup_confirmed:
+                print('Test worker startup cleanup could not be confirmed.')
             return 1
         assert process.stdout is not None and process.stderr is not None
         stdout = _StreamCapture(max_stdout)
@@ -357,6 +270,8 @@ def supervised(
         ]
         reason: str | None = None
         deadline = time.monotonic() + timeout
+        cleanup_confirmed = False
+        scope_restored = False
         try:
             for reader in readers:
                 reader.start()
@@ -371,23 +286,37 @@ def supervised(
                     reason = 'timeout'
                     break
                 time.sleep(RUNNER_POLL_SEC)
-            if reason is None:
-                for reader in readers:
-                    reader.join(RUNNER_DRAIN_SEC)
-                if not stdout.closed.is_set() or not stderr.closed.is_set():
-                    reason = 'stream-open'
-                elif stdout.overflow.is_set() or stderr.overflow.is_set():
-                    reason = 'output-limit'
-                elif stdout.read_failed.is_set() or stderr.read_failed.is_set():
-                    reason = 'stream-read-error'
+            if reason is None and scope.live():
+                reason = 'process-left-running'
         except KeyboardInterrupt:
             reason = 'interrupted'
+        except (OSError, psutil.Error):
+            reason = 'ownership-unconfirmed'
+        except RuntimeError:
+            reason = 'stream-start-error'
         finally:
-            if reason is not None:
-                _stop_worker(process, started_wall)
+            try:
+                cleanup_confirmed = scope.stop()
+            except BaseException:
+                cleanup_confirmed = False
             for reader in readers:
                 if reader.ident is not None:
-                    reader.join(RUNNER_DRAIN_SEC)
+                    try:
+                        reader.join(RUNNER_DRAIN_SEC)
+                    except BaseException:
+                        reason = reason or 'stream-read-error'
+            try:
+                scope_restored = scope.close()
+            except BaseException:
+                scope_restored = False
+        if not cleanup_confirmed or not scope_restored:
+            reason = reason or 'ownership-unconfirmed'
+        if not stdout.closed.is_set() or not stderr.closed.is_set():
+            reason = reason or 'stream-open'
+        if stdout.overflow.is_set() or stderr.overflow.is_set():
+            reason = reason or 'output-limit'
+        if stdout.read_failed.is_set() or stderr.read_failed.is_set():
+            reason = reason or 'stream-read-error'
         if reason is not None:
             _emit_safe_worker_hints(stdout.buffer)
             if last_id := _last_progress(progress):
@@ -410,3 +339,32 @@ def supervised(
             return 1
         sys.stdout.write(stdout.buffer.decode('utf-8', errors='replace'))
         return status
+
+
+def supervised(
+    command: list[str],
+    *,
+    timeout: float = RUNNER_WORKER_TIMEOUT_SEC,
+    max_stdout: int = MAX_RUNNER_OUTPUT,
+    max_stderr: int = MAX_RUNNER_STDERR,
+    report_path: Path | None = None,
+) -> int:
+    """Serialize one bounded worker lifetime in this supervisor process.
+
+    Args:
+        command: Exact worker process command.
+        timeout: Maximum worker execution time.
+        max_stdout: Maximum safe console bytes retained.
+        max_stderr: Maximum private stderr bytes retained.
+        report_path: Current worker's report; defaults to the canonical path.
+    Returns:
+        Verified child status, or failure when evidence is incomplete.
+    """
+    with _SUPERVISOR_LOCK:
+        return _supervised_locked(
+            command,
+            timeout=timeout,
+            max_stdout=max_stdout,
+            max_stderr=max_stderr,
+            report_path=report_path,
+        )

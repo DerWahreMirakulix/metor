@@ -2,18 +2,22 @@
 
 from contextlib import redirect_stderr, redirect_stdout
 import io
+import os
 from pathlib import Path
+import psutil
 import shutil
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
 from textwrap import dedent
+import threading
 import time
 import unittest
 from typing import cast
 from unittest.mock import Mock, patch
 
-from scripts import ci_impact, run_tests
+from scripts import ci_impact, run_tests, test_supervision
+from scripts.test_worker_lifetime import _PosixLifetime, _WindowsLifetime
 from metor.client import MetorRequestRejectedError
 from metor.core.api import InternalErrorEvent
 
@@ -707,6 +711,181 @@ class SupervisorTests(unittest.TestCase):
                 )
             return status, sink.getvalue(), time.monotonic() - started
 
+    def invoke_with_child(
+        self,
+        *,
+        detached: bool = False,
+        ignore_term: bool = False,
+        inherit_pipes: bool = False,
+        root_hangs: bool = False,
+        root_output_excess: bool = False,
+        interrupt: bool = False,
+        foreign: subprocess.Popen[bytes] | None = None,
+    ) -> tuple[int, str, bool, bool]:
+        """Observe and independently reap one disposable worker child.
+
+        Args:
+            detached: Give the child a separate session from the worker.
+            ignore_term: Make the child require escalation on POSIX.
+            inherit_pipes: Keep the worker's output pipes open in the child.
+            root_hangs: Keep the root worker active until its supervisor deadline.
+            root_output_excess: Trigger the bounded stdout guard after child startup.
+            interrupt: Interrupt the supervisor after the child is registered.
+            foreign: Preexisting, separately owned control process.
+        Returns:
+            Supervisor status, safe output, child liveness, and reader completion.
+        """
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            marker, acknowledged = root / 'child.pid', root / 'acknowledged'
+            child_program = (
+                'import os,signal,time\n'
+                'from pathlib import Path\n'
+                + (
+                    'signal.signal(signal.SIGTERM,signal.SIG_IGN)\n'
+                    if ignore_term and os.name != 'nt'
+                    else ''
+                )
+                + f'Path({str(marker)!r}).write_text(str(os.getpid()))\n'
+                + 'time.sleep(30)\n'
+            )
+            options = (
+                'creationflags=subprocess.DETACHED_PROCESS | '
+                'subprocess.CREATE_NEW_PROCESS_GROUP'
+                if detached and os.name == 'nt'
+                else 'start_new_session=True'
+                if detached
+                else ''
+            )
+            streams = 'sys.stdout' if inherit_pipes else 'subprocess.DEVNULL'
+            body = (
+                f'subprocess.Popen([sys.executable,"-c",{child_program!r}],'
+                f'stdout={streams},stderr={streams}'
+                + (f',{options}' if options else '')
+                + ')\n'
+                + f'while not Path({str(acknowledged)!r}).exists(): time.sleep(.01)\n'
+                + (
+                    ('os.write(1,b"x"*10000)\n' if root_output_excess else '')
+                    + 'time.sleep(30)\n'
+                    if root_hangs or root_output_excess or interrupt
+                    else 'report.write_text("safe report",encoding="utf-8")\n'
+                    'runner.write_completion(marker,0,report,nonce)\n'
+                )
+            )
+            output = io.StringIO()
+            results: list[int] = []
+            captures: list[test_supervision._StreamCapture] = []
+            original_capture = test_supervision._StreamCapture
+
+            def capture(limit: int) -> test_supervision._StreamCapture:
+                item = original_capture(limit)
+                captures.append(item)
+                return item
+
+            def run() -> None:
+                original_sleep = time.sleep
+                interrupted = False
+                owner = threading.current_thread()
+
+                def interrupt_once(seconds: float) -> None:
+                    nonlocal interrupted
+                    if (
+                        interrupt
+                        and not interrupted
+                        and threading.current_thread() is owner
+                        and acknowledged.exists()
+                    ):
+                        interrupted = True
+                        raise KeyboardInterrupt
+                    original_sleep(seconds)
+
+                with redirect_stdout(output):
+                    with patch.object(time, 'sleep', side_effect=interrupt_once):
+                        results.append(
+                            run_tests.supervised(
+                                [sys.executable, '-c', self._PREFIX + body],
+                                timeout=0.4 if root_hangs else 2.0,
+                                max_stdout=128 if root_output_excess else 1024,
+                                report_path=root / 'report.txt',
+                            )
+                        )
+
+            child: psutil.Process | None = None
+            created: float | None = None
+            worker = threading.Thread(target=run, daemon=True)
+            try:
+                with patch.object(
+                    test_supervision, '_StreamCapture', side_effect=capture
+                ):
+                    worker.start()
+                    deadline = time.monotonic() + 5
+                    while not marker.exists() and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    self.assertTrue(marker.exists(), 'Synthetic child did not start')
+                    child = psutil.Process(int(marker.read_text(encoding='ascii')))
+                    created = child.create_time()
+                    acknowledged.write_text('continue', encoding='ascii')
+                    worker.join(12)
+                self.assertFalse(
+                    worker.is_alive(), 'Synthetic supervisor did not finish'
+                )
+                self.assertEqual(len(results), 1)
+                if foreign is not None:
+                    self.assertIsNone(foreign.poll(), 'Foreign process was terminated')
+                assert child is not None and created is not None
+                live = self._same_process_live(child, created)
+                if sys.platform == 'linux' and not live:
+                    try:
+                        if child.create_time() == created:
+                            self.assertNotEqual(
+                                child.status(),
+                                psutil.STATUS_ZOMBIE,
+                                'Owned adopted child was not reaped',
+                            )
+                    except psutil.NoSuchProcess:
+                        pass
+                return (
+                    results[0],
+                    output.getvalue(),
+                    live,
+                    len(captures) == 2
+                    and all(item.closed.is_set() for item in captures),
+                )
+            finally:
+                acknowledged.write_text('continue', encoding='ascii')
+                if child is None and marker.exists():
+                    try:
+                        child = psutil.Process(int(marker.read_text(encoding='ascii')))
+                        created = child.create_time()
+                    except (ValueError, psutil.Error):
+                        pass
+                if child is not None and created is not None:
+                    if self._same_process_live(child, created):
+                        child.kill()
+                    try:
+                        child.wait(timeout=2)
+                    except (psutil.Error, psutil.TimeoutExpired):
+                        pass
+                worker.join(12)
+
+    @staticmethod
+    def _same_process_live(process: psutil.Process, created: float) -> bool:
+        """Check liveness without treating a reused PID as the same child.
+
+        Args:
+            process: Process handle captured while the child was alive.
+            created: Creation time captured before releasing the worker.
+        Returns:
+            True only for the original, still-running child.
+        """
+        try:
+            return process.create_time() == created and process.status() not in (
+                psutil.STATUS_DEAD,
+                psutil.STATUS_ZOMBIE,
+            )
+        except psutil.NoSuchProcess:
+            return False
+
     def test_complete_worker_preserves_status_and_report(self) -> None:
         """Accept only matching complete success and failure evidence.
 
@@ -782,8 +961,136 @@ class SupervisorTests(unittest.TestCase):
         )
         status, output, elapsed = self.invoke_worker(body)
         self.assertEqual(status, 1)
-        self.assertIn('stream-open', output)
+        self.assertIn('process-left-running', output)
         self.assertLess(elapsed, 7)
+
+    def test_live_children_are_cleaned_after_root_completion(self) -> None:
+        """Confirm same-group and detached children actually exit after a report.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        cases = (
+            ('pipe-holder', False, False, True),
+            ('term-resistant', False, True, True),
+            ('detached-devnull', True, False, False),
+        )
+        for label, detached, ignore_term, inherit_pipes in cases:
+            with self.subTest(case=label):
+                status, output, child_live, readers_done = self.invoke_with_child(
+                    detached=detached,
+                    ignore_term=ignore_term,
+                    inherit_pipes=inherit_pipes,
+                )
+                self.assertEqual(status, 1)
+                self.assertIn('process-left-running', output)
+                self.assertFalse(child_live)
+                self.assertTrue(readers_done)
+
+    def test_hung_root_child_and_preexisting_foreign_process(self) -> None:
+        """Stop owned children and refuse ambiguous Linux sibling ownership.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        status, output, child_live, readers_done = self.invoke_with_child(
+            ignore_term=True,
+            root_hangs=True,
+        )
+        self.assertEqual(status, 1)
+        self.assertIn('timeout', output)
+        self.assertFalse(child_live)
+        self.assertTrue(readers_done)
+
+        foreign = subprocess.Popen(
+            [sys.executable, '-c', 'import time;time.sleep(30)'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            if sys.platform == 'linux':
+                body = (
+                    'report.write_text("safe report",encoding="utf-8")\n'
+                    'runner.write_completion(marker,0,report,nonce)\n'
+                )
+                status, output, _elapsed = self.invoke_worker(body)
+                self.assertEqual(status, 1)
+                self.assertIn('could not start', output)
+            else:
+                status, output, child_live, readers_done = self.invoke_with_child(
+                    ignore_term=True,
+                    root_hangs=True,
+                    foreign=foreign,
+                )
+                self.assertEqual(status, 1)
+                self.assertIn('timeout', output)
+                self.assertFalse(child_live)
+                self.assertTrue(readers_done)
+            self.assertIsNone(foreign.poll())
+        finally:
+            foreign.kill()
+            foreign.wait(timeout=2)
+
+    def test_output_limit_and_interrupt_clean_live_children(self) -> None:
+        """Require confirmed child and reader exits on two supervisor aborts.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        for root_output_excess, interrupt, expected_status, reason in (
+            (True, False, 1, 'output-limit'),
+            (False, True, 130, 'interrupted'),
+        ):
+            with self.subTest(reason=reason):
+                status, output, child_live, readers_done = self.invoke_with_child(
+                    root_output_excess=root_output_excess,
+                    interrupt=interrupt,
+                )
+                self.assertEqual(status, expected_status)
+                self.assertIn(reason, output)
+                self.assertFalse(child_live)
+                self.assertTrue(readers_done)
+
+    def test_unverifiable_lifetime_is_not_success(self) -> None:
+        """Fail when ownership checks or final cleanup cannot be confirmed.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        lifetime = _WindowsLifetime if os.name == 'nt' else _PosixLifetime
+        body = (
+            'report.write_text("safe report",encoding="utf-8")\n'
+            'runner.write_completion(marker,0,report,nonce)\n'
+        )
+        with patch.object(lifetime, 'live', side_effect=OSError('private identity')):
+            status, output, _elapsed = self.invoke_worker(body)
+        self.assertEqual(status, 1)
+        self.assertIn('ownership-unconfirmed', output)
+        self.assertNotIn('private identity', output)
+        close_calls: list[bool] = []
+        original_close = lifetime.close
+
+        def observed_close(instance: _PosixLifetime | _WindowsLifetime) -> bool:
+            close_calls.append(True)
+            return original_close(instance)
+
+        with (
+            patch.object(lifetime, 'stop', side_effect=OSError('private cleanup')),
+            patch.object(lifetime, 'close', observed_close),
+        ):
+            status, output, _elapsed = self.invoke_worker(body)
+        self.assertEqual(status, 1)
+        self.assertIn('ownership-unconfirmed', output)
+        self.assertNotIn('private cleanup', output)
+        self.assertEqual(close_calls, [True])
 
     def test_timeout_reports_only_a_verified_running_case(self) -> None:
         """Keep the active unittest ID when a real runner case stops progressing.

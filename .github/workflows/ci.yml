@@ -34,9 +34,9 @@ jobs:
         shell: bash
         run: |
           if [[ '${{ github.event_name }}' == 'push' && '${{ github.ref }}' == 'refs/heads/embeddedui' ]]; then
-            python -m scripts.ci_impact --base '${{ github.event.before }}' --head '${{ github.sha }}' --github-output "$GITHUB_OUTPUT"
+            python -S -m scripts.ci_impact --base '${{ github.event.before }}' --head '${{ github.sha }}' --github-output "$GITHUB_OUTPUT"
           else
-            python -m scripts.ci_impact --full --github-output "$GITHUB_OUTPUT"
+            python -S -m scripts.ci_impact --full --github-output "$GITHUB_OUTPUT"
           fi
 
   python-quality:

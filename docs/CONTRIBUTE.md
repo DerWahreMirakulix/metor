@@ -30,8 +30,10 @@ python scripts/run_tests.py --suite integration --module test_startup_selection 
 python scripts/run_tests.py --suite all --durations 20
 ```
 
-The runner loads `tests/test_*.py` through an explicit per-module manifest in
-`scripts/run_tests.py`. Classify each new module as fast or integration; missing,
+The runner loads `tests/test_*.py` through the single declarative per-module
+manifest in `scripts/test_inventory.py`. The checkout-only CI planner reads the
+same inventory without importing test execution or project dependencies.
+Classify each new module as fast or integration; missing,
 unclassified or multiply classified files fail _before any test module imports_.
 Fast imports only fast modules (and their own dependencies); keep fast test
 imports independent of integration fixtures. `all` includes every classified
@@ -51,10 +53,14 @@ skips count as skipped coverage, while failed fixtures and interrupted runs leav
 untested cases incomplete. XFAIL and XPASS appear separately, and XPASS fails the run. The
 script supervises its test worker with a one-hour whole-worker guard, bounded
 stdout and stderr pipes, and a fresh completion record tied to the bounded
-report. Timeout, excess output, unexpected stderr, report failure and abrupt
-exit fail the run. A verified running test ID is retained for an aborted worker
-when available. Raw stderr is withheld; test and child-process output during
-test execution is discarded.
+report. On Linux, the serialized runner owns a subreaper scope and refuses to
+start beside an existing child; on Windows, it assigns the suspended worker to
+a Job Object before resuming it. Live test children or unconfirmed cleanup fail
+the run, as do timeout, excess output, unexpected stderr, report failure and
+abrupt exit. The runner process must not start unrelated children concurrently
+with its supervised worker. A verified running test ID is retained for an
+aborted worker when available. Raw stderr is withheld; test and child-process
+output during test execution is discarded.
 The console shows only the requested number of slow cases. Class/module fixture
 costs remain in overall elapsed time, not attributed to an individual case.
 

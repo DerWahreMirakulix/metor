@@ -5,8 +5,12 @@ import json
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
+import sys
 
-from scripts.run_tests import INTEGRATION_MODULES
+if __package__ in (None, ''):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.test_inventory import INTEGRATION_MODULES
 
 
 ISOLATED_GUI_MODULES: dict[str, tuple[str, ...]] = {
