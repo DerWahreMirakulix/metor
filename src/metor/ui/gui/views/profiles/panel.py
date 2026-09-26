@@ -94,7 +94,13 @@ def profiles_body(
                     disabled=state.busy,
                 )
             )
-    body.add_widget(Action('Reload first page', catalog.reload, disabled=state.busy))
+    body.add_widget(
+        Action(
+            'Refresh profiles' if catalog.on_first_page else 'Back to first profiles',
+            catalog.reload,
+            disabled=state.busy,
+        )
+    )
     if startup:
         return
     body.add_widget(

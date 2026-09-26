@@ -786,6 +786,14 @@ class ReleaseCompatibilityTests(unittest.TestCase):
                         self.assertIn(
                             f'Requires-Dist: metor-sdk=={APP_VERSION}', metadata
                         )
+                        entry_points_name = next(
+                            name
+                            for name in archive.namelist()
+                            if name.endswith('.dist-info/entry_points.txt')
+                        )
+                        entry_points = archive.read(entry_points_name).decode('utf-8')
+                        self.assertIn('[gui_scripts]', entry_points)
+                        self.assertIn('metor-gui = metor.main:gui_main', entry_points)
 
     def test_wheel_validator_requires_all_variants(self) -> None:
         """Verifies package validation rejects an incomplete release wheel set.

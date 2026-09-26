@@ -12,6 +12,9 @@ license = { text = "GPLv3" }
 [project.entry-points."metor.ui_frontends"]
 gui = "metor.ui.gui.launcher:launch"
 
+[project.gui-scripts]
+metor-gui = "metor.main:gui_main"
+
 [tool.setuptools]
 include-package-data = true
 

@@ -62,18 +62,29 @@ class GuiState:
         if value and self.privacy_fence is not None:
             self.privacy_fence()
 
-    def navigate(self, route: Route) -> None:
+    def navigate(self, route: Route, *, from_root: bool = False) -> None:
         """Changes only presentation; callers perform input finalization first.
 
         Args:
             route: Destination with exact peer and projection.
+            from_root: Whether the persistent master pane invoked the destination.
         Returns:
             None
         """
+        if from_root:
+            self.back_stack.clear()
+            if route.view not in {'V06', 'V07'}:
+                self.back_stack.append(
+                    Route(
+                        'V06' if self.root_delivery is Delivery.DROP else 'V07',
+                        delivery=self.root_delivery,
+                    )
+                )
         if route != self.route:
-            if len(self.back_stack) >= GuiLimits.TEXT_CONTEXTS:
-                self.back_stack.pop(0)
-            self.back_stack.append(self.route)
+            if not from_root:
+                if len(self.back_stack) >= GuiLimits.TEXT_CONTEXTS:
+                    self.back_stack.pop(0)
+                self.back_stack.append(self.route)
             self.route = route
 
     def back(self) -> None:
@@ -92,6 +103,21 @@ class GuiState:
                 delivery=self.root_delivery,
             )
         )
+
+    def select_root_delivery(self, delivery: Delivery) -> None:
+        """Changes the master list and its neutral Back target without changing detail.
+
+        Args:
+            delivery: Explicitly selected DROP or LIVE master projection.
+        Returns:
+            None
+        """
+        self.root_delivery = delivery
+        root = Route('V06' if delivery is Delivery.DROP else 'V07', delivery=delivery)
+        if self.route.view in {'V06', 'V07'}:
+            self.route = root
+        elif self.back_stack and self.back_stack[0].view in {'V06', 'V07'}:
+            self.back_stack[0] = root
 
     def set_draft(self, peer: str, delivery: Delivery, value: str) -> bool:
         """Refuses excess text growth without evicting another context's draft.

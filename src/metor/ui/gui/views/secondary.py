@@ -136,6 +136,20 @@ def secondary_view(controller: GuiController, refresh: Callable[[], None]) -> Bo
     Clock.schedule_once(restore, 0)
     body = BoxLayout(orientation='vertical', spacing=dp(12), size_hint_y=None)
     body.bind(minimum_height=body.setter('height'))
+    if route.view == 'V20':
+
+        def fit_profiles(*_args: object) -> None:
+            """Disables profile-page scrolling while every action fits the viewport.
+
+            Args:
+                _args: Native viewport or profile-row layout changes.
+            Returns:
+                None
+            """
+            scroll.do_scroll_y = body.minimum_height > scroll.height
+
+        body.bind(minimum_height=fit_profiles)
+        scroll.bind(height=fit_profiles)
     scroll.add_widget(body)
     panel.add_widget(scroll)
     if route.view in {'V11', 'V12', 'V13', 'V14', 'V15'}:
@@ -150,4 +164,6 @@ def secondary_view(controller: GuiController, refresh: Callable[[], None]) -> Bo
         body.add_widget(settings_body(controller, refresh))
     if state.status:
         panel.add_widget(Label(state.status, role='support', tone='info'))
+    if route.view == 'V20':
+        fit_profiles()
     return panel

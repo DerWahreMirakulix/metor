@@ -1,6 +1,7 @@
 """Public frontend host retry/cancellation tests with controlled process startup."""
 
 # ruff: noqa: E402
+import os
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -59,9 +60,18 @@ class ClosureFrontendTests(unittest.TestCase):
                 'first-secret',
                 'fresh-secret',
             ]
+
+            def start_attempt(_profile: object, **kwargs: object) -> bool:
+                if start.call_count == 1:
+                    return False
+                diagnostics = kwargs['diagnostics']
+                diagnostics.process = Mock(pid=os.getpid(), stdin=None)
+                diagnostics.process.poll.return_value = None
+                return True
+
             with patch(
                 'metor.application.frontend.host.start_managed_daemon_process',
-                side_effect=[False, True],
+                side_effect=start_attempt,
             ) as start:
                 with self.assertRaises(FrontendBootstrapError) as failed:
                     host.bootstrap(interaction)

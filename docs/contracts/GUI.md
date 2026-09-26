@@ -20,6 +20,12 @@ metor chat --ui gui --simulator
 metor chat --ui gui --simulator --device-config docs/examples/gui-simulator.toml
 ```
 
+On Windows, launch the installed `metor-gui.exe` from the environment's
+`Scripts` directory for a graphical start without a console window. The
+release GUI bundle places it in `.venv\Scripts`. `metor chat --ui gui` remains
+available from PowerShell for diagnostics. A failure before the graphical shell
+opens produces a generic Windows dialog that points to that diagnostic command.
+
 The GUI opens its graphical shell before profile authentication, including when
 started from a terminal. With no profiles it opens Create profile and says
 `No profiles exist yet.` With several profiles and no valid default it opens the
@@ -247,13 +253,18 @@ contacts, manual locked-call acceptance, and auto-play are independent policies.
 
 The software keyboard is local and offers QWERTY and QWERTZ without cloud
 suggestions or a learned persistent dictionary. Desktop typing uses the
-physical keyboard by default. Focus order follows visible reading order;
+physical keyboard by default. It opens on field focus only when the device
+configuration declares touch input; no keyboard button occupies the field.
+Focus order follows visible reading order;
 selection alone does not start communication. A focused PTT control may own
 Space down/up, but text fields and global shortcuts cannot capture that press.
 The text composer uses Enter for newline and Ctrl+Enter for explicit Send.
 Incoming call UI does not steal an active typing or PTT owner. Modal focus
 returns to a safe invoker; Escape/Back closes a reversible overlay before
 navigating and cannot dismiss a privacy cover or accepted destructive work.
+Master navigation returns Back to the active DROP/LIVE overview. Selection
+follows the foreground section; keyboard focus survives a repaint of that same
+route and clears when the route changes.
 
 ## Design and accessibility
 
@@ -265,6 +276,10 @@ scroll anchor without a communication command. Controls must remain operable
 at 1.5 text scale and with long content; wrap or grow rows and scroll forms
 instead of shrinking text or hiding required actions. A keyboard inset must not
 cover focused input or required actions.
+Entry, lock, and profile management content stays fixed when it fits the
+viewport. Scrolling is enabled only for actual overflow, including locked
+activity or continued-media controls. Pending profile activation shows covered
+progress until a graphical prompt or the complete profile becomes available.
 
 DROP and LIVE require distinct labels as well as color. Status, disabled state,
 focus, recording, errors, and destructive consequences cannot rely on color,

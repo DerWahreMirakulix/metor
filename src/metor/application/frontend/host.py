@@ -621,6 +621,7 @@ class LocalFrontendHost:
 
         startup_secret: Optional[str] = None
         daemon_started = False
+        started_process: subprocess.Popen[bytes] | None = None
         confirmed_start = profile.profile_name in self._started_processes
         started_pid = self._started_processes.get(profile.profile_name)
         if (
@@ -697,8 +698,14 @@ class LocalFrontendHost:
                     "Run 'metor daemon' to inspect foreground startup errors."
                 )
             if diagnostics.process is not None:
-                self._owned_processes[profile.profile_name] = diagnostics.process
-            self._started_processes[profile.profile_name] = profile.get_daemon_pid()
+                started_process = diagnostics.process
+                self._owned_processes[profile.profile_name] = started_process
+                self._started_processes[profile.profile_name] = started_process.pid
+            else:
+                # The serialized start observed an already-running daemon.
+                # It is borrowed, even if it disappears before the next check.
+                daemon_started = False
+                startup_secret = None
             self._require_open()
         port = profile.get_daemon_port()
         if type(port) is not int or not 0 < port < 65536:
@@ -707,6 +714,13 @@ class LocalFrontendHost:
                 'No active daemon endpoint is available.',
                 reason=FrontendBootstrapReason.UNREACHABLE,
             )
+        if daemon_started and started_process is not None:
+            daemon_started = (
+                started_process.poll() is None
+                and profile.get_daemon_pid() == started_process.pid
+            )
+            if not daemon_started:
+                startup_secret = None
         retries = profile.config.get_int(SettingKey.MAX_TOR_RETRIES)
         unlock_timeout = min(
             Constants.MAX_UNLOCK_INITIALIZATION_WAIT_SEC,

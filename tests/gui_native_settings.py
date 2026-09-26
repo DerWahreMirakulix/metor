@@ -58,6 +58,8 @@ def exercise_setting_editor(app: MetorApp, complete: Callable[[], None]) -> None
         field = sheet.field
         field.text = '7'
         field.focus = True
+        if not app.configuration.touch:
+            assert app.input_dock.keyboard is None
         state.snapshot = replace(
             state.snapshot, revision=(state.snapshot.revision or 0) + 1
         )
@@ -160,7 +162,7 @@ def exercise_setting_keyboard(app: MetorApp, complete: Callable[[], None]) -> No
         Clock.schedule_once(typed, 0.3)
 
     def show() -> None:
-        """Explicitly opens the focused modal field's software keyboard.
+        """Focuses a declared touch field to open its software keyboard.
 
         Args:
             None
@@ -171,7 +173,7 @@ def exercise_setting_keyboard(app: MetorApp, complete: Callable[[], None]) -> No
         assert isinstance(sheet, SettingEditor)
         sheet.field.text = ''
         sheet.field.focus = True
-        app.input_dock.show(sheet.field)
+        assert app.input_dock.keyboard is not None
         Clock.schedule_once(numbers, 0.3)
 
     exercise_setting_editor(app, show)

@@ -324,6 +324,91 @@ class ApplicationRuntimeContractTests(unittest.TestCase):
                     )
                 )
 
+    def test_windowed_gui_recognizes_console_daemon_from_same_environment(
+        self,
+    ) -> None:
+        """The exact Windows python.exe/pythonw.exe pair can share one daemon.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            scripts = Path(temp_dir)
+            console = scripts / 'python.exe'
+            windowed = scripts / 'pythonw.exe'
+            foreign = scripts / 'foreign.exe'
+            for candidate in (console, windowed, foreign):
+                candidate.touch()
+
+            identity = Mock()
+            identity.pid = 12345
+            identity.create_time = 20.0
+            identity.profile_name = 'alpha'
+            identity.role = Constants.PROCESS_ROLE_DAEMON
+            identity.executable = str(console)
+            identity.installation_root = str(ProcessManager._installation_root())
+
+            process = Mock()
+            process.create_time.return_value = 20.0
+            process.cmdline.return_value = [
+                str(console),
+                '-I',
+                '-m',
+                'metor',
+                '-p',
+                'alpha',
+                'daemon',
+                '--non-interactive',
+            ]
+            process.is_running.return_value = True
+            process.status.return_value = psutil.STATUS_RUNNING
+
+            os_double = Mock(wraps=os)
+            os_double.name = 'nt'
+            with (
+                patch('metor.utils.process.os', os_double),
+                patch('metor.utils.process.sys.executable', str(windowed)),
+                patch(
+                    'metor.utils.process.sys._base_executable',
+                    str(windowed),
+                    create=True,
+                ),
+                patch.object(
+                    ProcessManager, '_read_process_identity', return_value=identity
+                ),
+                patch('metor.utils.process.psutil.Process', return_value=process),
+                patch.object(ProcessManager, '_same_os_owner', return_value=True),
+            ):
+                self.assertTrue(
+                    ProcessManager.is_managed_process_running(
+                        scripts / Constants.DAEMON_PID_FILE, 'alpha'
+                    )
+                )
+                process.cmdline.return_value[0] = str(foreign)
+                self.assertIsNone(
+                    ProcessManager.is_managed_process_running(
+                        scripts / Constants.DAEMON_PID_FILE, 'alpha'
+                    )
+                )
+                identity.executable = str(windowed)
+                process.cmdline.return_value[0] = str(windowed)
+                with (
+                    patch('metor.utils.process.sys.executable', str(console)),
+                    patch(
+                        'metor.utils.process.sys._base_executable',
+                        str(console),
+                        create=True,
+                    ),
+                ):
+                    self.assertTrue(
+                        ProcessManager.is_managed_process_running(
+                            scripts / Constants.DAEMON_PID_FILE, 'alpha'
+                        )
+                    )
+
     def test_process_identity_rejects_nonfinite_foreign_and_exposed_metadata(
         self,
     ) -> None:

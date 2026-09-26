@@ -682,6 +682,11 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn('including the bundled pip wheel', guide)
         self.assertIn('not a signature', guide)
 
+        gui_guide = build_install_guide(
+            'metor-ui-gui-wheelhouse-windows-x86_64-py313', 'metor-ui-gui'
+        )
+        self.assertIn('.venv\\Scripts\\metor-gui.exe', gui_guide)
+
     def test_release_shell_installer_uses_local_wheelhouse(self) -> None:
         """
         Verifies that release shell installer uses local wheelhouse.
@@ -745,6 +750,9 @@ class ReleaseContractTests(unittest.TestCase):
         )
         self.assertIn('Scripts\\metor.exe --help', script)
         self.assertTrue(script.rstrip().endswith('endlocal\nexit /b 0'))
+
+        gui_script = build_install_windows_script('metor-ui-gui')
+        self.assertIn('Scripts\\metor-gui.exe', gui_script)
 
     def test_bundle_verifier_rejects_tampering_missing_files_and_wrong_target(
         self,

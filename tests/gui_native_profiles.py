@@ -61,6 +61,7 @@ def exercise_profile_editor(app: MetorApp, complete: Callable[[], None]) -> None
             None
         """
         assert sheet.cancel.focus
+        assert not sheet.scroll.do_scroll_y
         sheet.name.text = 'Travel_2026'
         sheet.name.focus = True
         state = app.controller.state

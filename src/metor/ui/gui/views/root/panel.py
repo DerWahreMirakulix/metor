@@ -45,6 +45,7 @@ class RootPanel(BoxLayout):
         self.delivery = state.root_delivery
         header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
         header.add_widget(Label('METOR', role='wordmark', wrap=False))
+        self.header_actions: dict[str, IconAction] = {}
         for icon, title, view in (
             ('bell', 'Notifications', 'V16'),
             ('users', 'Contacts', 'V12'),
@@ -52,11 +53,13 @@ class RootPanel(BoxLayout):
         ):
             action = IconAction(icon, title, partial(navigate, Route(view)))
             action.focus_key = ('header', view)
+            self.header_actions[view] = action
             header.add_widget(action)
             if view == 'V16':
                 self.notifications = action
         self.add_widget(header)
         tabs = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(4))
+        self.tabs: dict[Delivery, Action] = {}
         for delivery in (Delivery.DROP, Delivery.LIVE):
             action = Action(
                 delivery.value.upper(),
@@ -67,6 +70,7 @@ class RootPanel(BoxLayout):
                 tone=delivery.value,
             )
             action.focus_key = ('selector', delivery.value.upper())
+            self.tabs[delivery] = action
             tabs.add_widget(action)
         Action.group(tuple(reversed(tabs.children)))
         self.add_widget(tabs)
@@ -127,12 +131,59 @@ class RootPanel(BoxLayout):
             None
         """
         state = self.controller.state
+        contact_parent = next(
+            (
+                route.view
+                for route in reversed(state.back_stack)
+                if route.view in {'V11', 'V12'}
+            ),
+            None,
+        )
+        section = (
+            'V12'
+            if state.route.view == 'V12'
+            or (state.route.view in {'V13', 'V14', 'V15'} and contact_parent == 'V12')
+            else 'V17'
+            if state.route.view in {'V17', 'V18', 'V19', 'V20'}
+            else state.route.view
+        )
+        for view, action in self.header_actions.items():
+            selected = section == view
+            action.surface = 'dropSurface' if selected else 'raised'
+            action.accessible_name = (
+                'Notifications'
+                if view == 'V16'
+                else 'Contacts'
+                if view == 'V12'
+                else 'Settings'
+            ) + (', current view' if selected else '')
+            action._feedback()
+        for delivery, action in self.tabs.items():
+            selected = (
+                state.route.view in {'V06', 'V07', 'V08', 'V09', 'V11'}
+                and delivery is self.delivery
+            )
+            action.surface = delivery.value + 'Surface' if selected else 'surface'
+            action.accessible_name = delivery.value.upper() + (
+                ', current mode' if selected else ''
+            )
+            action._feedback()
+        new_view = state.route.view == 'V11' and state.route.delivery is self.delivery
+        new_selected = state.route.view in {'V06', 'V07'} or new_view
+        self.new.surface = self.delivery.value if new_selected else 'raised'
+        self.new._tone = 'onAccent' if new_selected else 'text'
+        self.new.accessible_name = self.new.label.text + (
+            ', current view' if new_view else ''
+        )
+        self.new._feedback()
         unseen = any(
             not item.seen for item in self.controller.notifications.store.items.values()
         )
         self.notifications.set_badge(unseen)
-        self.notifications.accessible_name = 'Notifications' + (
-            ', unseen activity' if unseen else ''
+        self.notifications.accessible_name = (
+            'Notifications'
+            + (', current view' if section == 'V16' else '')
+            + (', unseen activity' if unseen else '')
         )
         rows = conversation_rows(self.controller, self.delivery)
         page = min(
@@ -156,11 +207,11 @@ class RootPanel(BoxLayout):
         for entry in entries:
             row = self.rows.get(entry.peer)
             if row is None:
-                self.rows[entry.peer] = RootRow(
-                    self.controller, entry, self.navigate, self.refresh
-                )
+                row = RootRow(self.controller, entry, self.navigate, self.refresh)
+                self.rows[entry.peer] = row
             elif row.entry != entry:
                 row.update(entry)
+            row.select(state.route)
         for index, entry in enumerate(reversed(entries)):
             row = self.rows[entry.peer]
             if row.parent is not self.column:

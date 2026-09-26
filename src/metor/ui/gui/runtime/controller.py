@@ -1,6 +1,7 @@
 """Serial bounded SDK operations and generation-safe UI result installation."""
 
 from collections.abc import Callable
+from dataclasses import replace
 import threading
 
 from metor.client import (
@@ -303,7 +304,7 @@ class GuiController:
                             else 'Operation could not be confirmed'
                         ),
                     )
-                self.mailbox.put(update)
+                self.mailbox.put(replace(update, background=background))
 
             self._worker = threading.Thread(
                 target=run, name='metor-gui-operation', daemon=True
@@ -351,11 +352,12 @@ class GuiController:
             else self.activation.create_profile(name, password)
         )
 
-    def navigate(self, route: Route) -> None:
+    def navigate(self, route: Route, *, from_root: bool = False) -> None:
         """Opens a projection without a communication-changing command.
 
         Args:
             route: Foreground route and canonical peer.
+            from_root: Whether the persistent master pane invoked the destination.
         Returns:
             None
         """
@@ -364,7 +366,7 @@ class GuiController:
         if route != self.state.route:
             self.voice.depart()
             self.playback.stop()
-        self.state.navigate(route)
+        self.state.navigate(route, from_root=from_root)
         if route.view in {'V17', 'V19'}:
             self.core_settings.reload()
         if route.view == 'V18':
@@ -387,6 +389,13 @@ class GuiController:
             None
         """
         if not self.state.covered:
+            if self.state.route.view == 'V12' and self.contacts.book.selecting:
+                self.contacts.book.cancel_selection()
+                return
+            if self.state.route.view == 'V16' and self.notifications.store.selecting:
+                self.notifications.store.selecting = False
+                self.notifications.store.selected.clear()
+                return
             self.voice.depart()
             self.playback.stop()
             self.state.back()
@@ -502,15 +511,20 @@ class GuiController:
                 self.close()
                 self.state.status = 'Connection lost. Unsent drafts were not restored. Open profile to reconnect.'
                 continue
-            if not update.operation.startswith('voice-') and update.operation not in (
-                'event',
-                'status',
-                'inventory',
-                'capabilities',
-                'voice_owner',
-                'playback',
-                'playback-done',
-                'security:state',
+            if (
+                not update.background
+                and not update.operation.startswith('voice-')
+                and update.operation
+                not in (
+                    'event',
+                    'status',
+                    'inventory',
+                    'capabilities',
+                    'voice_owner',
+                    'playback',
+                    'playback-done',
+                    'security:state',
+                )
             ):
                 self.state.busy = False
             covered_status = self.state.status

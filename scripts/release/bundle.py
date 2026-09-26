@@ -113,6 +113,11 @@ def build_install_guide(bundle_name: str, package_name: str = 'metor') -> str:
     Returns:
         str: The installation guide text.
     """
+    gui_start: str = (
+        'For a console-free Windows GUI start, open .venv\\Scripts\\metor-gui.exe.\n'
+        if package_name == 'metor-ui-gui'
+        else ''
+    )
     return dedent(
         f"""\
         Metor release bundle: {bundle_name}
@@ -149,6 +154,7 @@ def build_install_guide(bundle_name: str, package_name: str = 'metor') -> str:
         The installers verify SHA256SUMS.txt, including the bundled pip wheel,
         before changing .venv. These hashes detect incomplete or modified bundle
         contents; they are not a signature or publisher-authenticity proof.
+        {gui_start}
         """
     )
 
@@ -226,11 +232,16 @@ def build_install_windows_script(package_name: str = 'metor') -> str:
     Returns:
         str: The Windows batch installer script.
     """
-    verification_line: str = (
-        'echo Run "%VENV_DIR%\\Scripts\\metor.exe --help" to verify the install.'
-        if package_name != 'metor-sdk'
-        else 'echo metor-sdk ready in "%VENV_DIR%"'
-    )
+    if package_name == 'metor-ui-gui':
+        verification_line = (
+            'echo Open "%VENV_DIR%\\Scripts\\metor-gui.exe" to start the GUI.'
+        )
+    elif package_name != 'metor-sdk':
+        verification_line = (
+            'echo Run "%VENV_DIR%\\Scripts\\metor.exe --help" to verify the install.'
+        )
+    else:
+        verification_line = 'echo metor-sdk ready in "%VENV_DIR%"'
     return dedent(
         f"""\
         @echo off

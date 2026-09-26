@@ -240,6 +240,10 @@ metor chat --ui terminal
 metor chat --ui gui
 ```
 
+On Windows, start `metor-gui.exe` from the installed environment's `Scripts`
+directory to open the GUI without a console window. In a release GUI bundle,
+that is `.venv\Scripts\metor-gui.exe`.
+
 The GUI opens its graphical Create profile or picker view even with no existing
 profile or daemon. `-p NAME` chooses only its initial profile; creation,
 selection, authentication and later switching stay graphical, including when

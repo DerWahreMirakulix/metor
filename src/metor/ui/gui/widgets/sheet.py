@@ -22,7 +22,7 @@ from .tooltip import PointerTooltip
 
 
 class ActionSheet(ModalView):
-    """Owns one modal; the narrow presentation is bottom anchored and privacy revocable."""
+    """Owns one centered modal with privacy revocation and reachable actions."""
 
     current: ClassVar['ActionSheet | None'] = None
 
@@ -105,7 +105,7 @@ class ActionSheet(ModalView):
         )
         self._update_call_indicator()
         self.body.add_widget(header)
-        scroll = ScrollView(do_scroll_x=False)
+        self.scroll = ScrollView(do_scroll_x=False)
         self.column = BoxLayout(
             orientation='vertical', spacing=dp(12), size_hint_y=None
         )
@@ -113,8 +113,8 @@ class ActionSheet(ModalView):
             minimum_height=self.column.setter('height'), minimum_size=self._resize
         )
         self.builder(self.column)
-        scroll.add_widget(self.column)
-        self.body.add_widget(scroll)
+        self.scroll.add_widget(self.column)
+        self.body.add_widget(self.scroll)
         if self.footer is not None:
             self.body.add_widget(self.footer)
         self.actions = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
@@ -154,17 +154,20 @@ class ActionSheet(ModalView):
                 )
         self.actions.orientation = 'vertical' if stacked else 'horizontal'
         self.actions.height = dp(108 if stacked else 48)
-        self.height = min(
-            Window.height - self._bottom() - dp(Geometry.EDGE),
+        desired_height = (
             dp(48 + 48 + 32)
             + self.column.minimum_height
             + self.actions.height
-            + (self.footer.height + dp(16) if self.footer is not None else 0),
+            + (self.footer.height + dp(16) if self.footer is not None else 0)
         )
+        self.height = min(
+            Window.height - self._bottom() - dp(Geometry.EDGE), desired_height
+        )
+        self.scroll.do_scroll_y = self.height < desired_height
         self._align_center()
 
     def _align_center(self, *_args: object) -> None:
-        """Maps the native modal alignment hook to the approved compact/wide placement.
+        """Centers the modal within the space above the local keyboard.
 
         Args:
             _args: Native modal/window geometry callback.
@@ -172,10 +175,7 @@ class ActionSheet(ModalView):
             None
         """
         self.center_x = Window.center[0]
-        if Window.width >= dp(Geometry.BREAKPOINT):
-            self.center_y = (Window.height - dp(Geometry.EDGE) + self._bottom()) / 2
-        else:
-            self.y = self._bottom()
+        self.center_y = (Window.height - dp(Geometry.EDGE) + self._bottom()) / 2
 
     def _bottom(self) -> float:
         """Keeps modal controls above a visible local keyboard with the approved gap.

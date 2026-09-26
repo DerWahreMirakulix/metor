@@ -140,19 +140,6 @@ class PeerView(BoxLayout):
                 controller.contacts.begin('save', peer)
                 self.refresh()
 
-            def keyboard() -> None:
-                """Returns to the original composer before explicitly opening its local keyboard.
-
-                Args:
-                    None
-                Returns:
-                    None
-                """
-                sheet.dismiss(animation=False)
-                entry = self.composer.entry
-                if entry.keyboard_owner is not None:
-                    entry.keyboard_owner.show(entry)
-
             snapshot = controller.state.snapshot
             saved = bool(
                 snapshot
@@ -176,14 +163,6 @@ class PeerView(BoxLayout):
                 live_context_actions(
                     controller, peer, body, lambda: sheet.dismiss(animation=False)
                 )
-            body.add_widget(
-                Action(
-                    'Show keyboard',
-                    keyboard,
-                    disabled=self.composer.parent is None
-                    or controller.voice.press.active,
-                )
-            )
 
         sheet = ActionSheet(
             controller,

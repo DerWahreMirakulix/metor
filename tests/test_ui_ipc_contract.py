@@ -14,8 +14,12 @@ import nacl.pwhash
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
-from metor.application import DaemonStatus, start_managed_daemon_process
-from metor.application.frontend.host import _resolve_autostart_policy
+from metor.application import (
+    DaemonStartDiagnostics,
+    DaemonStatus,
+    start_managed_daemon_process,
+)
+from metor.application.frontend.host import LocalFrontendHost, _resolve_autostart_policy
 from metor.core.api import (
     AuthenticateSessionCommand,
     EventType,
@@ -39,6 +43,7 @@ from metor.cli.handlers import CommandHandlers
 from metor.client import (
     BufferedIpcEventReader,
     FrontendBootstrapError,
+    FrontendBootstrapReason,
     FrontendBootstrapResult,
     FrontendLaunchContext,
     IpcAuthExchange,
@@ -82,6 +87,31 @@ def _run_deferred_frontend(
         interactions.error = exc
         return exc.exit_code
     return 0
+
+
+def _owned_start_mock(
+    _profile: ProfileManager,
+    *,
+    diagnostics: DaemonStartDiagnostics,
+    **_options: object,
+) -> bool:
+    """Mark a mocked successful start as owned by the invoking host.
+
+    Args:
+        _profile: Test profile.
+        diagnostics: Mutable start diagnostic record.
+        _options: Remaining start options.
+
+    Returns:
+        bool: Successful mock start.
+    """
+    process = Mock(pid=37124, stdin=None)
+    process.poll.return_value = None
+    process.terminate.side_effect = lambda: setattr(process.poll, 'return_value', 0)
+    if isinstance(_profile, Mock):
+        _profile.get_daemon_pid.return_value = process.pid
+    diagnostics.process = process
+    return True
 
 
 class _ChunkSocket:
@@ -1127,6 +1157,155 @@ class UiIpcContractTests(unittest.TestCase):
             ChatDaemonAutostartPolicy.NEVER,
         )
 
+    def test_host_borrows_already_running_local_daemon(self) -> None:
+        """A GUI attach does not restart or stop an independently running daemon.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        pm = Mock(spec=ProfileManager)
+        pm.profile_name = 'default'
+        pm.exists.return_value = True
+        pm.is_remote.return_value = False
+        pm.is_daemon_running.return_value = True
+        pm.uses_encrypted_storage.return_value = True
+        pm.get_daemon_port.return_value = 37123
+        pm.config = Mock()
+        pm.config.get_int.return_value = 3
+        pm.config.get_float.return_value = 15.0
+        interactions = _DeferredInteractions()
+        host = LocalFrontendHost(cast(ProfileManager, pm), False)
+
+        with patch(
+            'metor.application.frontend.host.start_managed_daemon_process'
+        ) as start:
+            result = host.bootstrap(interactions)
+            host.close()
+
+        start.assert_not_called()
+        self.assertFalse(result.daemon_started_by_launcher)
+        self.assertEqual(result.port, 37123)
+        self.assertEqual(interactions.statuses, [])
+
+    def test_host_does_not_claim_daemon_won_by_another_launcher(self) -> None:
+        """A process found after the start lock is borrowed, not invocation-owned.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        pm = Mock(spec=ProfileManager)
+        pm.profile_name = 'default'
+        pm.exists.return_value = True
+        pm.is_remote.return_value = False
+        pm.is_daemon_running.side_effect = [False, True]
+        pm.uses_encrypted_storage.return_value = True
+        pm.uses_plaintext_storage.return_value = False
+        pm.get_daemon_port.return_value = 37123
+        pm.config = Mock()
+        pm.config.get_int.return_value = 3
+        pm.config.get_float.return_value = 15.0
+        host = LocalFrontendHost(cast(ProfileManager, pm), True)
+
+        with patch(
+            'metor.application.frontend.host.start_managed_daemon_process',
+            return_value=True,
+        ) as start:
+            result = host.bootstrap(_DeferredInteractions())
+            self.assertNotIn('default', host._started_processes)
+            host.close()
+
+        start.assert_called_once()
+        self.assertFalse(result.daemon_started_by_launcher)
+        self.assertEqual(result.port, 37123)
+
+    def test_borrowed_daemon_disappearing_before_attach_can_retry(self) -> None:
+        """A borrowed start never leaves a stale invocation-owned retry marker."""
+        pm = Mock(spec=ProfileManager)
+        pm.profile_name = 'default'
+        pm.exists.return_value = True
+        pm.is_remote.return_value = False
+        pm.is_daemon_running.return_value = False
+        pm.uses_encrypted_storage.return_value = True
+        pm.uses_plaintext_storage.return_value = False
+        pm.get_daemon_port.side_effect = [None, 37123]
+        pm.config = Mock()
+        pm.config.get_int.return_value = 3
+        pm.config.get_float.return_value = 15.0
+        host = LocalFrontendHost(cast(ProfileManager, pm), True)
+
+        with patch(
+            'metor.application.frontend.host.start_managed_daemon_process',
+            return_value=True,
+        ) as start:
+            with self.assertRaises(FrontendBootstrapError) as missing:
+                host.bootstrap(_DeferredInteractions())
+            self.assertEqual(
+                missing.exception.reason, FrontendBootstrapReason.UNREACHABLE
+            )
+            self.assertNotIn('default', host._started_processes)
+            attached = host.bootstrap(_DeferredInteractions())
+            host.close()
+
+        self.assertEqual(start.call_count, 2)
+        self.assertFalse(attached.daemon_started_by_launcher)
+        self.assertEqual(attached.port, 37123)
+
+    def test_spawned_child_is_only_attributed_when_it_owns_endpoint(self) -> None:
+        """A competing daemon never inherits child ownership or startup secrets."""
+        for published_pid in (37124, 37125, None):
+            with self.subTest(published_pid=published_pid):
+                pm = Mock(spec=ProfileManager)
+                pm.profile_name = 'default'
+                pm.exists.return_value = True
+                pm.is_remote.return_value = False
+                pm.is_daemon_running.return_value = False
+                pm.uses_encrypted_storage.return_value = False
+                pm.uses_plaintext_storage.return_value = True
+                pm.get_daemon_port.return_value = 37123
+                pm.get_daemon_pid.return_value = published_pid
+                pm.config = Mock()
+                pm.config.get_bool.return_value = True
+                pm.config.get_int.return_value = 3
+                pm.config.get_float.return_value = 15.0
+                process = Mock(pid=37124, stdin=None)
+                process.poll.return_value = None
+                host = LocalFrontendHost(cast(ProfileManager, pm), True)
+
+                def start_child(
+                    _profile: ProfileManager,
+                    *,
+                    diagnostics: DaemonStartDiagnostics,
+                    **_options: object,
+                ) -> bool:
+                    diagnostics.process = process
+                    return True
+
+                with patch(
+                    'metor.application.frontend.host.start_managed_daemon_process',
+                    side_effect=start_child,
+                ):
+                    result = host.bootstrap(
+                        _DeferredInteractions(secret='startup-secret')
+                    )
+                    self.assertEqual(host._started_processes['default'], process.pid)
+                    host.close()
+
+                self.assertEqual(
+                    result.daemon_started_by_launcher, published_pid == process.pid
+                )
+                self.assertEqual(
+                    result.session_auth.take(),
+                    'startup-secret' if published_pid == process.pid else None,
+                )
+                process.terminate.assert_called_once()
+                self.assertEqual(host._started_processes, {})
+
     def test_handle_chat_never_policy_keeps_daemon_explicit(self) -> None:
         """
         Verifies that chat keep missing local daemons explicit when policy is never.
@@ -1209,7 +1388,7 @@ class UiIpcContractTests(unittest.TestCase):
             patch('metor.cli.handlers.prompt_text') as prompt_mock,
             patch(
                 'metor.application.frontend.host.start_managed_daemon_process',
-                return_value=True,
+                side_effect=_owned_start_mock,
             ) as start_mock,
         ):
             CommandHandlers.handle_chat(cast(ProfileManager, pm))
@@ -1368,7 +1547,7 @@ class UiIpcContractTests(unittest.TestCase):
             ),
             patch(
                 'metor.application.frontend.host.start_managed_daemon_process',
-                return_value=True,
+                side_effect=_owned_start_mock,
             ) as start_mock,
         ):
             CommandHandlers.handle_chat(cast(ProfileManager, pm))

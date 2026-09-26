@@ -44,11 +44,11 @@ class ContextAction(Action):
         self._context_used = False
         self._context_key_code: int | None = None
         super().__init__(text, callback, surface=surface, tone=tone, **kwargs)
-        self.bind(parent=self._cancel_hold, disabled=self._cancel_hold)
+        self.bind(parent=self._lost_target, disabled=self._lost_target)
         Window.bind(on_key_up=self._window_key_up)
 
     def _cancel_hold(self, *_args: object) -> None:
-        """Cancels a pending hold when its target departs or becomes unavailable.
+        """Cancels the timer for a completed or interrupted hold.
 
         Args:
             _args: Native lifetime event.
@@ -58,6 +58,20 @@ class ContextAction(Action):
         if self._hold is not None:
             self._hold.cancel()
             self._hold = None
+
+    def _lost_target(self, *_args: object) -> None:
+        """Forgets a press whose release may never reach a detached target.
+
+        Args:
+            _args: Native parent or eligibility change.
+        Returns:
+            None
+        """
+        if self.parent is not None and not self.disabled:
+            return
+        self._cancel_hold()
+        self._pointer_identity = None
+        self._context_used = True
 
     def _open_context(self, _elapsed: float = 0.0) -> None:
         """Consumes the primary press before opening one context menu.

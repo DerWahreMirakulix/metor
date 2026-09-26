@@ -90,7 +90,7 @@ def security_view(
     """
     outer = AnchorLayout(padding=dp(Geometry.EDGE))
     scroll = ScrollView(
-        size_hint_x=None, width=dp(Geometry.FORM_MAX), do_scroll_x=False
+        size_hint=(None, None), width=dp(Geometry.FORM_MAX), do_scroll_x=False
     )
     outer.bind(
         width=lambda owner, value: setattr(
@@ -98,9 +98,24 @@ def security_view(
         )
     )
     body = BoxLayout(
-        orientation='vertical', spacing=dp(16), size_hint_y=None, padding=(0, dp(48))
+        orientation='vertical', spacing=dp(8), size_hint_y=None, padding=(0, dp(24))
     )
     body.bind(minimum_height=body.setter('height'))
+
+    def fit_cover(*_args: object) -> None:
+        """Keeps a fitting lock form fixed while allowing overflow to remain reachable.
+
+        Args:
+            _args: Native layout or notification changes.
+        Returns:
+            None
+        """
+        available = max(0, outer.height - outer.padding[1] - outer.padding[3])
+        scroll.height = min(body.minimum_height, available)
+        scroll.do_scroll_y = body.minimum_height > available
+
+    outer.bind(height=fit_cover, padding=fit_cover)
+    body.bind(minimum_height=fit_cover)
     scroll.add_widget(body)
     outer.add_widget(scroll)
     body.add_widget(Label('Metor', role='hero'))
@@ -340,4 +355,5 @@ def security_view(
         )
     if state.status:
         body.add_widget(Label(state.status, role='support', tone='info'))
+    fit_cover()
     return outer

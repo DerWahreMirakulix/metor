@@ -39,7 +39,7 @@ class ContactListView(BoxLayout):
         self._key: object = None
         self._rows: dict[str, Action] = {}
         header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
-        self.back = IconAction('chevron-left', 'Back', controller.back)
+        self.back = IconAction('chevron-left', 'Back', self.go_back)
         self.title = Label(role='title', wrap=False)
         header.add_widget(self.back)
         header.add_widget(self.title)
@@ -69,13 +69,24 @@ class ContactListView(BoxLayout):
         self.page_label = Label(role='support', wrap=False)
         for widget in (self.previous, self.page_label, self.next):
             pages.add_widget(widget)
-        self.add_widget(pages)
         self.footer = BoxLayout(
-            orientation='vertical', spacing=dp(12), size_hint_y=None
+            orientation='vertical', spacing=dp(12), size_hint_y=None, height=0
         )
         self.footer.bind(minimum_height=self.footer.setter('height'))
         self.add_widget(self.footer)
+        self.add_widget(pages)
         self.update()
+
+    def go_back(self) -> None:
+        """Cancels contact selection or returns to the invoking root presentation.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self.controller.back()
+        self.refresh()
 
     def filter(self, _field: TextField, value: str) -> None:
         """Filters rows without replacing the focused search field or changing selection.
@@ -169,7 +180,7 @@ class ContactListView(BoxLayout):
             """
             sheet.dismiss(animation=False)
             action()
-            self.update()
+            self.refresh()
 
         def add(scan: bool = False) -> None:
             """Preserves picker intent in the shared contact form.
@@ -377,3 +388,5 @@ class ContactListView(BoxLayout):
             self.footer.add_widget(
                 Label(controller.state.status, role='support', tone='info')
             )
+        if not self.footer.children:
+            self.footer.height = 0

@@ -14,6 +14,7 @@ import unittest
 from unittest.mock import patch
 
 from metor.client import FrontendHost, FrontendLaunchContext
+from metor.main import gui_main
 from metor.ui.gui.launcher import GuiEntry
 
 import gui_installed_launcher as installed_fixture
@@ -21,6 +22,58 @@ import gui_installed_launcher as installed_fixture
 
 class GuiStartupDiagnosticsTests(unittest.TestCase):
     """Exercise the production launcher without opening a native window."""
+
+    def test_windowed_entry_starts_gui_with_no_console_streams(self) -> None:
+        """The Windows GUI script keeps the CLI handoff and handles missing stdio.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with (
+            patch('metor.main.sys.platform', 'win32'),
+            patch('metor.main.sys.argv', ['metor-gui', '-p', 'alpha']),
+            patch('metor.main.sys.stdout', None),
+            patch('metor.main.sys.stderr', None),
+            patch('metor.main.ctypes.windll', create=True) as windll,
+            patch('metor.cli.entry.run_cli', return_value=0) as run_cli,
+        ):
+            with self.assertRaises(SystemExit) as outcome:
+                gui_main()
+
+        self.assertEqual(outcome.exception.code, 0)
+        run_cli.assert_called_once_with(['chat', '--ui', 'gui', '-p', 'alpha'])
+        windll.user32.MessageBoxW.assert_not_called()
+
+    def test_windowed_entry_shows_safe_failure_without_console(self) -> None:
+        """A graphical launch failure is visible without exposing exception text.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with (
+            patch('metor.main.sys.platform', 'win32'),
+            patch('metor.main.sys.argv', ['metor-gui']),
+            patch('metor.main.sys.stdout', None),
+            patch('metor.main.sys.stderr', None),
+            patch('metor.main.ctypes.windll', create=True) as windll,
+            patch(
+                'metor.cli.entry.run_cli',
+                side_effect=RuntimeError('private-secret'),
+            ),
+        ):
+            with self.assertRaises(SystemExit) as outcome:
+                gui_main()
+
+        self.assertEqual(outcome.exception.code, 1)
+        message = windll.user32.MessageBoxW.call_args.args[1]
+        self.assertIn('Metor GUI could not start', message)
+        self.assertNotIn('private-secret', message)
 
     def _launch_with_app(
         self,

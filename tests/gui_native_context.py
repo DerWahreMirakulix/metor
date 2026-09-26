@@ -134,7 +134,7 @@ class GestureHarness(App):
         Clock.schedule_once(self.finished, 0.65)
 
     def finished(self, _elapsed: float) -> None:
-        """Completes after verifying detached targets cannot fire delayed menu actions.
+        """Verifies detached targets forget a press before the next real click.
 
         Args:
             _elapsed: Native scheduler delay.
@@ -143,6 +143,15 @@ class GestureHarness(App):
         """
         assert len(self.contexts) == 3 and self.primary == [True]
         EventLoop.post_dispatch_input('end', self.removed)
+        self.panel.add_widget(self.action)
+        pressed = self.touch('left', 'after-reattach')
+        EventLoop.post_dispatch_input('begin', pressed)
+        EventLoop.post_dispatch_input('end', pressed)
+        assert self.primary == [True, True], (
+            len(self.primary),
+            self.action._pointer_identity,
+            self.action.state,
+        )
         self.completed = True
         self.stop()
 
@@ -172,6 +181,7 @@ def main() -> None:
                 'hold_500ms': 'pass',
                 'travel_over_8_units': 'pass',
                 'detached_target_cancellation': 'pass',
+                'reattached_first_click': 'pass',
             },
             indent=2,
         )

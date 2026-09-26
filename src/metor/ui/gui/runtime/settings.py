@@ -198,5 +198,6 @@ class CoreSettings:
             lambda: client.request(
                 GetConfigListCommand(safe_descriptors=True), ConfigListDataEvent
             ),
+            background=True,
         ):
             self.refresh_needed = False

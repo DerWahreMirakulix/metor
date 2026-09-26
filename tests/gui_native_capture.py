@@ -40,6 +40,7 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.metrics import dp, Metrics
 from kivy.input.providers.mouse import MouseMotionEvent
+from kivy.uix.scrollview import ScrollView
 
 from metor.client import FrontendHost, FrontendLaunchContext
 from metor.core.api import (
@@ -88,7 +89,7 @@ from gui_native_profiles import (
 from gui_native_contacts import configure_contact_pages, exercise_contact_pages
 from gui_native_responsive import exercise_responsive
 from gui_native_purge import configure_purge
-from gui_native_root import exercise_root_refresh
+from gui_native_root import exercise_root_navigation, exercise_root_refresh
 from gui_native_load import exercise_native_load
 
 
@@ -410,10 +411,12 @@ def main() -> None:
             'root',
             'root_page',
             'root_refresh',
+            'root_navigation',
             'root_load',
             'drop',
             'live',
             'entry',
+            'entry_loading',
             'failure',
             'setup',
             'lock',
@@ -460,7 +463,10 @@ def main() -> None:
     Metrics.fontscale = args.font_scale
     args.output.parent.mkdir(parents=True, exist_ok=True)
     config = DeviceConfiguration(
-        mode='simulator', width_px=args.width, height_px=args.height
+        mode='simulator',
+        width_px=args.width,
+        height_px=args.height,
+        touch=args.view == 'setting_keyboard',
     )
     host = cast(FrontendHost, object())
     app = MetorApp(FrontendLaunchContext('Simulator', host), config)
@@ -688,9 +694,12 @@ def main() -> None:
             controller.security.restriction = ClientRestrictedEvent(
                 ClientUnlockMethod.PIN, '11' * 32, '22' * 16
             )
-    elif args.view == 'entry':
+    elif args.view in {'entry', 'entry_loading'}:
         controller.state.covered = True
         controller.state.route = Route('V01')
+        if args.view == 'entry_loading':
+            controller.state.busy = True
+            controller.state.status = 'Opening profile…'
     elif args.view == 'failure':
         controller.state.covered = True
         controller.state.status = 'Could not open profile. Retry or choose a profile.'
@@ -910,6 +919,11 @@ def main() -> None:
                         app, lambda: Clock.schedule_once(capture, 0.3)
                     )
                     return
+                if args.view == 'root_navigation':
+                    exercise_root_navigation(
+                        app, lambda: Clock.schedule_once(capture, 0.3)
+                    )
+                    return
                 if args.view == 'responsive':
                     exercise_responsive(app, lambda: Clock.schedule_once(capture, 0.3))
                     return
@@ -996,13 +1010,36 @@ def main() -> None:
             )
             Clock.schedule_once(capture, 0.1)
             return
+        if args.view in {'entry', 'entry_loading', 'setup', 'lock'}:
+            covers = [
+                widget for widget in app.shell.walk() if isinstance(widget, ScrollView)
+            ]
+            assert len(covers) == 1 and not covers[0].do_scroll_y
+        if args.view == 'entry_loading':
+            assert any(
+                getattr(widget, 'text', '') == 'Opening profile'
+                for widget in app.shell.walk()
+            )
+            assert not any(
+                isinstance(widget, Action)
+                and widget.accessible_name
+                in {'Open profile', 'Switch profile', 'New profile'}
+                for widget in app.shell.walk()
+            )
+        if args.view == 'profiles' and args.height >= 800:
+            assert not any(
+                widget.do_scroll_y
+                for widget in app.shell.walk()
+                if isinstance(widget, ScrollView)
+            )
         if args.window_output:
             Window.screenshot(name=args.window_output)
             args.window_output = None
         if args.view == 'confirmation' and not confirmation_checked:
             sheet = ActionSheet.current
             assert sheet is not None and sheet.cancel.focus
-            assert sheet.y == dp(24) and sheet.height <= Window.height - dp(48)
+            assert abs(sheet.center_y - Window.center[1]) < dp(1)
+            assert sheet.height <= Window.height - dp(48)
             if args.font_scale >= 1.5:
                 assert sheet.actions.orientation == 'vertical'
                 assert sheet.actions.children[0] is sheet.cancel
@@ -1044,8 +1081,6 @@ def main() -> None:
             assert overlay.ptt.height >= dp(48)
             assert overlay.panel.right <= Window.width - dp(24)
             if args.view == 'continued_pin' and not continued_pin_checked:
-                from kivy.uix.scrollview import ScrollView
-
                 scroll = next(
                     widget
                     for widget in app.shell.walk()

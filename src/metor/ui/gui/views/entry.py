@@ -26,14 +26,29 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
         AnchorLayout: Centered scrollable authentication composition.
     """
     outer = AnchorLayout(padding=dp(24))
-    scroll = ScrollView(size_hint=(None, 1), width=dp(400), do_scroll_x=False)
+    scroll = ScrollView(size_hint=(None, None), width=dp(400), do_scroll_x=False)
     outer.bind(
         width=lambda _w, width: setattr(scroll, 'width', min(dp(400), width - dp(48)))
     )
     column = BoxLayout(
-        orientation='vertical', spacing=dp(16), size_hint_y=None, padding=(0, dp(48))
+        orientation='vertical', spacing=dp(8), size_hint_y=None, padding=(0, dp(24))
     )
     column.bind(minimum_height=column.setter('height'))
+
+    def fit_cover(*_args: object) -> None:
+        """Centers a fitting cover and scrolls only when its controls overflow.
+
+        Args:
+            _args: Native layout changes.
+        Returns:
+            None
+        """
+        available = max(0, outer.height - outer.padding[1] - outer.padding[3])
+        scroll.height = min(column.minimum_height, available)
+        scroll.do_scroll_y = column.minimum_height > available
+
+    outer.bind(height=fit_cover, padding=fit_cover)
+    column.bind(minimum_height=fit_cover)
     scroll.add_widget(column)
     outer.add_widget(scroll)
     column.add_widget(Label('Metor', role='hero'))
@@ -65,6 +80,18 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
         refresh()
 
     if prompt is not None:
+
+        def respond(value: str | bool | None) -> None:
+            """Replace an answered prompt with the pending startup state.
+
+            Args:
+                value: Start confirmation, one-use password, or cancellation.
+            Returns:
+                None
+            """
+            controller.interactions.answer(value)
+            refresh()
+
         if prompt.kind == 'start':
             column.add_widget(Label('Start Metor?', role='peer'))
             column.add_widget(
@@ -73,14 +100,12 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
             column.add_widget(
                 Action(
                     'Start Metor',
-                    lambda: controller.interactions.answer(True),
+                    lambda: respond(True),
                     surface='drop',
                     tone='onAccent',
                 )
             )
-            column.add_widget(
-                Action('Cancel', lambda: controller.interactions.answer(None))
-            )
+            column.add_widget(Action('Cancel', lambda: respond(None)))
         else:
             column.add_widget(Label('Open profile', role='peer'))
             column.add_widget(Label('Profile password', role='support'))
@@ -97,17 +122,20 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
                 """
                 value = secret.text
                 secret.text = ''
-                controller.interactions.answer(value)
+                respond(value)
 
             secret.bind(on_text_validate=lambda *_args: answer())
             column.add_widget(
                 Action('Open profile', answer, surface='drop', tone='onAccent')
             )
-            column.add_widget(
-                Action('Cancel', lambda: controller.interactions.answer(None))
-            )
+            column.add_widget(Action('Cancel', lambda: respond(None)))
     elif controller.lifecycle.active or controller.lifecycle.failed:
         lifecycle_body(controller, column)
+    elif state.busy and state.route.view == 'V01':
+        column.add_widget(Label('Opening profile', role='peer'))
+        column.add_widget(
+            Label(state.status or 'Please wait…', role='support', tone='textSecondary')
+        )
     elif state.route.view == 'V02':
         column.add_widget(Label('Choose profile', role='peer'))
         profiles_body(controller, column, startup=True)
@@ -191,6 +219,9 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
         column.add_widget(
             Action('New profile', lambda: navigate('V03'), disabled=state.busy)
         )
-    if state.status:
+    if state.status and not (
+        state.busy and state.route.view == 'V01' and prompt is None
+    ):
         column.add_widget(Label(state.status, role='support', tone='info'))
+    fit_cover()
     return outer

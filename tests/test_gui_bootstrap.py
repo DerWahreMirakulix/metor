@@ -115,7 +115,11 @@ class BootstrapTransportTests(unittest.TestCase):
                         )
                     )
                 self.assertTrue(controller.state.covered)
-                bridge.answer('test-password')
+                self.assertTrue(controller.state.busy)
+                with bridge._condition:
+                    bridge.answer('test-password')
+                    self.assertIsNone(bridge.prompt)
+                    bridge.answer('ignored-repeat')
                 worker = controller._worker
                 assert worker is not None
                 worker.join(5)

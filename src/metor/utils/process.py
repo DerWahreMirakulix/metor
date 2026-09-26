@@ -47,7 +47,7 @@ def _trusted_python_executables() -> tuple[Path, ...]:
         None
 
     Returns:
-        tuple[Path, ...]: Active interpreter plus its Windows venv base runtime.
+        tuple[Path, ...]: Active interpreter and its Windows console/windowed peers.
     """
     selected: list[Path] = [Path(sys.executable).resolve()]
     base_executable = getattr(sys, '_base_executable', None)
@@ -55,6 +55,17 @@ def _trusted_python_executables() -> tuple[Path, ...]:
         base_path = Path(base_executable).resolve()
         if not any(_same_file_object(base_path, current) for current in selected):
             selected.append(base_path)
+    if os.name == 'nt':
+        for interpreter in tuple(selected):
+            name = interpreter.name.lower()
+            if name not in ('python.exe', 'pythonw.exe'):
+                continue
+            counterpart_name = 'pythonw.exe' if name == 'python.exe' else 'python.exe'
+            counterpart = interpreter.with_name(counterpart_name)
+            if counterpart.is_file() and not any(
+                _same_file_object(counterpart, current) for current in selected
+            ):
+                selected.append(counterpart.resolve())
     return tuple(selected)
 
 

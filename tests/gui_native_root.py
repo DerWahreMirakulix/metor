@@ -4,11 +4,123 @@ from collections.abc import Callable
 from dataclasses import replace
 
 from kivy.clock import Clock
+from kivy.metrics import dp
 from kivy.uix.scrollview import ScrollView
 
 from metor.core.api import Delivery, DropConversationSummaryEntry
 from metor.ui.gui.app import MetorApp
-from metor.ui.gui.widgets import Action
+from metor.ui.gui.widgets import Action, Label
+
+
+def exercise_root_navigation(app: MetorApp, complete: Callable[[], None]) -> None:
+    """Uses native sidebar and Back controls across compact and wide root routes.
+
+    Args:
+        app: Running isolated native simulator.
+        complete: Continuation after presentation-only navigation returns to root.
+    Returns:
+        None
+    """
+    assert app.shell is not None
+    shell, state = app.shell, app.controller.state
+
+    def assert_overview(view: str) -> None:
+        """Checks the actual compact list or wide neutral detail after Back.
+
+        Args:
+            view: Expected DROP or LIVE root route.
+        Returns:
+            None
+        """
+        assert state.route.view == view
+        assert shell._root_panel is not None
+        assert shell._root_panel.get_root_window() is not None
+        if shell.width >= dp(960):
+            assert any(
+                isinstance(widget, Label) and widget.text == 'Choose a conversation'
+                for widget in shell.walk()
+            )
+        else:
+            assert shell._contacts_panel is None and shell._detail is None
+
+    assert_overview('V06')
+    root = shell._root_panel
+    root.header_actions['V12'].dispatch('on_release')
+    shell.render()
+    assert state.route.view == 'V12' and shell._contacts_panel is not None
+    if shell.width >= dp(960):
+        assert root.header_actions['V12'].surface == 'dropSurface'
+        assert root.tabs[Delivery.DROP].surface == 'surface'
+        root.tabs[Delivery.LIVE].dispatch('on_release')
+        shell.render()
+        assert state.route.view == 'V12' and state.root_delivery is Delivery.LIVE
+        assert shell._contacts_panel is not None
+    shell._contacts_panel.back.dispatch('on_release')
+    shell.render()
+    if shell.width >= dp(960):
+        assert_overview('V07')
+        shell._root_panel.tabs[Delivery.DROP].dispatch('on_release')
+        shell.render()
+    assert_overview('V06')
+
+    root = shell._root_panel
+    root.new.dispatch('on_release')
+    shell.render()
+    assert state.route.view == 'V11' and shell._contacts_panel is not None
+    shell._contacts_panel.back.dispatch('on_release')
+    shell.render()
+    assert_overview('V06')
+
+    root = shell._root_panel
+    root.tabs[Delivery.LIVE].dispatch('on_release')
+    shell.render()
+    assert state.route.view == 'V07' and state.root_delivery is Delivery.LIVE
+    root = shell._root_panel
+    root.new.dispatch('on_release')
+    shell.render()
+    assert state.route.view == 'V11' and shell._contacts_panel is not None
+    assert state.route.delivery is Delivery.LIVE
+    shell._contacts_panel.back.dispatch('on_release')
+    shell.render()
+    assert_overview('V07')
+
+    if shell.width >= dp(960):
+        root = shell._root_panel
+        root.new.focus = True
+        root.new.dispatch('on_release')
+        shell.render()
+        notifications = root.header_actions['V16']
+        notifications.focus = True
+        notifications.dispatch('on_release')
+        shell.render()
+        assert state.route.view == 'V16'
+        assert not root.new.focus and root.new.surface == 'raised'
+        assert notifications.surface == 'dropSurface'
+        assert 'current view' in notifications.accessible_name
+        app.controller.back()
+        shell.render()
+        assert_overview('V07')
+
+        root = shell._root_panel
+        settings = root.header_actions['V17']
+        settings.dispatch('on_release')
+        shell.render()
+        root = shell._root_panel
+        settings = root.header_actions['V17']
+        assert state.route.view == 'V17'
+        assert settings.surface == 'dropSurface'
+        assert 'current view' in settings.accessible_name
+        assert not root.header_actions['V16'].focus
+        assert root.header_actions['V16'].surface == 'raised'
+        app.controller.back()
+        shell.render()
+        assert_overview('V07')
+
+    shell._root_panel.tabs[Delivery.DROP].dispatch('on_release')
+    shell.render()
+    assert_overview('V06')
+    assert app.controller.client is None
+    complete()
 
 
 def exercise_root_refresh(app: MetorApp, complete: Callable[[], None]) -> None:

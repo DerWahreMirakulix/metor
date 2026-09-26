@@ -37,7 +37,7 @@ class InputDock:
         self._sheet: ActionSheet | None = None
 
     def focused(self, field: TextField) -> None:
-        """Automatically opens only in declared touch/device mode.
+        """Automatically opens only when touch input is declared.
 
         Args:
             field: Newly focused local text/password/PIN field.
@@ -46,8 +46,21 @@ class InputDock:
         """
         if self.target is field or self._dismissed == id(field):
             return
-        if self.app.configuration.touch or self.app.configuration.mode == 'device':
+        if self.app.configuration.touch:
             self.show(field)
+
+    def unfocused(self, field: TextField) -> None:
+        """Clears an explicit Hide once the field loses native focus.
+
+        Args:
+            field: Field that left the current focus path.
+        Returns:
+            None
+        """
+        if self.target is field:
+            self.hide()
+        if self._dismissed == id(field):
+            self._dismissed = None
 
     def show(self, field: TextField) -> None:
         """Shows an explicitly requested keyboard while keeping the current field focused.

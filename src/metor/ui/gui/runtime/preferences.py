@@ -103,6 +103,7 @@ class PreferenceBridge:
             if controller.submit(
                 'preferences',
                 lambda: client.request(GetGuiPreferencesCommand(), GuiPreferencesEvent),
+                background=True,
             ):
                 self.refresh_needed = False
 

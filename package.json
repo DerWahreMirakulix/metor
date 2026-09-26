@@ -3,11 +3,11 @@
   "private": true,
   "description": "Metor is a Tor-based messenger framework written in Python.",
   "scripts": {
-    "format:md": "prettier --write \"**/*.md\"",
+    "format:md": "prettier --write \"*.md\" \"docs/**/*.md\" \".github/**/*.md\"",
     "format:py": "python -m ruff format src/metor/ scripts/ tests/",
     "fix:py": "python -m ruff check --fix src/metor/ scripts/ tests/",
     "generate:docs": "python scripts/generate_api_docs.py && python scripts/generate_settings_docs.py && python scripts/generate_compatibility_manifest.py",
-    "check:md": "prettier --check \"**/*.md\"",
+    "check:md": "prettier --check \"*.md\" \"docs/**/*.md\" \".github/**/*.md\"",
     "check:py": "python -m ruff check src/metor/ scripts/ tests/ && python -m ruff format --check src/metor/ scripts/ tests/",
     "check:types": "python -m mypy src scripts/",
     "check:boundaries": "python scripts/check_boundaries.py",

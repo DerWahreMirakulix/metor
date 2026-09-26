@@ -26,6 +26,7 @@ class Update:
     playback: PlaybackProgress | None = None
     profile_catalog: FrontendProfileCatalog | None = None
     profile_result: FrontendProfileOperationResult | None = None
+    background: bool = False
 
 
 class Mailbox:

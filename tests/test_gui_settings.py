@@ -1,6 +1,7 @@
 """Protected GUI editor revisions across another client's concurrent policy change."""
 
 from dataclasses import replace
+import threading
 import unittest
 from unittest.mock import Mock, patch
 
@@ -32,6 +33,109 @@ from metor.ui.gui.state.mailbox import Update
 
 class SettingsCoreTests(unittest.TestCase):
     """Verifies stale native-form intent through two actual encrypted Core clients."""
+
+    def test_initial_descriptor_read_keeps_loaded_preference_controls_enabled(
+        self,
+    ) -> None:
+        """A read-only descriptor request does not globally disable Settings.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        gui = GuiController(
+            FrontendLaunchContext(
+                'fixture',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'fixture', True, False, False
+                    )
+                ),
+            )
+        )
+        self.addCleanup(gui.close)
+        started = threading.Event()
+        release = threading.Event()
+        self.addCleanup(release.set)
+
+        def read(_command: object, _expected: object) -> ConfigListDataEvent:
+            """Holds the authorized read while the visible busy state is inspected.
+
+            Args:
+                _command: Public descriptor request.
+                _expected: Typed response expectation.
+            Returns:
+                ConfigListDataEvent: Empty valid descriptor page.
+            """
+            started.set()
+            if not release.wait(5):
+                raise TimeoutError('Test descriptor read was not released')
+            return ConfigListDataEvent('daemon', 'fixture', [])
+
+        gui.client = Mock(request=Mock(side_effect=read))
+        gui.state.covered = False
+        gui.state.route = Route('V17')
+        gui.state.capabilities = frozenset({'safe_setting_descriptors'})
+        gui.core_settings.poll()
+        self.assertTrue(started.wait(5))
+        self.assertFalse(gui.state.busy)
+        release.set()
+        assert gui._worker is not None
+        gui._worker.join(5)
+        self.assertFalse(gui._worker.is_alive())
+        update = gui.mailbox.take()
+        self.assertIsNotNone(update)
+        self.assertTrue(gui.core_settings.install(update))
+        self.assertTrue(gui.core_settings.loaded)
+
+    def test_preference_refresh_does_not_disable_settings(self) -> None:
+        """An invalidation read keeps the displayed preferences interactive.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        gui = GuiController(
+            FrontendLaunchContext(
+                'fixture',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'fixture', True, False, False
+                    )
+                ),
+            )
+        )
+        self.addCleanup(gui.close)
+        started = threading.Event()
+        release = threading.Event()
+        self.addCleanup(release.set)
+
+        def read(_command: object, _expected: object) -> None:
+            """Holds the public read until the busy state has been checked.
+
+            Args:
+                _command: Protected preference request.
+                _expected: Typed response expectation.
+            Returns:
+                None
+            """
+            started.set()
+            if not release.wait(5):
+                raise TimeoutError('Test preference read was not released')
+
+        gui.client = Mock(request=Mock(side_effect=read))
+        gui.state.covered = False
+        gui.state.route = Route('V17')
+        gui.preferences.refresh_needed = True
+        gui.preferences.poll()
+        self.assertTrue(started.wait(5))
+        self.assertFalse(gui.state.busy)
+        release.set()
+        assert gui._worker is not None
+        gui._worker.join(5)
+        self.assertFalse(gui._worker.is_alive())
 
     def test_covered_late_descriptors_require_fresh_authorized_read(self) -> None:
         """A pending pre-lock settings response cannot repopulate private values.
@@ -382,5 +486,12 @@ class SettingsCoreTests(unittest.TestCase):
                 gui._worker.join(5)
                 self.assertFalse(gui._worker.is_alive())
             gui.poll()
-            if not gui.state.busy and not gui.core_settings.refresh_needed:
-                break
+            if (
+                not gui.state.busy
+                and not gui.core_settings.refresh_needed
+                and gui.core_settings.pending is None
+                and (gui._worker is None or not gui._worker.is_alive())
+            ):
+                gui.poll()
+                if not gui.core_settings.refresh_needed:
+                    break

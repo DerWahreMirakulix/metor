@@ -32,6 +32,7 @@ from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.runtime.interaction import Interactions
 from metor.ui.gui.state import GuiState, Route
 from metor.ui.gui.state.mailbox import Mailbox, Update
+from metor.ui.gui.state.notifications import NoticeKind
 from metor.utils import open_private_binary_file
 
 
@@ -146,6 +147,81 @@ class ConfigurationTests(unittest.TestCase):
 
 class PresentationTests(unittest.TestCase):
     """Exercises public enclosing routing and bounded state behavior."""
+
+    def test_master_navigation_returns_to_neutral_root_without_replaying_details(
+        self,
+    ) -> None:
+        """A master selection replaces stale detail history while child views retain Back.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        state = GuiState()
+        state.route = Route('V08', 'first-peer', Delivery.DROP)
+        state.navigate(Route('V12'), from_root=True)
+        self.assertEqual(state.back_stack, [Route('V06')])
+        state.back()
+        self.assertEqual(state.route, Route('V06'))
+
+        state.root_delivery = Delivery.LIVE
+        state.navigate(Route('V11', delivery=Delivery.LIVE), from_root=True)
+        state.navigate(Route('V13'))
+        state.back()
+        self.assertEqual(state.route, Route('V11', delivery=Delivery.LIVE))
+        state.back()
+        self.assertEqual(state.route, Route('V07', delivery=Delivery.LIVE))
+
+        state.navigate(Route('V16'), from_root=True)
+        state.navigate(Route('V17'), from_root=True)
+        state.back()
+        self.assertEqual(state.route, Route('V07', delivery=Delivery.LIVE))
+
+        state.select_root_delivery(Delivery.DROP)
+        self.assertEqual(state.route, Route('V06'))
+        state.navigate(Route('V12'), from_root=True)
+        state.select_root_delivery(Delivery.LIVE)
+        self.assertEqual(state.route, Route('V12'))
+        state.back()
+        self.assertEqual(state.route, Route('V07', delivery=Delivery.LIVE))
+
+    def test_back_cancels_list_selection_before_leaving_view(self) -> None:
+        """Visible and hardware Back share contact and notification selection semantics.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        controller = GuiController(
+            FrontendLaunchContext(
+                'fixture',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'fixture', True, False, False
+                    )
+                ),
+            )
+        )
+        controller.state.covered = False
+        controller.state.route = Route('V12')
+        controller.contacts.book.selecting = True
+        controller.contacts.book.selected.add('peer')
+        controller.back()
+        self.assertEqual(controller.state.route, Route('V12'))
+        self.assertFalse(controller.contacts.book.selecting)
+        self.assertFalse(controller.contacts.book.selected)
+
+        controller.state.route = Route('V16')
+        controller.notifications.store.selecting = True
+        controller.notifications.store.selected.add((NoticeKind.DROP, 'peer'))
+        controller.back()
+        self.assertEqual(controller.state.route, Route('V16'))
+        self.assertFalse(controller.notifications.store.selecting)
+        self.assertFalse(controller.notifications.store.selected)
+        controller.back()
+        self.assertEqual(controller.state.route, Route('V06'))
 
     def test_navigation_has_no_communication_side_effect(self) -> None:
         """Peer LIVE, selectors and secondary routes never initiate calls."""
@@ -404,8 +480,6 @@ class BackgroundAdmissionTests(unittest.TestCase):
         Returns:
             None
         """
-        import threading
-
         controller = GuiController(
             FrontendLaunchContext(
                 'fixture',
@@ -440,6 +514,60 @@ class BackgroundAdmissionTests(unittest.TestCase):
         controller.poll()
         controller._worker.join(5)
         self.assertEqual(ran, ['action'])
+
+    def test_completed_background_read_cannot_clear_a_new_foreground_action(
+        self,
+    ) -> None:
+        """An older read result retains the busy state of a newer in-flight write.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        controller = GuiController(
+            FrontendLaunchContext(
+                'fixture',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'fixture', True, False, False
+                    )
+                ),
+            ),
+            simulator=True,
+        )
+        self.addCleanup(controller.close)
+        release = threading.Event()
+        started = threading.Event()
+        self.addCleanup(release.set)
+
+        def write() -> None:
+            """Holds the later foreground operation while the prior result is installed.
+
+            Args:
+                None
+            Returns:
+                None
+            """
+            started.set()
+            if not release.wait(5):
+                raise TimeoutError('Test foreground operation was not released')
+
+        self.assertTrue(
+            controller.submit('background:read', lambda: None, background=True)
+        )
+        assert controller._worker is not None
+        controller._worker.join(5)
+        self.assertFalse(controller._worker.is_alive())
+        self.assertTrue(controller.submit('foreground:write', write))
+        self.assertTrue(started.wait(5))
+        self.assertTrue(controller.state.busy)
+        controller.poll()
+        self.assertTrue(controller.state.busy)
+        release.set()
+        controller._worker.join(5)
+        controller.poll()
+        self.assertFalse(controller.state.busy)
 
 
 if __name__ == '__main__':

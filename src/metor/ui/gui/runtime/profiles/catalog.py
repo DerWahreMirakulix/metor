@@ -41,6 +41,8 @@ class ProfileCatalog:
         self.unknown = False
         self._needed = False
         self._after: str | None = None
+        self._pending_after: str | None = None
+        self._page_after: str | None = None
 
     @property
     def host(self) -> FrontendProfileManagement | None:
@@ -58,6 +60,17 @@ class ProfileCatalog:
             and isinstance(host, FrontendProfileManagement)
             else None
         )
+
+    @property
+    def on_first_page(self) -> bool:
+        """Reports whether the visible catalog request starts at the first entry.
+
+        Args:
+            None
+        Returns:
+            bool: True when refresh and first-page navigation are the same action.
+        """
+        return self._page_after is None
 
     def reload(self, after: str | None = None) -> None:
         """Schedules one exact read; a failed read leaves the displayed page intact.
@@ -107,6 +120,7 @@ class ProfileCatalog:
             return None
 
         if controller.submit('profiles:read', read):
+            self._pending_after = after
             self._needed = False
 
     def change(self, change: FrontendProfileChange) -> bool:
@@ -253,6 +267,7 @@ class ProfileCatalog:
             return True
         if update.profile_catalog is not None:
             self.page = update.profile_catalog
+            self._page_after = self._pending_after
             self.error = ''
             self.unknown = False
         elif update.profile_result is not None:

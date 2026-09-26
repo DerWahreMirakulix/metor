@@ -370,6 +370,31 @@ class GuiProfileCatalogTests(unittest.TestCase):
                 return
         self.fail('Catalog operation did not settle')
 
+    def test_first_page_action_describes_the_displayed_catalog(self) -> None:
+        """A failed first-page read keeps the visible later-page action truthful.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        catalog = self.gui.profiles
+        catalog.reload()
+        self.settle()
+        self.assertTrue(catalog.on_first_page)
+        catalog.reload('active')
+        self.settle()
+        self.assertFalse(catalog.on_first_page)
+        with patch.object(
+            self.host_tests.host, 'profile_catalog', side_effect=OSError('read lost')
+        ):
+            catalog.reload()
+            self.settle()
+        self.assertFalse(catalog.on_first_page)
+        catalog.reload()
+        self.settle()
+        self.assertTrue(catalog.on_first_page)
+
     def test_unknown_actual_rename_requires_readback_before_another_mutation(
         self,
     ) -> None:

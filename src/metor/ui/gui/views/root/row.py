@@ -147,11 +147,33 @@ class RootRow(BoxLayout):
                 self.group.add_widget(self.badge)
         elif self.badge.parent is not None:
             self.group.remove_widget(self.badge)
-        self.action.accessible_name = (
+        self._base_accessible_name = (
             entry.label
             + ': '
             + status
             + (f', {entry.unseen} unseen' if entry.unseen else '')
             + (', pinned' if entry.pinned else '')
         )
+        self.action.accessible_name = self._base_accessible_name
         self._measure()
+
+    def select(self, route: Route) -> None:
+        """Shows the open detail separately from the transient keyboard focus.
+
+        Args:
+            route: Current foreground route.
+        Returns:
+            None
+        """
+        selected = (
+            route.view == ('V08' if self.entry.delivery is Delivery.DROP else 'V09')
+            and route.peer == self.entry.peer
+            and route.delivery is self.entry.delivery
+        )
+        self.action.surface = (
+            self.entry.delivery.value + 'Surface' if selected else 'surface'
+        )
+        self.action.accessible_name = self._base_accessible_name + (
+            ', open conversation' if selected else ''
+        )
+        self.action._feedback()

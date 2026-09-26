@@ -52,11 +52,7 @@ def notification_center(
         Returns:
             None
         """
-        if store.selecting:
-            store.selecting = False
-            store.selected.clear()
-        else:
-            controller.back()
+        controller.back()
         refresh()
 
     def clear() -> None:

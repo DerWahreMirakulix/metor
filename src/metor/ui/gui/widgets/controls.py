@@ -11,7 +11,6 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label as KivyLabel
 from kivy.uix.textinput import TextInput
 from kivy.uix.scrollview import ScrollView
-from kivy.input.motionevent import MotionEvent
 
 from metor.ui.gui.theme import TYPE, color, font_path
 
@@ -345,6 +344,16 @@ class KeyboardOwner(Protocol):
         """
         ...
 
+    def unfocused(self, field: 'TextField') -> None:
+        """Reports a field departure so a later focus can reopen local input.
+
+        Args:
+            field: Field that lost native focus.
+        Returns:
+            None
+        """
+        ...
+
     def show(self, field: 'TextField') -> None:
         """Shows the native keyboard for one focused field.
 
@@ -362,7 +371,7 @@ class TextField(TextInput):
     keyboard_owner: ClassVar[KeyboardOwner | None] = None
 
     def __init__(self, **kwargs: object) -> None:
-        """Adds an explicit local keyboard target to every editable field.
+        """Builds an editable field whose device keyboard follows focus.
 
         Args:
             kwargs: Native text-input properties.
@@ -380,23 +389,7 @@ class TextField(TextInput):
         self._font_coverage()
         self.local_keyboard_visible = False
         self.input_purpose = 'password' if self.password else 'text'
-        # Icon controls depend on Action in this module and load after it exists.
-        from .symbol import IconAction
-
-        self._keyboard_action = IconAction(
-            'keyboard', 'Show keyboard', self._show_keyboard
-        )
-        self._keyboard_action.is_focusable = False
-        self.add_widget(self._keyboard_action, canvas='after')
-        self.padding[2] = max(self.padding[2], dp(48))
-        self.bind(
-            right=self._keyboard_bounds,
-            center_y=self._keyboard_bounds,
-            focus=self._keyboard_focus,
-            disabled=self._keyboard_bounds,
-            readonly=self._keyboard_bounds,
-        )
-        self._keyboard_bounds()
+        self.bind(focus=self._keyboard_focus)
 
     def _font_coverage(self, *_args: object) -> None:
         """Keeps accepted Unicode editable while masked credentials use a fixed font.
@@ -408,17 +401,6 @@ class TextField(TextInput):
         """
         self.font_name = font_path(text='' if self.password else self.text)
 
-    def _keyboard_bounds(self, *_args: object) -> None:
-        """Reserves a fixed trailing key target without overlapping editable text.
-
-        Args:
-            _args: Native property callbacks.
-        Returns:
-            None
-        """
-        self._keyboard_action.pos = self.right - dp(48), self.center_y - dp(24)
-        self._keyboard_action.disabled = self.disabled or self.readonly
-
     def _keyboard_focus(self, _widget: object, focused: bool) -> None:
         """Offers newly focused text/password input to the configured local dock.
 
@@ -428,32 +410,11 @@ class TextField(TextInput):
         Returns:
             None
         """
-        if focused and self.keyboard_owner is not None:
-            self.keyboard_owner.focused(self)
-
-    def _show_keyboard(self) -> None:
-        """Explicitly requests local input without exposing text to clipboard or logging.
-
-        Args:
-            None
-        Returns:
-            None
-        """
         if self.keyboard_owner is not None:
-            self.keyboard_owner.show(self)
-
-    def on_touch_down(self, touch: MotionEvent) -> bool:
-        """Prioritizes the keyboard target before native text-selection handling.
-
-        Args:
-            touch: Native pointer/touch identity.
-        Returns:
-            bool: Whether the field or its explicit keyboard target handled input.
-        """
-        if self._keyboard_action.collide_point(*touch.pos) and not self.disabled:
-            FocusBehavior.ignored_touch.append(touch)
-            return bool(self._keyboard_action.on_touch_down(touch))
-        return bool(super().on_touch_down(touch))
+            if focused:
+                self.keyboard_owner.focused(self)
+            else:
+                self.keyboard_owner.unfocused(self)
 
     def copy(self, data: str = '') -> None:
         """Keeps selected profile-linked text out of the host clipboard.

@@ -2,3 +2,8 @@
 
 # Generated Markdown is formatted only by its owning generators.
 docs/generated/
+
+# Local runtime data, dependencies, and test output are not authored Markdown.
+.metor/
+.venv/
+build/

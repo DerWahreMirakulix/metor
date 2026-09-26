@@ -54,7 +54,7 @@ class Interactions:
 
     @property
     def prompt(self) -> Prompt | None:
-        """Returns a safe current prompt descriptor.
+        """Returns only a prompt that still awaits a graphical answer.
 
         Args:
             None
@@ -62,7 +62,7 @@ class Interactions:
             Prompt | None: Pending prompt without secret data.
         """
         with self._condition:
-            return self._prompt
+            return None if self._answered else self._prompt
 
     def answer(self, value: str | bool | None) -> None:
         """Transfers one explicit UI response to its waiting worker.
@@ -73,7 +73,7 @@ class Interactions:
             None
         """
         with self._condition:
-            if self._prompt is not None and not self._cancelled:
+            if self._prompt is not None and not self._cancelled and not self._answered:
                 self._answer = value
                 self._answered = True
                 self._condition.notify_all()

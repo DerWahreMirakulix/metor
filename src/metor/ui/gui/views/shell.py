@@ -12,7 +12,7 @@ from metor.core.api import Delivery
 from metor.ui.gui.constants import Geometry
 from metor.ui.gui.runtime import GuiController, conversation_rows
 from metor.ui.gui.state import Route
-from metor.ui.gui.widgets import Label, PointerTooltip
+from metor.ui.gui.widgets import Action, Label, PointerTooltip
 from metor.ui.gui.theme import color
 
 # Local Package Imports
@@ -111,12 +111,26 @@ class Shell(BoxLayout):
             state.root_delivery,
             state.root_pages.get(state.root_delivery, 0),
         )
+        previous_route = (
+            self._foreground_key[:2] if self._foreground_key is not None else None
+        )
+        route_changed = previous_route is not None and previous_route != (
+            state.generation,
+            state.route,
+        )
         root_continuity = (
             RootContinuity(self._root_panel)
-            if self._root_panel is not None and self._root_context == root_context
+            if self._root_panel is not None
+            and self._root_context == root_context
+            and (state.generation, state.route)
+            == (self._foreground_key[:2] if self._foreground_key is not None else None)
             else None
         )
         peer_key = (state.generation, state.route, wide)
+        if route_changed and self._root_panel is not None:
+            for widget in self._root_panel.walk(restrict=True):
+                if isinstance(widget, Action):
+                    widget.focus = False
         if (
             not state.covered
             and prompt is None
@@ -375,7 +389,7 @@ class Shell(BoxLayout):
         Returns:
             None
         """
-        self.controller.navigate(route)
+        self.controller.navigate(route, from_root=True)
         self.refresh()
 
     def _tab(self, delivery: Delivery) -> None:
@@ -387,11 +401,7 @@ class Shell(BoxLayout):
             None
         """
         state = self.controller.state
-        state.root_delivery = delivery
-        if state.route.view in ('V06', 'V07'):
-            state.route = Route(
-                'V06' if delivery == Delivery.DROP else 'V07', delivery=delivery
-            )
+        state.select_root_delivery(delivery)
         self.refresh()
 
     def _root_key(self) -> tuple[object, ...]:
