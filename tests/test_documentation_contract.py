@@ -17,6 +17,7 @@ ACTIVE_DOCUMENTS = (
     ROOT / 'docs' / 'AGENTS.md',
     ROOT / 'docs' / 'ARCHITECTURE.md',
     ROOT / 'docs' / 'CONTRIBUTE.md',
+    ROOT / 'docs' / 'governance' / 'AUDIT.md',
     ROOT / 'docs' / 'GLOSSARY.md',
     ROOT / 'docs' / 'RELEASING.md',
     ROOT / 'docs' / 'contracts' / 'GUI.md',
@@ -26,14 +27,12 @@ RETIRED_DIRECTORIES = (
     ROOT / 'docs' / 'audits',
     ROOT / 'docs' / 'gui',
     ROOT / 'docs' / 'reference',
-    ROOT / 'docs' / 'governance',
     ROOT / 'docs' / 'specs',
 )
 RETIRED_REFERENCES = (
     'docs/audits/',
     'docs/gui/',
     'docs/reference/',
-    'docs/governance/',
     'docs/specs/',
     'GUI_INTEGRATION_MAP.md',
     'GUI_PLATFORM_ADR.md',

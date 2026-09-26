@@ -21,6 +21,8 @@ system model, then use the focused references when you need exact contracts.
 - Integrate a frontend through the [frontend-neutral contract](docs/contracts/FRONTENDS.md).
 - Contribute and review security-sensitive changes with the
   [contribution guide](docs/CONTRIBUTE.md).
+- Record applicable security and architecture checks with the
+  [audit checklist](docs/governance/AUDIT.md).
 - Prepare a release with the [release and versioning guide](docs/RELEASING.md).
 - Check the [GUI contract](docs/contracts/GUI.md) for current capabilities and limitations; consult release evidence for a particular platform claim.
 
@@ -59,7 +61,8 @@ Recommended reading order:
 - [Architecture guide](docs/ARCHITECTURE.md) for the high-level design and long-lived decisions.
 - [Settings reference](docs/generated/SETTINGS.md) for all supported settings, defaults, constraints, and security notes.
 - [IPC API reference](docs/generated/API.md) for the exact client-daemon wire contract.
-- [Contribution guide](docs/CONTRIBUTE.md) for development, testing, and the integrated security/architecture review checklist.
+- [Contribution guide](docs/CONTRIBUTE.md) for development, testing, and review rules.
+- [Audit checklist](docs/governance/AUDIT.md) for recording applicable review checks and evidence.
 
 ### OPSEC & Security Concepts
 
@@ -380,7 +383,7 @@ Generated documentation is part of the project maintenance pipeline.
 - `npm run check` (or `npm run ready`): Runs nonmutating Markdown/Python format checks, linting, type checking, dependency boundaries, generated-reference freshness, and the supervised full test suite.
 - `npm run format:md`, `npm run format:py`, and `npm run fix:py`: Apply intentional Markdown formatting, Python formatting, or Ruff fixes; these mutating commands are separate from readiness checks.
 
-Before changing architecture, security boundaries, or contributor-facing workflows, review the [architecture guide](docs/ARCHITECTURE.md) and [contribution guide](docs/CONTRIBUTE.md).
+Before changing architecture, security boundaries, or contributor-facing workflows, review the [architecture guide](docs/ARCHITECTURE.md) and [contribution guide](docs/CONTRIBUTE.md), then record applicable checks with the [audit checklist](docs/governance/AUDIT.md).
 
 ## 🛡️ Security Disclaimer
 

@@ -7,6 +7,8 @@ anonymity, persistence integrity, and compatibility are non-negotiable.
 Load only the references needed for the task:
 
 - architecture or ownership: [ARCHITECTURE.md](./ARCHITECTURE.md);
+- security or architecture review: [AUDIT.md](./governance/AUDIT.md), using
+  [CONTRIBUTE.md](./CONTRIBUTE.md) as the authoritative rules;
 - IPC/API: the IPC sections of `ARCHITECTURE.md`,
   [API.md](./generated/API.md), and [api.schema.json](./generated/api.schema.json);
 - settings or terminology: [SETTINGS.md](./generated/SETTINGS.md) and

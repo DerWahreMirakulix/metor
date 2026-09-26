@@ -176,7 +176,9 @@ point.
 
 Every change is reviewed against the risks it can actually affect. Record the
 relevant checks and evidence; do not claim a platform, hardware, or destructive
-path that was not exercised.
+path that was not exercised. Use the reusable
+[audit checklist](./governance/AUDIT.md) to select relevant checks and record
+their results with the PR or release evidence.
 
 ### Ownership and isolation
 

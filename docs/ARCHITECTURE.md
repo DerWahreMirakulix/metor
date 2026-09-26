@@ -36,6 +36,8 @@ message identities. Navigation is never a transport command.
 
 - [README.md](../README.md) is the human entry point.
 - [CONTRIBUTE.md](./CONTRIBUTE.md) owns development, testing and review rules.
+- [AUDIT.md](./governance/AUDIT.md) is the reusable security and architecture
+  review checklist.
 - [FRONTENDS.md](contracts/FRONTENDS.md) owns public frontend integration.
 - [GUI.md](./contracts/GUI.md) owns GUI operation, device configuration, behavior, and presentation.
 - [API.md](./generated/API.md), [SETTINGS.md](./generated/SETTINGS.md), and
