@@ -223,19 +223,40 @@ def _stop_failed_daemon_process(process: subprocess.Popen[bytes]) -> None:
         return
 
 
-def _build_daemon_start_timeout(pm: ProfileManager) -> float:
+def _build_daemon_start_timeout(pm: ProfileManager, *, start_locked: bool) -> float:
     """
-    Resolves the local wait window for daemon IPC readiness after background spawn.
+    Covers profile setup and synchronous Tor startup before IPC publication.
 
     Args:
         pm (ProfileManager): The active profile manager.
+        start_locked (bool): Whether startup skips Tor and the protected runtime.
 
     Returns:
         float: The readiness timeout in seconds.
     """
     ipc_timeout: float = pm.config.get_float(SettingKey.IPC_TIMEOUT)
     tor_timeout: float = pm.config.get_float(SettingKey.TOR_TIMEOUT)
-    return max(ipc_timeout, tor_timeout + Constants.LISTENER_READY_TIMEOUT)
+    baseline: float = max(ipc_timeout, tor_timeout + Constants.LISTENER_READY_TIMEOUT)
+    if start_locked:
+        return baseline
+
+    retries: int = pm.config.get_int(SettingKey.MAX_TOR_RETRIES)
+    tor_start_budget: float = (
+        retries * Constants.UNIX_TOR_TIMEOUT
+        + max(0, retries - 1) * Constants.TOR_BOOTSTRAP_RETRY_SEC
+        + Constants.TOR_HOSTNAME_POLL_RETRIES * Constants.TOR_BOOTSTRAP_POLL_SEC
+        + Constants.TOR_PROXY_READY_ATTEMPTS
+        * (Constants.TOR_PROXY_READY_TIMEOUT_SEC + Constants.TOR_PROXY_READY_RETRY_SEC)
+        + Constants.LISTENER_READY_TIMEOUT
+    )
+    # The configured IPC wait also covers profile validation and the password KDF.
+    return max(
+        baseline,
+        min(
+            Constants.MAX_DERIVED_DAEMON_START_WAIT_SEC,
+            ipc_timeout + tor_start_budget,
+        ),
+    )
 
 
 def start_managed_daemon_process(
@@ -407,7 +428,9 @@ def _start_managed_daemon_process_unlocked(
     try:
         if diagnostics is not None:
             diagnostics.phase = 'waiting-for-ipc'
-        deadline: float = time.monotonic() + _build_daemon_start_timeout(pm)
+        deadline: float = time.monotonic() + _build_daemon_start_timeout(
+            pm, start_locked=start_locked
+        )
         while time.monotonic() < deadline:
             daemon_port: Optional[int] = pm.get_daemon_port()
             if daemon_port is not None:

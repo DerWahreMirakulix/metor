@@ -28,6 +28,9 @@ class Constants(ContractConstants):
 
     # Tor Bootstrapping
     UNIX_TOR_TIMEOUT: int = 45  # Process launch timeout for Unix Tor binaries
+    MAX_DERIVED_DAEMON_START_WAIT_SEC: float = (
+        210.0  # Bound the automatic cold-start wait before an explicit IPC override
+    )
     TOR_BOOTSTRAP_POLL_SEC: float = 1.0
     TOR_BOOTSTRAP_RETRY_SEC: float = 2.0
     TOR_CONTROL_RETRY_SEC: float = 1.0  # Delay between Tor control-port retry attempts

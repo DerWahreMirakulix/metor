@@ -210,6 +210,7 @@ class DaemonBootstrapContractTests(unittest.TestCase):
             SettingKey.TOR_TIMEOUT: 0.1,
         }[key]
         profile.config.get_bool.return_value = False
+        profile.config.get_int.return_value = 3
         profile.exists.return_value = True
         profile.validate_integrity.return_value = None
         profile.is_remote.return_value = False
@@ -291,7 +292,7 @@ class DaemonBootstrapContractTests(unittest.TestCase):
             ),
             patch(
                 'metor.application.runtime.daemon.time.monotonic',
-                side_effect=[0.0, 100.0],
+                side_effect=[0.0, 1000.0],
             ),
         ):
             self.assertFalse(start_managed_daemon_process(profile))
@@ -299,6 +300,50 @@ class DaemonBootstrapContractTests(unittest.TestCase):
         process.terminate.assert_called_once_with()
         process.kill.assert_called_once_with()
         process.wait.assert_called()
+
+    def test_unlocked_spawn_accepts_ipc_readiness_after_tor_launch_window(self) -> None:
+        """An unlocked child may publish IPC after Tor's 45-second launch window.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        from metor.application.runtime.daemon import (
+            DaemonStartDiagnostics,
+            start_managed_daemon_process,
+        )
+
+        process = Mock()
+        process.stdin = None
+        process.poll.return_value = None
+        profile = self._spawn_profile()
+        profile.config.get_float.side_effect = lambda key: {
+            SettingKey.IPC_TIMEOUT: 45.0,
+            SettingKey.TOR_TIMEOUT: 10.0,
+        }[key]
+        profile.get_daemon_port.side_effect = [None, 43111]
+        diagnostics = DaemonStartDiagnostics()
+
+        with (
+            patch('metor.application.runtime.daemon.Settings.validate_integrity'),
+            patch(
+                'metor.application.runtime.daemon.subprocess.Popen',
+                return_value=process,
+            ),
+            patch(
+                'metor.application.runtime.daemon.time.monotonic',
+                side_effect=[0.0, 46.0, 46.0],
+            ),
+            patch('metor.application.runtime.daemon.time.sleep'),
+        ):
+            self.assertTrue(
+                start_managed_daemon_process(profile, diagnostics=diagnostics)
+            )
+
+        self.assertEqual(diagnostics.phase, 'ready')
+        process.terminate.assert_not_called()
+        process.kill.assert_not_called()
 
 
 if __name__ == '__main__':

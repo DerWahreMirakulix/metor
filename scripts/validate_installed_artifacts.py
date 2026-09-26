@@ -20,6 +20,9 @@ from zipfile import ZipFile
 
 
 _ANNOTATION_MAX_CHARS = 4096
+_CONSUMER_COMMAND_TIMEOUT_SEC = 180
+# Missing-installation, locked, and full Tor startups run sequentially.
+_MANAGED_SPAWN_COMMAND_TIMEOUT_SEC = 360
 
 
 def _emit_failure_annotation(
@@ -293,6 +296,7 @@ def run_acceptance(bundle_root: Path, *, gui_smoke: bool = False) -> None:
             *,
             expected: int = 0,
             extra_environment: dict[str, str] | None = None,
+            timeout_seconds: int = _CONSUMER_COMMAND_TIMEOUT_SEC,
         ) -> str:
             command_environment = dict(environment)
             if extra_environment is not None:
@@ -304,7 +308,7 @@ def run_acceptance(bundle_root: Path, *, gui_smoke: bool = False) -> None:
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                timeout=180,
+                timeout=timeout_seconds,
             )
             print(result.stdout, end='')
             if result.returncode != expected:
@@ -436,6 +440,7 @@ def run_acceptance(bundle_root: Path, *, gui_smoke: bool = False) -> None:
                 str(Path(__file__).resolve().parents[1]),
             ],
             extra_environment={'METOR_DATA_DIR_PARENT': str(managed_data)},
+            timeout_seconds=_MANAGED_SPAWN_COMMAND_TIMEOUT_SEC,
         )
 
         # A separately built, non-shipped frontend exercises installed discovery,

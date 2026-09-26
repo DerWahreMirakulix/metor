@@ -19,7 +19,8 @@ from metor.utils import Constants, ProcessManager
 
 
 _PUBLIC_STARTUP_SENTINEL = 'public-installed-startup-sentinel'
-_MANAGED_START_TIMEOUT_SEC: float = 45.0
+_MISSING_INSTALLATION_TIMEOUT_SEC: float = 45.0
+_CONFIGURED_IPC_TIMEOUT_SEC: float = 45.0
 _MANAGED_DIAGNOSTIC_MAX_BYTES: int = 4096
 
 
@@ -162,7 +163,7 @@ def _verify_missing_installation_fails_closed(
         input=_PUBLIC_STARTUP_SENTINEL,
         capture_output=True,
         text=True,
-        timeout=_MANAGED_START_TIMEOUT_SEC,
+        timeout=_MISSING_INSTALLATION_TIMEOUT_SEC,
         check=False,
     )
     if result.returncode == 0:
@@ -211,7 +212,7 @@ def _run_installed_start(
     started_at: float = time.monotonic()
     try:
         diagnostic_stream = diagnostic_path.open('w+b')
-        profile.config.set(SettingKey.IPC_TIMEOUT, _MANAGED_START_TIMEOUT_SEC)
+        profile.config.set(SettingKey.IPC_TIMEOUT, _CONFIGURED_IPC_TIMEOUT_SEC)
         os.chdir(working_directory)
         print(
             'INSTALLED_MANAGED_SPAWN_START',
@@ -220,7 +221,7 @@ def _run_installed_start(
                     'profile': profile.profile_name,
                     'start_locked': start_locked,
                     'startup_secret': session_auth_password is not None,
-                    'timeout_seconds': _MANAGED_START_TIMEOUT_SEC,
+                    'configured_ipc_timeout_seconds': _CONFIGURED_IPC_TIMEOUT_SEC,
                     'working_directory': working_directory.name,
                 },
                 sort_keys=True,

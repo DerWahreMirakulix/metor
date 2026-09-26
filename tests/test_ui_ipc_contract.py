@@ -1064,6 +1064,7 @@ class UiIpcContractTests(unittest.TestCase):
             SettingKey.IPC_TIMEOUT: 4.0,
             SettingKey.TOR_TIMEOUT: 6.0,
         }[key]
+        pm.config.get_int.return_value = 3
         pm.validate_integrity.return_value = None
         pm.is_remote.return_value = False
         pm.is_daemon_running.return_value = False
