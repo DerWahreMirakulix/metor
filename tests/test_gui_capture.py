@@ -35,6 +35,7 @@ from metor.ui.gui.state.mailbox import Mailbox, Update
 from metor.ui.gui.state.media import MediaCache, PlaybackTarget
 from metor.ui.gui.runtime.playback.worker import PlaybackWorker
 from metor.core.daemon.managed.notify import NotificationPayload, NotificationService
+from metor.utils import Constants
 
 
 class FiniteMicrophone:
@@ -136,7 +137,8 @@ class CaptureIntegrationTests(unittest.TestCase):
         )
         audio.on_empty = worker.request_stop
         worker.start()
-        self.assertTrue(worker.done.wait(10))
+        # A capture may perform more than one real IPC exchange before cleanup.
+        self.assertTrue(worker.done.wait(2 * Constants.DEFAULT_IPC_TIMEOUT))
         updates = []
         while update := self.mailbox.take():
             updates.append(update)
@@ -300,7 +302,6 @@ class CaptureIntegrationTests(unittest.TestCase):
             self.h.daemon._ipc.port,
             auth_provider=provider,
             on_event=on_event,
-            timeout=2,
         )
         self.addCleanup(gui_client.disconnect)
         initialized = gui_client.bootstrap()
