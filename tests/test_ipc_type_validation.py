@@ -8,7 +8,8 @@ import threading
 import unittest
 from enum import Enum
 from types import UnionType
-from typing import ForwardRef, Union, get_args, get_origin, get_type_hints
+from typing import ForwardRef, Union, cast, get_args, get_origin, get_type_hints
+from unittest.mock import Mock, patch
 
 from metor.client.stream import BufferedIpcEventReader
 from metor.core.api import (
@@ -17,14 +18,18 @@ from metor.core.api import (
     Delivery,
     EVENT_MAP,
     EventType,
+    GetSettingsListCommand,
     IpcCommand,
     IpcEvent,
     MessageDirectionCode,
     MessageOutcomeEvent,
     MessageStatusCode,
     SetSettingCommand,
+    create_event,
 )
+from metor.core.daemon.headless.server import handle_client as handle_headless_client
 from metor.core.daemon.managed.ipc import IpcServer
+from metor.shared.constants import Constants as SharedConstants
 from metor.utils import Constants
 
 
@@ -97,6 +102,120 @@ def _sample_payload(dto_type: type[object]) -> dict[str, object]:
 
 class IpcTypeValidationTests(unittest.TestCase):
     """Covers strict recursive validation through real command and event decoders."""
+
+    def test_sdk_reader_accepts_coalesced_bounded_events(self) -> None:
+        """Decodes two valid events even when their shared read exceeds one frame.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        frame = (create_event(EventType.DAEMON_UNLOCKED).to_json() + '\n').encode(
+            'utf-8'
+        )
+        source = Mock()
+        source.recv.return_value = frame + frame
+        reader = BufferedIpcEventReader()
+        with patch.object(SharedConstants, 'MAX_IPC_BYTES', len(frame)):
+            first = reader.read_from_socket(cast(socket.socket, source))
+            second = reader.read_from_socket(cast(socket.socket, source))
+
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+        assert first is not None and second is not None
+        self.assertIs(first.event_type, EventType.DAEMON_UNLOCKED)
+        self.assertIs(second.event_type, EventType.DAEMON_UNLOCKED)
+        self.assertEqual(source.recv.call_count, 1)
+
+        batch_count = SharedConstants.TCP_BUFFER_SIZE // len(frame) + 2
+        batch_reader = BufferedIpcEventReader()
+        with patch.object(SharedConstants, 'MAX_IPC_BYTES', len(frame)):
+            batch_reader.append_bytes(frame * batch_count)
+            batch_events = [batch_reader.pop_event() for _ in range(batch_count)]
+        self.assertTrue(
+            all(
+                event is not None and event.event_type is EventType.DAEMON_UNLOCKED
+                for event in batch_events
+            )
+        )
+        self.assertIsNone(batch_reader.pop_event())
+
+        with patch.object(SharedConstants, 'MAX_IPC_BYTES', len(frame) - 1):
+            with self.assertRaisesRegex(ValueError, 'IPC size limit'):
+                BufferedIpcEventReader().append_bytes(frame)
+
+    def test_managed_ipc_accepts_coalesced_bounded_commands(self) -> None:
+        """Dispatches each bounded command before checking an incomplete tail.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        first_frame = (
+            GetSettingsListCommand(request_id='first').to_json() + '\n'
+        ).encode('utf-8')
+        second_frame = (
+            GetSettingsListCommand(request_id='other').to_json() + '\n'
+        ).encode('utf-8')
+        dispatched: list[str | None] = []
+        server = IpcServer(  # type: ignore[arg-type]
+            _DispatcherProfileManager(),
+            lambda command, _conn: dispatched.append(command.request_id),
+        )
+        source = Mock()
+        source.recv.side_effect = [first_frame + second_frame, b'']
+        with patch.object(Constants, 'MAX_IPC_BYTES', len(first_frame)):
+            server._handler(cast(socket.socket, source))
+        self.assertEqual(dispatched, ['first', 'other'])
+
+        oversized_source = Mock()
+        oversized_source.recv.side_effect = [first_frame, b'']
+        with (
+            patch.object(Constants, 'MAX_IPC_BYTES', len(first_frame) - 1),
+            patch.object(server, 'send_to') as send_to,
+        ):
+            server._handler(cast(socket.socket, oversized_source))
+        self.assertEqual(dispatched, ['first', 'other'])
+        self.assertIs(send_to.call_args.args[1].event_type, EventType.UNKNOWN_COMMAND)
+
+    def test_headless_ipc_accepts_first_bounded_coalesced_command(self) -> None:
+        """Processes its one command when a second frame shares the same read.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        first_frame = (
+            GetSettingsListCommand(request_id='first').to_json() + '\n'
+        ).encode('utf-8')
+        second_frame = (
+            GetSettingsListCommand(request_id='other').to_json() + '\n'
+        ).encode('utf-8')
+        daemon = Mock()
+        daemon._pm = _DispatcherProfileManager()
+        daemon._stop_event = threading.Event()
+        source = Mock()
+        source.recv.return_value = first_frame + second_frame
+        with patch.object(Constants, 'MAX_IPC_BYTES', len(first_frame)):
+            handle_headless_client(daemon, cast(socket.socket, source))
+        self.assertEqual(daemon._process_command.call_count, 1)
+        self.assertEqual(daemon._process_command.call_args.args[0].request_id, 'first')
+        daemon._send.assert_not_called()
+
+        oversized_source = Mock()
+        oversized_source.recv.return_value = first_frame
+        with patch.object(Constants, 'MAX_IPC_BYTES', len(first_frame) - 1):
+            handle_headless_client(daemon, cast(socket.socket, oversized_source))
+        self.assertEqual(daemon._process_command.call_count, 1)
+        self.assertIs(
+            daemon._send.call_args.args[1].event_type, EventType.UNKNOWN_COMMAND
+        )
 
     def test_receipt_outcome_wire_fields_are_validated_enums(self) -> None:
         """Validate receipt enums and call-context bounds without a Core fixture.

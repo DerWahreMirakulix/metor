@@ -64,14 +64,18 @@ def handle_client(daemon: HeadlessDaemonProtocol, conn: socket.socket) -> None:
                 break
 
             buffer.extend(data)
-            if len(buffer) > Constants.MAX_IPC_BYTES:
+            frame_end: int = buffer.find(b'\n')
+            if frame_end < 0:
+                if len(buffer) > Constants.MAX_IPC_BYTES:
+                    daemon._send(conn, create_event(EventType.UNKNOWN_COMMAND))
+                    break
+                continue
+
+            if frame_end + 1 > Constants.MAX_IPC_BYTES:
                 daemon._send(conn, create_event(EventType.UNKNOWN_COMMAND))
                 break
 
-            if b'\n' not in buffer:
-                continue
-
-            line_bytes, _, _ = buffer.partition(b'\n')
+            line_bytes = buffer[:frame_end]
             try:
                 line: str = line_bytes.decode('utf-8').strip()
             except UnicodeDecodeError:

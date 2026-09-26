@@ -236,8 +236,8 @@ class InboundListener:
         )
         try:
             self._listener_thread.start()
-        except Exception as exc:
-            self._set_startup_error(str(exc).strip() or exc.__class__.__name__)
+        except Exception:
+            self._set_startup_error('Inbound listener thread could not start.')
 
         ready: bool = self._startup_event.wait(Constants.LISTENER_READY_TIMEOUT)
         with self._startup_lock:
@@ -274,14 +274,14 @@ class InboundListener:
                     conn, _ = listener.accept()
                 except socket.timeout:
                     continue
-                except OSError as e:
+                except OSError:
                     if self._stop_flag.is_set():
                         break
                     self._hm.log_event(
                         HistoryEvent.STREAM_CORRUPTED,
                         None,
                         actor=HistoryActor.SYSTEM,
-                        detail_text=str(e).strip() or e.__class__.__name__,
+                        detail_text='Inbound listener accept failed.',
                     )
                     continue
 
@@ -327,16 +327,16 @@ class InboundListener:
                         detail_text='Inbound listener failed to start handler thread.',
                     )
                     continue
-        except MemoryError as e:
-            self._set_startup_error(str(e))
+        except MemoryError:
+            self._set_startup_error('Inbound listener ran out of memory.')
             self._hm.log_event(
                 HistoryEvent.STREAM_CORRUPTED,
                 None,
                 actor=HistoryActor.SYSTEM,
-                detail_text=str(e),
+                detail_text='Inbound listener ran out of memory.',
             )
-        except Exception as e:
-            error_text: str = str(e).strip() or e.__class__.__name__
+        except Exception:
+            error_text = 'Inbound listener failed.'
             self._set_startup_error(error_text)
             self._hm.log_event(
                 HistoryEvent.STREAM_CORRUPTED,
@@ -399,12 +399,12 @@ class InboundListener:
                 if self._crypto.verify_signature(remote_onion, challenge, signature):
                     onion = remote_onion
                     auth_successful = True
-        except MemoryError as e:
+        except MemoryError:
             self._hm.log_event(
                 HistoryEvent.STREAM_CORRUPTED,
                 onion,
                 actor=HistoryActor.SYSTEM,
-                detail_text=str(e),
+                detail_text='Inbound handshake exceeded memory limit.',
             )
         except Exception:
             pass

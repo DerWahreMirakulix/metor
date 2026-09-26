@@ -238,6 +238,8 @@ class CliProxySettingsActions:
                     EventType.SETTING_TYPE_ERROR,
                     {'key': key, 'reason': str(exc)},
                 )
+            except OSError:
+                return self._translate_event(EventType.SETTING_UPDATE_FAILED)
 
         if key.startswith('ui.'):
             try:
@@ -254,6 +256,8 @@ class CliProxySettingsActions:
                     EventType.SETTING_TYPE_ERROR,
                     {'key': key, 'reason': str(exc)},
                 )
+            except OSError:
+                return self._translate_event(EventType.SETTING_UPDATE_FAILED)
             return (
                 f"Global setting '{Theme.YELLOW}{key}{Theme.RESET}' updated "
                 'successfully.'

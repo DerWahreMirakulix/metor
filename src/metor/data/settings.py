@@ -7,11 +7,19 @@ Prevents silent overwrites of corrupted JSON configurations.
 
 from dataclasses import dataclass
 import json
+import os
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Optional, Tuple, TypeGuard, TypedDict, Union
+import tempfile
+from typing import Dict, Optional, Tuple, TypeGuard, TypedDict, Union, cast
 
-from metor.utils import Constants, FileLock, TypeCaster, validate_json_file
+from metor.utils import (
+    Constants,
+    FileLock,
+    TypeCaster,
+    create_private_directory_tree,
+    validate_json_file,
+)
 
 
 # Types
@@ -759,8 +767,43 @@ class Settings:
             Path: Absolute path object to settings.json.
         """
         data_dir: Path = Constants.DATA
-        data_dir.mkdir(parents=True, exist_ok=True)
+        data_dir.parent.mkdir(parents=True, exist_ok=True)
+        create_private_directory_tree(data_dir, ())
         return data_dir / Constants.SETTINGS_FILE
+
+    @staticmethod
+    def _write_settings(path: Path, data: Dict[str, Dict[str, SettingValue]]) -> None:
+        """Replace a settings document only after a private temporary copy is complete.
+
+        Args:
+            path (Path): Destination in the private settings directory.
+            data (Dict[str, Dict[str, SettingValue]]): Validated settings document.
+
+        Returns:
+            None
+        """
+        document = json.dumps(data, indent=4)
+        descriptor, temp_name = tempfile.mkstemp(
+            prefix=f'.{path.name}.', suffix='.tmp', dir=path.parent
+        )
+        temp_path = Path(temp_name)
+        try:
+            with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
+                handle.write(document)
+                handle.flush()
+                os.fsync(handle.fileno())
+            temp_path.replace(path)
+            if os.name != 'nt':
+                try:
+                    directory_descriptor = os.open(path.parent, os.O_RDONLY)
+                    try:
+                        os.fsync(directory_descriptor)
+                    finally:
+                        os.close(directory_descriptor)
+                except OSError:
+                    pass
+        finally:
+            temp_path.unlink(missing_ok=True)
 
     @classmethod
     def _read_raw_settings_data(cls) -> Dict[str, object]:
@@ -967,6 +1010,7 @@ class Settings:
         cls,
         *,
         persist_defaults: bool = True,
+        path: Optional[Path] = None,
     ) -> Dict[str, Dict[str, SettingValue]]:
         """
         Loads the settings from the JSON file into a nested structure.
@@ -974,12 +1018,13 @@ class Settings:
         Prevents overwriting the file if a JSONDecodeError occurs on an existing file.
 
         Args:
-            None
+            persist_defaults (bool): Persist the defaults when the file is absent.
+            path (Optional[Path]): Exact path already selected by a locked writer.
 
         Returns:
             Dict[str, Dict[str, SettingValue]]: The loaded settings dictionary partitioned by domain.
         """
-        path: Path = (
+        path = path or (
             cls.get_global_settings_path()
             if persist_defaults
             else Constants.DATA / Constants.SETTINGS_FILE
@@ -987,15 +1032,23 @@ class Settings:
         if path.exists():
             try:
                 with path.open('r', encoding='utf-8') as f:
-                    data: Dict[str, Dict[str, SettingValue]] = json.load(f)
-
-                    for domain in ('ui', 'client', 'daemon'):
-                        if domain not in data:
-                            data[domain] = {}
-
-                    return data
-            except (json.JSONDecodeError, IOError):
-                pass
+                    loaded: object = json.load(f)
+            except (json.JSONDecodeError, UnicodeError, OSError):
+                raise SettingValidationError(
+                    'Global settings file is unreadable or invalid.'
+                ) from None
+            if not isinstance(loaded, dict) or any(
+                domain in loaded and not isinstance(loaded[domain], dict)
+                for domain in ('ui', 'client', 'daemon')
+            ):
+                raise SettingValidationError(
+                    'Global settings file is unreadable or invalid.'
+                )
+            data = cast(Dict[str, Dict[str, SettingValue]], loaded)
+            for domain in ('ui', 'client', 'daemon'):
+                if domain not in data:
+                    data[domain] = {}
+            return data
 
         data = {'ui': {}, 'client': {}, 'daemon': {}}
         for key_enum, val in cls._DEFAULTS.items():
@@ -1006,10 +1059,32 @@ class Settings:
 
         if persist_defaults and not path.exists():
             with FileLock(path):
-                with path.open('w', encoding='utf-8') as f:
-                    json.dump(data, f, indent=4)
+                if path.exists():
+                    return cls._load_settings(persist_defaults=False, path=path)
+                cls._write_settings(path, data)
 
         return data
+
+    @classmethod
+    def _load_validated_settings_for_write(
+        cls, path: Path
+    ) -> Dict[str, Dict[str, SettingValue]]:
+        """Read the locked target only when its existing document is valid.
+
+        Args:
+            path (Path): Exact settings path held by the caller's file lock.
+
+        Returns:
+            Dict[str, Dict[str, SettingValue]]: Valid settings or fresh defaults.
+        """
+        if path.exists():
+            try:
+                cls.validate_integrity()
+            except (OSError, ValueError, TypeError):
+                raise SettingValidationError(
+                    'Global settings file is unreadable or invalid.'
+                ) from None
+        return cls._load_settings(persist_defaults=False, path=path)
 
     @classmethod
     def get(
@@ -1156,8 +1231,8 @@ class Settings:
         path: Path = cls.get_global_settings_path()
 
         with FileLock(path):
-            data: Dict[str, Dict[str, SettingValue]] = cls._load_settings(
-                persist_defaults=False,
+            data: Dict[str, Dict[str, SettingValue]] = (
+                cls._load_validated_settings_for_write(path)
             )
             category: str
             sub_key: str
@@ -1171,8 +1246,7 @@ class Settings:
 
             data[category][sub_key] = value
 
-            with path.open('w', encoding='utf-8') as f:
-                json.dump(data, f, indent=4)
+            cls._write_settings(path, data)
 
     @classmethod
     def set_namespace(cls, key: str, value: SettingValue) -> None:
@@ -1210,8 +1284,8 @@ class Settings:
         path: Path = cls.get_global_settings_path()
 
         with FileLock(path):
-            data: Dict[str, Dict[str, SettingValue]] = cls._load_settings(
-                persist_defaults=False,
+            data: Dict[str, Dict[str, SettingValue]] = (
+                cls._load_validated_settings_for_write(path)
             )
             category: str
             sub_key: str
@@ -1219,8 +1293,7 @@ class Settings:
 
             data[category][sub_key] = normalized
 
-            with path.open('w', encoding='utf-8') as f:
-                json.dump(data, f, indent=4)
+            cls._write_settings(path, data)
 
     @classmethod
     def get_namespace_value(cls, key: str) -> SettingValue:

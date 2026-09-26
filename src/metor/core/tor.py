@@ -309,13 +309,9 @@ class TorManager:
             candidate = Constants.TOR_UNIX_DEFAULT_PATH.resolve()
 
         if not candidate.is_file():
-            raise FileNotFoundError(
-                f'The configured Tor executable does not exist: {candidate}'
-            )
+            raise FileNotFoundError('The configured Tor executable does not exist.')
         if not _is_windows() and not os.access(candidate, os.X_OK):
-            raise PermissionError(
-                f'The configured Tor executable is not executable: {candidate}'
-            )
+            raise PermissionError('The configured Tor executable is not executable.')
         return str(candidate)
 
     def _launch_process(self) -> Tuple[bool, Optional[EventType], Dict[str, JsonValue]]:
@@ -362,7 +358,6 @@ class TorManager:
                 TorManager._log_callback(line)
 
         max_retries: int = self._pm.config.get_int(SettingKey.MAX_TOR_RETRIES)
-        last_error: str = 'Unknown Tor launch error.'
         self._tm_proc = None
 
         for attempt in range(max_retries):
@@ -385,28 +380,28 @@ class TorManager:
                 with open_private_binary_file(pid_file) as f:
                     f.write(identity_payload)
                 break
-            except OSError as e:
+            except OSError:
                 if self._tm_proc is not None:
                     try:
                         self._terminate_process()
                     except RuntimeError:
-                        pass
-                last_error = str(e).strip() or 'Unknown Tor launch error.'
+                        return (
+                            False,
+                            EventType.TOR_START_FAILED,
+                            {'error_code': RuntimeErrorCode.TOR_LAUNCH_FAILED},
+                        )
                 if (
                     self._pm.config.get_bool(SettingKey.ENABLE_TOR_LOGGING)
                     and TorManager._log_callback
                 ):
-                    TorManager._log_callback(f'Error starting Tor: {e}')
+                    TorManager._log_callback('Tor launch failed.')
                 if attempt < max_retries - 1:
                     time.sleep(Constants.TOR_BOOTSTRAP_RETRY_SEC)
                     continue
                 return (
                     False,
                     EventType.TOR_START_FAILED,
-                    {
-                        'error_code': RuntimeErrorCode.TOR_LAUNCH_FAILED,
-                        'error_detail': last_error,
-                    },
+                    {'error_code': RuntimeErrorCode.TOR_LAUNCH_FAILED},
                 )
 
         self._load_onion_address(hs_dir)
@@ -620,7 +615,6 @@ class TorManager:
             if not self._is_process_running() or not self.control_port:
                 return self._recover_runtime('Tor process not actively running.')
 
-            last_error: str = 'Unknown Tor control error.'
             for attempt in range(Constants.TOR_CONTROL_RETRY_ATTEMPTS):
                 try:
                     with stem.control.Controller.from_port(
@@ -635,12 +629,11 @@ class TorManager:
                         )
 
                     return True, None, {}
-                except Exception as e:
-                    last_error = str(e).strip() or 'Unknown Tor control error.'
+                except Exception:
                     if attempt < Constants.TOR_CONTROL_RETRY_ATTEMPTS - 1:
                         time.sleep(Constants.TOR_CONTROL_RETRY_SEC)
 
-            return self._recover_runtime(last_error)
+            return self._recover_runtime('Tor control operation failed.')
 
     def get_address(self) -> Tuple[bool, EventType, Dict[str, JsonValue]]:
         """

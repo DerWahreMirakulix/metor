@@ -83,7 +83,7 @@ from metor.core.daemon.managed.network.state import (
     StateTracker,
 )
 from metor.core.daemon.managed.outbox import OutboxWorker
-from metor.core.daemon.managed.outbox.delivery import is_expected_ack_line
+from metor.core.daemon.managed.outbox.delivery import DropDelivery, is_expected_ack_line
 from metor.core.daemon.managed.network.stream import TcpStreamReader
 from metor.data import (
     ContactManager,
@@ -2556,7 +2556,8 @@ class DaemonHardeningTests(unittest.TestCase):
             config=cast(Config, _DummyConfig()),
         )
         socket_mock = Mock()
-        socket_mock.bind.side_effect = OSError('bind failed')
+        private_detail = 'private-listener-bind-path'
+        socket_mock.bind.side_effect = OSError(private_detail)
 
         with (
             patch(
@@ -2568,11 +2569,143 @@ class DaemonHardeningTests(unittest.TestCase):
                 return_value=socket_mock,
             ),
         ):
-            with self.assertRaisesRegex(RuntimeError, 'bind failed'):
+            with self.assertRaisesRegex(
+                RuntimeError, 'Inbound listener failed'
+            ) as raised:
                 listener.start_listener()
 
         history_manager_mock.log_event.assert_called_once()
         broadcast_mock.assert_called_once()
+        self.assertEqual(
+            history_manager_mock.log_event.call_args.kwargs['detail_text'],
+            'Inbound listener failed.',
+        )
+        self.assertNotIn(private_detail, str(raised.exception))
+
+    def test_inbound_listener_accept_error_keeps_os_detail_out_of_history(
+        self,
+    ) -> None:
+        """An accept failure records a fixed diagnostic and keeps listening bounded.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        stop_flag = threading.Event()
+        history_manager = Mock()
+        history_manager.log_event.side_effect = lambda *_args, **_kwargs: (
+            stop_flag.set()
+        )
+        listener = InboundListener(
+            tm=cast(TorManager, Mock(incoming_port=43123)),
+            cm=cast(ContactManager, Mock()),
+            hm=cast(HistoryManager, history_manager),
+            crypto=cast(Crypto, Mock()),
+            state=StateTracker(),
+            router=cast(MessageRouter, Mock()),
+            receiver=cast(StreamReceiver, Mock()),
+            broadcast_callback=Mock(),
+            has_live_consumers_callback=lambda: False,
+            has_clients_callback=lambda: False,
+            notify_callback=lambda _payload: None,
+            enqueue_live_reconnect_callback=lambda _onion: True,
+            stop_flag=stop_flag,
+            config=cast(Config, _DummyConfig()),
+        )
+        socket_mock = Mock()
+        private_detail = 'private-listener-accept-path'
+        socket_mock.accept.side_effect = OSError(private_detail)
+
+        with patch(
+            'metor.core.daemon.managed.network.listener.socket.socket',
+            return_value=socket_mock,
+        ):
+            listener._listener_target()
+
+        history_manager.log_event.assert_called_once()
+        self.assertEqual(
+            history_manager.log_event.call_args.kwargs['detail_text'],
+            'Inbound listener accept failed.',
+        )
+        self.assertNotIn(private_detail, repr(history_manager.log_event.call_args))
+
+    def test_inbound_listener_thread_start_error_is_sanitized(self) -> None:
+        """A failed worker start never includes its exception text in startup errors.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        listener = InboundListener(
+            tm=cast(TorManager, Mock(incoming_port=43123)),
+            cm=cast(ContactManager, Mock()),
+            hm=cast(HistoryManager, Mock()),
+            crypto=cast(Crypto, Mock()),
+            state=StateTracker(),
+            router=cast(MessageRouter, Mock()),
+            receiver=cast(StreamReceiver, Mock()),
+            broadcast_callback=Mock(),
+            has_live_consumers_callback=lambda: False,
+            has_clients_callback=lambda: False,
+            notify_callback=lambda _payload: None,
+            enqueue_live_reconnect_callback=lambda _onion: True,
+            stop_flag=threading.Event(),
+            config=cast(Config, _DummyConfig()),
+        )
+        private_detail = 'private-listener-thread-path'
+        thread = Mock()
+        thread.start.side_effect = OSError(private_detail)
+        with (
+            patch(
+                'metor.core.daemon.managed.network.listener.threading.Thread',
+                return_value=thread,
+            ),
+            self.assertRaisesRegex(
+                RuntimeError, 'Inbound listener thread could not start'
+            ) as raised,
+        ):
+            listener.start_listener()
+
+        self.assertNotIn(private_detail, str(raised.exception))
+
+    def test_inbound_handshake_memory_error_keeps_detail_out_of_history(
+        self,
+    ) -> None:
+        """A failed handshake records only a fixed resource diagnostic."""
+        private_detail = 'private-handshake-path-and-secret'
+        history_manager = Mock()
+        state = Mock()
+        config = Mock()
+        config.get_float.side_effect = MemoryError(private_detail)
+        listener = InboundListener(
+            tm=cast(TorManager, Mock()),
+            cm=cast(ContactManager, Mock()),
+            hm=cast(HistoryManager, history_manager),
+            crypto=cast(Crypto, Mock()),
+            state=cast(StateTracker, state),
+            router=cast(MessageRouter, Mock()),
+            receiver=cast(StreamReceiver, Mock()),
+            broadcast_callback=Mock(),
+            has_live_consumers_callback=lambda: False,
+            has_clients_callback=lambda: False,
+            notify_callback=lambda _payload: None,
+            enqueue_live_reconnect_callback=lambda _onion: True,
+            stop_flag=threading.Event(),
+            config=cast(Config, config),
+        )
+
+        listener._handle_incoming(cast(socket.socket, Mock()))
+
+        history_manager.log_event.assert_called_once()
+        self.assertEqual(
+            history_manager.log_event.call_args.kwargs['detail_text'],
+            'Inbound handshake exceeded memory limit.',
+        )
+        self.assertNotIn(private_detail, repr(history_manager.log_event.call_args))
 
     def test_start_subsystems_aborts_when_listener_readiness_fails(self) -> None:
         """
@@ -3015,6 +3148,45 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertFalse(is_expected_ack_line('msg-1', '/drop_ack other'))
         self.assertFalse(is_expected_ack_line('msg-1', 'prefix /drop_ack msg-1'))
 
+    def test_drop_delivery_error_keeps_exception_detail_out_of_history(self) -> None:
+        """A failed direct tunnel records no transport exception payload.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        private_detail = 'private-drop-payload-and-path'
+        conn = Mock()
+        conn.settimeout.side_effect = OSError(private_detail)
+        tunnels = Mock()
+        tunnels.establish.return_value = (conn, Mock())
+        history_manager = Mock()
+        delivery = DropDelivery(
+            mm=cast(MessageManager, Mock()),
+            hm=cast(HistoryManager, history_manager),
+            state=StateTracker(),
+            tunnels=tunnels,
+            broadcast_callback=Mock(),
+            stop_flag=threading.Event(),
+            config=cast(Config, _DummyConfig()),
+        )
+
+        with patch.object(delivery, '_reuse_session', return_value=False):
+            delivery.send_single_drop(
+                'peer-onion',
+                (1, 'peer-onion', 'text', 'payload', 'msg-1', '2026-04-04'),
+            )
+
+        history_manager.log_event.assert_called_once()
+        self.assertEqual(
+            history_manager.log_event.call_args.kwargs['detail_text'],
+            'Drop delivery failed.',
+        )
+        self.assertNotIn(private_detail, repr(history_manager.log_event.call_args))
+        conn.close.assert_called_once()
+
     def test_chat_ipc_client_applies_timeout_and_ignores_read_timeouts(self) -> None:
         """
         Verifies that chat IPC client applies timeout and ignores read timeouts.
@@ -3182,6 +3354,40 @@ class DaemonHardeningTests(unittest.TestCase):
             state.remove_unauthenticated_connection(unauth_conn)
             unauth_conn.close()
             unauth_peer.close()
+
+    def test_failed_connect_keeps_exception_detail_out_of_ipc_and_history(
+        self,
+    ) -> None:
+        """A socket failure emits only a stable reason and history detail.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        private_detail = 'private-connect-path-and-secret'
+        controller = _ConnectControllerHarness(
+            StateTracker(),
+            _ConnectTestConfig(max_connections=1, max_retries=0),
+            connect_side_effect=OSError(private_detail),
+        )
+
+        connect_to_helper(
+            cast(ConnectControllerProtocol, controller),
+            'peer',
+            origin=ConnectionOrigin.MANUAL,
+        )
+
+        event = cast(IpcEvent, controller.broadcast_mock.call_args.args[0])
+        self.assertIs(event.event_type, EventType.CONNECTION_FAILED)
+        self.assertEqual(event.error, 'Connection attempt failed.')
+        self.assertEqual(
+            controller._hm.log_event.call_args.kwargs['detail_text'],
+            'Connection attempt failed.',
+        )
+        self.assertNotIn(private_detail, event.to_json())
+        self.assertNotIn(private_detail, repr(controller._hm.log_event.call_args))
 
     def test_retunnel_connect_failure_preserves_current_live_connection(self) -> None:
         """
@@ -4071,6 +4277,51 @@ class DaemonHardeningTests(unittest.TestCase):
         finally:
             writer.close()
             reader.close()
+
+    def test_tcp_stream_reader_rejects_terminated_frame_over_limit(self) -> None:
+        """Rejects an oversized peer frame even when its delimiter arrives with it.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        frame_limit = len(b'abcd')
+        for payload, accepted in ((b'abcd\n', True), (b'abcde\n', False)):
+            with self.subTest(payload=payload):
+                writer, reader = socket.socketpair()
+                try:
+                    writer.sendall(payload)
+                    stream = TcpStreamReader(reader, max_bytes=frame_limit)
+                    if accepted:
+                        self.assertEqual(stream.read_line(), 'abcd')
+                    else:
+                        with self.assertRaises(MemoryError):
+                            stream.read_line()
+                finally:
+                    writer.close()
+                    reader.close()
+
+    def test_tcp_stream_reader_hides_socket_exception_details(self) -> None:
+        """Keeps raw socket error details out of the transport failure text.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        private_detail = 'private-profile-path-and-secret'
+        reader = Mock()
+        reader.recv.side_effect = OSError(private_detail)
+        stream = TcpStreamReader(cast(socket.socket, reader))
+
+        with self.assertRaises(ConnectionError) as raised:
+            stream.read_line()
+
+        self.assertEqual(str(raised.exception), 'Socket read failed.')
+        self.assertNotIn(private_detail, str(raised.exception))
 
     def test_add_pending_connection_rejects_shadow_socket_when_active_exists(
         self,

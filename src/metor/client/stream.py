@@ -64,8 +64,19 @@ class BufferedIpcEventReader:
             None
         """
         self._buffer.extend(data)
-        if len(self._buffer) > Constants.MAX_IPC_BYTES:
-            raise ValueError('Daemon response exceeded the IPC size limit.')
+        if len(self._buffer) <= Constants.MAX_IPC_BYTES:
+            return
+
+        frame_start: int = 0
+        while True:
+            frame_end: int = self._buffer.find(b'\n', frame_start)
+            if frame_end < 0:
+                if len(self._buffer) - frame_start > Constants.MAX_IPC_BYTES:
+                    raise ValueError('Daemon response exceeded the IPC size limit.')
+                return
+            if frame_end - frame_start + 1 > Constants.MAX_IPC_BYTES:
+                raise ValueError('Daemon response exceeded the IPC size limit.')
+            frame_start = frame_end + 1
 
     def pop_event(self) -> Optional[IpcEvent]:
         """

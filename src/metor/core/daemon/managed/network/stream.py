@@ -65,10 +65,14 @@ class TcpStreamReader:
                 self._buffer.extend(data)
             except socket.timeout:
                 raise
-            except Exception as e:
-                raise ConnectionError(f'Socket error: {str(e)}')
+            except Exception:
+                raise ConnectionError('Socket read failed.') from None
 
         line_bytes, _, rest = self._buffer.partition(b'\n')
+        if len(line_bytes) > self._max_bytes:
+            raise MemoryError(
+                'Maximum TCP stream buffer size exceeded. Possible DoS attack.'
+            )
         self._buffer = bytearray(rest)
 
         try:

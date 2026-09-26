@@ -134,13 +134,20 @@ def _add_profile_folder_locked(
             km.generate_keys()
             SqlManager(pm.paths.get_db_file(), pm.config, km.get_database_key())
             SqlManager.close_connection(pm.paths.get_db_file())
-        except Exception as exc:
+        except Exception:
             km.clear_sensitive_state()
             destroy_profile_storage(pm)
             return ProfileOperationResult(
                 False,
                 ProfileOperationType.PROFILE_CREATION_FAILED,
-                {'profile': safe_name, 'reason': str(exc)},
+                {
+                    'profile': safe_name,
+                    'reason': (
+                        'A master password is required for encrypted profiles.'
+                        if not master_password
+                        else 'Profile creation failed.'
+                    ),
+                },
             )
         km.clear_sensitive_state()
 

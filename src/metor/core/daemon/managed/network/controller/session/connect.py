@@ -113,7 +113,6 @@ def connect_to(
     )
 
     handshake_success: bool = False
-    last_error: Optional[str] = None
     try:
         max_retries: int = controller._config.get_int(SettingKey.MAX_CONNECT_RETRIES)
         for retry_index in range(max_retries + 1):
@@ -191,7 +190,7 @@ def connect_to(
                 handshake_success = True
                 conn = None
                 return
-            except Exception as exc:
+            except Exception:
                 if conn is not None:
                     controller._state.retire_connection(conn)
                     controller._state.clear_bound_outbound_socket(onion, conn)
@@ -201,7 +200,6 @@ def connect_to(
                     onion
                 ):
                     return
-                last_error = str(exc).strip() or exc.__class__.__name__
                 if retry_index < max_retries:
                     controller._broadcast(
                         ConnectionRetryEvent(
@@ -215,7 +213,7 @@ def connect_to(
                     )
                     controller._sleep_connect_retry_backoff()
                 else:
-                    failure_reason: str = last_error or 'Connection timeout/exhausted'
+                    failure_reason = 'Connection attempt failed.'
                     controller._hm.log_event(
                         HistoryEvent.CONNECTION_LOST,
                         onion,

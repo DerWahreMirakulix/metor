@@ -550,13 +550,12 @@ class IpcServer:
 
                     buffer.extend(data)
 
-                    if len(buffer) > Constants.MAX_IPC_BYTES:
-                        self.send_to(conn, create_event(EventType.UNKNOWN_COMMAND))
-                        break
-
                     while b'\n' in buffer:
                         line_bytes, _, rest = buffer.partition(b'\n')
                         buffer = bytearray(rest)
+                        if len(line_bytes) + 1 > Constants.MAX_IPC_BYTES:
+                            self.send_to(conn, create_event(EventType.UNKNOWN_COMMAND))
+                            return
                         request_id: Optional[str] = None
 
                         try:
@@ -596,6 +595,9 @@ class IpcServer:
                                     else None,
                                 ),
                             )
+                    if len(buffer) > Constants.MAX_IPC_BYTES:
+                        self.send_to(conn, create_event(EventType.UNKNOWN_COMMAND))
+                        break
                 except socket.timeout:
                     continue
         except Exception:

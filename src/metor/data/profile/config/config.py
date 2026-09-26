@@ -7,6 +7,8 @@ Prevents silent overwrites of corrupted JSON configurations.
 """
 
 import json
+import os
+import tempfile
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, cast
@@ -274,8 +276,34 @@ class Config:
                 nested_data[k] = v
 
         config_file: Path = self._paths.get_config_file()
-        with config_file.open('w', encoding='utf-8') as f:
-            json.dump(nested_data, f, indent=4)
+        temp_path: Optional[Path] = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode='w',
+                encoding='utf-8',
+                dir=config_file.parent,
+                prefix=f'.{config_file.name}.',
+                suffix='.tmp',
+                delete=False,
+            ) as output:
+                temp_path = Path(output.name)
+                json.dump(nested_data, output, indent=4)
+                output.flush()
+                os.fsync(output.fileno())
+
+            temp_path.replace(config_file)
+            if os.name != 'nt':
+                try:
+                    directory_fd: int = os.open(config_file.parent, os.O_RDONLY)
+                    try:
+                        os.fsync(directory_fd)
+                    finally:
+                        os.close(directory_fd)
+                except OSError:
+                    pass
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
 
     def _load(
         self,
@@ -295,21 +323,21 @@ class Config:
         """
         config_file: Path = self._paths.get_config_file()
         if config_file.exists():
-            try:
-                return self._load_raw_data()
-            except (json.JSONDecodeError, IOError):
-                pass
+            data: Dict[str, ProfileConfigValue] = self._load_raw_data()
+            validate_profile_config_values(config_file, data)
+            return data
 
         default_data: Dict[str, ProfileConfigValue] = {
             spec.key.value: spec.default for spec in PROFILE_CONFIG_SPECS.values()
         }
 
         if persist_defaults and self._paths.exists() and not config_file.exists():
-            try:
-                with FileLock(config_file):
-                    self._write_nested(default_data)
-            except IOError:
-                pass
+            with FileLock(config_file):
+                if config_file.exists():
+                    data = self._load_raw_data()
+                    validate_profile_config_values(config_file, data)
+                    return data
+                self._write_nested(default_data)
 
         return default_data
 

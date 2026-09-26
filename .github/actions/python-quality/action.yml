@@ -44,6 +44,10 @@ runs:
       shell: bash
       run: npm ci
 
+    - name: Check Markdown formatting
+      shell: bash
+      run: npm run check:md
+
     - name: Set up Python
       uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
       with:

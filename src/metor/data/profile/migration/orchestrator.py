@@ -207,12 +207,12 @@ def migrate_profile_security(
         write_migration_journal(journal_path, safe_name, MIGRATION_COMMITTED)
         _migration_checkpoint('immediately_after_commit')
         recover_staged_profile_migration(safe_name, _migration_checkpoint)
-    except DatabaseCorruptedError as exc:
+    except DatabaseCorruptedError:
         key_manager.clear_sensitive_state()
-        return _migration_failure(safe_name, str(exc))
-    except Exception as exc:
+        return _migration_failure(safe_name, 'Profile database migration failed.')
+    except Exception:
         key_manager.clear_sensitive_state()
-        return _migration_failure(safe_name, str(exc) or 'Migration failed.')
+        return _migration_failure(safe_name, 'Security migration failed.')
 
     key_manager.clear_sensitive_state()
     return ProfileOperationResult(

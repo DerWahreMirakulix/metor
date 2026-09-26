@@ -174,12 +174,11 @@ class SqlManager:
                     pass
 
             conn.commit()
-        except (sqlite3.DatabaseError, sqlite3.OperationalError, MemoryError) as exc:
+        except (sqlite3.DatabaseError, sqlite3.OperationalError, MemoryError):
             target_db.unlink(missing_ok=True)
-            error_text: str = str(exc).strip() or exc.__class__.__name__
             raise DatabaseCorruptedError(
-                f'Profile database could not be migrated safely. Details: {error_text}'
-            ) from exc
+                'Profile database could not be migrated safely.'
+            ) from None
         finally:
             try:
                 conn.close()
@@ -366,7 +365,7 @@ class SqlManager:
             sqlite3.OperationalError,
             MemoryError,
             ValueError,
-        ) as exc:
+        ):
             path_str = str(self.db_path.absolute())
             with SqlManager._pool_lock:
                 if path_str in SqlManager._connections:
@@ -377,10 +376,9 @@ class SqlManager:
                     del SqlManager._connections[path_str]
                     SqlManager._metadata_repositories.pop(path_str, None)
                     SqlManager._producer_repositories.pop(path_str, None)
-            error_text: str = str(exc).strip() or exc.__class__.__name__
             raise DatabaseCorruptedError(
-                f'Profile database could not be opened safely. Details: {error_text}'
-            ) from exc
+                'Profile database could not be opened safely.'
+            ) from None
 
     @contextmanager
     def transaction(self) -> Iterator[SqlCipherCursor]:

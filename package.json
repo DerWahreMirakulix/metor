@@ -12,7 +12,7 @@
     "check:types": "python -m mypy src scripts/",
     "check:boundaries": "python scripts/check_boundaries.py",
     "check:generated": "python scripts/validate_generated_docs.py",
-    "test": "python -m unittest discover -s tests -p \"test_*.py\"",
+    "test": "python scripts/run_tests.py --suite all",
     "check": "npm run check:md && npm run check:py && npm run check:types && npm run check:boundaries && npm run check:generated && npm test",
     "lint": "npm run check:py",
     "typecheck": "npm run check:types",

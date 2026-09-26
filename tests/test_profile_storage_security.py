@@ -6,13 +6,20 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import cast
+from typing import TextIO, cast
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.core.daemon.managed.engine import Daemon
-from metor.core.api import CMD_MAP, ChangePasswordCommand, CommandType
+from metor.core.api import (
+    CMD_MAP,
+    ChangePasswordCommand,
+    CommandType,
+    IpcEvent,
+    ProfileOperationCode,
+    ProfileOperationResultEvent,
+)
 from metor.core.key import KeyManager
 from metor.core.profile_destruction import destroy_profile_storage
 from metor.core.profile_keys import (
@@ -41,6 +48,7 @@ from metor.data.blob import (
 )
 from metor.data.profile import ProfileConfigKey, ProfileManager, ProfileSecurityMode
 from metor.data.profile.migration import orchestrator as profile_migration
+from metor.data.profile.models import ProfileOperationType
 from metor.data.sql import DatabaseCorruptedError, SqlManager
 from metor.data import Settings
 from metor.utils import Constants
@@ -79,6 +87,93 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         protector = PasswordKeyProtector(root / 'keyslot.json')
         protector.protect(pmk, password)
         return protector
+
+    def test_corrupt_profile_config_is_preserved_by_writes(self) -> None:
+        """Rejects profile changes without replacing an invalid source document.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                Constants.DATA = Path(temp_dir)
+                profile = ProfileManager('corrupt-config')
+                profile.paths.create_directories()
+                config_file = profile.paths.get_config_file()
+                damaged_content = b'{incomplete'
+                config_file.write_bytes(damaged_content)
+
+                with self.assertRaises(json.JSONDecodeError):
+                    profile.config.set(ProfileConfigKey.DAEMON_PORT, 12000)
+                with self.assertRaises(json.JSONDecodeError):
+                    profile.config.set_namespace('ui.terminal.prompt_sign', '#')
+                with self.assertRaises(json.JSONDecodeError):
+                    profile.config.sync_with_global()
+
+                self.assertEqual(config_file.read_bytes(), damaged_content)
+
+                invalid_content = b'{"ui": {"unknown": true}}'
+                config_file.write_bytes(invalid_content)
+                with self.assertRaisesRegex(ValueError, 'unknown config key'):
+                    profile.config.set(ProfileConfigKey.DAEMON_PORT, 12000)
+                self.assertEqual(config_file.read_bytes(), invalid_content)
+        finally:
+            Constants.DATA = original_data
+
+    def test_interrupted_profile_config_write_preserves_previous_document(
+        self,
+    ) -> None:
+        """Keeps the last complete profile document after a partial staged write.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+
+        def interrupted_dump(_data: object, output: TextIO, **_kwargs: object) -> None:
+            """Writes a partial JSON document before simulating an I/O failure.
+
+            Args:
+                _data (object): Serialized document under test.
+                output (TextIO): Destination stream under test.
+                **_kwargs (object): JSON writer options.
+
+            Returns:
+                None
+            """
+            output.write('{partial')
+            raise OSError('Simulated interrupted write.')
+
+        original_data = Constants.DATA
+        try:
+            with TemporaryDirectory() as temp_dir:
+                Constants.DATA = Path(temp_dir)
+                profile = ProfileManager('atomic-config')
+                profile.paths.create_directories()
+                profile.config.set(ProfileConfigKey.DAEMON_PORT, 12000)
+                config_file = profile.paths.get_config_file()
+                original_content = config_file.read_bytes()
+
+                with patch(
+                    'metor.data.profile.config.config.json.dump',
+                    side_effect=interrupted_dump,
+                ):
+                    with self.assertRaisesRegex(OSError, 'interrupted write'):
+                        profile.config.set(ProfileConfigKey.DAEMON_PORT, 12001)
+
+                self.assertEqual(config_file.read_bytes(), original_content)
+                self.assertEqual(
+                    list(config_file.parent.glob(f'.{config_file.name}.*.tmp')),
+                    [],
+                )
+        finally:
+            Constants.DATA = original_data
 
     def test_profile_key_hierarchy_is_stable_and_domain_separated(self) -> None:
         """Verifies explicit versioned labels produce independent deterministic keys.
@@ -230,6 +325,108 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                 self.assertFalse((root / 'incomplete').exists())
         finally:
             Constants.DATA = original_data
+
+    def test_profile_creation_failure_keeps_exception_details_out_of_results(
+        self,
+    ) -> None:
+        """A key setup error is neither returned locally nor carried over IPC.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        private_detail = 'private-keyslot-path-and-secret'
+        with (
+            TemporaryDirectory() as temp_dir,
+            patch.object(Constants, 'DATA', Path(temp_dir)),
+            patch.object(
+                KeyManager,
+                'unlock_profile_keys',
+                side_effect=OSError(private_detail),
+            ),
+        ):
+            result = ProfileManager.add_profile_folder(
+                'failed', master_password='profile-password'
+            )
+            self.assertFalse((Path(temp_dir) / 'failed').exists())
+
+        self.assertFalse(result.success)
+        self.assertIs(
+            result.operation_type, ProfileOperationType.PROFILE_CREATION_FAILED
+        )
+        self.assertEqual(result.params['reason'], 'Profile creation failed.')
+        event = ProfileOperationResultEvent(
+            success=result.success,
+            operation_type=ProfileOperationCode(result.operation_type.value),
+            params=result.params,
+        )
+        encoded = event.to_json()
+        self.assertIsInstance(
+            IpcEvent.from_dict(json.loads(encoded)), ProfileOperationResultEvent
+        )
+        self.assertNotIn(private_detail, repr(result) + encoded)
+
+    def test_security_migration_failure_uses_fixed_reasons(self) -> None:
+        """Filesystem and SQL errors cannot enter a migration result or IPC DTO.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        private_detail = 'private-database-path-and-secret'
+        with (
+            TemporaryDirectory() as temp_dir,
+            patch.object(Constants, 'DATA', Path(temp_dir)),
+            patch.object(Settings, 'get_bool', return_value=True),
+        ):
+            created = ProfileManager.add_profile_folder(
+                'migration', security_mode=ProfileSecurityMode.PLAINTEXT
+            )
+            self.assertTrue(created.success)
+            for error, expected_reason in (
+                (OSError(private_detail), 'Security migration failed.'),
+                (
+                    DatabaseCorruptedError(private_detail),
+                    'Profile database migration failed.',
+                ),
+            ):
+                with (
+                    self.subTest(error=type(error).__name__),
+                    patch.object(
+                        profile_migration,
+                        'write_migration_journal',
+                        side_effect=error,
+                    ),
+                ):
+                    result = ProfileManager.migrate_profile_security(
+                        'migration',
+                        ProfileSecurityMode.ENCRYPTED,
+                        new_password='replacement-password',
+                    )
+                    self.assertFalse(result.success)
+                    self.assertIs(
+                        result.operation_type,
+                        ProfileOperationType.SECURITY_MIGRATION_FAILED,
+                    )
+                    self.assertEqual(result.params['reason'], expected_reason)
+                    self.assertNotIn(private_detail, repr(result))
+                    event = ProfileOperationResultEvent(
+                        success=result.success,
+                        operation_type=ProfileOperationCode(
+                            result.operation_type.value
+                        ),
+                        params=result.params,
+                    )
+                    encoded = event.to_json()
+                    self.assertIsInstance(
+                        IpcEvent.from_dict(json.loads(encoded)),
+                        ProfileOperationResultEvent,
+                    )
+                    self.assertNotIn(private_detail, encoded)
 
     def test_wrong_password_tamper_and_unsupported_format_fail(self) -> None:
         """Verifies keyslot authentication and strict format handling.

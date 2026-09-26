@@ -4,6 +4,7 @@
 
 import sys
 import json
+import traceback
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -12,7 +13,15 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.data import ContactManager, HistoryActor, HistoryEvent, HistoryManager
-from metor.core.api import ContentType, Delivery
+from metor.core.api import (
+    ContentType,
+    Delivery,
+    EventType,
+    IpcEvent,
+    ListRetainedMessagesCommand,
+    RetainedMessagesUnavailableEvent,
+)
+from metor.core.daemon.handlers.db.messages import DatabaseCommandMessagesMixin
 from metor.data.contact import ContactOperationType
 from metor.data.message import (
     MessageDirection,
@@ -20,7 +29,7 @@ from metor.data.message import (
     MessageStatus,
 )
 from metor.data.profile import ProfileManager
-from metor.data.sql import SqlManager
+from metor.data.sql import DatabaseCorruptedError, SqlManager
 from metor.utils import Constants
 
 
@@ -127,6 +136,85 @@ class DataPersistenceContractTests(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             self._mm.list_retained_messages(cursor=changed.next_cursor, limit=1)
+
+    def test_retained_inventory_error_cannot_leak_record_values_over_ipc(self) -> None:
+        """A storage conversion error yields a fixed, round-trippable IPC reason.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        private_detail = 'private-retained-payload-and-path'
+        handler = DatabaseCommandMessagesMixin()
+        handler._mm = self._mm
+        handler._cm = self._cm
+        with patch.object(
+            self._mm,
+            'list_retained_messages',
+            side_effect=ValueError(private_detail),
+        ):
+            event = handler._handle_list_retained_messages(
+                ListRetainedMessagesCommand()
+            )
+
+        self.assertIsInstance(event, RetainedMessagesUnavailableEvent)
+        assert isinstance(event, RetainedMessagesUnavailableEvent)
+        self.assertIs(event.event_type, EventType.RETAINED_MESSAGES_UNAVAILABLE)
+        self.assertEqual(event.reason, 'Retained-message inventory is unavailable.')
+        self.assertTrue(event.retryable)
+        encoded = event.to_json()
+        self.assertIsInstance(
+            IpcEvent.from_dict(json.loads(encoded)),
+            RetainedMessagesUnavailableEvent,
+        )
+        self.assertNotIn(private_detail, encoded)
+
+    def test_sql_manager_errors_do_not_expose_native_details(self) -> None:
+        """Open and export failures retain safe text through normal tracebacks.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        private_detail = 'private-sql-query-and-key'
+        db_path = self._pm.paths.get_db_file()
+        with (
+            patch(
+                'metor.data.sql.manager.read_schema_version',
+                side_effect=ValueError(private_detail),
+            ),
+            self.assertRaises(DatabaseCorruptedError) as open_error,
+        ):
+            SqlManager(db_path, self._pm.config)
+
+        self.assertEqual(
+            str(open_error.exception),
+            'Profile database could not be opened safely.',
+        )
+        self.assertNotIn(
+            private_detail, ''.join(traceback.format_exception(open_error.exception))
+        )
+
+        with (
+            patch(
+                'metor.data.sql.manager.read_schema_version',
+                side_effect=MemoryError(private_detail),
+            ),
+            self.assertRaises(DatabaseCorruptedError) as export_error,
+        ):
+            SqlManager.export_database_copy(db_path, self._data_root / 'staged.db')
+
+        self.assertEqual(
+            str(export_error.exception),
+            'Profile database could not be migrated safely.',
+        )
+        self.assertNotIn(
+            private_detail, ''.join(traceback.format_exception(export_error.exception))
+        )
 
     def test_promotion_keeps_the_same_discovered_peer_identity(self) -> None:
         """

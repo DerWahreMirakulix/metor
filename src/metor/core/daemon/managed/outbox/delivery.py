@@ -228,8 +228,8 @@ class DropDelivery:
                         timestamp,
                         transport='tunnel',
                     )
-                except Exception as exc:
-                    self._log_delivery_failure(onion, str(exc))
+                except Exception:
+                    self._log_delivery_failure(onion, 'Drop delivery failed.')
                     self._tunnels.close(onion)
                     break
 
@@ -242,8 +242,8 @@ class DropDelivery:
                 and not self.is_drop_standby_allowed()
             ):
                 self._tunnels.close(onion)
-        except Exception as exc:
-            self._log_delivery_failure(onion, str(exc))
+        except Exception:
+            self._log_delivery_failure(onion, 'Drop delivery failed.')
             self._tunnels.close(onion)
 
     def send_single_drop(self, onion: str, row: OutboxRow) -> None:
@@ -289,8 +289,8 @@ class DropDelivery:
                 timestamp,
                 transport='direct',
             )
-        except Exception as exc:
-            self._log_delivery_failure(onion, str(exc))
+        except Exception:
+            self._log_delivery_failure(onion, 'Drop delivery failed.')
         finally:
             try:
                 conn.close()

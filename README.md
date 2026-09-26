@@ -377,7 +377,7 @@ The release bundle workflow is separate from the normal developer workflow. Day-
 Generated documentation is part of the project maintenance pipeline.
 
 - `npm run generate:docs` (or `npm run docs`): Regenerates the [IPC API](docs/generated/API.md), [settings](docs/generated/SETTINGS.md), and machine-readable compatibility references under `docs/generated/`.
-- `npm run check` (or `npm run ready`): Runs nonmutating Markdown/Python format checks, linting, type checking, dependency boundaries, generated-reference freshness, and the discovered unit/integration suite.
+- `npm run check` (or `npm run ready`): Runs nonmutating Markdown/Python format checks, linting, type checking, dependency boundaries, generated-reference freshness, and the supervised full test suite.
 - `npm run format:md`, `npm run format:py`, and `npm run fix:py`: Apply intentional Markdown formatting, Python formatting, or Ruff fixes; these mutating commands are separate from readiness checks.
 
 Before changing architecture, security boundaries, or contributor-facing workflows, review the [architecture guide](docs/ARCHITECTURE.md) and [contribution guide](docs/CONTRIBUTE.md).

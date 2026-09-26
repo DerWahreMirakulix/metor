@@ -15,6 +15,7 @@ import stem.process
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.core.tor import TorManager
+from metor.core.api import EventType, RuntimeErrorCode
 from metor.utils import Constants
 
 
@@ -90,9 +91,10 @@ class TorPathResolutionTests(unittest.TestCase):
                 patch('metor.core.tor._is_windows', return_value=True),
                 patch.object(Constants, 'TOR_PATH', ''),
                 patch.object(Constants, 'DATA', data_dir),
-                self.assertRaises(FileNotFoundError),
+                self.assertRaises(FileNotFoundError) as raised,
             ):
                 TorManager._resolve_tor_command()
+            self.assertNotIn(str(data_dir), str(raised.exception))
 
     def test_stem_passes_profile_configuration_outside_process_argv(self) -> None:
         """Pinned Stem sends modern Tor configuration through standard input.
@@ -144,8 +146,12 @@ class TorLifecycleTests(unittest.TestCase):
         manager = TorManager.__new__(TorManager)
         manager._process_lock = threading.RLock()
         manager._tm_proc = process
+        manager.socks_port = 12346
+        manager.control_port = 12347
+        manager.incoming_port = 12348
         manager._pm = Mock()
         manager._pm.paths.get_hidden_service_dir.return_value = root
+        manager._pm.paths.get_tor_data_dir.return_value = root
         return manager
 
     def test_stop_confirms_normal_exit_and_is_idempotent(self) -> None:
@@ -323,6 +329,121 @@ class TorLifecycleTests(unittest.TestCase):
         manager = self._manager(None)
         manager.stop()
         manager.stop()
+
+    def test_launch_failure_never_publishes_os_error_detail(self) -> None:
+        """A Tor startup error cannot expose host paths or secrets over IPC or logs.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        manager = self._manager(None)
+        manager._pm.config.get_int.return_value = 1
+        manager._pm.config.get_bool.return_value = True
+        messages: list[str] = []
+        private_detail = 'private-profile-path-and-secret'
+
+        with (
+            patch.object(manager, '_reserve_ports'),
+            patch.object(TorManager, '_resolve_tor_command', return_value='tor'),
+            patch.object(TorManager, '_log_callback', messages.append),
+            patch(
+                'metor.core.tor.stem.process.launch_tor_with_config',
+                side_effect=OSError(private_detail),
+            ),
+        ):
+            result = manager._launch_process()
+
+        self.assertEqual(
+            result,
+            (
+                False,
+                EventType.TOR_START_FAILED,
+                {'error_code': RuntimeErrorCode.TOR_LAUNCH_FAILED},
+            ),
+        )
+        self.assertEqual(messages, ['Tor launch failed.'])
+        self.assertNotIn(private_detail, repr(result) + repr(messages))
+
+    def test_failed_launch_cleanup_retains_unconfirmed_process(self) -> None:
+        """A failed PID write must not retry over an unconfirmed Tor process.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        process = Mock(pid=12345)
+        process.poll.return_value = None
+        process.terminate.side_effect = OSError('private-termination-path')
+        process.kill.side_effect = OSError('private-kill-path')
+        manager = self._manager(None)
+        manager._pm.config.get_int.return_value = 2
+
+        with (
+            patch.object(manager, '_reserve_ports'),
+            patch.object(TorManager, '_resolve_tor_command', return_value='tor'),
+            patch(
+                'metor.core.tor.stem.process.launch_tor_with_config',
+                return_value=process,
+            ) as launch,
+            patch(
+                'metor.core.tor.ProcessManager.process_identity_payload',
+                return_value='owned-process',
+            ),
+            patch(
+                'metor.core.tor.open_private_binary_file',
+                side_effect=OSError('private-pid-path'),
+            ),
+        ):
+            result = manager._launch_process()
+
+        self.assertEqual(
+            result,
+            (
+                False,
+                EventType.TOR_START_FAILED,
+                {'error_code': RuntimeErrorCode.TOR_LAUNCH_FAILED},
+            ),
+        )
+        launch.assert_called_once()
+        self.assertIs(manager._tm_proc, process)
+        self.assertNotIn('private-', repr(result))
+
+    def test_control_failure_never_publishes_exception_detail(self) -> None:
+        """A failed Tor control request returns a fixed diagnostic after recovery.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        manager = self._manager(None)
+        manager.control_port = 12345
+        with (
+            patch.object(manager, '_is_process_running', return_value=True),
+            patch.object(manager, '_restart_process', return_value=(False, None, {})),
+            patch(
+                'metor.core.tor.stem.control.Controller.from_port',
+                side_effect=OSError('private-control-path'),
+            ),
+            patch('metor.core.tor.time.sleep'),
+        ):
+            result = manager.rotate_circuits()
+
+        self.assertEqual(result[1], EventType.RETUNNEL_FAILED)
+        self.assertEqual(
+            result[2],
+            {
+                'error_code': RuntimeErrorCode.RETUNNEL_RECONNECT_FAILED,
+                'error_detail': 'Tor control operation failed.',
+            },
+        )
+        self.assertNotIn('private-control-path', repr(result))
 
 
 if __name__ == '__main__':

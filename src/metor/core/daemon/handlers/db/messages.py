@@ -190,10 +190,13 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
                 owner_token=cmd.owner_token,
                 msg_id=cmd.msg_id,
             )
-        except ValueError as exc:
+        except ValueError:
             return create_event(
                 EventType.RETAINED_MESSAGES_UNAVAILABLE,
-                {'reason': str(exc), 'retryable': True},
+                {
+                    'reason': 'Retained-message inventory is unavailable.',
+                    'retryable': True,
+                },
             )
         entries = [
             RetainedMessageEntry(
