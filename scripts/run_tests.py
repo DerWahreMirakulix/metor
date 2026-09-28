@@ -108,6 +108,7 @@ class TimedResult(unittest.TestResult):
         self.failure_count = 0
         self.error_count = 0
         self.skip_count = 0
+        self.capability_skip_count = 0
         self.statuses: dict[str, str] = {}
         self.diagnostics: list[str] = []
         self.skip_diagnostics: list[str] = []
@@ -232,15 +233,19 @@ class TimedResult(unittest.TestResult):
         super().addSkip(test, reason)
         self.skip_count += 1
         self.statuses[test.id()] = 'skip'
+        if reason.startswith('capability:'):
+            self.capability_skip_count += 1
         if len(self.skip_diagnostics) < MAX_DETAILS:
             # Only fixed, source-verified skip categories are published.
-            category = (
-                'platform'
-                if 'platform' in reason.lower()
-                or 'windows' in reason.lower()
-                or 'linux' in reason.lower()
-                else 'condition'
-            )
+            if reason.startswith('capability:'):
+                category = 'capability'
+            elif any(
+                platform in reason.lower()
+                for platform in ('platform', 'windows', 'linux')
+            ):
+                category = 'platform'
+            else:
+                category = 'condition'
             self.skip_diagnostics.append(f'SKIP {test.id()}: {category}')
         else:
             self.omitted_skips += 1
@@ -699,6 +704,8 @@ def main(argv: list[str] | None = None) -> int:
         f'(failures={result.failure_count}, errors={result.error_count}, skips={selected_skips}, '
         f'xfail={len(result.expectedFailures)}, xpass={len(result.unexpectedSuccesses)})',
     ]
+    if result.capability_skip_count:
+        lines.append(f'Capability skips: {result.capability_skip_count}')
     lines.extend(
         f'  slow {seconds:.3f}s {name}'
         for seconds, name in sorted(result.durations, reverse=True)[: args.durations]

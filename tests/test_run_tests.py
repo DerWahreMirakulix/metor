@@ -631,6 +631,27 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(run_tests.safe_category(counterfeit('secret')), 'Exception')
         self.assertIsNone(run_tests.safe_outcome(counterfeit('secret')))
 
+    def test_capability_skip_reports_only_a_fixed_category(self) -> None:
+        """Surface unavailable host features without leaking the skip reason.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+
+        class MissingCapability(unittest.TestCase):
+            def test_unavailable(self) -> None:
+                raise unittest.SkipTest('capability: Windows token=private')
+
+        status, output = self.invoke([MissingCapability('test_unavailable')])
+        self.assertEqual(status, 0)
+        self.assertIn('skips=1', output)
+        self.assertIn('Capability skips: 1', output)
+        self.assertIn('SKIP test_run_tests.', output)
+        self.assertIn(': capability', output)
+        self.assertNotIn('token=private', output)
+
     def test_safe_phase_categories_cover_setup_test_and_cleanup(self) -> None:
         """Report each failed lifecycle callback without serializing its value.
 
@@ -931,7 +952,7 @@ class SupervisorTests(unittest.TestCase):
                         results.append(
                             run_tests.supervised(
                                 [sys.executable, '-c', self._PREFIX + body],
-                                timeout=0.4 if root_hangs else 2.0,
+                                timeout=2.0,
                                 max_stdout=128 if root_output_excess else 1024,
                                 report_path=root / 'report.txt',
                             )

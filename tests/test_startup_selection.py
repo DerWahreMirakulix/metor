@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 from typing import cast
 from unittest.mock import Mock, patch
 
+from link_fixtures import create_directory_alias
 from metor.application import create_local_frontend_host
 from metor.application.frontend.host import LocalFrontendHost
 from metor.client import (
@@ -118,9 +119,7 @@ class StartupSelectionTests(unittest.TestCase):
         self.assertEqual(controller.state.route.view, 'V02')
         self.assertIn('requested', controller.state.status)
         self.assertEqual(resolve_initial_profile('requested'), 'requested')
-        (self.root / 'damaged').symlink_to(
-            self.root / 'healthy', target_is_directory=True
-        )
+        create_directory_alias(self.root / 'damaged', self.root / 'healthy')
         damaged = create_local_frontend_host('damaged')
         damaged_controller = GuiController(FrontendLaunchContext('damaged', damaged))
         self.assertEqual(damaged_controller.state.route.view, 'V02')

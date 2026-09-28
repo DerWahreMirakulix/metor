@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
+from link_fixtures import create_directory_alias, create_native_symlink_or_skip
 from metor.utils import Constants
 from metor.shared.security import secure_clear_buffer
 from metor.utils.security import secure_remove_path, secure_shred_file
@@ -197,8 +198,8 @@ class SecurityContractTests(unittest.TestCase):
                     secure_shred_file(file_path)
                 self.assertTrue(file_path.exists())
 
-    def test_secure_shred_file_rejects_direct_symlink_and_hardlink(self) -> None:
-        """Link aliases cannot redirect or multiply a sensitive overwrite.
+    def test_secure_shred_file_rejects_direct_symlink(self) -> None:
+        """A direct alias cannot redirect a sensitive overwrite.
 
         Args:
             None
@@ -211,13 +212,26 @@ class SecurityContractTests(unittest.TestCase):
             target = root / 'target.bin'
             target.write_bytes(b'outside')
             symlink = root / 'secret-link.bin'
-            symlink.symlink_to(target)
+            create_native_symlink_or_skip(self, symlink, target)
 
             with self.assertRaises(OSError):
                 secure_shred_file(symlink)
             self.assertEqual(target.read_bytes(), b'outside')
             self.assertTrue(symlink.is_symlink())
 
+    def test_secure_shred_file_rejects_hardlink(self) -> None:
+        """Multiply linked data cannot be overwritten through one alias.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            target = root / 'target.bin'
+            target.write_bytes(b'outside')
             hardlink = root / 'secret-hardlink.bin'
             os.link(target, hardlink)
             with self.assertRaisesRegex(OSError, 'multiply linked'):
@@ -316,11 +330,36 @@ class SecurityContractTests(unittest.TestCase):
             marker = target / 'keep.bin'
             marker.write_bytes(b'outside')
             link = root / 'profile-link'
-            link.symlink_to(target, target_is_directory=True)
+            create_native_symlink_or_skip(self, link, target, target_is_directory=True)
 
             secure_remove_path(link)
 
             self.assertFalse(link.exists())
+            self.assertEqual(marker.read_bytes(), b'outside')
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows-native junction regression.')
+    def test_secure_remove_path_rejects_native_windows_junction(self) -> None:
+        """Cleanup never traverses an unprivileged directory reparse point.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            target = root / 'outside'
+            target.mkdir()
+            marker = target / 'keep.bin'
+            marker.write_bytes(b'outside')
+            link = root / 'profile-link'
+            create_directory_alias(link, target)
+
+            with self.assertRaisesRegex(OSError, 'reparse point'):
+                secure_remove_path(link)
+
+            self.assertTrue(link.exists())
             self.assertEqual(marker.read_bytes(), b'outside')
 
     def test_secure_remove_path_rejects_root_exchange_before_directory_open(

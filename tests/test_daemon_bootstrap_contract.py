@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
+from link_fixtures import create_directory_alias
 from metor.data import ProfileManager, SettingKey
 from metor.utils import Constants
 
@@ -54,16 +55,26 @@ class DaemonBootstrapContractTests(unittest.TestCase):
         self.assertIn('--non-interactive', command)
         self.assertIn('daemon', command)
 
-    def test_autostart_preserves_a_symlinked_virtualenv_interpreter(self) -> None:
-        """The child invocation retains venv selection instead of canonicalizing it."""
+    def test_autostart_preserves_an_aliased_virtualenv_interpreter(self) -> None:
+        """The child invocation retains venv selection without canonicalizing it.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         from metor.application.runtime.daemon import _build_daemon_launch_command
 
         profile = Mock(spec=ProfileManager)
         profile.profile_name = 'alpha'
         with TemporaryDirectory() as temp_dir:
-            interpreter = Path(temp_dir) / 'venv' / 'bin' / 'python'
-            interpreter.parent.mkdir(parents=True)
-            interpreter.symlink_to(Path(sys.executable).resolve())
+            root = Path(temp_dir)
+            physical_bin = root / 'physical' / 'bin'
+            physical_bin.mkdir(parents=True)
+            (physical_bin / 'python').touch()
+            create_directory_alias(root / 'venv', root / 'physical')
+            interpreter = root / 'venv' / 'bin' / 'python'
             resolved_interpreter = interpreter.resolve()
             with patch('sys.executable', str(interpreter)):
                 command = _build_daemon_launch_command(

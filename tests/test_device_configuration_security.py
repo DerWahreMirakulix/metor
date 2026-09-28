@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from link_fixtures import create_directory_alias, create_native_symlink_or_skip
 from metor.ui.gui.platform.configuration import (
     DeviceConfigurationError,
     read_configuration,
@@ -254,7 +255,26 @@ class DeviceConfigurationSecurityTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == 'nt', 'Windows-native reparse regression.')
     def test_windows_rejects_reparse_configuration_before_parsing(self) -> None:
-        """A native symbolic-link fixture never reaches TOML parsing.
+        """A privilege-free native junction never reaches TOML parsing.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / 'target-directory'
+            link = root / 'device.toml'
+            target.mkdir()
+            create_directory_alias(link, target)
+            with self.assertRaisesRegex(DeviceConfigurationError, 'trust'):
+                read_configuration(str(link), True)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows-native file link regression.')
+    def test_windows_rejects_file_symlink_configuration_before_parsing(self) -> None:
+        """A native file symlink is rejected when the host can create one.
 
         Args:
             None
@@ -267,7 +287,7 @@ class DeviceConfigurationSecurityTests(unittest.TestCase):
             target = root / 'target.toml'
             link = root / 'device.toml'
             _write_private_configuration(target, DEVICE)
-            link.symlink_to(target)
+            create_native_symlink_or_skip(self, link, target)
             with self.assertRaisesRegex(DeviceConfigurationError, 'trust'):
                 read_configuration(str(link), True)
 

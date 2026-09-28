@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
+from link_fixtures import create_directory_alias, create_native_symlink_or_skip
 from metor.utils import Constants
 from metor.utils.lock import FileLock
 
@@ -101,10 +102,10 @@ class LockContractTests(unittest.TestCase):
             finally:
                 os.umask(previous_umask)
 
-    def test_acquisition_rejects_fifo_link_hardlink_and_oversized_metadata(
+    def test_acquisition_rejects_fifo_hardlink_and_oversized_metadata(
         self,
     ) -> None:
-        """Special, linked, and unbounded lock objects fail before ownership.
+        """Special, hard-linked, and unbounded locks fail before ownership.
 
         Args:
             None
@@ -122,15 +123,6 @@ class LockContractTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 lock.__enter__()
             self.assertTrue(lock.lock_path.exists())
-
-            lock.lock_path.unlink()
-            real = root / 'real.lock'
-            real.write_text('7:10.0')
-            real.chmod(0o600)
-            lock.lock_path.symlink_to(real)
-            with self.assertRaises(OSError):
-                lock.__enter__()
-            self.assertEqual(real.read_text(), '7:10.0')
 
             lock.lock_path.unlink()
             lock.lock_path.write_text('7:10.0')
@@ -156,6 +148,50 @@ class LockContractTests(unittest.TestCase):
                 self.assertRaisesRegex(PermissionError, 'lock unreadable'),
             ):
                 lock.__enter__()
+
+    def test_acquisition_rejects_native_file_symlink(self) -> None:
+        """A lock path cannot redirect ownership to another file.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            real = root / 'real.lock'
+            real.write_text('7:10.0')
+            real.chmod(0o600)
+            lock = FileLock(root / 'config.json')
+            create_native_symlink_or_skip(self, lock.lock_path, real)
+
+            with self.assertRaises(OSError):
+                lock.__enter__()
+            self.assertEqual(real.read_text(), '7:10.0')
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows-native junction regression.')
+    def test_acquisition_rejects_native_windows_junction(self) -> None:
+        """An unprivileged directory reparse point cannot become a lock.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / 'outside'
+            target.mkdir()
+            marker = target / 'keep.txt'
+            marker.write_text('keep')
+            lock = FileLock(root / 'config.json')
+            create_directory_alias(lock.lock_path, target)
+
+            with self.assertRaises(OSError):
+                lock.__enter__()
+            self.assertEqual(marker.read_text(), 'keep')
 
     def test_file_lock_rejects_zero_progress_and_cleans_up(self) -> None:
         """A zero-length metadata write cannot become a successful lock.

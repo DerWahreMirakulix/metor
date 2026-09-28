@@ -101,8 +101,11 @@ class IpcServer:
         self._state_revision: int = 0
         self._epoch: str = secrets.token_hex(Constants.UUID_MSG_BYTES)
         self._stop_flag: threading.Event = threading.Event()
+        self._lifecycle_lock: threading.Lock = threading.Lock()
+        self._active_stops: int = 0
         self.port: Optional[int] = None
         self._server: Optional[socket.socket] = None
+        self._acceptor_thread: Optional[threading.Thread] = None
 
     def _report_internal_error(self, message: str) -> None:
         """
@@ -157,40 +160,57 @@ class IpcServer:
         Returns:
             None
         """
-        self._stop_flag.clear()
-        server: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-            static_port: Optional[int] = self._pm.get_static_port()
-            bind_port: int = static_port if static_port else 0
-
-            server.bind((Constants.LOCALHOST, bind_port))
-            server.listen(Constants.SERVER_BACKLOG)
-
-            self._server = server
-            self.port = server.getsockname()[1]
-            self._pm.set_daemon_port(self.port, os.getpid())
-
-            threading.Thread(target=self._acceptor, daemon=True).start()
-        except BaseException:
-            self._stop_flag.set()
-            failed_port = self.port
+        with self._lifecycle_lock:
+            if (
+                self._active_stops
+                or self._server is not None
+                or (
+                    self._acceptor_thread is not None
+                    and self._acceptor_thread.is_alive()
+                )
+            ):
+                raise RuntimeError('IPC listener is already active or stopping')
+            self._stop_flag.clear()
+            server: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
-                server.close()
-            except Exception:
+                server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+                static_port: Optional[int] = self._pm.get_static_port()
+                bind_port: int = static_port if static_port else 0
+
+                server.bind((Constants.LOCALHOST, bind_port))
+                server.listen(Constants.SERVER_BACKLOG)
+
                 self._server = server
-            else:
-                self._server = None
-                self.port = None
-            if failed_port is not None:
+                self.port = server.getsockname()[1]
+                self._pm.set_daemon_port(self.port, os.getpid())
+
+                acceptor = threading.Thread(target=self._acceptor, daemon=True)
+                self._acceptor_thread = acceptor
+                acceptor.start()
+            except BaseException:
+                self._stop_flag.set()
+                failed_port = self.port
                 try:
-                    self._pm.clear_daemon_port(
-                        expected_pid=os.getpid(), expected_port=failed_port
-                    )
+                    server.close()
                 except Exception:
-                    pass
-            raise
+                    self._server = server
+                else:
+                    self._server = None
+                    self.port = None
+                if failed_port is not None:
+                    try:
+                        self._pm.clear_daemon_port(
+                            expected_pid=os.getpid(), expected_port=failed_port
+                        )
+                    except Exception:
+                        pass
+                if (
+                    self._acceptor_thread is not None
+                    and not self._acceptor_thread.is_alive()
+                ):
+                    self._acceptor_thread = None
+                raise
 
     def stop(self) -> None:
         """
@@ -202,13 +222,45 @@ class IpcServer:
         Returns:
             None
         """
-        self._stop_flag.set()
-        if self._server:
+        with self._lifecycle_lock:
+            self._active_stops += 1
+            self._stop_flag.set()
+            server = self._server
+            self._server = None
+            acceptor = self._acceptor_thread
+        try:
+            self._stop_listener(server, acceptor)
+        finally:
+            with self._lifecycle_lock:
+                self._active_stops -= 1
+
+    def _stop_listener(
+        self,
+        server: Optional[socket.socket],
+        acceptor: Optional[threading.Thread],
+    ) -> None:
+        """Release a claimed listener without holding the lifecycle lock.
+
+        Args:
+            server: Listener socket claimed for this stop attempt.
+            acceptor: Acceptor thread claimed for this stop attempt.
+        Returns:
+            None
+        """
+        if server is not None:
             try:
-                self._server.close()
+                server.close()
             except Exception:
                 pass
-            self._server = None
+        acceptor_alive = False
+        if acceptor is not None and threading.current_thread() is not acceptor:
+            if acceptor.ident is not None:
+                acceptor.join(timeout=Constants.IPC_ACCEPTOR_STOP_TIMEOUT_SEC)
+            acceptor_alive = acceptor.is_alive()
+            if not acceptor_alive:
+                with self._lifecycle_lock:
+                    if self._acceptor_thread is acceptor:
+                        self._acceptor_thread = None
         with self._lock:
             clients: List[socket.socket] = list(self._clients)
             self._clients.clear()
@@ -222,6 +274,8 @@ class IpcServer:
                 client.close()
             except Exception:
                 pass
+        if acceptor_alive:
+            raise TimeoutError('IPC acceptor did not stop within the shutdown bound')
 
     def broadcast(self, event: IpcEvent) -> None:
         """

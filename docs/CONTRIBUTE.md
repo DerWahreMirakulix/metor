@@ -86,6 +86,30 @@ branch/PR; branch commits and PR merge refs are separate candidates. Explicit
 native GUI and stream fixtures remain separate from unittest discovery; the
 runner does not replace installed-consumer, Tor, or physical-device acceptance.
 
+### Portable local test environments
+
+The full unittest suite runs natively on Windows and Linux, including Linux
+under WSL 2. A Linux Docker image provides the same checkout dependency closure
+on any host with a Linux-container engine:
+
+```sh
+docker build -f Dockerfile.tests --build-arg PYTHON_VERSION=3.11 -t metor-tests:py311 .
+docker run --rm metor-tests:py311
+```
+
+Build the image again after changing the checkout. This image runs the Linux
+suite; it does not run native Windows APIs. On Windows, also run the native suite
+with the checkout's development Python. Native Windows and Linux results remain
+separate CI requirements. WSL and a Linux container satisfy the Linux side, not
+the Windows side. The container runs as an unprivileged user and excludes local
+`.env`, profile data, build outputs, and virtual environments from its context.
+
+Tests must isolate configuration and writable data from the developer's home
+and repository `.env`. Host capabilities are checked at the narrow fixture that
+needs them: an unsupported native capability produces an explicit skip locally,
+while CI must fail if a capability required for its security coverage disappears.
+Do not turn a genuine cleanup or authorization failure into a capability skip.
+
 ## 1. Language & Naming
 
 - **English Only:** All code, variables, comments, commit messages, and docstrings MUST be written in English.

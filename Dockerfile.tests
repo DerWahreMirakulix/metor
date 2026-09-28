@@ -1,0 +1,43 @@
+ARG PYTHON_VERSION=3.11
+FROM python:${PYTHON_VERSION}-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+        git \
+        libasound2 \
+        libdbus-1-3 \
+        libegl1 \
+        libgl1 \
+        libgl1-mesa-dri \
+        libmtdev1 \
+        libportaudio2 \
+        libx11-6 \
+        libxext6 \
+        libxkbcommon0 \
+        libxrender1 \
+        xauth \
+        xvfb \
+    && apt-get clean
+
+WORKDIR /workspace
+COPY requirements/ requirements/
+
+RUN python -m pip install --upgrade pip==26.0.1 \
+    && python -m pip install -r requirements/dev.lock -r requirements/gui.lock
+
+COPY . .
+
+RUN python -m pip install --no-deps \
+        -e ./packaging/sdk \
+        -e . \
+        -e ./packaging/terminal \
+        -e ./packaging/gui \
+    && python -m pip check \
+    && useradd --create-home --uid 10001 metor \
+    && chown -R metor:metor /workspace
+
+USER metor
+CMD ["python", "scripts/run_tests.py", "--suite", "all"]

@@ -367,10 +367,14 @@ class IndependentCliContractTests(unittest.TestCase):
 
     def test_missing_frontend_preflight_does_not_create_global_settings(self) -> None:
         """R2-T32: default UI resolution is read-only before plugin preflight."""
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory(
+            dir=Path(__file__).resolve().parents[1]
+        ) as temp_dir:
             data_path = Path(temp_dir) / '.metor'
             with (
                 patch('metor.data.settings.Constants.DATA', data_path),
+                patch('metor.application.environment._loaded', False),
+                patch('metor.application.environment.load_dotenv'),
                 patch(
                     'metor.cli.entry.ProfileManager',
                     side_effect=AssertionError('profile side effect'),
@@ -379,7 +383,11 @@ class IndependentCliContractTests(unittest.TestCase):
                     'metor.cli.entry.load_frontend',
                     side_effect=FrontendLaunchError('install metor-ui-terminal'),
                 ),
-                patch.dict(os.environ, {}, clear=True),
+                patch.dict(
+                    os.environ,
+                    {'METOR_DATA_DIR_PARENT': temp_dir},
+                    clear=True,
+                ),
                 patch('sys.stderr', io.StringIO()),
             ):
                 self.assertEqual(run_cli(['chat']), 2)

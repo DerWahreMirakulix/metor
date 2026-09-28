@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
+from link_fixtures import create_directory_alias
 from metor.data.profile.manager import ProfileManager
 from metor.data.profile.migration.journal import migration_paths
 from metor.data.profile.models import ProfileOperationType
@@ -118,9 +119,10 @@ class ProfilePathSecurityTests(unittest.TestCase):
             outside = root / 'outside'
             outside.mkdir()
             link = root / 'linked'
-            link.symlink_to(outside, target_is_directory=True)
+            create_directory_alias(link, outside)
 
-            with self.assertRaisesRegex(ValueError, 'link'):
+            expected = 'reparse' if os.name == 'nt' else 'link'
+            with self.assertRaisesRegex(ValueError, expected):
                 validate_profile_directory(link)
 
         reparse_info = SimpleNamespace(
@@ -191,10 +193,7 @@ class ProfilePathSecurityTests(unittest.TestCase):
                     for component in relative[:-1]:
                         parent = parent / component
                         parent.mkdir()
-                    (parent / relative[-1]).symlink_to(
-                        outside,
-                        target_is_directory=True,
-                    )
+                    create_directory_alias(parent / relative[-1], outside)
 
                     with (
                         patch.object(Constants, 'DATA', data_root),

@@ -6,8 +6,10 @@ import socket
 import json
 import sys
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Optional, cast
+from tempfile import TemporaryDirectory
+from typing import Any, Iterator, Optional, cast
 from unittest.mock import ANY, Mock, patch
 
 import nacl.pwhash
@@ -51,6 +53,21 @@ from metor.client import (
 from metor.ui.terminal import get_session_auth_prompt
 from metor.utils import Constants
 from metor.versioning import IPC_PROTOCOL_MIN_SUPPORTED, IPC_PROTOCOL_VERSION
+
+
+@contextmanager
+def _isolated_metor_data() -> Iterator[None]:
+    """Validate real settings without reading a developer's profile directory.
+
+    Args:
+        None
+
+    Returns:
+        Iterator[None]: A temporary Metor data root inside the checkout.
+    """
+    with TemporaryDirectory(dir=Path(__file__).resolve().parents[1]) as parent:
+        with patch.object(Constants, 'DATA', Path(parent) / Constants.DATA_DIR):
+            yield
 
 
 class _DeferredInteractions:
@@ -965,6 +982,7 @@ class UiIpcContractTests(unittest.TestCase):
         )
 
         with (
+            _isolated_metor_data(),
             patch(
                 'metor.cli.handlers.prompt_hidden',
                 return_value='session-secret',
@@ -1003,6 +1021,7 @@ class UiIpcContractTests(unittest.TestCase):
         )
 
         with (
+            _isolated_metor_data(),
             patch('metor.cli.handlers.prompt_hidden', return_value=''),
             patch('metor.cli.handlers.configure_daemon_runtime_logging'),
             patch('metor.cli.handlers.run_managed_daemon') as run_daemon,
@@ -1030,6 +1049,7 @@ class UiIpcContractTests(unittest.TestCase):
         )
 
         with (
+            _isolated_metor_data(),
             patch('metor.cli.handlers.prompt_hidden', return_value=''),
             patch('metor.cli.handlers.configure_daemon_runtime_logging'),
             patch('metor.cli.handlers.run_managed_daemon') as run_daemon,
@@ -1059,6 +1079,7 @@ class UiIpcContractTests(unittest.TestCase):
         )
 
         with (
+            _isolated_metor_data(),
             patch(
                 'metor.cli.handlers.sys.stdin.readline',
                 return_value='session-secret\n',
@@ -1582,6 +1603,7 @@ class UiIpcContractTests(unittest.TestCase):
         )
 
         with (
+            _isolated_metor_data(),
             patch(
                 'metor.cli.handlers.prompt_hidden',
                 return_value='secret',
@@ -1619,6 +1641,7 @@ class UiIpcContractTests(unittest.TestCase):
         )
 
         with (
+            _isolated_metor_data(),
             patch('metor.cli.handlers.prompt_hidden', return_value='secret'),
             patch('metor.cli.handlers.configure_daemon_runtime_logging'),
             patch('metor.cli.handlers.run_managed_daemon') as run_daemon,

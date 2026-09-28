@@ -25,7 +25,7 @@ from metor.core.key import KeyManager
 from metor.core.tor import TorManager
 from metor.application import DaemonStartPreparation
 from metor.cli.handlers import CommandHandlers
-from metor.data import ProfileManager, SqlManager
+from metor.data import ProfileManager, SettingKey, SqlManager
 from metor.data.blob.store import BLOB_KEY_BYTES, EncryptedBlobStore
 from metor.shared.network import decode_tor_v3_onion_public_key
 from metor.utils import Constants
@@ -705,6 +705,245 @@ class ResourceConstructionTests(unittest.TestCase):
         self.assertEqual(raw.fileno(), -1)
         self.assertIsNone(server.port)
         self.assertIsNone(server._server)
+
+    def test_ipc_stop_waits_for_acceptor_before_profile_cleanup(self) -> None:
+        """Stopping a listener does not leave its settings read in flight.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        server = IpcServer(self.profile, lambda _command, _connection: None)
+        entered = threading.Event()
+        release = threading.Event()
+        stopped = threading.Event()
+        failures: list[Exception] = []
+        original_get_float = self.profile.config.get_float
+
+        def delayed_get_float(key: SettingKey) -> float:
+            """Hold the acceptor at its first profile settings access.
+
+            Args:
+                key: Requested daemon setting.
+            Returns:
+                float: The configured value after the controlled wait.
+            """
+            if key is SettingKey.DAEMON_IPC_TIMEOUT:
+                entered.set()
+                if not release.wait(10):
+                    raise TimeoutError('Controlled acceptor gate was not released')
+            return original_get_float(key)
+
+        def stop_server() -> None:
+            """Stop the listener on a separate thread while its acceptor is held.
+
+            Args:
+                None
+            Returns:
+                None
+            """
+            try:
+                server.stop()
+            except Exception as error:
+                failures.append(error)
+            finally:
+                stopped.set()
+
+        stopper = threading.Thread(target=stop_server, daemon=True)
+        with patch.object(self.profile.config, 'get_float', delayed_get_float):
+            try:
+                server.start()
+                acceptor = server._acceptor_thread
+                self.assertIsNotNone(acceptor)
+                self.assertTrue(entered.wait(10))
+                stopper.start()
+                self.assertTrue(server._stop_flag.wait(2))
+                self.assertFalse(stopped.wait(0.05))
+            finally:
+                release.set()
+                if stopper.ident is not None:
+                    stopper.join(10)
+                server.stop()
+        self.assertTrue(stopped.is_set())
+        self.assertFalse(failures)
+        assert acceptor is not None
+        self.assertFalse(acceptor.is_alive())
+        self.assertIsNone(server._acceptor_thread)
+
+    def test_ipc_stop_timeout_keeps_listener_generation_owned(self) -> None:
+        """A timed-out acceptor remains owned until a later stop succeeds.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        server = IpcServer(self.profile, lambda _command, _connection: None)
+        entered = threading.Event()
+        release = threading.Event()
+        original_acceptor = server._acceptor
+
+        def delayed_acceptor() -> None:
+            """Hold the acceptor until its shutdown timeout has been observed.
+
+            Args:
+                None
+            Returns:
+                None
+            """
+            entered.set()
+            if not release.wait(10):
+                raise TimeoutError('Controlled acceptor gate was not released')
+            original_acceptor()
+
+        with patch.object(server, '_acceptor', delayed_acceptor):
+            try:
+                server.start()
+                acceptor = server._acceptor_thread
+                self.assertIsNotNone(acceptor)
+                self.assertTrue(entered.wait(10))
+                with patch.object(Constants, 'IPC_ACCEPTOR_STOP_TIMEOUT_SEC', 0.05):
+                    with self.assertRaises(TimeoutError):
+                        server.stop()
+                self.assertIs(server._acceptor_thread, acceptor)
+                with self.assertRaises(RuntimeError):
+                    server.start()
+            finally:
+                release.set()
+                server.stop()
+        self.assertIsNone(server._acceptor_thread)
+        assert acceptor is not None
+        self.assertFalse(acceptor.is_alive())
+
+    def test_ipc_stop_during_acceptor_launch_waits_for_thread_start(self) -> None:
+        """A concurrent stop cannot miss or join an unstarted acceptor.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        server = IpcServer(self.profile, lambda _command, _connection: None)
+        entered = threading.Event()
+        release = threading.Event()
+        stop_entered = threading.Event()
+        stopped = threading.Event()
+        failures: list[Exception] = []
+        thread_class = threading.Thread
+
+        class DelayedAcceptorThread(threading.Thread):
+            """Delay Thread.start before the listener thread is launched."""
+
+            def start(self) -> None:
+                """Release the controlled launch window before native start.
+
+                Args:
+                    None
+                Returns:
+                    None
+                """
+                entered.set()
+                if not release.wait(10):
+                    raise TimeoutError('Controlled thread start gate was not released')
+                super().start()
+
+        def start_server() -> None:
+            """Start the listener while its acceptor launch is delayed.
+
+            Args:
+                None
+            Returns:
+                None
+            """
+            try:
+                server.start()
+            except Exception as error:
+                failures.append(error)
+
+        def stop_server() -> None:
+            """Stop the listener concurrently with its acceptor launch.
+
+            Args:
+                None
+            Returns:
+                None
+            """
+            stop_entered.set()
+            try:
+                server.stop()
+            except Exception as error:
+                failures.append(error)
+            finally:
+                stopped.set()
+
+        starter = thread_class(target=start_server, daemon=True)
+        stopper = thread_class(target=stop_server, daemon=True)
+        with patch(
+            'metor.core.daemon.managed.ipc.threading.Thread', DelayedAcceptorThread
+        ):
+            try:
+                starter.start()
+                self.assertTrue(entered.wait(10))
+                acceptor = server._acceptor_thread
+                self.assertIsNotNone(acceptor)
+                stopper.start()
+                self.assertTrue(stop_entered.wait(10))
+                self.assertFalse(stopped.wait(0.05))
+            finally:
+                release.set()
+                starter.join(10)
+                if stopper.ident is not None:
+                    stopper.join(10)
+                server.stop()
+        self.assertFalse(starter.is_alive())
+        self.assertFalse(stopper.is_alive())
+        self.assertFalse(failures)
+        self.assertTrue(stopped.is_set())
+        assert acceptor is not None
+        self.assertFalse(acceptor.is_alive())
+        self.assertIsNone(server._acceptor_thread)
+        self.assertIsNone(server._server)
+
+    def test_ipc_acceptor_can_stop_its_own_listener(self) -> None:
+        """An acceptor-originated stop skips joining its own thread.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        server = IpcServer(self.profile, lambda _command, _connection: None)
+        stopped = threading.Event()
+        failures: list[Exception] = []
+
+        def stop_from_acceptor() -> None:
+            """Invoke the public stop path on its own acceptor thread.
+
+            Args:
+                None
+            Returns:
+                None
+            """
+            try:
+                server.stop()
+            except Exception as error:
+                failures.append(error)
+            finally:
+                stopped.set()
+
+        with patch.object(server, '_acceptor', stop_from_acceptor):
+            try:
+                server.start()
+                acceptor = server._acceptor_thread
+                self.assertIsNotNone(acceptor)
+                self.assertTrue(stopped.wait(10))
+            finally:
+                server.stop()
+        self.assertFalse(failures)
+        assert acceptor is not None
+        self.assertFalse(acceptor.is_alive())
+        self.assertIsNone(server._acceptor_thread)
 
     def test_blob_constructor_failure_clears_acquired_key_copy(self) -> None:
         """Directory failure cannot strand a key inside a partial blob store.

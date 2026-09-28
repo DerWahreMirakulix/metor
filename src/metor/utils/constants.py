@@ -81,6 +81,7 @@ class Constants(ContractConstants):
     LISTENER_READY_TIMEOUT: float = (
         5.0  # Startup wait for inbound listener bind/listen readiness
     )
+    IPC_ACCEPTOR_STOP_TIMEOUT_SEC: float = 3.0  # Bound listener thread shutdown
     WORKER_SLEEP_SEC: float = 1.0  # Standard background worker tick rate
     WORKER_SLEEP_SLOW_SEC: float = 2.0  # Slower background worker tick rate
     LOCK_SLEEP_SEC: float = 0.05  # Sleep interval for FileLock spinlocks

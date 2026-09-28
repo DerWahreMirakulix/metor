@@ -123,6 +123,34 @@ class WindowsInstallerBranchTests(unittest.TestCase):
                 }
             )
             argv = (environment['COMSPEC'], '/d', '/c', 'call install.cmd')
+            for name in ('py', 'python'):
+                expected = commands / f'{name}.cmd'
+                if not expected.is_file():
+                    continue
+                discovery = subprocess.run(
+                    (environment['COMSPEC'], '/d', '/c', f'where {name}'),
+                    cwd=bundle,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                discovered = discovery.returncode == 0 and expected.resolve() in (
+                    Path(line.strip()).resolve()
+                    for line in discovery.stdout.splitlines()
+                )
+                if not discovered:
+                    if any(
+                        environment.get(variable, '').casefold() == 'true'
+                        for variable in ('CI', 'GITHUB_ACTIONS')
+                    ):
+                        self.fail(
+                            f'Native where.exe did not discover controlled {name}.cmd'
+                        )
+                    self.skipTest(
+                        'capability: native where.exe cannot discover controlled command '
+                        'shims in this restricted host'
+                    )
             result = subprocess.run(
                 argv,
                 cwd=bundle,

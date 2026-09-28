@@ -2,7 +2,6 @@
 
 import ast
 from pathlib import Path
-import subprocess
 import unittest
 
 
@@ -21,16 +20,14 @@ class SourceDocumentationTests(unittest.TestCase):
         Returns:
             None
         """
-        tracked = subprocess.run(
-            ['git', 'ls-files', 'src/**/*.py', 'packaging/**/*.py'],
-            cwd=ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.splitlines()
+        source_paths = sorted(
+            path
+            for source_root in (ROOT / 'src', ROOT / 'packaging')
+            for path in source_root.rglob('*.py')
+        )
         failures: list[str] = []
-        for relative in tracked:
-            path = ROOT / relative
+        for path in source_paths:
+            relative = path.relative_to(ROOT).as_posix()
             tree = ast.parse(path.read_text(encoding='utf-8'), filename=relative)
             if not ast.get_docstring(tree):
                 failures.append(f'{relative}: missing module docstring')
