@@ -148,6 +148,8 @@ jobs:
           set -o pipefail
           python tests/gui_native_capture.py --view root_refresh --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/root-refresh.png" 2>&1 | tee "${RUNNER_TEMP}/root-refresh.log"
           python tests/gui_native_capture.py --view setting_keyboard --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/setting-keyboard.png" 2>&1 | tee "${RUNNER_TEMP}/setting-keyboard.log"
+          python tests/gui_native_capture.py --view qr --width 1180 --height 760 --font-scale 1.5 --output "${RUNNER_TEMP}/qr-wide.png" 2>&1 | tee "${RUNNER_TEMP}/qr-wide.log"
+          python tests/gui_native_dpi.py --output "${RUNNER_TEMP}/dpi-reflow.png" 2>&1 | tee "${RUNNER_TEMP}/dpi-reflow.log"
 
       - name: Run bounded synthetic stream fixture outside unittest discovery
         if: needs.plan.outputs.mode == 'full' && runner.os == 'Linux' && matrix.python-version == '3.11'
@@ -164,8 +166,12 @@ jobs:
           path: |
             ${{ runner.temp }}/root-refresh.png
             ${{ runner.temp }}/setting-keyboard.png
+            ${{ runner.temp }}/qr-wide.png
+            ${{ runner.temp }}/dpi-reflow.png
             ${{ runner.temp }}/root-refresh.log
             ${{ runner.temp }}/setting-keyboard.log
+            ${{ runner.temp }}/qr-wide.log
+            ${{ runner.temp }}/dpi-reflow.log
             ${{ runner.temp }}/stream-pressure.json
             ${{ runner.temp }}/stream-pressure.log
           if-no-files-found: warn

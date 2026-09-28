@@ -5,7 +5,7 @@ from typing import ClassVar, Protocol
 
 from kivy.graphics import Color, Line, RoundedRectangle
 from kivy.core.window import Window
-from kivy.metrics import dp, sp
+from kivy.metrics import dp
 from kivy.uix.behaviors import ButtonBehavior, FocusBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label as KivyLabel
@@ -74,7 +74,7 @@ class Label(KivyLabel):
         super().__init__(
             text=text,
             font_name=font_path(weight, text),
-            font_size=sp(size),
+            font_size=f'{size}sp',
             color=color(tone),
             markup=False,
             halign='left',
@@ -82,13 +82,16 @@ class Label(KivyLabel):
             size_hint_y=None,
             **kwargs,
         )
-        self._line_height: float = dp(line)
+        self._line_units = line
         self._font_weight = weight
         self.bind(text=self._font_coverage)
-        self.height = self._line_height
+        self.height = dp(line)
         if wrap:
             self.bind(
-                width=self._measure, text=self._measure, texture_size=self._height
+                width=self._measure,
+                text=self._measure,
+                texture_size=self._height,
+                font_size=self._height,
             )
         else:
             self.size_hint_y = 1
@@ -124,7 +127,7 @@ class Label(KivyLabel):
         Returns:
             None
         """
-        self.height = max(self._line_height, self.texture_size[1])
+        self.height = max(dp(self._line_units), self.texture_size[1])
 
     def _single(self, *_args: object) -> None:
         """Constrains header labels without reducing font size.
@@ -163,8 +166,8 @@ class Action(FocusBehavior, ButtonBehavior, Panel):
         super().__init__(
             surface=surface,
             size_hint_y=None,
-            height=dp(48),
-            padding=(dp(12), dp(8)),
+            height='48dp',
+            padding=('12dp', '8dp'),
             **kwargs,
         )
         self.accessible_name: str = text
@@ -379,11 +382,11 @@ class TextField(TextInput):
             None
         """
         kwargs.setdefault('font_name', font_path())
-        kwargs.setdefault('font_size', sp(15))
+        kwargs.setdefault('font_size', '15sp')
         kwargs.setdefault('foreground_color', color('text'))
         kwargs.setdefault('background_color', color('raised'))
         kwargs.setdefault('cursor_color', color('focus'))
-        kwargs.setdefault('padding', (dp(16), dp(14)))
+        kwargs.setdefault('padding', ('16dp', '14dp'))
         super().__init__(**kwargs)
         self.bind(text=self._font_coverage)
         self._font_coverage()
@@ -450,13 +453,13 @@ class SecretInput(TextField):
             password=True,
             multiline=False,
             font_name=font_path(),
-            font_size=sp(15),
+            font_size='15sp',
             size_hint_y=None,
-            height=dp(52),
+            height='52dp',
             foreground_color=color('text'),
             background_color=color('raised'),
             cursor_color=color('focus'),
-            padding=(dp(16), dp(16)),
+            padding=('16dp', '16dp'),
             **kwargs,
         )
         self.use_bubble = False

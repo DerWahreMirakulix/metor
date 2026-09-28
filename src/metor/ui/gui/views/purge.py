@@ -18,14 +18,27 @@ def purge_view(controller: GuiController) -> AnchorLayout:
     Returns:
         AnchorLayout: Full-application covered layout, including the desktop master.
     """
-    wrapper = AnchorLayout(padding=dp(Geometry.EDGE))
+    wrapper = AnchorLayout(padding=f'{Geometry.EDGE}dp')
     scroll = ScrollView(do_scroll_x=False, size_hint_x=None)
-    wrapper.bind(
-        width=lambda owner, width: setattr(
-            scroll, 'width', min(dp(Geometry.FORM_MAX), width - dp(Geometry.EDGE * 2))
+
+    def fit_width(*_args: object) -> None:
+        """Keep the privacy message inside current density-scaled insets.
+
+        Args:
+            _args: Native width or padding changes.
+        Returns:
+            None
+        """
+        scroll.width = max(
+            0,
+            min(
+                dp(Geometry.FORM_MAX),
+                wrapper.width - wrapper.padding[0] - wrapper.padding[2],
+            ),
         )
-    )
-    body = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(16))
+
+    wrapper.bind(width=fit_width, padding=fit_width)
+    body = BoxLayout(orientation='vertical', size_hint_y=None, spacing='16dp')
     body.bind(minimum_height=body.setter('height'))
     body.add_widget(Label(controller.purge.title, role='title'))
     body.add_widget(Label(controller.purge.detail, tone='textSecondary'))

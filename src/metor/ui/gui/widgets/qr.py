@@ -50,7 +50,9 @@ class ContactQr(Widget):
         if unit < 1:
             return
         size = count * unit
-        left, bottom = round(self.center_x - size / 2), round(self.center_y - size / 2)
+        # Cached center aliases can lag inside Kivy's size/pos dispatch.
+        left = round(self.x + (self.width - size) / 2)
+        bottom = round(self.y + (self.height - size) / 2)
         with self.canvas:
             Color(1, 1, 1, 1)
             Rectangle(pos=(left, bottom), size=(size, size))

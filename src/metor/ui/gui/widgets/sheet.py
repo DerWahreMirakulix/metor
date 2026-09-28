@@ -70,7 +70,7 @@ class ActionSheet(ModalView):
         self._keyboard_top = 0.0
         self._generation = controller.state.generation
         self._snapshot = id(controller.state.snapshot)
-        self.body = Panel(orientation='vertical', padding=dp(24), spacing=dp(16))
+        self.body = Panel(orientation='vertical', padding='24dp', spacing='16dp')
         self.add_widget(self.body)
         self.column = BoxLayout()
         self.actions = BoxLayout()
@@ -90,7 +90,7 @@ class ActionSheet(ModalView):
             None
         """
         self.body.clear_widgets()
-        header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+        header = BoxLayout(size_hint_y=None, height='48dp', spacing='12dp')
         header.add_widget(
             Label(
                 self.heading() if callable(self.heading) else self.heading,
@@ -107,7 +107,7 @@ class ActionSheet(ModalView):
         self.body.add_widget(header)
         self.scroll = ScrollView(do_scroll_x=False)
         self.column = BoxLayout(
-            orientation='vertical', spacing=dp(12), size_hint_y=None
+            orientation='vertical', spacing='12dp', size_hint_y=None
         )
         self.column.bind(
             minimum_height=self.column.setter('height'), minimum_size=self._resize
@@ -117,7 +117,7 @@ class ActionSheet(ModalView):
         self.body.add_widget(self.scroll)
         if self.footer is not None:
             self.body.add_widget(self.footer)
-        self.actions = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+        self.actions = BoxLayout(size_hint_y=None, height='48dp', spacing='12dp')
         self.cancel = Action('Cancel' if self.primary else 'Back', self.dismiss)
         self.actions.add_widget(self.cancel)
         if self.primary:
@@ -226,7 +226,11 @@ class ActionSheet(ModalView):
         Returns:
             None
         """
-        if ActionSheet.current is self:
+        if ActionSheet.current is self and not any(
+            bool(getattr(widget, 'focus', False))
+            for widget in self.body.walk()
+            if widget is not self.cancel
+        ):
             self.cancel.focus = True
 
     def _dismissed(self, *_args: object) -> None:

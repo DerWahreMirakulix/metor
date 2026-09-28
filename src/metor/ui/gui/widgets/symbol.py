@@ -66,6 +66,8 @@ class Symbol(Widget):
         """
         self._translate.x = self.center_x - dp(12)
         self._translate.y = self.center_y - dp(12)
+        self._scale.x = dp(1)
+        self._scale.y = dp(1)
 
 
 class IconAction(ContextAction):
@@ -103,7 +105,7 @@ class IconAction(ContextAction):
             surface=surface,
             tone=tone,
             size_hint_x=None,
-            width=dp(48),
+            width='48dp',
             **kwargs,
         )
         self.remove_widget(self.label)

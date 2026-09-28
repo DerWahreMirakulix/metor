@@ -38,6 +38,7 @@ Config.set('graphics', 'height', str(initial_geometry.height + 24))
 
 from kivy.clock import Clock
 from kivy.core.window import Window
+from kivy.graphics import Rectangle
 from kivy.metrics import dp, Metrics
 from kivy.input.providers.mouse import MouseMotionEvent
 from kivy.uix.scrollview import ScrollView
@@ -64,6 +65,7 @@ from metor.core.api import (
     TextContent,
 )
 from metor.ui.gui.app import MetorApp
+from metor.ui.gui.constants import Geometry
 from metor.ui.gui.platform import DeviceConfiguration
 from metor.ui.gui.runtime.device import DevicePhase
 from metor.ui.gui.state import Route
@@ -71,6 +73,7 @@ from metor.ui.gui.widgets import Action, SecretInput, TextField
 from metor.ui.gui.widgets.keyboard import KeyboardKey
 from metor.ui.gui.widgets.sheet import ActionSheet, confirm
 from metor.ui.gui.views.contacts.panel import contact_sheet
+from metor.ui.gui.widgets.qr import ContactQr
 from metor.ui.gui.views.peer import PeerView
 from metor.ui.gui.runtime.transcript import TranscriptItem
 from metor.ui.gui.runtime.voice.controller import VoiceReview
@@ -91,6 +94,58 @@ from gui_native_responsive import exercise_responsive
 from gui_native_purge import configure_purge
 from gui_native_root import exercise_root_navigation, exercise_root_refresh
 from gui_native_load import exercise_native_load
+
+
+def assert_qr_visible(app: MetorApp) -> None:
+    """Keeps the complete module matrix and quiet zone inside the real viewport.
+
+    Args:
+        app: Running isolated native fixture application.
+    Returns:
+        None
+    """
+    assert app.shell is not None
+    qr = next(widget for widget in app.shell.walk() if isinstance(widget, ContactQr))
+    scroll = qr.parent.parent
+    assert isinstance(scroll, ScrollView)
+    rectangles = [item for item in qr.canvas.children if isinstance(item, Rectangle)]
+    square = max(rectangles, key=lambda item: item.size[0] * item.size[1])
+    count = len(qr.modules)
+    assert square.size[0] == square.size[1] and square.size[0] >= count
+    assert all(not any(row[:4]) and not any(row[-4:]) for row in qr.modules)
+    assert all(not any(row) for row in qr.modules[:4] + qr.modules[-4:])
+    left, bottom = qr.to_window(*square.pos)
+    right, top = left + square.size[0], bottom + square.size[1]
+    viewport_left, viewport_bottom = scroll.to_window(*scroll.pos)
+    viewport_right = viewport_left + scroll.width
+    viewport_top = viewport_bottom + scroll.height
+    assert (
+        viewport_left <= left < right <= viewport_right
+        and viewport_bottom <= bottom < top <= viewport_top
+    ), (
+        f'Contact QR clipped: square={(left, bottom, right, top)}, '
+        f'viewport={(viewport_left, viewport_bottom, viewport_right, viewport_top)}, '
+        f'widget={qr.pos + qr.size}'
+    )
+
+
+def assert_qr_resize(onion: str) -> None:
+    """Checks drawing during a size callback, when cached centers may lag.
+
+    Args:
+        onion: Valid fixture contact address.
+    Returns:
+        None
+    """
+    qr = ContactQr(onion)
+    qr.pos = (dp(17), dp(23))
+    qr.width = dp(500)
+    square = max(
+        (item for item in qr.canvas.children if isinstance(item, Rectangle)),
+        key=lambda item: item.size[0] * item.size[1],
+    )
+    assert square.pos[0] == round(qr.x + (qr.width - square.size[0]) / 2)
+    assert square.pos[1] == round(qr.y + (qr.height - square.size[1]) / 2)
 
 
 def exercise_keyboard(app: MetorApp) -> None:
@@ -1032,6 +1087,10 @@ def main() -> None:
                 for widget in app.shell.walk()
                 if isinstance(widget, ScrollView)
             )
+        if args.view == 'qr':
+            assert controller.state.snapshot is not None
+            assert_qr_resize(controller.state.snapshot.onion)
+            assert_qr_visible(app)
         if args.window_output:
             Window.screenshot(name=args.window_output)
             args.window_output = None
@@ -1232,6 +1291,25 @@ def main() -> None:
                 }
                 for field in app.shell.walk()
                 if isinstance(field, TextField)
+            ],
+            'qr_geometry': [
+                {
+                    'widget_pos': list(widget.pos),
+                    'widget_size': list(widget.size),
+                    'widget_window': list(widget.to_window(*widget.pos)),
+                    'scroll_size': list(widget.parent.parent.size),
+                    'scroll_window': list(
+                        widget.parent.parent.to_window(*widget.parent.parent.pos)
+                    ),
+                    'square': [
+                        list(item.pos) + list(item.size)
+                        for item in widget.canvas.children
+                        if type(item).__name__ == 'Rectangle'
+                        and item.size[0] > dp(Geometry.TARGET)
+                    ],
+                }
+                for widget in app.shell.walk()
+                if args.view == 'qr' and isinstance(widget, ContactQr)
             ],
         }
         args.output.with_suffix('.json').write_text(

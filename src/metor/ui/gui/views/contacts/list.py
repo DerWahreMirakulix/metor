@@ -354,6 +354,7 @@ class ContactListView(BoxLayout):
                 )
             )
             self._rows[item.onion] = action
+            action.focus_key = ('contact', item.onion)
             action.label.halign = 'left'
             row.add_widget(action)
             if not selecting:

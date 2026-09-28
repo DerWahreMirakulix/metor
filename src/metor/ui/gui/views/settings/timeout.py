@@ -3,7 +3,6 @@
 from dataclasses import replace
 
 from kivy.clock import Clock
-from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 
 from metor.core.api import GuiPreferencesEvent
@@ -34,7 +33,7 @@ class TimeoutEditor(ActionSheet):
             text=str(self.preferences.idle_seconds),
             multiline=False,
             size_hint_y=None,
-            height=dp(52),
+            height='52dp',
         )
         self.feedback = Label('', role='support', tone='danger')
         self._disable_confirmed = False

@@ -63,7 +63,7 @@ class LockedActivity(Action):
         )
         self.opacity = 1 if visible else 0
         self.disabled = not visible
-        self.height = dp(48) if visible else 0
+        self.height = '48dp' if visible else 0
         activity = self.controller.notifications.locked_activity
         text = (
             'New Drop'
@@ -88,17 +88,30 @@ def security_view(
     Returns:
         AnchorLayout: Centered, measured private form.
     """
-    outer = AnchorLayout(padding=dp(Geometry.EDGE))
+    outer = AnchorLayout(padding=f'{Geometry.EDGE}dp')
     scroll = ScrollView(
-        size_hint=(None, None), width=dp(Geometry.FORM_MAX), do_scroll_x=False
+        size_hint=(None, None), width=f'{Geometry.FORM_MAX}dp', do_scroll_x=False
     )
-    outer.bind(
-        width=lambda owner, value: setattr(
-            scroll, 'width', min(dp(Geometry.FORM_MAX), value - dp(Geometry.EDGE * 2))
+
+    def fit_width(*_args: object) -> None:
+        """Keep the lock form within live, density-scaled cover insets.
+
+        Args:
+            _args: Native width or padding changes.
+        Returns:
+            None
+        """
+        scroll.width = max(
+            0,
+            min(
+                dp(Geometry.FORM_MAX),
+                outer.width - outer.padding[0] - outer.padding[2],
+            ),
         )
-    )
+
+    outer.bind(width=fit_width, padding=fit_width)
     body = BoxLayout(
-        orientation='vertical', spacing=dp(8), size_hint_y=None, padding=(0, dp(24))
+        orientation='vertical', spacing='8dp', size_hint_y=None, padding=(0, '24dp')
     )
     body.bind(minimum_height=body.setter('height'))
 
@@ -158,7 +171,10 @@ def security_view(
             secret.bind(on_text_validate=lambda *_args: unlock())
             if method is ClientUnlockMethod.PIN:
                 keypad = GridLayout(
-                    cols=3, spacing=dp(8), size_hint_y=None, height=dp(48 * 4 + 8 * 3)
+                    cols=3,
+                    spacing='8dp',
+                    size_hint_y=None,
+                    height=f'{Geometry.TARGET * 4 + 8 * 3}dp',
                 )
                 for key in (
                     '1',
@@ -303,7 +319,7 @@ def security_view(
             )
         )
         warning = BoxLayout(
-            orientation='vertical', spacing=dp(12), size_hint_y=None, height=0
+            orientation='vertical', spacing='12dp', size_hint_y=None, height=0
         )
         warning.bind(minimum_height=warning.setter('height'))
 

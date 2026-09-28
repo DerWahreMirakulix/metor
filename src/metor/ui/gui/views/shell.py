@@ -12,7 +12,7 @@ from metor.core.api import Delivery
 from metor.ui.gui.constants import Geometry
 from metor.ui.gui.runtime import GuiController, conversation_rows
 from metor.ui.gui.state import Route
-from metor.ui.gui.widgets import Action, Label, PointerTooltip
+from metor.ui.gui.widgets import Action, Label, PointerTooltip, TextField
 from metor.ui.gui.theme import color
 
 # Local Package Imports
@@ -24,6 +24,11 @@ from .contacts import ContactListView
 from .security import security_view, LockedActivity
 from .purge import purge_view
 from .device import device_view
+from .metric_continuity import (
+    ContactMetricContinuity,
+    PeerMetricContinuity,
+    SecondaryMetricContinuity,
+)
 
 
 class Shell(BoxLayout):
@@ -57,6 +62,7 @@ class Shell(BoxLayout):
         self._detail: BoxLayout | None = None
         self._security_panel: AnchorLayout | None = None
         self.keyboard_inset: float = 0
+        self._pixel_scale = dp(1)
         with self.canvas.before:
             Color(*color('background'))
             self._background = Rectangle(pos=self.pos, size=self.size)
@@ -100,6 +106,18 @@ class Shell(BoxLayout):
             self.add_widget(Label('Increase the window size or reduce display scaling'))
             return
         state = self.controller.state
+        pixel_scale = dp(1)
+        metrics_changed = pixel_scale != self._pixel_scale
+        if (
+            metrics_changed
+            and self._peer_panel is not None
+            and self._peer_panel.route == state.route
+            and self._peer_panel.composer.ptt.held
+            and not state.covered
+        ):
+            # Keep the native input owner attached until its matching release.
+            return
+        self._pixel_scale = pixel_scale
         if self._security_panel is not None:
             for widget in self._security_panel.walk():
                 if isinstance(widget, LockedActivity):
@@ -126,6 +144,48 @@ class Shell(BoxLayout):
             == (self._foreground_key[:2] if self._foreground_key is not None else None)
             else None
         )
+        peer_continuity = (
+            PeerMetricContinuity.capture(self._peer_panel, self.controller)
+            if metrics_changed
+            and not state.covered
+            and self._peer_panel is not None
+            and self._peer_panel.route == state.route
+            else None
+        )
+        contact_continuity = (
+            ContactMetricContinuity.capture(self._contacts_panel, self.controller)
+            if metrics_changed
+            and not state.covered
+            and self._contacts_panel is not None
+            and self._contacts_panel.route == state.route
+            else None
+        )
+        secondary_continuity = (
+            SecondaryMetricContinuity.capture(self._detail, self.controller)
+            if metrics_changed
+            and not state.covered
+            and self._detail is not None
+            and previous_route == (state.generation, state.route)
+            and state.route.view not in {'V06', 'V07', 'V08', 'V09', 'V11', 'V12'}
+            else None
+        )
+        metric_rebuild = (
+            metrics_changed
+            and not state.covered
+            and self.controller.interactions.prompt is None
+            and state.route.view not in {'V02', 'V03', 'V04', 'V05', 'V21', 'V22'}
+        )
+        if (route_changed or metric_rebuild) and self._detail is not None:
+            for widget in self._detail.walk(restrict=True):
+                if isinstance(widget, TextField):
+                    widget.focus = False
+        if metric_rebuild:
+            self._private_render_key = None
+            self._foreground_key = None
+            self._peer_key = None
+            self._contacts_key = None
+            self._root_panel = None
+            self._root_context = None
         peer_key = (state.generation, state.route, wide)
         if route_changed and self._root_panel is not None:
             for widget in self._root_panel.walk(restrict=True):
@@ -217,7 +277,11 @@ class Shell(BoxLayout):
                 id(self.controller.voice.routes.endpoints),
                 self.controller.voice.routes.scanned,
                 self.controller.voice.headset_confirmed,
-                self.width >= dp(Geometry.BREAKPOINT),
+                wide
+                if not state.covered
+                and prompt is None
+                and state.route.view not in {'V02', 'V03', 'V04', 'V05', 'V21', 'V22'}
+                else None,
             )
             if key == self._private_render_key:
                 return
@@ -327,6 +391,12 @@ class Shell(BoxLayout):
             )
             if self._contacts_panel is not None and contact_search_focused:
                 self._contacts_panel.search.focus = True
+            if self._peer_panel is not None and peer_continuity is not None:
+                peer_continuity.restore(self._peer_panel, self.controller)
+            if self._contacts_panel is not None and contact_continuity is not None:
+                contact_continuity.restore(self._contacts_panel, self.controller)
+            if secondary_continuity is not None:
+                secondary_continuity.restore(panel, self.controller)
 
     def set_input_inset(self, height: float) -> None:
         """Reserves keyboard height without replacing focused peer controls.

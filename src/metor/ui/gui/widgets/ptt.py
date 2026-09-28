@@ -31,6 +31,22 @@ class PttAction(Action):
         self._key_identity: str | None = None
         self.bind(focus=self._focus_changed, parent=self._parent_changed)
 
+    @property
+    def held(self) -> bool:
+        """Report whether live capture still depends on this pressed native target.
+
+        Args:
+            None
+        Returns:
+            bool: Whether this widget still owns an active recording press.
+        """
+        press = self.controller.voice.press
+        return (
+            (self._touch_identity is not None or self._key_identity is not None)
+            and press.active
+            and not press.stop_requested
+        )
+
     def on_touch_down(self, touch: MotionEvent) -> bool:
         """Captures one eligible pointer identity and rejects a second pointer owner.
 

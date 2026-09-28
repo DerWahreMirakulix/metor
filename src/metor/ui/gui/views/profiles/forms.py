@@ -1,7 +1,6 @@
 """Focus-preserving profile name and masked password forms with explicit save outcomes."""
 
 from kivy.clock import Clock
-from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 
 from metor.client import (
@@ -33,7 +32,7 @@ class ProfileEditor(ActionSheet):
         page = controller.profiles.page
         self.selected = page.selected_profile if page else ''
         self.name = TextField(
-            text=profile, multiline=False, size_hint_y=None, height=dp(52)
+            text=profile, multiline=False, size_hint_y=None, height='52dp'
         )
         self.current_password = SecretInput()
         self.password = SecretInput()

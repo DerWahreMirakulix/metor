@@ -152,6 +152,7 @@ def notice_row(
         partial(notice_menu, controller, key, refresh),
         surface='surface',
     )
+    action.focus_key = ('notice', key[0].value, key[1])
     action.height = dp(88)
     action.padding = (dp(16), dp(16), dp(16), dp(18))
     action.remove_widget(action.label)
@@ -210,25 +211,22 @@ def notice_row(
     measure()
     row.add_widget(action)
     if store.selecting:
-        row.add_widget(
-            IconAction(
-                'square-check' if key in store.selected else 'square',
-                'Deselect notification'
-                if key in store.selected
-                else 'Select notification',
-                activate,
-                pos_hint={'center_y': 0.5},
-            )
+        auxiliary = IconAction(
+            'square-check' if key in store.selected else 'square',
+            'Deselect notification' if key in store.selected else 'Select notification',
+            activate,
+            pos_hint={'center_y': 0.5},
         )
+        auxiliary.focus_key = ('notice_select', key[0].value, key[1])
     else:
-        row.add_widget(
-            IconAction(
-                'ellipsis',
-                'Notification actions',
-                partial(notice_menu, controller, key, refresh),
-                pos_hint={'center_y': 0.5},
-            )
+        auxiliary = IconAction(
+            'ellipsis',
+            'Notification actions',
+            partial(notice_menu, controller, key, refresh),
+            pos_hint={'center_y': 0.5},
         )
+        auxiliary.focus_key = ('notice_more', key[0].value, key[1])
+    row.add_widget(auxiliary)
     return row
 
 

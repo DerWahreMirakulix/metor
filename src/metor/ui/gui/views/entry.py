@@ -25,13 +25,24 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
     Returns:
         AnchorLayout: Centered scrollable authentication composition.
     """
-    outer = AnchorLayout(padding=dp(24))
-    scroll = ScrollView(size_hint=(None, None), width=dp(400), do_scroll_x=False)
-    outer.bind(
-        width=lambda _w, width: setattr(scroll, 'width', min(dp(400), width - dp(48)))
-    )
+    outer = AnchorLayout(padding='24dp')
+    scroll = ScrollView(size_hint=(None, None), width='400dp', do_scroll_x=False)
+
+    def fit_width(*_args: object) -> None:
+        """Keep the form inside its live, density-scaled horizontal padding.
+
+        Args:
+            _args: Native width or padding changes.
+        Returns:
+            None
+        """
+        scroll.width = max(
+            0, min(dp(400), outer.width - outer.padding[0] - outer.padding[2])
+        )
+
+    outer.bind(width=fit_width, padding=fit_width)
     column = BoxLayout(
-        orientation='vertical', spacing=dp(8), size_hint_y=None, padding=(0, dp(24))
+        orientation='vertical', spacing='8dp', size_hint_y=None, padding=(0, '24dp')
     )
     column.bind(minimum_height=column.setter('height'))
 
@@ -150,7 +161,7 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
             multiline=False,
             font_name=font_path(),
             size_hint_y=None,
-            height=dp(52),
+            height='52dp',
             foreground_color=color('text'),
             background_color=color('raised'),
         )

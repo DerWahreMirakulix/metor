@@ -7,7 +7,6 @@ from kivy.app import App
 from kivy.clock import Clock
 from kivy.config import Config
 from kivy.core.window import Window
-from kivy.metrics import dp
 from kivy.input.motionevent import MotionEvent
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
@@ -61,6 +60,7 @@ class MetorApp(App):
         self.exit_status: int = 0
         self._stopped = False
         self.shell: Shell | None = None
+        self.stage: FloatLayout | None = None
         self.viewport: BoxLayout | None = None
         self.input_dock: InputDock | None = None
         self.call_overlay: CallOverlay | None = None
@@ -69,6 +69,7 @@ class MetorApp(App):
         self.accessibility: AccessibilityBridge | None = None
         self._lifecycle_source: DesktopLifecycleSource | None = None
         self._render_trigger = Clock.create_trigger(self._render, 0)
+        self._metrics_trigger = Clock.create_trigger(self._reflow_metrics, 0)
         self._lifecycle = LifecycleCoordinator(
             self._revoke_native_privacy,
             self.controller.suspend,
@@ -105,14 +106,14 @@ class MetorApp(App):
                 raise
         Window.clearcolor = color('background')
         width, height = self.configuration.logical_size
-        Window.size = (dp(width), dp(height))
-        Window.minimum_width = dp(Geometry.MIN_WIDTH)
-        Window.minimum_height = dp(
-            Geometry.MIN_HEIGHT + (24 if self.controller.simulator else 0)
+        Window.size = (width, height)
+        Window.minimum_width = Geometry.MIN_WIDTH
+        Window.minimum_height = Geometry.MIN_HEIGHT + (
+            24 if self.controller.simulator else 0
         )
         root = BoxLayout(orientation='vertical')
         if self.controller.simulator:
-            simulator_bar = BoxLayout(size_hint_y=None, height=dp(24))
+            simulator_bar = BoxLayout(size_hint_y=None, height='24dp')
             simulator_bar.add_widget(
                 Label(
                     'SIMULATOR · no hardware or production profile actions',
@@ -122,11 +123,12 @@ class MetorApp(App):
                 )
             )
             root.add_widget(simulator_bar)
-            Window.size = (dp(width), dp(height) + dp(24))
+            Window.size = (width, height + 24)
         self.shell = Shell(self.controller, self.refresh)
         self.viewport = BoxLayout(orientation='vertical')
         self.viewport.add_widget(self.shell)
         stage = FloatLayout()
+        self.stage = stage
         stage.add_widget(self.viewport)
         self.continued_overlay = ContinuedOverlay(self.controller, self.refresh)
         stage.add_widget(self.continued_overlay)
@@ -136,6 +138,7 @@ class MetorApp(App):
         self.input_dock = InputDock(self, self.viewport)
         TextField.keyboard_owner = self.input_dock
         self.shell.bind(size=lambda *_args: self.refresh())
+        Window.bind(dpi=self._metrics_changed, _density=self._metrics_changed)
         Window.bind(on_request_close=self._close, on_keyboard=self._keyboard)
         Window.bind(
             on_key_down=self._key_down,
@@ -149,6 +152,33 @@ class MetorApp(App):
         self.refresh()
         return root
 
+    def on_start(self) -> None:
+        """Settle nested native layout after App attaches its root to Window.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self._settle_viewport_layout()
+
+    def _settle_viewport_layout(self) -> None:
+        """Measure the outer responsive chain at the current drawable size.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        if (
+            self.root is not None
+            and self.stage is not None
+            and self.viewport is not None
+        ):
+            self.root.do_layout()
+            self.stage.do_layout()
+            self.viewport.do_layout()
+
     def refresh(self) -> None:
         """Coalesces redundant presentation updates into one native frame.
 
@@ -158,6 +188,33 @@ class MetorApp(App):
             None
         """
         self._render_trigger()
+
+    def _metrics_changed(self, *_args: object) -> None:
+        """Coalesces DPI and drawable-density updates from the native window.
+
+        Args:
+            _args: Kivy property-change fields.
+        Returns:
+            None
+        """
+        self._metrics_trigger()
+
+    def _reflow_metrics(self, _elapsed: float) -> None:
+        """Applies the current pixel scale without discarding editor or cover input.
+
+        Args:
+            _elapsed: Native scheduling delay after a monitor transition.
+        Returns:
+            None
+        """
+        Window.minimum_width = Geometry.MIN_WIDTH
+        Window.minimum_height = Geometry.MIN_HEIGHT + (
+            24 if self.controller.simulator else 0
+        )
+        if ActionSheet.current is not None:
+            ActionSheet.current._resize()
+        self._settle_viewport_layout()
+        self.refresh()
 
     def _render(self, _elapsed: float) -> None:
         """Paints only UI-thread state after layout updates settle.
@@ -453,6 +510,8 @@ class MetorApp(App):
                     on_touch_down=self._activity,
                     on_touch_up=self._touch_up,
                     focus=self._focus,
+                    dpi=self._metrics_changed,
+                    _density=self._metrics_changed,
                 )
             cleanup.callback(self.controller.device.close)
             cleanup.callback(setattr, TextField, 'keyboard_owner', None)
