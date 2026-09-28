@@ -13,6 +13,7 @@ from ctypes import wintypes
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
+from unittest.mock import patch
 
 os.environ['KIVY_NO_ARGS'] = '1'
 if os.name == 'nt':
@@ -704,7 +705,8 @@ def main() -> None:
         ),
         1.0,
     )
-    app.run()
+    with patch('metor.ui.gui.app.create_desktop_lifecycle_source', return_value=None):
+        app.run()
 
 
 if __name__ == '__main__':
