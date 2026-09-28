@@ -23,18 +23,10 @@ RUN apt-get update \
     && apt-get clean
 
 WORKDIR /workspace
-COPY requirements/ requirements/
-
-RUN python -m pip install --upgrade pip==26.0.1 \
-    && python -m pip install -r requirements/dev.lock -r requirements/gui.lock
-
 COPY . .
 
-RUN python -m pip install --no-deps \
-        -e ./packaging/sdk \
-        -e . \
-        -e ./packaging/terminal \
-        -e ./packaging/gui \
+RUN python -m pip install --upgrade pip==26.0.1 \
+    && python -m pip install -r requirements/dev.txt \
     && python -m pip check \
     && useradd --create-home --uid 10001 metor \
     && chown -R metor:metor /workspace

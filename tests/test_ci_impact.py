@@ -316,6 +316,36 @@ class CiImpactTests(unittest.TestCase):
                 self.assertEqual(self.classify(base, head), ('full', ()))
                 base = head
 
+    def test_full_ci_requires_same_linux_container_as_local_tests(self) -> None:
+        """Keep the documented image and bounded result in full acceptance.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        workflow = (
+            Path(__file__).resolve().parents[1] / '.github' / 'workflows' / 'ci.yml'
+        ).read_text(encoding='utf-8')
+        container_job = workflow.split('\n  linux-container-tests:\n', 1)[1].split(
+            '\n  acceptance:\n', 1
+        )[0]
+        acceptance = workflow.split('\n  acceptance:\n', 1)[1]
+        self.assertIn("if: needs.plan.outputs.mode == 'full'", container_job)
+        self.assertIn('docker build --file Dockerfile.tests', container_job)
+        self.assertIn(
+            'docker create --env CI=true --env GITHUB_ACTIONS=true', container_job
+        )
+        self.assertIn(
+            'docker cp "$container_id:/workspace/build/test-report.txt"', container_job
+        )
+        self.assertIn("docker inspect --format '{{.State.ExitCode}}'", container_job)
+        self.assertIn(
+            'needs: [plan, python-quality, linux-container-tests]', acceptance
+        )
+        self.assertIn('"$MODE" == full && "$CONTAINER" != success', acceptance)
+        self.assertIn('"$MODE" == fast && "$CONTAINER" != skipped', acceptance)
+
     def test_renames_include_both_sides_under_any_git_setting(self) -> None:
         """A move between Core and an allowed GUI path always needs full CI.
 

@@ -39,6 +39,42 @@ class QualityGateContractTests(unittest.TestCase):
         self.assertNotIn('--write', scripts['check:md'])
         self.assertNotIn('generate:', check)
 
+    def test_container_uses_shared_development_install_and_runner(self) -> None:
+        """Keep the local Linux image aligned with the native CI checkout.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        requirements = (ROOT / 'requirements' / 'dev.txt').read_text(encoding='utf-8')
+        dockerfile = (ROOT / 'Dockerfile.tests').read_text(encoding='utf-8')
+        action = (
+            ROOT / '.github' / 'actions' / 'python-quality' / 'action.yml'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn('-r dev.lock', requirements)
+        self.assertIn('-r gui.lock', requirements)
+        self.assertIn('-e ./packaging/sdk', requirements)
+        self.assertIn('-e ./packaging/gui', requirements)
+        for installer in (dockerfile, action):
+            self.assertIn('python -m pip install -r requirements/dev.txt', installer)
+            self.assertIn('python -m pip check', installer)
+        pip_default = (
+            action.split('  pip-version:\n', 1)[1]
+            .split('    default: "', 1)[1]
+            .split('"', 1)[0]
+        )
+        self.assertIn(f'pip=={pip_default}', dockerfile)
+        self.assertNotIn('--no-deps', dockerfile)
+        self.assertNotIn('pip install -r requirements/dev.lock', dockerfile)
+        self.assertNotIn('pip install -r requirements/gui.lock', dockerfile)
+        self.assertIn(
+            'CMD ["python", "scripts/run_tests.py", "--suite", "all"]', dockerfile
+        )
+        self.assertIn('python scripts/run_tests.py --suite all', action)
+
     def test_ci_covers_minimum_and_newer_python_and_explicit_fixtures(self) -> None:
         """Rejects a 3.11-only matrix and discovery-only native-fixture claims.
 

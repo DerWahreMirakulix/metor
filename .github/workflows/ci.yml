@@ -177,9 +177,49 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  linux-container-tests:
+    needs: plan
+    if: needs.plan.outputs.mode == 'full'
+    name: Linux Container Unittest (Python 3.11)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Build documented Linux test image
+        run: docker build --file Dockerfile.tests --build-arg PYTHON_VERSION=3.11 --tag metor-tests:ci .
+
+      - name: Run full Linux suite in documented test image
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_id="$(docker create --env CI=true --env GITHUB_ACTIONS=true metor-tests:ci)"
+          trap 'docker rm --force "$container_id" >/dev/null 2>&1 || true' EXIT
+          start_status=0
+          docker start --attach "$container_id" || start_status=$?
+          mkdir -p build
+          docker cp "$container_id:/workspace/build/test-report.txt" build/test-report-container.txt
+          state="$(docker inspect --format '{{.State.Status}}' "$container_id")"
+          test_status="$(docker inspect --format '{{.State.ExitCode}}' "$container_id")"
+          if [[ "$start_status" != 0 || "$state" != exited || "$test_status" != 0 ]]; then
+            echo '::error title=Linux container tests failed::See the bounded unittest report artifact.'
+            exit 1
+          fi
+
+      - name: Upload bounded container unittest report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unittest-report-linux-container-py311
+          path: build/test-report-container.txt
+          if-no-files-found: warn
+          retention-days: 14
+
   acceptance:
     if: always()
-    needs: [plan, python-quality]
+    needs: [plan, python-quality, linux-container-tests]
     runs-on: ubuntu-latest
     steps:
       - name: Require every planned quality and acceptance job
@@ -187,6 +227,7 @@ jobs:
         env:
           PLAN: ${{ needs.plan.result }}
           QUALITY: ${{ needs['python-quality'].result }}
+          CONTAINER: ${{ needs['linux-container-tests'].result }}
           MODE: ${{ needs.plan.outputs.mode }}
           MATRIX: ${{ needs.plan.outputs.matrix }}
         run: |
@@ -222,6 +263,14 @@ jobs:
           PY
           if [[ "$PLAN" != success || "$QUALITY" != success ]]; then
             echo "Required $MODE candidate checks are incomplete or failed." >&2
+            exit 1
+          fi
+          if [[ "$MODE" == full && "$CONTAINER" != success ]]; then
+            echo 'Required full Linux container check is incomplete or failed.' >&2
+            exit 1
+          fi
+          if [[ "$MODE" == fast && "$CONTAINER" != skipped ]]; then
+            echo 'Fast candidate unexpectedly ran the full Linux container check.' >&2
             exit 1
           fi
           echo "$MODE candidate checks passed."

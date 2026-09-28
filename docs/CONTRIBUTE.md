@@ -89,20 +89,24 @@ runner does not replace installed-consumer, Tor, or physical-device acceptance.
 ### Portable local test environments
 
 The full unittest suite runs natively on Windows and Linux, including Linux
-under WSL 2. A Linux Docker image provides the same checkout dependency closure
-on any host with a Linux-container engine:
+under WSL 2. The Linux Docker image installs the same canonical
+`requirements/dev.txt` checkout dependency closure as native CI and runs the
+same full test runner on any host with a Linux-container engine:
 
 ```sh
 docker build -f Dockerfile.tests --build-arg PYTHON_VERSION=3.11 -t metor-tests:py311 .
 docker run --rm metor-tests:py311
 ```
 
-Build the image again after changing the checkout. This image runs the Linux
-suite; it does not run native Windows APIs. On Windows, also run the native suite
-with the checkout's development Python. Native Windows and Linux results remain
-separate CI requirements. WSL and a Linux container satisfy the Linux side, not
-the Windows side. The container runs as an unprivileged user and excludes local
-`.env`, profile data, build outputs, and virtual environments from its context.
+Build the image again after changing the checkout. Full CI also builds this
+image and runs its complete suite as a separate, parallel Linux gate, so the
+local container path is checked on the candidate revision. The native Linux
+and Windows jobs remain separate requirements: installed consumers, Tor, GUI,
+and platform-specific behavior cannot be inferred from the container suite.
+On Windows, also run the native suite with the checkout's development Python.
+WSL and a Linux container satisfy the Linux side, not the Windows side. The
+container runs as an unprivileged user and excludes local `.env`, profile data,
+build outputs, and virtual environments from its context.
 
 Tests must isolate configuration and writable data from the developer's home
 and repository `.env`. Host capabilities are checked at the narrow fixture that
