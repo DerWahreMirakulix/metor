@@ -297,8 +297,14 @@ class ContinuedGuiTests(unittest.TestCase):
         self.assertIsNotNone(self.gui.security.continuation.scope)
         self.assertTrue(self.gui.voice.down(PressSource.PHYSICAL))
         binding = self.gui.voice.press.binding
-        self.assertTrue(drained.wait(Constants.DEFAULT_IPC_TIMEOUT))
-        self.gui.voice.up(PressSource.PHYSICAL)
+        try:
+            # Admission may use its entire IPC deadline before the capture port opens.
+            self.assertTrue(
+                microphone.opened_event.wait(2 * Constants.DEFAULT_IPC_TIMEOUT)
+            )
+            self.assertTrue(drained.wait(Constants.DEFAULT_IPC_TIMEOUT))
+        finally:
+            self.gui.voice.up(PressSource.PHYSICAL)
         self.assertTrue(
             self.gui.voice.worker.done.wait(2 * Constants.DEFAULT_IPC_TIMEOUT)
         )
