@@ -14,6 +14,7 @@ from metor.core.api import (
     RestrictClientCommand,
     RestrictedClientStateEvent,
 )
+from metor.utils import Constants
 
 
 class ContinuedCoreTests(unittest.TestCase):
@@ -296,9 +297,11 @@ class ContinuedGuiTests(unittest.TestCase):
         self.assertIsNotNone(self.gui.security.continuation.scope)
         self.assertTrue(self.gui.voice.down(PressSource.PHYSICAL))
         binding = self.gui.voice.press.binding
-        self.assertTrue(drained.wait(5))
+        self.assertTrue(drained.wait(Constants.DEFAULT_IPC_TIMEOUT))
         self.gui.voice.up(PressSource.PHYSICAL)
-        self.assertTrue(self.gui.voice.worker.done.wait(10))
+        self.assertTrue(
+            self.gui.voice.worker.done.wait(2 * Constants.DEFAULT_IPC_TIMEOUT)
+        )
         self.gui.poll()
         turn = self.gui.voice.live_turns[binding.msg_id]
         self.assertTrue(turn.finalized)

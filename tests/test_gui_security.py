@@ -105,7 +105,11 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
         provider.get_session_auth_proof.side_effect = lambda challenge, salt: (
             build_session_auth_proof('test-password', challenge, salt)
         )
-        client = MetorClient(self.daemon._ipc.port, auth_provider=provider, timeout=5)
+        client = MetorClient(
+            self.daemon._ipc.port,
+            auth_provider=provider,
+            timeout=Constants.DEFAULT_IPC_TIMEOUT,
+        )
         self.addCleanup(client.disconnect)
         self.assertIsNotNone(client.bootstrap())
         self.assertIn('protected_gui_preferences', client.init_event.capabilities)

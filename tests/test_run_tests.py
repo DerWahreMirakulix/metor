@@ -17,7 +17,11 @@ from typing import cast
 from unittest.mock import Mock, patch
 
 from scripts import ci_impact, run_tests, test_supervision
-from scripts.test_worker_lifetime import _PosixLifetime, _WindowsLifetime
+from scripts.test_worker_lifetime import (
+    RUNNER_STOP_SEC,
+    _PosixLifetime,
+    _WindowsLifetime,
+)
 from metor.client import MetorRequestRejectedError
 from metor.core.api import InternalErrorEvent
 
@@ -956,6 +960,13 @@ class SupervisorTests(unittest.TestCase):
                 if foreign is not None:
                     self.assertIsNone(foreign.poll(), 'Foreign process was terminated')
                 assert child is not None and created is not None
+                if sys.platform == 'win32':
+                    deadline = time.monotonic() + RUNNER_STOP_SEC
+                    while (
+                        self._same_process_live(child, created)
+                        and time.monotonic() < deadline
+                    ):
+                        time.sleep(test_supervision.RUNNER_POLL_SEC)
                 live = self._same_process_live(child, created)
                 if sys.platform == 'linux' and not live:
                     try:
@@ -1002,9 +1013,14 @@ class SupervisorTests(unittest.TestCase):
             True only for the original, still-running child.
         """
         try:
-            return process.create_time() == created and process.status() not in (
-                psutil.STATUS_DEAD,
-                psutil.STATUS_ZOMBIE,
+            return (
+                process.is_running()
+                and process.create_time() == created
+                and process.status()
+                not in (
+                    psutil.STATUS_DEAD,
+                    psutil.STATUS_ZOMBIE,
+                )
             )
         except psutil.NoSuchProcess:
             return False
