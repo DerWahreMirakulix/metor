@@ -5,12 +5,10 @@ from pathlib import Path
 
 from setuptools import setup
 
-
 SOURCE_DIR: Path = Path(__file__).resolve().parent / 'src'
 sys.path.insert(0, str(SOURCE_DIR))
 
-from metor.versioning import APP_VERSION  # noqa: E402
-
+from metor.versioning import APP_VERSION
 
 setup(
     install_requires=[
