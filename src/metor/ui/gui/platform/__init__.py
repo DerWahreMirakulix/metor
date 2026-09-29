@@ -5,5 +5,13 @@ from .configuration import (
     DeviceConfigurationError,
     read_configuration,
 )
+from .providers import ActivePlatform, open_platform, prepare_platform
 
-__all__ = ['DeviceConfiguration', 'DeviceConfigurationError', 'read_configuration']
+__all__ = [
+    'ActivePlatform',
+    'DeviceConfiguration',
+    'DeviceConfigurationError',
+    'open_platform',
+    'prepare_platform',
+    'read_configuration',
+]

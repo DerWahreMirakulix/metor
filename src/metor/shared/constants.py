@@ -53,3 +53,5 @@ class Constants:
     IPC_AUTH_FAILURE_LIMIT: int = (
         3  # Maximum invalid local auth attempts per IPC session before disconnect
     )
+    FRONTEND_LIFETIME_TOKEN_BYTES: int = 32
+    FRONTEND_LIFETIME_ID_BYTES: int = 16

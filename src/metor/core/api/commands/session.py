@@ -17,6 +17,34 @@ from metor.core.api.codes import (
 from metor.core.api.registry import register_command
 
 
+@register_command(CommandType.FRONTEND_LEASE)
+@dataclass(repr=False)
+class FrontendLeaseCommand(IpcCommand):
+    """Join or release the automatic daemon lifetime without profile authority."""
+
+    frontend_id: str = field(
+        metadata={'example': '0' * (2 * Constants.FRONTEND_LIFETIME_ID_BYTES)}
+    )
+    token: Optional[str] = None
+    release: bool = False
+    command_type: CommandType = field(default=CommandType.FRONTEND_LEASE, init=False)
+
+    def __post_init__(self) -> None:
+        """Reject malformed bounded identities before dispatch."""
+        values = [(self.frontend_id, Constants.FRONTEND_LIFETIME_ID_BYTES)]
+        if self.token is not None:
+            values.append((self.token, Constants.FRONTEND_LIFETIME_TOKEN_BYTES))
+        for value, size in values:
+            if (
+                not isinstance(value, str)
+                or len(value) != 2 * size
+                or any(character not in '0123456789abcdef' for character in value)
+            ):
+                raise ValueError('Invalid frontend lifetime identity')
+        if type(self.release) is not bool:
+            raise ValueError('Invalid frontend lifetime operation')
+
+
 @register_command(CommandType.INIT)
 @dataclass
 class InitCommand(IpcCommand):

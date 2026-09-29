@@ -128,6 +128,8 @@ class ProfileActivation:
             result.port,
             auth_provider=interactions,
             unlock_timeout=result.unlock_timeout,
+            lifetime_token=result.lifetime_token,
+            local_lifetime=not result.remote,
             on_event=on_event,
             on_disconnect=on_disconnect,
         )

@@ -84,19 +84,17 @@ class ClosureFrontendTests(unittest.TestCase):
                     endpoint.exception.reason, FrontendBootstrapReason.UNREACHABLE
                 )
                 self.assertEqual(start.call_count, 2)
-                # A known started process with missing endpoint metadata is not
-                # proof that another process may safely be launched.
-                with self.assertRaises(FrontendBootstrapError) as retry:
-                    host.bootstrap(interaction)
-                self.assertEqual(
-                    retry.exception.reason, FrontendBootstrapReason.UNREACHABLE
-                )
-                self.assertEqual(start.call_count, 2)
-                self.assertEqual(interaction.request_session_auth_secret.call_count, 2)
-                with patch.object(
-                    ProfileManager, 'get_daemon_port', return_value=37412
+                # Once the serialized starter has published a live endpoint,
+                # the host attaches without a new start or credential prompt.
+                with (
+                    patch.object(
+                        ProfileManager, 'is_daemon_running', return_value=True
+                    ),
+                    patch.object(ProfileManager, 'get_daemon_port', return_value=37412),
                 ):
                     attached = host.bootstrap(interaction)
+                self.assertEqual(start.call_count, 2)
+                self.assertEqual(interaction.request_session_auth_secret.call_count, 2)
                 self.assertEqual(attached.port, 37412)
                 self.assertIsNone(attached.session_auth.take())
                 self.assertIsNone(attached.session_auth.take())

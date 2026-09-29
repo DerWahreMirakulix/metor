@@ -45,7 +45,7 @@ class ProfileSwitchError(RuntimeError):
             phase (ProfileSwitchPhase): Phase that did not complete.
             message (str): Safe user-facing explanation.
             source_released (bool): Whether the old client was confirmed detached.
-            source_prepared (bool): Whether Core confirmed its hard-lock boundary.
+            source_prepared (bool): Whether Core confirmed local session cleanup.
 
         Returns:
             None

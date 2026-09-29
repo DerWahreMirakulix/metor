@@ -131,7 +131,8 @@ class CommandHandlers:
         start_locked: bool = False,
         startup_session_auth_stdin: bool = False,
         non_interactive: bool = False,
-        chat_owner: tuple[int, float] | None = None,
+        automatic_lifetime: bool = False,
+        parent_start_lock_held: bool = False,
     ) -> int:
         """
         Authenticates the user and starts the background Daemon subsystem.
@@ -290,7 +291,8 @@ class CommandHandlers:
                     start_locked=True,
                     status_callback=status_cb,
                     preparation=preparation,
-                    chat_owner=chat_owner,
+                    automatic_lifetime=automatic_lifetime,
+                    parent_start_lock_held=parent_start_lock_held,
                 )
             except InvalidDaemonPasswordError:
                 msg, _ = Translator.get(EventType.INVALID_PASSWORD)
@@ -311,6 +313,9 @@ class CommandHandlers:
                     )
                 )
                 return 1
+            except TimeoutError:
+                print('Another daemon start is still in progress.', file=sys.stderr)
+                return 1
             except ValueError as exc:
                 print(
                     output_spacer.format(format_safe_local_runtime_error(exc)),
@@ -327,7 +332,8 @@ class CommandHandlers:
                 start_locked=False,
                 status_callback=status_cb,
                 preparation=preparation,
-                chat_owner=chat_owner,
+                automatic_lifetime=automatic_lifetime,
+                parent_start_lock_held=parent_start_lock_held,
             )
         except InvalidDaemonPasswordError:
             msg, _ = Translator.get(EventType.INVALID_PASSWORD)
@@ -340,6 +346,9 @@ class CommandHandlers:
                     f"{msg}\nYou need to run 'metor purge' or manually delete the storage.db."
                 )
             )
+            return 1
+        except TimeoutError:
+            print('Another daemon start is still in progress.', file=sys.stderr)
             return 1
         except ValueError as exc:
             print(

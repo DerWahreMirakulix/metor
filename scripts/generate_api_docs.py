@@ -193,7 +193,11 @@ class ApiDocGenerator:
                 field.default is dataclasses.MISSING
                 and field.default_factory is dataclasses.MISSING
             ):
-                payload[field.name] = self._sample_value(hints[field.name])
+                payload[field.name] = (
+                    field.metadata['example']
+                    if 'example' in field.metadata
+                    else self._sample_value(hints[field.name])
+                )
 
         return json.dumps(payload, indent=2, allow_nan=False)
 

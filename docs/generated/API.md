@@ -47,6 +47,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [DismissLiveContextCommand](#dismisslivecontextcommand)
 - [FallbackCommand](#fallbackcommand)
 - [FinalizeVoiceCommand](#finalizevoicecommand)
+- [FrontendLeaseCommand](#frontendleasecommand)
 - [GenerateAddressCommand](#generateaddresscommand)
 - [GetAddressCommand](#getaddresscommand)
 - [GetChatStartupStateCommand](#getchatstartupstatecommand)
@@ -151,6 +152,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [DropsDisabledEvent](#dropsdisabledevent)
 - [FallbackRejectedEvent](#fallbackrejectedevent)
 - [FallbackSuccessEvent](#fallbacksuccessevent)
+- [FrontendLeaseEvent](#frontendleaseevent)
 - [GuiPreferencesEvent](#guipreferencesevent)
 - [GuiPreferencesRejectedEvent](#guipreferencesrejectedevent)
 - [HistoryClearFailedEvent](#historyclearfailedevent)
@@ -731,6 +733,30 @@ Finalizes the current logical Voice turn without changing its target.
 
 ---
 
+### `FrontendLeaseCommand`
+
+Join or release the automatic daemon lifetime without profile authority.
+
+| Field         | Type               | Default  |
+| ------------- | ------------------ | -------- |
+| `request_id`  | `Union[str, None]` | `None`   |
+| `frontend_id` | `str`              | Required |
+| `token`       | `Union[str, None]` | `None`   |
+| `release`     | `bool`             | `False`  |
+
+**Wire Value:** `frontend_lease`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "frontend_lease",
+  "frontend_id": "00000000000000000000000000000000"
+}
+```
+
+---
+
 ### `GenerateAddressCommand`
 
 Requests generation of a new onion address.
@@ -1284,7 +1310,7 @@ Requests migration of one local profile between encrypted and plaintext storage.
 
 ### `PrepareProfileExitCommand`
 
-Durably prepares normal profile exit without awaiting remote delivery.
+Releases only the requesting frontend's active profile resources.
 
 | Field        | Type               | Default |
 | ------------ | ------------------ | ------- |
@@ -3202,6 +3228,30 @@ Signals that pending live messages were converted to drops.
 
 ---
 
+### `FrontendLeaseEvent`
+
+Report one lifetime join or release without granting content access.
+
+| Field        | Type               | Default  |
+| ------------ | ------------------ | -------- |
+| `request_id` | `Union[str, None]` | `None`   |
+| `revision`   | `Union[int, None]` | `None`   |
+| `epoch`      | `Union[str, None]` | `None`   |
+| `state`      | `str`              | Required |
+
+**Wire Value:** `frontend_lease`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "frontend_lease",
+  "state": "joined"
+}
+```
+
+---
+
 ### `GuiPreferencesEvent`
 
 Returns current protected preferences and the stable owning profile ID.
@@ -4549,7 +4599,7 @@ Signals that a pending connection existed but its acceptance window expired.
 
 ### `ProfileExitPreparedEvent`
 
-Confirms durable local transition and hard lock for normal profile exit.
+Confirms this client's local resources were released for profile exit.
 
 | Field        | Type               | Default  |
 | ------------ | ------------------ | -------- |

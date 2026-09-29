@@ -30,7 +30,7 @@ from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.runtime.voice.press import PressPhase
 from metor.ui.gui.state import Route
 from metor.ui.gui.state.mailbox import Update
-from metor.core.daemon.managed.engine import Daemon
+from metor.core.daemon.managed.engine import Daemon, DaemonLifecycle
 from metor.core.daemon.managed.local_auth import create_session_auth_context
 from metor.core.key import KeyManager
 from metor.data import ContactManager, HistoryManager, MessageManager, ProfileManager
@@ -42,7 +42,7 @@ class CoordinatorPhaseTests(unittest.TestCase):
     """Checks SDK transaction failures without assuming that disconnect and hard lock coincide."""
 
     def test_disconnect_failure_reports_confirmed_source_preparation(self) -> None:
-        """A prepared source is already locked even when socket release raises.
+        """Local source preparation is confirmed even when socket release raises.
 
         Args:
             None
@@ -267,7 +267,7 @@ class GuiLifecycleCoreTests(unittest.TestCase):
     def test_failed_target_after_actual_preparation_stays_covered_without_rollback(
         self,
     ) -> None:
-        """A confirmed old-profile lock followed by host failure offers fresh entry, not auto-unlock.
+        """A released local session stays covered after target failure.
 
         Args:
             None
@@ -289,11 +289,13 @@ class GuiLifecycleCoreTests(unittest.TestCase):
         self.assertTrue(self.gui.lifecycle.failed)
         self.assertTrue(self.gui.state.covered)
         self.assertFalse(self.gui.lifecycle.return_available)
-        self.assertIn('previous profile is locked', self.gui.state.status)
+        self.assertIn('previous profile was released', self.gui.state.status)
         self.assertIsNone(self.gui.state.snapshot)
         self.assertEqual(self.gui.state.drafts, {})
         self.host.bootstrap.assert_not_called()
         self.assertFalse(self.h.client.is_connected)
+        self.assertEqual(self.h.daemon._lifecycle, DaemonLifecycle.UNLOCKED)
+        self.assertIsNotNone(self.h.other.runtime_snapshot())
 
     def test_successful_switch_hydrates_independent_target_and_fences_old_callbacks(
         self,

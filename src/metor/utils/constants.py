@@ -28,6 +28,9 @@ class Constants(ContractConstants):
 
     # Tor Bootstrapping
     UNIX_TOR_TIMEOUT: int = 45  # Process launch timeout for Unix Tor binaries
+    WINDOWS_TOR_BOOTSTRAP_TIMEOUT_SEC: float = 45.0
+    WINDOWS_TOR_CONFIG_MAX_BYTES: int = 4096
+    WINDOWS_TOR_LOG_LINE_MAX_BYTES: int = 4096
     MAX_DERIVED_DAEMON_START_WAIT_SEC: float = (
         210.0  # Bound the automatic cold-start wait before an explicit IPC override
     )
@@ -47,6 +50,13 @@ class Constants(ContractConstants):
     )
     TOR_KILL_TIMEOUT_SEC: float = 2.0  # Timeout for Tor process termination
     OWNED_DAEMON_SHUTDOWN_TIMEOUT_SEC: float = 10.0  # Graceful chat child exit
+    FRONTEND_FIRST_REGISTRATION_GRACE_SEC: float = 60.0
+    FRONTEND_DISCONNECT_GRACE_SEC: float = 45.0
+    FRONTEND_FINAL_RELEASE_GRACE_SEC: float = 2.0
+    FRONTEND_SUSPEND_GAP_SEC: float = 5.0
+    FRONTEND_MAX_SUSPEND_EXTENSION_SEC: float = 24.0 * 60.0 * 60.0
+    FRONTEND_MAX_LEASES: int = 64
+    DEVICE_RESOURCE_LOCK_SECONDS: float = 0.2
 
     # Security-Critical File Operations
     SECURE_SHRED_BLOCK_BYTES: int = 65536
@@ -103,6 +113,8 @@ class Constants(ContractConstants):
     CONTACTS_FILE: str = 'contacts.json'
     DAEMON_PORT_FILE: str = 'daemon.port'
     DAEMON_PID_FILE: str = 'daemon.pid'
+    DAEMON_INSTANCE_LOCK_FILE: str = 'daemon.instance'
+    FRONTEND_LIFETIME_FILE: str = 'daemon.frontend-lifetime'
     PROCESS_IDENTITY_MAX_BYTES: int = 4096
     PROCESS_CREATE_TIME_TOLERANCE_SEC: float = 0.01
     PROCESS_ROLE_DAEMON: str = 'daemon'

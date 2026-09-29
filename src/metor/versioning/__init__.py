@@ -7,8 +7,8 @@ from dataclasses import dataclass
 APP_VERSION: str = '0.2.0'
 
 # Client-to-daemon typed NDJSON wire generation.
-IPC_PROTOCOL_VERSION: int = 2
-IPC_PROTOCOL_MIN_SUPPORTED: int = 2
+IPC_PROTOCOL_VERSION: int = 3
+IPC_PROTOCOL_MIN_SUPPORTED: int = 3
 
 # Daemon-to-daemon Tor handshake and message-wire generation.
 PEER_PROTOCOL_VERSION: int = 3

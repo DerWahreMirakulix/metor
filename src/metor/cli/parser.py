@@ -157,6 +157,8 @@ class CliParser:
             'locked': False,
             'non_interactive': False,
             'startup_session_auth_stdin': False,
+            'frontend_managed': False,
+            'parent_start_lock_held': False,
             'force': False,
         }
         for name, value in defaults.items():

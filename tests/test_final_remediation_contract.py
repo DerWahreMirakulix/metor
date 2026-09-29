@@ -381,6 +381,7 @@ class FinalRemediationContractTests(unittest.TestCase):
             cast(FrontendEntry, fake_gui),
         )
         with (
+            TemporaryDirectory() as directory,
             patch(
                 'metor.cli.handlers.prompt_text',
                 side_effect=AssertionError('base terminal prompt used'),
@@ -394,6 +395,8 @@ class FinalRemediationContractTests(unittest.TestCase):
                 return_value=True,
             ),
         ):
+            pm.paths = Mock()
+            pm.paths.get_config_dir.return_value = Path(directory)
             status = CommandHandlers.handle_chat(
                 cast(ProfileManager, pm), loaded_frontend=loaded
             )

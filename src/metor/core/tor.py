@@ -28,6 +28,7 @@ from metor.shared import clean_onion, ensure_onion_format
 
 # Local Package Imports
 from metor.core.key import KeyManager
+from metor.core.tor_windows import launch_tor_without_console
 
 
 def _is_windows() -> bool:
@@ -362,13 +363,20 @@ class TorManager:
 
         for attempt in range(max_retries):
             try:
-                self._tm_proc = stem.process.launch_tor_with_config(
-                    config=config,
-                    timeout=tor_timeout,
-                    take_ownership=True,
-                    tor_cmd=tor_cmd,
-                    init_msg_handler=print_tor_output,
-                )
+                if _is_windows():
+                    self._tm_proc = launch_tor_without_console(
+                        config=config,
+                        tor_cmd=tor_cmd,
+                        init_msg_handler=print_tor_output,
+                    )
+                else:
+                    self._tm_proc = stem.process.launch_tor_with_config(
+                        config=config,
+                        timeout=tor_timeout,
+                        take_ownership=True,
+                        tor_cmd=tor_cmd,
+                        init_msg_handler=print_tor_output,
+                    )
 
                 pid_file: Path = data_dir / 'tor.pid'
                 identity_payload = ProcessManager.process_identity_payload(
@@ -380,7 +388,7 @@ class TorManager:
                 with open_private_binary_file(pid_file) as f:
                     f.write(identity_payload)
                 break
-            except OSError:
+            except (OSError, ValueError):
                 if self._tm_proc is not None:
                     try:
                         self._terminate_process()

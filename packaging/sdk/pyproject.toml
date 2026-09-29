@@ -7,7 +7,7 @@ name = "metor-sdk"
 dynamic = ["version"]
 description = "Client SDK and typed IPC wire contract for Metor."
 authors = [{ name = "LuRex" }]
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 license = { text = "GPLv3" }
 dependencies = ["pynacl==1.6.2"]
 

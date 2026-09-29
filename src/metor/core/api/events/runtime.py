@@ -16,6 +16,27 @@ from .shared import NestedEntryCastingMixin
 from metor.core.api.registry import register_event
 
 
+@register_event(EventType.FRONTEND_LEASE)
+@dataclass
+class FrontendLeaseEvent(IpcEvent):
+    """Report one lifetime join or release without granting content access."""
+
+    state: str = field(metadata={'example': 'joined'})
+    event_type: EventType = field(default=EventType.FRONTEND_LEASE, init=False)
+
+    def __post_init__(self) -> None:
+        """Limit responses to defined, presentation-safe states."""
+        if self.state not in (
+            'joined',
+            'released',
+            'denied',
+            'stopping',
+            'independent',
+            'full',
+        ):
+            raise ValueError('Invalid frontend lease state')
+
+
 @register_event(EventType.AUTH_REQUIRED)
 @dataclass
 class AuthRequiredEvent(IpcEvent):
@@ -236,7 +257,7 @@ class SelfDestructSafeEvent(IpcEvent):
 @register_event(EventType.PROFILE_EXIT_PREPARED)
 @dataclass
 class ProfileExitPreparedEvent(IpcEvent):
-    """Confirms durable local transition and hard lock for normal profile exit."""
+    """Confirms this client's local resources were released for profile exit."""
 
     profile: str
     event_type: EventType = field(

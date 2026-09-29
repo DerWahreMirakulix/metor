@@ -2,6 +2,7 @@
 
 from typing import Callable, Optional, Type, TypeVar, cast
 import time
+import secrets
 
 from metor.client.auth import (
     AuthProvider,
@@ -17,6 +18,8 @@ from metor.core.api import (
     CommitVoiceCommand,
     DaemonLockedEvent,
     EventType,
+    FrontendLeaseCommand,
+    FrontendLeaseEvent,
     Delivery,
     InitCommand,
     InitEvent,
@@ -120,6 +123,8 @@ class MetorClient:
         timeout: float = Constants.DEFAULT_IPC_TIMEOUT,
         unlock_timeout: float = Constants.MAX_UNLOCK_INITIALIZATION_WAIT_SEC,
         client_version: str = APP_VERSION,
+        lifetime_token: str | None = None,
+        local_lifetime: bool = False,
     ) -> None:
         """
         Initializes one MetorClient.
@@ -147,6 +152,10 @@ class MetorClient:
             unlock_timeout, Constants.MAX_UNLOCK_INITIALIZATION_WAIT_SEC
         )
         self._client_version: str = client_version
+        self._lifetime_token = lifetime_token
+        self._local_lifetime = local_lifetime
+        self._frontend_id = secrets.token_hex(Constants.FRONTEND_LIFETIME_ID_BYTES)
+        self._lease_joined = False
 
         self._ipc: IpcClient = IpcClient(
             port=self._port,
@@ -205,6 +214,18 @@ class MetorClient:
         Returns:
             None
         """
+        if self._lease_joined and self.is_connected:
+            try:
+                self._ipc.send_command(
+                    FrontendLeaseCommand(
+                        frontend_id=self._frontend_id,
+                        token=self._lifetime_token,
+                        release=True,
+                    )
+                )
+            except (OSError, ValueError):
+                pass
+        self._lease_joined = False
         self._ipc.stop()
 
     def send_command(self, cmd: IpcCommand) -> None:
@@ -582,6 +603,18 @@ class MetorClient:
             if not self.connect():
                 return None
 
+        if self._local_lifetime and self._lifetime_token is not None:
+            lease = self.request(
+                FrontendLeaseCommand(
+                    frontend_id=self._frontend_id,
+                    token=self._lifetime_token,
+                ),
+                FrontendLeaseEvent,
+            )
+            if lease is None or lease.state not in ('joined', 'independent'):
+                return None
+            self._lease_joined = lease.state == 'joined'
+
         init_cmd: InitCommand = InitCommand(
             current_version=IPC_PROTOCOL_VERSION,
             min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
@@ -698,4 +731,5 @@ class MetorClient:
         Returns:
             None
         """
+        self._lease_joined = False
         self._on_disconnect()

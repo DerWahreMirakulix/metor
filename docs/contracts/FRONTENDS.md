@@ -34,8 +34,10 @@ These local contracts neither add IPC authority nor make an untested adapter a
 supported appliance.
 
 `PlatformBindings` is the frontend-neutral composition object. It keeps status,
-input and each actuator as separate ports and carries one bounded registered ID.
-An appliance owner may inject it through `FrontendLaunchContext`; the GUI accepts
+input, ordinary device settings and each actuator as separate ports and carries
+one bounded registered ID. An appliance owner installs and selects a trusted
+`metor.platform_adapters` provider, or may inject bindings through
+`FrontendLaunchContext`; the GUI accepts
 physical mode only when strict configuration names the same ID. Simulator mode
 rejects all physical bindings. Optional actuator ports remain unavailable unless
 their matching configuration tables explicitly select that ID. Before normal
@@ -77,10 +79,46 @@ are reported safely, and explicit `-p` never changes the persisted default.
 The common `FrontendHost` evaluates ASK, ALWAYS and NEVER only when the selected
 profile is activated. GUI interactions are graphical even when launched from a
 shell; Terminal prompts before chat. A remote profile never triggers local daemon
-spawn. Each chat invocation retains the exact local daemon process it spawned
-and stops it at final close or when that profile is retired. An already running
-local daemon is borrowed and is only detached. The child also observes owner
-process disappearance so a lost parent cannot leave a session daemon running.
+spawn. `--start-daemon` permits a missing local daemon to start;
+`--no-start-daemon` prevents only that start. Neither flag changes the mode of
+an existing instance. Without a flag, `never`, `ask`, and `always` decide whether
+a missing daemon may start.
+
+| Existing daemon                                                | Start decision                                  | Concrete instance behavior                                                                                    |
+| -------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Independently started with `metor daemon` or a service manager | Any frontend flag or policy                     | The daemon remains independent; frontend exit never shuts it down.                                            |
+| Automatically started by a frontend                            | Any later frontend flag or policy               | Long-lived local GUI and Terminal frontends share its lifetime. It exits after the last frontend releases it. |
+| Missing local daemon                                           | `--start-daemon`, `always`, or confirmed `ask`  | One automatic instance is started and shared.                                                                 |
+| Missing local daemon                                           | `--no-start-daemon`, `never`, or declined `ask` | No daemon is started; the frontend receives an unavailable result.                                            |
+| Remote profile                                                 | Any flag or policy                              | No local communication daemon is started.                                                                     |
+
+The local Base host reads an owner-only, per-instance bearer token for an
+automatic daemon and passes it to the selected frontend through its bootstrap
+result. The frontend registers a random instance ID before `Init`, profile
+unlock, or content authentication. This permission controls only daemon lifetime; it does
+not grant access to keys, content, or profile actions. Anonymous connections
+without that token cannot keep an automatic daemon alive. Re-registration on a
+new socket replaces only the same frontend ID. A stale socket or previous
+daemon token cannot release or join a newer instance. Frontends skip the lease
+command when a current independent daemon has no token. IPC generation 2 is
+incompatible with this release because profile-exit semantics changed; a
+generation 2 daemon must be stopped and upgraded before a generation 3 frontend
+can attach. Short-lived CLI queries do not register as frontends.
+
+The first frontend has 60 seconds after IPC readiness to register. An
+unexpected disconnect reserves that frontend's slot for 45 seconds so a
+reconnect can replace its socket. An explicit final release starts a 2-second
+join grace. One daemon-owned monotonic clock drives these deadlines; a suspend
+gap extends outstanding deadlines before expiry is evaluated. Extensions
+within one idle period share a 24-hour maximum, so repeated polling stalls
+cannot retain a dead frontend indefinitely. At expiry the
+daemon fences new joins atomically and performs the normal bounded runtime,
+Tor, IPC, and endpoint cleanup. A joining client receives a typed `stopping`
+result and can retry bootstrap against the next instance. At most 64 frontend
+IDs are retained, including disconnected clients in their grace window;
+additional IDs receive a typed `full` result. All detached and
+manual start paths share the profile start lock through IPC publication, so
+concurrent starts cannot open two writers for the same profile.
 
 Cold encrypted unlock has a bounded initialization wait distinct from the
 ordinary IPC request timeout. Frontends report failed bootstrap or lost
@@ -237,10 +275,17 @@ frontend may inspect the current snapshot and must finalize platform-owned
 capture before switching. The coordinator then requests
 `PrepareProfileExitCommand`, disconnects the old client, attaches/authenticates
 the selected profile, and returns a fresh aggregate snapshot. Normal preparation
-durably applies configured eligible fallback, does not wait for remote DROP
-delivery, terminates LIVE sessions, and hard-locks the old runtime. When fallback
-is disabled, pending LIVE data remains recoverable and is not auto-reconnected
-on a later return.
+releases only the requesting frontend's voice producer and focus. The subsequent
+disconnect removes its session authority and frontend lifetime registration.
+Other clients and the daemon's profile runtime continue. Explicit `LockCommand`
+still hard-locks the shared runtime and broadcasts the result to connected
+clients. An authorized profile purge immediately broadcasts a redacted
+initiation to other connected frontends so they cover local state. Its operation
+ID and detailed destruction milestones remain limited to the initiator.
+
+This changed profile-exit meaning requires IPC generation 3. Generation 2
+clients and daemons are rejected by the handshake instead of interpreting the
+same command with conflicting global and local effects.
 
 Self-destruct is a separate emergency path. Hard-locked anonymous clients cannot
 invoke it. A restricted client can act only when it was authenticated before

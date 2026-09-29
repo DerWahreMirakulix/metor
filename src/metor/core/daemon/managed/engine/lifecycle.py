@@ -314,10 +314,10 @@ class DaemonLifecycleMixin:
             ipc = getattr(self, '_ipc', None)
             if ipc is not None:
                 try:
-                    ipc.flush(
-                        Constants.SOCKET_WRITER_FLUSH_TIMEOUT_SEC,
-                        getattr(self, '_destruction_recipients', set()),
-                    )
+                    # The initiating session receives operation milestones; every
+                    # other attached session still needs its redacted initiation
+                    # before stop() closes and discards pending writer frames.
+                    ipc.flush(Constants.SOCKET_WRITER_FLUSH_TIMEOUT_SEC)
                 except Exception:
                     pass
             self.stop()

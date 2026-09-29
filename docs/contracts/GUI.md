@@ -23,7 +23,9 @@ metor chat --ui gui --simulator --device-config docs/examples/gui-simulator.toml
 On Windows, launch the installed `metor-gui.exe` from the environment's
 `Scripts` directory for a graphical start without a console window. The
 release GUI bundle places it in `.venv\Scripts`. `metor chat --ui gui` remains
-available from PowerShell for diagnostics. A failure before the graphical shell
+available from PowerShell for diagnostics; that original terminal remains open.
+Neither start path creates a console for GUI child processes (daemon, Tor or the
+Windows ACL helper). A failure before the graphical shell
 opens produces a generic Windows dialog that points to that diagnostic command.
 
 The GUI opens its graphical shell before profile authentication, including when
@@ -39,8 +41,11 @@ local daemon autostart choices graphically. Autostart follows the shared
 daemon. `--start-daemon` starts a missing local daemon upon profile activation;
 `--no-start-daemon` leaves a missing daemon unavailable with a retry path. ASK
 uses a graphical confirmation and passwords remain graphical, regardless of
-terminal stdin. A daemon spawned by this chat invocation ends when the GUI closes
-or switches away; an already running daemon is borrowed and survives. Optional
+terminal stdin. GUI and Terminal sessions share an automatically started daemon;
+it exits after the last participating frontend releases it. A second GUI or
+Terminal session may continue on that daemon even when the original GUI closes
+or changes profile. An independently started daemon survives every frontend
+exit. Optional
 audio or camera failure leaves available text actions usable.
 
 `--debug` adds bounded phase, timing and known-safe source locations to fatal
@@ -59,13 +64,22 @@ The installed GUI smoke runs
 `python scripts/validate_installed_artifacts.py BUNDLE_ROOT --gui-smoke` with a
 compatible window display. It starts the wheel-installed
 common CLI and actual Kivy event loop against temporary data, checks the usable
-Create profile and missing-selection picker views, closes through the native
-Close handler, and verifies that an unexpected callback returns a safe nonzero
-status. A generic X11 display such as Xvfb is suitable for this software gate;
+Create profile and missing-selection picker views, opens a disposable encrypted
+profile with `--start-daemon` until the password prompt is visible, closes
+through the native Close handler, and verifies that an unexpected callback
+returns a safe nonzero status. The profile stays locked, so this deterministic
+gate does not connect to public Tor. A generic X11 display such as Xvfb is
+suitable for this software gate;
 the offscreen and simulator modes are not counted as a native window result.
 The OS lifecycle notification source is replaced by an inert test adapter;
 the real toolkit, app, frontend discovery and CLI still run. This smoke does
 not exercise microphone, media, OS suspend, or physical devices.
+
+On Windows, add `--windows-launch` to check both installed entry-point
+executables, the graphical launcher without standard streams, the temporary
+locked `--start-daemon` path through native UI Automation, the original
+terminal, and console windows created by daemon and synthetic Tor children.
+This acceptance runs on a native Windows desktop, not WSL.
 
 ## Device configuration (`device.toml`)
 
@@ -84,28 +98,43 @@ explicit. A file never enables simulation by itself. An explicit missing,
 unreadable, malformed, untrusted, or unsupported file fails before daemon
 startup and driver activation; no desktop fallback occurs.
 
-The supported top-level names are `schema_version`, `[display]`, `[input]`,
+The supported top-level names are `schema_version`, `[platform]`, `[display]`, `[input]`,
 `[audio]`, `[camera]`, `[indicator]`, `[haptics]`, `[power]`, `[clipboard]`, and
 `[drivers]`. `schema_version = 1`, `[display]`, and `[input]` are required.
 Unknown fields and versions fail. The current parser accepts an empty
 `[drivers]` table only; it does not load arbitrary driver names or commands.
+`[platform]` selects an installed adapter by stable ID; `[platform.config]`
+holds at most 32 bounded scalar values and passes only to that adapter's
+preactivation validator. Existing version 1 files without `[platform]` retain
+their `[display].adapter` identity. A selected adapter's concrete fields are
+specified by its installed package, never inferred by the GUI. The generic
+boundary accepts finite numbers with absolute value at most 10¹²; this keeps
+deployment data small before provider validation. Each provider then applies
+its own narrower field ranges.
 
 | Table                                 | Current contract                                                                                                                                                                  |
 | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `[platform]`                          | Optional `adapter` and bounded `[platform.config]` for a physical adapter. Simulation has no platform provider.                                                                   |
 | `[display]`                           | `adapter`, positive bounded native `width_px` and `height_px`; optional `rotation_deg` in 0/90/180/270 and finite `scale` from 0.25 through 8. `output` is currently unsupported. |
 | `[input]`                             | `adapter`, exact `ptt_binding = "ptt"` and `power_binding = "power"`; optional boolean `touch`. PTT and Power have separate meanings.                                             |
 | `[audio]`, `[camera]`                 | Optional `adapter = "none"` only in the current implementation; absence means unavailable.                                                                                        |
-| `[indicator]`, `[haptics]`, `[power]` | Optional `adapter = "none"`, or the matching injected physical adapter ID when that port exists. Undeclared ports remain disabled.                                                |
+| `[indicator]`, `[haptics]`, `[power]` | Optional `adapter = "none"`, or the matching selected physical adapter ID when that port exists. Undeclared ports remain disabled.                                                |
 | `[clipboard]`                         | Optional `policy = "disabled"` only.                                                                                                                                              |
 
-`adapter` is a registered identity, not a Python import path. In simulator mode,
-required display and input adapters are `simulator`, and physical
-`PlatformBindings` are rejected. In physical mode, both required adapters must
-match the injected `PlatformBindings.adapter_id`; without those bindings the
-configuration fails. The optional physical ports must belong to that same
-identity and be explicitly selected. Describing a port in TOML cannot create a
-production driver or authorize Core actions. Simulator controls cannot call
-production power or destruction paths.
+`adapter` is a registered identity, never a Python import path. In simulator
+mode, required display and input adapters are `simulator`, and physical bindings
+are rejected. In physical mode, `[platform].adapter` (or legacy
+`[display].adapter`) must match the required display/input IDs and the selected
+`metor.platform_adapters` entry point. Discovery inspects metadata only, rejects
+duplicate IDs and loads only that selected provider. The device file is
+owner-checked deployment configuration; the package installation must also be
+trusted. Neither an entry point nor a well-formed ID proves trust, and validation
+after import cannot undo module import side effects. Optional capabilities are
+off when omitted or explicitly `none`, even if the provider offers them; a
+matching requested but unavailable capability fails before activation. Audio
+and camera currently have no generic device adapter implementation: only
+`adapter = "none"` is accepted for those tables. The display dimensions configure
+the native Kivy/SDL window, not a supplied screen driver.
 
 Rotation transforms native dimensions before scale is applied. The resulting
 usable display must be at least **360 × 640 logical units**. Desktop defaults
@@ -120,6 +149,67 @@ uses native handle trust checks. Parsing uses strict types, field allowlists,
 finite numeric bounds, and no evaluation of shell fragments, imports, or URLs.
 Errors report a safe reason; configuration content and secrets must not enter
 logs.
+
+### Installed reference adapter and device settings
+
+The harmless [`metor-reference-board`](../../examples/reference_adapter/pyproject.toml)
+package implements the public SDK factory/session contract. In the same Python
+environment as Metor, install it, create a private `device.toml`, and start the
+GUI:
+
+```sh
+python -m pip install --no-deps ./examples/reference_adapter
+cp docs/examples/gui-reference-board.toml ./device.toml
+chmod 600 ./device.toml
+metor chat --ui gui --device-config ./device.toml
+```
+
+On Windows, use `Copy-Item docs/examples/gui-reference-board.toml device.toml`
+and launch `metor-gui.exe --device-config device.toml` or the common CLI from
+PowerShell. The adapter package entry point registers `reference-board`; the
+example file selects it with `[platform]`, validates
+`[platform.config].initial_brightness`, and leaves all physical actuators off.
+Open Settings → Device → Hardware settings → Simulated brightness. Apply a value
+from 0 to 100. The adapter independently validates and reads back the effective
+value. It stores the nonsecret simulation in the user's private
+`~/.metor-reference-board/brightness.txt`, independent of any communication
+profile. A second local GUI sees changes on entry to Settings or **Reload device
+settings**. The example's input port reports released buttons only; it drives no
+real screen, GPIO, indicator, haptic device, power switch, audio or camera.
+
+The selected provider is trusted, nonprivileged application code running in the
+local GUI process. Its `prepare()` validates parameters before `open()` can
+acquire resources. `close()` releases resources after GUI consumers stop and is
+safe against in-flight setting calls. Profile changes do not reopen the adapter.
+For exclusive resources, the plan supplies a stable `resource_id` and requests
+an OS-backed per-user lock; another GUI gets a clear busy error. A shared
+provider such as this simulation declares shared use and must itself supply one
+device-wide source of truth. An OS device service must enforce ownership across
+users as well. In-process operations and cleanup must be bounded and cooperative;
+a Python thread timeout cannot stop a hung native driver. Hardware I/O runs off
+the GUI event loop. Setting descriptors are bounded boolean, numeric or finite
+choice values; the GUI shows confirmed effective readback or an explicit
+unsupported, denied, unavailable, failed or unknown outcome. Shutdown and purge
+stay in their dedicated authorization and confirmation flows, never as setting
+keys.
+
+### Local service proxy pattern (illustrative)
+
+A deployment may instead install a trusted `metor.platform_adapters` provider
+whose typed ports act as a small local IPC proxy. The OS deployment manager
+starts a separate, resource-limited device service; neither the GUI nor the
+communication daemon starts it from TOML. The proxy may send a fixed operation
+such as `set_brightness` with one validated integer from 0 to 100 over an
+owner-controlled Unix socket or Windows named pipe. The service applies its own
+size and time limits, verifies the peer using OS credentials or endpoint ACLs,
+authorizes that specific operation, and reports the effective readback. A
+verified local service may hold narrowly scoped device privileges without
+granting them to Metor or reading its profiles, keys or messages. This is an
+integration pattern, not a supplied production service. Do not load untrusted
+Python/native drivers in GUI or Core, or assume that a separate process with
+the same broad rights is a complete sandbox. IPC carries only bounded data and
+defined operations, never scripts, import paths, pickled objects or general
+commands.
 
 ## Navigation and communication
 

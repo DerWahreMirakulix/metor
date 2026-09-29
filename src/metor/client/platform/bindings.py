@@ -6,6 +6,7 @@ import re
 from .actions import HapticsPort, IndicatorPort, ShutdownPort
 from .inputs import HardwareInputPort
 from .status import HardwareStatusPort
+from .settings import HardwareSettingsPort
 
 
 _ADAPTER_ID = re.compile(r'[a-z][a-z0-9_.-]{0,63}')
@@ -25,6 +26,7 @@ class PlatformBindings:
     status: HardwareStatusPort | None = None
     indicator: IndicatorPort | None = None
     haptics: HapticsPort | None = None
+    settings: HardwareSettingsPort | None = None
 
     def __post_init__(self) -> None:
         """Rejects ambiguous provider identities before any port is activated.

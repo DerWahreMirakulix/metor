@@ -5,10 +5,13 @@ from collections import Counter
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 import importlib
 import io
+import linecache
 import os
 from pathlib import Path
+import re
 import sys
 import time
+import tokenize
 from types import TracebackType
 import unittest
 from collections.abc import Iterator
@@ -17,7 +20,6 @@ if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.test_supervision import supervised, write_completion, write_progress
-from scripts.test_inventory import FAST_MODULES, INTEGRATION_MODULES
 
 from metor.client import MetorRequestRejectedError
 from metor.client.ipc import (
@@ -35,6 +37,15 @@ TESTS = ROOT / 'tests'
 REPORT = ROOT / 'build' / 'test-report.txt'
 MAX_OUTPUT = 8192
 MAX_DETAILS = 10
+# The optional short suite is deliberately small. Every other test_*.py file is
+# discovered automatically and belongs to the integration suite by default.
+FAST_MODULES: tuple[str, ...] = (
+    'test_cli_literal_boundary',
+    'test_ipc_type_validation',
+    'test_run_tests',
+    'test_terminal_voice',
+    'test_ui_boundaries',
+)
 ExcInfo = (
     tuple[type[BaseException], BaseException, TracebackType] | tuple[None, None, None]
 )
@@ -116,7 +127,7 @@ class TimedResult(unittest.TestResult):
         self.omitted_skips = 0
 
     def _exc_info_to_string(self, err: ExcInfo, test: unittest.case.TestCase) -> str:
-        """Keep only a known category and source-verified repository locations.
+        """Keep bounded categories, locations, and redacted assertion source.
 
         Args:
             err: Exception triple supplied by unittest.
@@ -126,7 +137,9 @@ class TimedResult(unittest.TestResult):
         """
         category = safe_category(err[1])
         outcome = safe_outcome(err[1])
+        detail = safe_detail(err[1])
         locations: list[str] = []
+        assertion_source: str | None = None
         traceback = err[2]
         while traceback is not None:
             path = Path(traceback.tb_frame.f_code.co_filename)
@@ -139,10 +152,14 @@ class TimedResult(unittest.TestResult):
                 location = f'{relative.as_posix()}:{traceback.tb_lineno}'
                 if location not in locations:
                     locations.append(location)
+                if isinstance(err[1], AssertionError) and relative.parts[0] == 'tests':
+                    assertion_source = safe_source_line(path, traceback.tb_lineno)
             traceback = traceback.tb_next
         return (
-            f'{category}{f" outcome={outcome}" if outcome else ""} at '
+            f'{category}{f" outcome={outcome}" if outcome else ""}'
+            f'{f" {detail}" if detail else ""} at '
             f'{", ".join(locations[-3:]) if locations else "repository location unavailable"}'
+            f'{f" assertion={assertion_source}" if assertion_source else ""}'
         )
 
     def startTest(self, test: unittest.case.TestCase) -> None:
@@ -377,28 +394,35 @@ def group(test: unittest.case.TestCase) -> str:
     module = test.__class__.__module__
     if module in FAST_MODULES:
         return 'fast'
-    if module in INTEGRATION_MODULES:
+    if module in test_modules():
         return 'integration'
-    raise ValueError('Discovered test outside the explicit manifest')
+    raise ValueError('Discovered test outside tests/test_*.py')
 
 
-def validate_manifest() -> str | None:
-    """Check every test filename is classified exactly once before imports.
+def test_modules() -> tuple[str, ...]:
+    """Discover unittest modules by the standard filename convention.
+
+    Returns:
+        Module names in a stable order.
+    """
+    return tuple(path.stem for path in sorted(TESTS.glob('test_*.py')))
+
+
+def validate_inventory() -> str | None:
+    """Check that discovery and the optional short suite have usable inputs.
 
     Args:
         None
     Returns:
-        A safe diagnostic on mismatch, or None if the inventory is exact.
+        A safe diagnostic on mismatch, or None when discovery is usable.
     """
-    modules = FAST_MODULES + INTEGRATION_MODULES
-    duplicates = sum(count - 1 for count in Counter(modules).values() if count > 1)
-    files = {path.stem for path in TESTS.glob('test_*.py')}
-    unknown = len(files - set(modules))
-    missing = len(set(modules) - files)
-    if not files or duplicates or unknown or missing:
+    files = set(test_modules())
+    missing = len(set(FAST_MODULES) - files)
+    duplicates = len(FAST_MODULES) - len(set(FAST_MODULES))
+    if not files or duplicates or missing:
         return (
-            f'Manifest invalid: {unknown} unclassified files, '
-            f'{missing} missing files, {duplicates} duplicate entries'
+            f'Test inventory invalid: {missing} missing short-suite files, '
+            f'{duplicates} duplicate short-suite entries, {len(files)} discovered files'
         )
     return None
 
@@ -442,6 +466,62 @@ def safe_category(error: BaseException | None) -> str:
     )
 
 
+def safe_source_line(path: Path, line_number: int) -> str | None:
+    """Show a test assertion's tracked source without literal values or comments.
+
+    Args:
+        path: Source-verified test path.
+        line_number: Failing source line.
+    Returns:
+        A bounded structural hint, or None when tokenization is incomplete.
+    """
+    source = linecache.getline(str(path), line_number).strip()
+    if not source:
+        return None
+    parts: list[str] = []
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(source).readline):
+            if token.type == tokenize.COMMENT:
+                break
+            if token.type in (tokenize.STRING, tokenize.NUMBER):
+                parts.append('<literal>')
+            elif token.type == tokenize.ERRORTOKEN and not token.string.isspace():
+                return None
+            elif token.type not in (tokenize.ENDMARKER, tokenize.NEWLINE, tokenize.NL):
+                parts.append(token.string)
+    except tokenize.TokenError:
+        return None
+    rendered = ' '.join(parts)
+    return rendered[:160] if rendered else None
+
+
+def safe_detail(error: BaseException | None) -> str | None:
+    """Return only typed, bounded error facts without arbitrary exception text.
+
+    Args:
+        error: Error whose message and file paths remain private.
+    Returns:
+        A small OS code or import name, when structurally verified.
+    """
+    if isinstance(error, OSError) and type(error) in {
+        OSError,
+        PermissionError,
+        FileNotFoundError,
+        TimeoutError,
+    }:
+        code = error.errno
+        if type(code) is int and 0 < code < 256:
+            return f'errno={code}'
+    if isinstance(error, ModuleNotFoundError) and type(error) is ModuleNotFoundError:
+        name = error.name
+        if type(name) is str and re.fullmatch(
+            r'[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*', name, flags=re.ASCII
+        ):
+            if len(name) <= 80:
+                return f'module={name}'
+    return None
+
+
 def safe_outcome(error: BaseException | None) -> str | None:
     """Return a verified enum outcome from an exact SDK rejection type.
 
@@ -479,7 +559,13 @@ def discover(
             found.extend(cases(loader.loadTestsFromName(module)))
         except (Exception, SystemExit) as exc:
             # No exception messages or traceback may reach CI or the report.
-            failed_modules.append((module, safe_category(exc)))
+            detail = safe_detail(exc)
+            failed_modules.append(
+                (
+                    module,
+                    f'{safe_category(exc)} {detail}' if detail else safe_category(exc),
+                )
+            )
     return found, failed_modules
 
 
@@ -590,7 +676,7 @@ def main(argv: list[str] | None = None) -> int:
     if not 0 <= args.durations <= MAX_OUTPUT // 100:
         parser.error('durations must be between 0 and 81')
     started = time.perf_counter()
-    invalid = validate_manifest()
+    invalid = validate_inventory()
     if invalid is not None:
         emit([invalid])
         return 1
@@ -598,12 +684,13 @@ def main(argv: list[str] | None = None) -> int:
     for path in (ROOT, TESTS):
         if str(path) not in sys.path:
             sys.path.insert(0, str(path))
+    discovered = test_modules()
     modules = (
-        FAST_MODULES
+        tuple(module for module in discovered if module in FAST_MODULES)
         if args.suite == 'fast'
-        else INTEGRATION_MODULES
+        else tuple(module for module in discovered if module not in FAST_MODULES)
         if args.suite == 'integration'
-        else FAST_MODULES + INTEGRATION_MODULES
+        else discovered
     )
     if args.module:
         if len(args.module) != len(set(args.module)) or any(
@@ -625,7 +712,9 @@ def main(argv: list[str] | None = None) -> int:
                 failed_names.append(
                     (
                         name if name in modules else 'unclassified module',
-                        safe_category(error),
+                        f'{safe_category(error)} {safe_detail(error)}'
+                        if safe_detail(error)
+                        else safe_category(error),
                     )
                 )
         emit(

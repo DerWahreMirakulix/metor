@@ -282,7 +282,7 @@ class ProfileTransition:
                 'Could not confirm recording preservation. Accepted audio remains managed by Metor.'
                 if error is not None
                 and error.phase is ProfileSwitchPhase.CAPTURE_FINALIZATION
-                else 'The previous profile is locked. Could not open the selected profile.'
+                else 'The previous profile was released. Could not open the selected profile.'
                 if error is not None and error.source_prepared
                 else 'Profile transition is unconfirmed. Open a profile explicitly to continue.'
             )

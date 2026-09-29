@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "metor-ui-gui"
 dynamic = ["version", "dependencies"]
 description = "Native privacy-first graphical frontend for Metor."
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 license = { text = "GPLv3" }
 
 [project.entry-points."metor.ui_frontends"]

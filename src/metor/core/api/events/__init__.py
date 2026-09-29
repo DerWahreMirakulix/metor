@@ -89,6 +89,7 @@ from metor.core.api.events.maintenance import (
 )
 from metor.core.api.events.profile import ProfileOperationResultEvent
 from metor.core.api.events.runtime import (
+    FrontendLeaseEvent,
     AlreadyUnlockedEvent,
     AuthRequiredEvent,
     ClientAccessRestrictedEvent,
@@ -197,6 +198,7 @@ from metor.core.api.events.transport import (
 
 
 __all__ = [
+    'FrontendLeaseEvent',
     'VoiceOwnerRegisteredEvent',
     'VoiceOwnerReleasedEvent',
     'VoiceOwnerRejectedEvent',

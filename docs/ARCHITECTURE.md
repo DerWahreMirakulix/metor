@@ -59,6 +59,13 @@ stopping profile-scoped workers, peer sessions, Tor, database access, and key
 state. IPC stays available so the process can accept a later `UnlockCommand`,
 which constructs a fresh profile runtime.
 
+Normal frontend exit and profile switch release only that frontend's session
+resources and daemon lifetime lease. They do not issue `LockCommand` or revoke
+another client's authorization. An automatically started daemon has a separate
+shared lifetime; an independently started daemon has no frontend shutdown
+deadline. [FRONTENDS.md](contracts/FRONTENDS.md) defines the startup policy and
+lease behavior.
+
 For encrypted profiles, unlock uses the configured `KeyProtector` to recover the
 PMK and derives fresh DB, secret, and blob keys. Lock closes SQLCipher and the
 blob store, clears their mutable runtime key buffers, clears the PMK hierarchy,
@@ -379,10 +386,12 @@ preparation and exclusive host/runtime coordination. Simulator composition must
 not receive real destructive or shutdown adapters.
 
 `PlatformBindings` composes those independent ports for one validated adapter ID
-without merging their authority. A deployment injects it through the public
-`FrontendLaunchContext`; strict device TOML must name the same adapter before the
-GUI subscribes. Optional indicator, haptic and shutdown ports are exposed only
-when their matching TOML tables name that adapter; omission disables the
+without merging their authority. A trusted local package registers the selected
+`metor.platform_adapters` entry point; legacy deployment injection through
+`FrontendLaunchContext` remains supported. Strict device TOML must name the same
+adapter before the GUI subscribes. Optional indicator, haptic and shutdown ports
+are exposed only when their matching TOML tables name that adapter; omission or
+explicit `none` disables the
 capability. The GUI reads cached status separately, drains ordered inputs on the
 UI thread, and sends actuator requests off that thread. Before normal power it
 also rejects a remote selection or another running local profile. The shutdown
@@ -390,6 +399,14 @@ port is the privileged deployment boundary and must close the remaining race by
 enforcing local privilege plus exclusive runtime ownership; the GUI first proves
 the current local-profile binding and required Core lifecycle milestone. No
 binding means physical mode fails closed, and simulator mode rejects a binding.
+The selected adapter runs in the GUI process as trusted code or proxies to a
+separately installed, authorized local OS device service. Its device-wide
+settings readback has a single adapter/service owner and does not move with a
+communication profile. An exclusive local resource uses an adapter-declared
+stable resource ID and GUI-held OS file lock obtained through the Base
+`FrontendHost.device_resource_lock` boundary; a shared adapter must
+coordinate its own value and I/O ownership. This does not grant Core content
+access.
 
 Normal appliance power and emergency purge remain different transactions.
 Normal power requires explicit V21 confirmation followed by capture/owner
@@ -406,8 +423,8 @@ used by the GUI's existing production workers. They preserve independent duplex
 ownership. The native PortAudio implementation and PCM codec remain in the GUI
 distribution. New hardware contracts do not declare any untested board supported.
 
-This is an additive local SDK surface, with no IPC, launcher, persistence or
-cryptographic format change. Existing compatibility generations remain unchanged.
+The platform contract itself adds no IPC, persistence or cryptographic format.
+The separate frontend lifetime and profile-exit change uses IPC generation 3.
 
 1. The UI owns presentation and interaction state only.
    It may hold transient presentation state such as focus or scroll position, but it must not own Tor, database, or cryptographic lifecycle.
@@ -568,6 +585,11 @@ instead of silent misbehavior. Two version axes exist:
    `InitEvent.negotiated_version`, alongside its advertised range. The client
    independently validates that result before accepting the session.
 
+Generation 3 changes `PrepareProfileExitCommand` from a global daemon lock to
+cleanup of the requesting socket. Both the current and minimum IPC generations
+are 3. The canonical handshake rejects a generation 2 client or daemon before
+either side applies the old meaning to the new lifecycle.
+
 For the complete generated command/event reference, see [API.md](./generated/API.md).
 
 ### Canonical Client Lifecycle and Wire Sequence (Track 1 & Track 2)
@@ -578,6 +600,12 @@ Metor provides two complementary client integration surfaces:
 - **Track 2 (Documented Wire Contract):** The newline-delimited JSON IPC wire protocol allowing implementations in any programming language.
 
 The canonical wire sequence is:
+
+Between Connect and `Init`, a long-lived local frontend attached to an
+automatically managed daemon sends `FrontendLeaseCommand` with its host-provided instance
+token and a random frontend ID. Independent daemons, remote profiles, and
+short-lived queries do not require this lifetime registration. The lease does
+not authenticate a profile or grant content access.
 
 1. **Connect:** Connect to the daemon's local IPC listener (`127.0.0.1:<daemon_port>`). When connecting to a remote VPS daemon, the port is forwarded locally via SSH tunnel, keeping remote transparent.
 2. **Handshake:** Send `InitCommand(current_version, min_supported)` with a unique `request_id`. Await `InitEvent(negotiated_version)`.
@@ -1079,7 +1107,7 @@ runtime. SDK imports do not inspect HOME, load dotenv, open profiles or start
 processes. Base CLI/daemon explicitly call
 `initialize_runtime_environment` after side-effect-free help/version gates.
 
-Frontend launch contract v2 defers host work until the selected frontend starts.
+The frontend launch contract defers host work until the selected frontend starts.
 `FrontendHost.bootstrap` returns a non-null active local or configured forwarded
 port, a consumable startup secret, storage prompt mode and `FrontendSettings`.
 This is endpoint resolution, not successful authentication: use `MetorClient`

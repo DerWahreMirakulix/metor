@@ -2,14 +2,13 @@
 
 import os
 import subprocess
-import threading
 import sys
 import time
 
-import psutil
 from dataclasses import dataclass
 from typing import BinaryIO, Callable, Optional, TextIO
 
+from metor.core.api import EventType, JsonValue
 from metor.core.daemon.managed import (
     CorruptedDaemonStorageError,
     DaemonStatus,
@@ -98,7 +97,7 @@ def _build_daemon_launch_command(
     *,
     start_locked: bool,
     startup_session_auth_stdin: bool,
-    chat_owner: tuple[int, float] | None = None,
+    automatic_lifetime: bool = False,
 ) -> list[str]:
     """
     Builds the detached CLI command used to launch one managed daemon process.
@@ -107,7 +106,7 @@ def _build_daemon_launch_command(
         pm (ProfileManager): The active profile manager.
         start_locked (bool): Whether the daemon should expose IPC only until unlock.
         startup_session_auth_stdin (bool): Whether the child should read one startup-only session-auth password from stdin.
-        chat_owner: Exact owning chat process identity, if any.
+        automatic_lifetime: Whether the daemon ends after its frontend leases.
 
     Returns:
         list[str]: The detached child-process argv.
@@ -121,16 +120,10 @@ def _build_daemon_launch_command(
         pm.profile_name,
         'daemon',
         '--non-interactive',
+        '--parent-start-lock-held',
     ]
-    if chat_owner is not None:
-        command.extend(
-            (
-                '--chat-owner-pid',
-                str(chat_owner[0]),
-                '--chat-owner-created',
-                repr(chat_owner[1]),
-            )
-        )
+    if automatic_lifetime:
+        command.append('--frontend-managed')
     if start_locked:
         command.append('--locked')
     if startup_session_auth_stdin:
@@ -266,9 +259,9 @@ def start_managed_daemon_process(
     session_auth_password: Optional[str] = None,
     diagnostics: Optional[DaemonStartDiagnostics] = None,
     diagnostic_output: Optional[BinaryIO] = None,
-    chat_owner: tuple[int, float] | None = None,
+    automatic_lifetime: bool = False,
 ) -> bool:
-    """Start a daemon, serializing starts that belong to chat invocations.
+    """Start a daemon under the local profile's cross-process launch lock.
 
     Args:
         pm: Exact profile to start.
@@ -276,7 +269,7 @@ def start_managed_daemon_process(
         session_auth_password: One-use plaintext session authentication secret.
         diagnostics: Optional non-secret child identity and phase recorder.
         diagnostic_output: Optional caller-owned diagnostic stream.
-        chat_owner: Exact parent process identity for an invocation-owned child.
+        automatic_lifetime: Whether frontends jointly manage this instance.
     Returns:
         bool: Whether the daemon published its IPC endpoint.
     """
@@ -295,12 +288,13 @@ def start_managed_daemon_process(
             session_auth_password=session_auth_password,
             diagnostics=diagnostics,
             diagnostic_output=diagnostic_output,
-            chat_owner=chat_owner,
+            automatic_lifetime=automatic_lifetime,
         )
 
-    if chat_owner is None:
-        return start()
-    with FileLock(pm.paths.get_daemon_pid_file()):
+    with FileLock(
+        pm.paths.get_daemon_pid_file(),
+        timeout=_build_daemon_start_timeout(pm, start_locked=start_locked),
+    ):
         return start()
 
 
@@ -311,7 +305,7 @@ def _start_managed_daemon_process_unlocked(
     session_auth_password: Optional[str] = None,
     diagnostics: Optional[DaemonStartDiagnostics] = None,
     diagnostic_output: Optional[BinaryIO] = None,
-    chat_owner: tuple[int, float] | None = None,
+    automatic_lifetime: bool = False,
 ) -> bool:
     """
     Spawns one detached managed-daemon CLI process and waits for IPC readiness.
@@ -322,7 +316,7 @@ def _start_managed_daemon_process_unlocked(
         session_auth_password (Optional[str]): Optional startup-only plaintext session-auth password delivered over stdin.
         diagnostics (Optional[DaemonStartDiagnostics]): Optional non-secret launch-state recorder.
         diagnostic_output (Optional[BinaryIO]): Optional caller-owned binary stream for bounded acceptance diagnostics.
-        chat_owner: Exact owning chat process identity, if any.
+        automatic_lifetime: Whether frontends jointly manage this instance.
 
     Raises:
         PlaintextLockedDaemonError: If locked startup is requested for a plaintext profile.
@@ -355,29 +349,21 @@ def _start_managed_daemon_process_unlocked(
         pm,
         start_locked=start_locked,
         startup_session_auth_stdin=secret_payload is not None,
-        chat_owner=chat_owner,
+        automatic_lifetime=automatic_lifetime,
     )
     stdin_target: int = (
-        subprocess.PIPE
-        if secret_payload is not None or chat_owner is not None
-        else subprocess.DEVNULL
+        subprocess.PIPE if secret_payload is not None else subprocess.DEVNULL
     )
 
     with open(os.devnull, 'wb') as sink:
         output_target: BinaryIO = diagnostic_output or sink
         if os.name == 'nt':
-            detached_flags: int = getattr(subprocess, 'DETACHED_PROCESS', 0)
-            new_group_flags: int = getattr(
-                subprocess,
-                'CREATE_NEW_PROCESS_GROUP',
-                0,
-            )
             process: subprocess.Popen[bytes] = subprocess.Popen(
                 command,
                 stdin=stdin_target,
                 stdout=output_target,
                 stderr=output_target,
-                creationflags=detached_flags | new_group_flags,
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
             )
         else:
             process = subprocess.Popen(
@@ -411,11 +397,10 @@ def _start_managed_daemon_process_unlocked(
             _stop_failed_daemon_process(process)
             raise
         finally:
-            if chat_owner is None:
-                try:
-                    process.stdin.close()
-                except OSError:
-                    secret_write_failed = True
+            try:
+                process.stdin.close()
+            except OSError:
+                secret_write_failed = True
         if secret_write_failed:
             _stop_failed_daemon_process(process)
             if diagnostics is not None:
@@ -470,7 +455,8 @@ def run_managed_daemon(
     sql_log_callback: Optional[RuntimeLogCallback] = None,
     tor_log_callback: Optional[RuntimeLogCallback] = None,
     preparation: Optional[DaemonStartPreparation] = None,
-    chat_owner: tuple[int, float] | None = None,
+    automatic_lifetime: bool = False,
+    parent_start_lock_held: bool = False,
 ) -> None:
     """
     Builds and runs one managed daemon instance for the active profile.
@@ -484,7 +470,7 @@ def run_managed_daemon(
         sql_log_callback (Optional[RuntimeLogCallback]): Optional SQL diagnostics callback.
         tor_log_callback (Optional[RuntimeLogCallback]): Optional Tor diagnostics callback.
         preparation: Optional already validated daemon startup facts.
-        chat_owner: Exact owning chat process identity, if any.
+        automatic_lifetime: Whether frontends jointly manage this instance.
 
     Raises:
         InvalidDaemonPasswordError: If the supplied password cannot unlock storage.
@@ -494,71 +480,70 @@ def run_managed_daemon(
     Returns:
         None
     """
-    prepared: DaemonStartPreparation = preparation or prepare_managed_daemon_start(
-        pm,
-        start_locked=start_locked,
+    start_lock = (
+        None
+        if parent_start_lock_held
+        else FileLock(
+            pm.paths.get_daemon_pid_file(),
+            timeout=_build_daemon_start_timeout(pm, start_locked=start_locked),
+        )
     )
-    if prepared.already_running:
-        return
-    if prepared.encrypted and not start_locked and password is None:
-        raise InvalidDaemonPasswordError()
-    if prepared.session_auth_required and session_auth_password is None:
-        raise ValueError('Session-auth password is required for daemon startup.')
-
-    daemon = create_managed_daemon(
-        pm,
-        password=password,
-        session_auth_password=session_auth_password,
-        start_locked=start_locked,
-        status_callback=status_callback,
-        sql_log_callback=sql_log_callback or _default_sql_log_callback,
-        tor_log_callback=tor_log_callback or _default_tor_log_callback,
+    instance_lock = FileLock(
+        pm.paths.get_config_dir() / Constants.DAEMON_INSTANCE_LOCK_FILE,
+        timeout=_build_daemon_start_timeout(pm, start_locked=start_locked),
     )
-    watcher_done = threading.Event()
-    if chat_owner is not None:
+    lock_held = False
+    if start_lock is not None:
+        start_lock.__enter__()
+        lock_held = True
+    instance_held = False
 
-        def watch_chat_owner() -> None:
-            """Stop only this daemon when its exact owning invocation disappears.
+    def report_ready(
+        code: EventType | DaemonStatus, params: dict[str, JsonValue]
+    ) -> None:
+        """Release the cross-process start lock only after IPC publication."""
+        nonlocal lock_held
+        if code in (DaemonStatus.ACTIVE, DaemonStatus.LOCKED_MODE) and lock_held:
+            assert start_lock is not None
+            start_lock.__exit__(None, None, None)
+            lock_held = False
+        if status_callback is not None:
+            status_callback(code, params)
 
-            Args:
-                None
-            Returns:
-                None
-            """
-            owner_pid, owner_created = chat_owner
-            while not watcher_done.wait(Constants.WORKER_SLEEP_SEC):
-                try:
-                    owner = psutil.Process(owner_pid)
-                    alive = (
-                        owner.create_time() == owner_created
-                        and owner.is_running()
-                        and owner.status() != psutil.STATUS_ZOMBIE
-                    )
-                except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
-                    alive = False
-                if not alive:
-                    daemon.stop()
-                    return
-
-        threading.Thread(target=watch_chat_owner, daemon=True).start()
-
-        def watch_lifetime_pipe() -> None:
-            """Stop gracefully when the owning chat closes its exact child pipe.
-
-            Args:
-                None
-            Returns:
-                None
-            """
-            try:
-                sys.stdin.buffer.read(1)
-            except OSError:
-                pass
-            if not watcher_done.is_set():
-                daemon.stop()
-
-        threading.Thread(target=watch_lifetime_pipe, daemon=True).start()
     try:
+        if pm.is_daemon_running():
+            return
+        try:
+            instance_lock.__enter__()
+            instance_held = True
+        except TimeoutError:
+            if pm.is_daemon_running():
+                return
+            raise
+        prepared: DaemonStartPreparation = prepare_managed_daemon_start(
+            pm, start_locked=start_locked
+        )
+        if prepared.already_running:
+            return
+        if prepared.encrypted and not start_locked and password is None:
+            raise InvalidDaemonPasswordError()
+        if prepared.session_auth_required and session_auth_password is None:
+            raise ValueError('Session-auth password is required for daemon startup.')
+
+        daemon = create_managed_daemon(
+            pm,
+            password=password,
+            session_auth_password=session_auth_password,
+            start_locked=start_locked,
+            automatic_lifetime=automatic_lifetime,
+            status_callback=report_ready,
+            sql_log_callback=sql_log_callback or _default_sql_log_callback,
+            tor_log_callback=tor_log_callback or _default_tor_log_callback,
+        )
         daemon.run()
     finally:
-        watcher_done.set()
+        if instance_held:
+            instance_lock.__exit__(None, None, None)
+        if lock_held:
+            assert start_lock is not None
+            start_lock.__exit__(None, None, None)

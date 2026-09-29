@@ -150,6 +150,19 @@ writes. When a first `current` release already has the correct registry and
 generated outputs, no release commit is created; the validated checked-out
 commit is tagged directly.
 
+Release validation checks out the immutable requested candidate, applies the
+proposed version, and builds and accepts the native archives from that modified
+candidate. Publication downloads those archives from the same workflow run and
+refuses to update `main` if it moved after validation. It does not substitute a
+prior CI run or rebuild release assets from an untested branch state. Normal CI
+checks generated references without writing them; maintainers run
+`npm run generate:docs` when intentionally changing the API or settings. There
+is no branch-specific documentation bot that commits generated files after CI.
+The mandatory installed daemon acceptance starts a locked local daemon without
+the public Tor network. An optional native Tor startup check is described in
+[CONTRIBUTE.md](./CONTRIBUTE.md#portable-local-environments) and requires a
+separately provisioned Tor binary.
+
 Publication updates the validated `main` branch and its annotated version tag
 in one required atomic Git push. A server that cannot perform the transaction,
 or rejects either ref, fails closed without a non-atomic fallback. GitHub

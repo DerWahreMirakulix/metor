@@ -5,18 +5,16 @@ import io
 import os
 from pathlib import Path
 import psutil
-import shutil
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
-from textwrap import dedent
 import threading
 import time
 import unittest
 from typing import cast
 from unittest.mock import Mock, patch
 
-from scripts import ci_impact, run_tests, test_supervision
+from scripts import run_tests, test_supervision
 from scripts.test_worker_lifetime import (
     RUNNER_STOP_SEC,
     _PosixLifetime,
@@ -197,8 +195,8 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn('1 duplicate test IDs', text)
 
-    def test_manifest_and_unexpected_ids_fail_closed(self) -> None:
-        """Reject unknown modules, repeated manifest entries and foreign cases.
+    def test_discovery_and_unexpected_ids_fail_closed(self) -> None:
+        """Discover new modules and reject missing short-suite or foreign cases.
 
         Args:
             None
@@ -210,29 +208,26 @@ class RunnerTests(unittest.TestCase):
             (root / 'test_new.py').write_text('pass\n', encoding='utf-8')
             with patch.object(run_tests, 'TESTS', root):
                 with patch.object(run_tests, 'FAST_MODULES', ('test_new',)):
-                    with patch.object(run_tests, 'INTEGRATION_MODULES', ()):
-                        self.assertIsNone(run_tests.validate_manifest())
-                        (root / 'test_unknown.py').write_text(
-                            'pass\n', encoding='utf-8'
-                        )
+                    self.assertIsNone(run_tests.validate_inventory())
+                    (root / 'test_unknown.py').write_text('pass\n', encoding='utf-8')
+                    self.assertIn('test_unknown', run_tests.test_modules())
+                    (root / 'test_new.py').unlink()
+                    self.assertIn(
+                        '1 missing short-suite files',
+                        run_tests.validate_inventory() or '',
+                    )
+                    with patch.object(run_tests, 'REPORT', root / 'report.txt'):
+                        with patch.object(run_tests, 'discover') as imported:
+                            with redirect_stdout(io.StringIO()):
+                                self.assertEqual(run_tests.main(['--suite', 'fast']), 1)
+                            imported.assert_not_called()
+                    with patch.object(
+                        run_tests, 'FAST_MODULES', ('test_unknown', 'test_unknown')
+                    ):
                         self.assertIn(
-                            '1 unclassified files', run_tests.validate_manifest() or ''
+                            '1 duplicate short-suite entries',
+                            run_tests.validate_inventory() or '',
                         )
-                        with patch.object(run_tests, 'REPORT', root / 'report.txt'):
-                            with patch.object(run_tests, 'discover') as imported:
-                                with redirect_stdout(io.StringIO()):
-                                    self.assertEqual(
-                                        run_tests.main(['--suite', 'fast']), 1
-                                    )
-                                imported.assert_not_called()
-                        (root / 'test_unknown.py').unlink()
-                        with patch.object(
-                            run_tests, 'FAST_MODULES', ('test_new', 'test_new')
-                        ):
-                            self.assertIn(
-                                '1 duplicate entries',
-                                run_tests.validate_manifest() or '',
-                            )
         with patch.object(IntegrationExample, '__module__', 'test_not_classified'):
             status, text = self.invoke([IntegrationExample('exercise_integration')])
         self.assertEqual(status, 1)
@@ -259,11 +254,6 @@ class RunnerTests(unittest.TestCase):
             with (
                 patch.object(run_tests, 'TESTS', root),
                 patch.object(run_tests, 'FAST_MODULES', ('test_runner_fast_fixture',)),
-                patch.object(
-                    run_tests,
-                    'INTEGRATION_MODULES',
-                    ('test_runner_integration_fixture',),
-                ),
                 patch.object(run_tests, 'REPORT', root / 'report.txt'),
                 patch.object(sys, 'path', sys.path.copy()),
                 patch.dict(sys.modules),
@@ -306,8 +296,22 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn('failures=1', text)
         self.assertIn('FAIL: test_run_tests.FailureExample.exercise_failure', text)
+        self.assertIn('assertion=self . fail ( <literal> )', text)
         self.assertNotIn('do-not-log', text)
         self.assertNotIn('do-not-log', run_tests.REPORT.read_text(encoding='utf-8'))
+
+    def test_safe_error_details_exclude_messages_and_paths(self) -> None:
+        """Report a verified OS code or import name without private values."""
+        missing = FileNotFoundError(2, 'secret=message', '/private/secret-path')
+        self.assertEqual(run_tests.safe_detail(missing), 'errno=2')
+        self.assertNotIn('secret', run_tests.safe_detail(missing) or '')
+        module = ModuleNotFoundError('secret=message', name='metor.optional')
+        self.assertEqual(run_tests.safe_detail(module), 'module=metor.optional')
+        private_module = ModuleNotFoundError(
+            'secret=message', name='private/secret-path'
+        )
+        self.assertIsNone(run_tests.safe_detail(private_module))
+        self.assertIsNone(run_tests.safe_detail(RuntimeError('secret=message')))
 
     def test_subtest_and_missing_coverage_fail(self) -> None:
         """Reject subtest failures and absent optional coverage dependencies.
@@ -346,67 +350,6 @@ class RunnerTests(unittest.TestCase):
         module.Coverage.return_value.start.assert_called_once_with()
         module.Coverage.return_value.stop.assert_called_once_with()
         module.Coverage.return_value.save.assert_called_once_with()
-
-    def test_ci_runs_full_matrix_and_keeps_branch_acceptance(self) -> None:
-        """Keep full PR/main acceptance and a distinct fast branch route.
-
-        Args:
-            None
-        Returns:
-            None
-        """
-        ci = (run_tests.ROOT / '.github' / 'workflows' / 'ci.yml').read_text(
-            encoding='utf-8'
-        )
-        release = (run_tests.ROOT / '.github' / 'workflows' / 'release.yml').read_text(
-            encoding='utf-8'
-        )
-        impact = (run_tests.ROOT / 'scripts' / 'ci_impact.py').read_text(
-            encoding='utf-8'
-        )
-        for entry in ('ubuntu-latest', 'windows-latest', "'3.11'", "'3.13'"):
-            self.assertIn(entry, impact)
-        self.assertIn('fromJSON(needs.plan.outputs.matrix)', ci)
-        self.assertIn('python scripts/run_tests.py --suite all', ci)
-        self.assertIn('python scripts/run_tests.py --suite fast', ci)
-        self.assertIn('workflow_dispatch:', ci)
-        self.assertIn("mode == 'full'", ci)
-        self.assertIn('  acceptance:', ci)
-        self.assertIn('cancel-in-progress: true', ci)
-        self.assertIn('github.event.pull_request.number || github.ref', ci)
-        self.assertIn('  pull_request:', ci)
-        self.assertNotIn("if: github.event_name != 'pull_request'", ci)
-        self.assertIn('      - embeddedui', ci)
-        self.assertIn('      - main', ci)
-        self.assertIn('tests/gui_native_capture.py --view root_refresh', ci)
-        self.assertIn('python scripts/run_tests.py --suite all', release)
-
-    def test_conservative_ci_impact(self) -> None:
-        """Use a small GUI group only for known views and full for shared work.
-
-        Args:
-            None
-        Returns:
-            None
-        """
-        root = run_tests.ROOT
-        self.assertEqual(
-            ci_impact.decide(['src/metor/ui/gui/views/root/panel.py'], root),
-            ('fast', ('test_gui_contract', 'test_gui_root')),
-        )
-        self.assertEqual(ci_impact.decide(['docs/GLOSSARY.md'], root), ('fast', ()))
-        for name in (
-            'README.md',
-            'src/metor/ui/gui/views/profiles/lifecycle.py',
-            'src/metor/ui/terminal/chat/renderer/input.py',
-            'src/metor/client/frontends.py',
-            'src/metor/data/profile/catalog.py',
-            'requirements/dev.txt',
-            '.github/workflows/ci.yml',
-            'unknown-path.py',
-        ):
-            self.assertEqual(ci_impact.decide([name], root), ('full', ()))
-        self.assertEqual(ci_impact.decide([], root), ('full', ()))
 
     def test_output_is_bounded(self) -> None:
         """Limit captured text even if a test writes much more.
@@ -512,7 +455,7 @@ class RunnerTests(unittest.TestCase):
             program = (
                 'import sys; from pathlib import Path; from scripts import run_tests as r; '
                 'r.TESTS=Path(sys.argv[1]); r.REPORT=r.TESTS/"report.txt"; '
-                'r.FAST_MODULES=("test_synthetic",); r.INTEGRATION_MODULES=(); '
+                'r.FAST_MODULES=("test_synthetic",); '
                 'sys.exit(r.main(sys.argv[2:]))'
             )
             result = subprocess.run(
@@ -1279,7 +1222,6 @@ class SupervisorTests(unittest.TestCase):
                 'runner.TESTS=Path(sys.argv[1])\n'
                 'runner.REPORT=Path(os.environ["METOR_TEST_REPORT"])\n'
                 'runner.FAST_MODULES=("test_supervision_fixture",)\n'
-                'runner.INTEGRATION_MODULES=()\n'
                 'os.environ["METOR_TEST_PROGRESS_OWNER"]=str(os.getpid())\n'
                 'sys.exit(runner.main(["--suite","fast"]))\n'
             )
@@ -1372,63 +1314,6 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(status, 1)
             self.assertIn('Test report could not be written', sink.getvalue())
             self.assertIn('without a bounded, completed result', sink.getvalue())
-
-    def test_quality_action_preserves_direct_child_status(self) -> None:
-        """Execute the actual composite shell body for both child outcomes.
-
-        Args:
-            None
-        Returns:
-            None
-        """
-        action = (
-            run_tests.ROOT / '.github' / 'actions' / 'python-quality' / 'action.yml'
-        ).read_text(encoding='utf-8')
-        body = dedent(
-            action.split('    - name: Run Tests\n', 1)[1].split('      run: |\n', 1)[1]
-        )
-        self.assertNotIn(' | tee ', body)
-        bash = shutil.which('bash')
-        if sys.platform == 'win32':
-            git_exec = subprocess.run(
-                ['git', '--exec-path'],
-                text=True,
-                capture_output=True,
-                check=True,
-            ).stdout.strip()
-            bash = str(Path(git_exec).parents[2] / 'bin' / 'bash.exe')
-            self.assertTrue(Path(bash).is_file())
-        elif bash is None:
-            self.skipTest('Bash unavailable for composite action test')
-        for status in (0, 7):
-            command = f'(exit {status})'
-            shell = body.replace('${{ inputs.test-command }}', command)
-            completed = subprocess.run(
-                [bash, '--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', shell],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(completed.returncode, status)
-        annotation_fails = 'echo() { return 9; }\n' + body.replace(
-            '${{ inputs.test-command }}', '(exit 7)'
-        )
-        completed = subprocess.run(
-            [
-                bash,
-                '--noprofile',
-                '--norc',
-                '-e',
-                '-o',
-                'pipefail',
-                '-c',
-                annotation_fails,
-            ],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(completed.returncode, 7)
 
 
 if __name__ == '__main__':

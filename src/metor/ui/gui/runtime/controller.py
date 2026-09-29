@@ -369,6 +369,8 @@ class GuiController:
         self.state.navigate(route, from_root=from_root)
         if route.view in {'V17', 'V19'}:
             self.core_settings.reload()
+        if route.view == 'V17':
+            self.device.settings.refresh()
         if route.view == 'V18':
             self.history.open(route.history_raw)
         if route.view == 'V20':

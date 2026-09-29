@@ -22,6 +22,7 @@ from metor.core.api import (
     SessionAuthenticatedEvent,
 )
 from metor.ui.gui.runtime import GuiController
+from metor.versioning import IPC_PROTOCOL_MIN_SUPPORTED, IPC_PROTOCOL_VERSION
 
 
 class BootstrapTransportTests(unittest.TestCase):
@@ -54,9 +55,9 @@ class BootstrapTransportTests(unittest.TestCase):
                             if kind == 'init':
                                 response = (
                                     InitEvent(
-                                        2,
-                                        2,
-                                        2,
+                                        IPC_PROTOCOL_VERSION,
+                                        IPC_PROTOCOL_VERSION,
+                                        IPC_PROTOCOL_MIN_SUPPORTED,
                                         capabilities=[
                                             'runtime_snapshot',
                                             'retained_message_inventory',

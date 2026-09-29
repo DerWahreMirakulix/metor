@@ -841,8 +841,8 @@
     }
   },
   "ipc": {
-    "current": 2,
-    "minimum_supported": 2,
+    "current": 3,
+    "minimum_supported": 3,
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "commands": {
@@ -905,6 +905,9 @@
         },
         "finalize_voice": {
           "$ref": "#/definitions/FinalizeVoiceCommand"
+        },
+        "frontend_lease": {
+          "$ref": "#/definitions/FrontendLeaseCommand"
         },
         "generate_address": {
           "$ref": "#/definitions/GenerateAddressCommand"
@@ -5322,6 +5325,95 @@
             "msg_id"
           ],
           "title": "FinalizeVoiceCommand",
+          "type": "object"
+        },
+        "FrontendLeaseCommand": {
+          "additionalProperties": false,
+          "properties": {
+            "command_type": {
+              "const": "frontend_lease",
+              "type": "string"
+            },
+            "frontend_id": {
+              "type": "string"
+            },
+            "release": {
+              "type": "boolean"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "token": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "command_type",
+            "frontend_id"
+          ],
+          "title": "FrontendLeaseCommand",
+          "type": "object"
+        },
+        "FrontendLeaseEvent": {
+          "additionalProperties": false,
+          "properties": {
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "event_type": {
+              "const": "frontend_lease",
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "state": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "event_type",
+            "state"
+          ],
+          "title": "FrontendLeaseEvent",
           "type": "object"
         },
         "GenerateAddressCommand": {
@@ -15390,6 +15482,9 @@
         },
         "fallback_success": {
           "$ref": "#/definitions/FallbackSuccessEvent"
+        },
+        "frontend_lease": {
+          "$ref": "#/definitions/FrontendLeaseEvent"
         },
         "gui_preferences": {
           "$ref": "#/definitions/GuiPreferencesEvent"

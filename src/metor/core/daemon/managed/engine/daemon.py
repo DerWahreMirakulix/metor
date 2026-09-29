@@ -27,6 +27,8 @@ from metor.core.api import (
     IpcEvent,
     IpcCommand,
     LockCommand,
+    FrontendLeaseCommand,
+    FrontendLeaseEvent,
     RestrictClientCommand,
     PrepareProfileExitCommand,
     SelfDestructCommand,
@@ -66,6 +68,7 @@ from metor.core.daemon.managed.handlers import (
     ProfileMetadataCommandHandler,
 )
 from metor.core.daemon.managed.ipc import IpcServer
+from metor.core.daemon.managed.frontend_lifetime import FrontendLifetime
 from metor.core.daemon.managed.outbox import OutboxWorker
 from metor.core.daemon.managed.network import NetworkManager, StateTracker
 from metor.core.daemon.managed.notify import NotificationService
@@ -159,6 +162,7 @@ class Daemon(DaemonLifecycleMixin):
         ] = None,
         require_session_auth: bool = False,
         start_locked: bool = False,
+        automatic_lifetime: bool = False,
     ) -> None:
         """
         Initializes the DaemonEngine.
@@ -180,6 +184,9 @@ class Daemon(DaemonLifecycleMixin):
             None
         """
         self._pm: ProfileManager = pm
+        self._frontend_lifetime = FrontendLifetime(
+            pm.paths.get_config_dir(), automatic=automatic_lifetime
+        )
         self._tm: Optional[TorManager] = None
         self._cm: Optional[ContactManager] = None
         self._hm: Optional[HistoryManager] = None
@@ -563,6 +570,7 @@ class Daemon(DaemonLifecycleMixin):
             None
         """
         try:
+            self._frontend_lifetime.publish()
             with self._domain_operation_lock:
                 if self._stop_flag.is_set() or self._purge_fence.is_set():
                     raise RuntimeStartupError(
@@ -601,8 +609,11 @@ class Daemon(DaemonLifecycleMixin):
                         self._lifecycle = DaemonLifecycle.UNLOCKED
                         self._publish_active_status()
 
+            self._frontend_lifetime.ready()
             while not self._stop_flag.is_set():
                 time.sleep(Constants.WORKER_SLEEP_SEC)
+                if self._frontend_lifetime.should_stop():
+                    break
                 if self._session_maintenance is not None:
                     self._session_maintenance.check_idle_timeouts()
                 with self._domain_operation_lock:
@@ -729,6 +740,7 @@ class Daemon(DaemonLifecycleMixin):
         Returns:
             None
         """
+        self._frontend_lifetime.begin_shutdown()
         with self._stop_lock:
             self._stop_flag.set()
         with self._domain_operation_lock, self._release_lock:
@@ -767,6 +779,7 @@ class Daemon(DaemonLifecycleMixin):
                         expected_pid=os.getpid(), expected_port=self._ipc.port
                     ),
                 ),
+                ('frontend_lifetime', self._frontend_lifetime.clear_published_token),
             )
         )
         self._stop_completed = self._last_stop_release.succeeded
@@ -781,6 +794,7 @@ class Daemon(DaemonLifecycleMixin):
         Returns:
             None
         """
+        self._frontend_lifetime.disconnect(conn)
         self._session_access.disconnect(conn)
         self._command_dispatcher.clear_client_focus(conn)
         with self._domain_operation_lock:
@@ -925,6 +939,16 @@ class Daemon(DaemonLifecycleMixin):
             None
         """
         with request_context(cmd.request_id):
+            if isinstance(cmd, FrontendLeaseCommand):
+                state = (
+                    self._frontend_lifetime.release(cmd.frontend_id, cmd.token, conn)
+                    if cmd.release
+                    else self._frontend_lifetime.register(
+                        cmd.frontend_id, cmd.token, conn
+                    )
+                )
+                self._ipc.send_to(conn, FrontendLeaseEvent(state=state))
+                return
             if self._purge_fence.is_set():
                 if isinstance(cmd, SelfDestructCommand):
                     self._send_self_destruct_initiated(conn)
@@ -937,6 +961,23 @@ class Daemon(DaemonLifecycleMixin):
                         self._send_self_destruct_initiated(conn)
                     else:
                         self._ipc.send_to(conn, create_event(EventType.DAEMON_OFFLINE))
+                    return
+                if isinstance(cmd, PrepareProfileExitCommand):
+                    if not self._session_access.authorize(
+                        cmd,
+                        conn,
+                        runtime_unlocked=self._lifecycle is DaemonLifecycle.UNLOCKED,
+                    ):
+                        return
+                    self._command_dispatcher.disconnect_voice_producer(conn)
+                    self._command_dispatcher.clear_client_focus(conn)
+                    self._ipc.send_to(
+                        conn,
+                        create_event(
+                            EventType.PROFILE_EXIT_PREPARED,
+                            {'profile': self._pm.profile_name},
+                        ),
+                    )
                     return
                 self._process_ui_command_in_context(cmd, conn)
 
@@ -1187,20 +1228,6 @@ class Daemon(DaemonLifecycleMixin):
             )
             return
 
-        if isinstance(cmd, PrepareProfileExitCommand):
-            profile = self._pm.profile_name
-            if not self._lock_runtime(preserve_reliability=True):
-                self._ipc.send_to(conn, create_event(EventType.INTERNAL_ERROR))
-                return
-            self._ipc.send_to(
-                conn,
-                create_event(
-                    EventType.PROFILE_EXIT_PREPARED,
-                    {'profile': profile},
-                ),
-            )
-            return
-
         if isinstance(cmd, SelfDestructCommand):
             self._purge_operation_id = cmd.operation_id
             self._purge_fence.set()
@@ -1209,6 +1236,14 @@ class Daemon(DaemonLifecycleMixin):
             self._runtime_stop_flag.set()
             self._destruction_recipients = {conn}
             self._send_self_destruct_initiated(conn)
+            try:
+                with request_context(None):
+                    self._ipc.broadcast_to(
+                        create_event(EventType.SELF_DESTRUCT_INITIATED),
+                        exclude={conn},
+                    )
+            except Exception:
+                pass
             try:
                 threading.Thread(target=self._nuke_data, daemon=True).start()
             except Exception:

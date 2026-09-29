@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=80", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "metor-reference-board"
+version = "0.1.0"
+description = "Harmless shared simulated device settings example for Metor"
+requires-python = ">=3.11,<3.14"
+dependencies = ["metor", "metor-sdk"]
+
+[project.entry-points."metor.platform_adapters"]
+reference-board = "metor_reference_board:provider"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"

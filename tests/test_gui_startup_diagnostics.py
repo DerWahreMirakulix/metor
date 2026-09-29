@@ -16,6 +16,7 @@ from unittest.mock import patch
 from metor.client import FrontendHost, FrontendLaunchContext
 from metor.main import gui_main
 from metor.ui.gui.launcher import GuiEntry
+from metor.ui.gui.platform import DeviceConfiguration
 
 import gui_installed_launcher as installed_fixture
 
@@ -38,7 +39,7 @@ class GuiStartupDiagnosticsTests(unittest.TestCase):
             patch('metor.main.sys.stdout', None),
             patch('metor.main.sys.stderr', None),
             patch('metor.main.ctypes.windll', create=True) as windll,
-            patch('metor.cli.entry.run_cli', return_value=0) as run_cli,
+            patch('metor.main._run_gui_cli', return_value=0) as run_cli,
         ):
             with self.assertRaises(SystemExit) as outcome:
                 gui_main()
@@ -63,7 +64,7 @@ class GuiStartupDiagnosticsTests(unittest.TestCase):
             patch('metor.main.sys.stderr', None),
             patch('metor.main.ctypes.windll', create=True) as windll,
             patch(
-                'metor.cli.entry.run_cli',
+                'metor.main._run_gui_cli',
                 side_effect=RuntimeError('private-secret'),
             ),
         ):
@@ -135,7 +136,7 @@ class GuiStartupDiagnosticsTests(unittest.TestCase):
         self_outer = self
         self.stops = 0
         module.MetorApp = TestApp  # type: ignore[attr-defined]
-        configuration = SimpleNamespace(activate_platform=lambda value: value)
+        configuration = DeviceConfiguration()
         sink = StringIO()
         with (
             patch.dict(sys.modules, {'metor.ui.gui.app': module}),

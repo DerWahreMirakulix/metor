@@ -3,6 +3,7 @@
 # ruff: noqa: E402
 
 import io
+from contextlib import nullcontext
 import os
 import subprocess
 import sys
@@ -229,6 +230,8 @@ class DaemonBootstrapContractTests(unittest.TestCase):
         profile.uses_plaintext_storage.return_value = True
         profile.uses_encrypted_storage.return_value = False
         profile.get_daemon_port.return_value = None
+        profile.paths = Mock()
+        profile.paths.get_daemon_pid_file.return_value = Path('unused-daemon-pid')
         return cast(ProfileManager, profile)
 
     def test_secret_write_failure_terminates_owned_child(self) -> None:
@@ -242,6 +245,9 @@ class DaemonBootstrapContractTests(unittest.TestCase):
 
         with (
             patch('metor.application.runtime.daemon.Settings.validate_integrity'),
+            patch(
+                'metor.application.runtime.daemon.FileLock', return_value=nullcontext()
+            ),
             patch(
                 'metor.application.runtime.daemon.subprocess.Popen',
                 return_value=process,
@@ -274,6 +280,9 @@ class DaemonBootstrapContractTests(unittest.TestCase):
         with (
             patch('metor.application.runtime.daemon.Settings.validate_integrity'),
             patch(
+                'metor.application.runtime.daemon.FileLock', return_value=nullcontext()
+            ),
+            patch(
                 'metor.application.runtime.daemon.subprocess.Popen',
                 return_value=process,
             ),
@@ -297,6 +306,9 @@ class DaemonBootstrapContractTests(unittest.TestCase):
 
         with (
             patch('metor.application.runtime.daemon.Settings.validate_integrity'),
+            patch(
+                'metor.application.runtime.daemon.FileLock', return_value=nullcontext()
+            ),
             patch(
                 'metor.application.runtime.daemon.subprocess.Popen',
                 return_value=process,
@@ -338,6 +350,9 @@ class DaemonBootstrapContractTests(unittest.TestCase):
 
         with (
             patch('metor.application.runtime.daemon.Settings.validate_integrity'),
+            patch(
+                'metor.application.runtime.daemon.FileLock', return_value=nullcontext()
+            ),
             patch(
                 'metor.application.runtime.daemon.subprocess.Popen',
                 return_value=process,

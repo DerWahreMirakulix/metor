@@ -455,13 +455,15 @@ class ClosureDaemonTests(unittest.TestCase):
         self.assertIs(pending[0], two)
 
     def test_release_failure_attempts_all_resources_and_retries_stop(self) -> None:
-        """F06: actual normal exit fails truthfully, then stop retries all releases."""
+        """Local exit keeps resources; final stop retries failed releases."""
         daemon = self.daemon()
         client = self.client(daemon)
         key = daemon._km
         blobs = daemon._blob_store
         assert key is not None
         assert blobs is not None
+        self.assertTrue(client.prepare_profile_exit())
+        self.assertEqual(daemon._lifecycle, DaemonLifecycle.UNLOCKED)
         with (
             patch(
                 'metor.core.daemon.managed.engine.lifecycle.SqlManager.close_connection',
@@ -472,31 +474,30 @@ class ClosureDaemonTests(unittest.TestCase):
             ) as clear,
             patch.object(blobs, 'close', wraps=blobs.close) as close,
         ):
-            with self.assertRaises(MetorRequestRejectedError):
-                client.prepare_profile_exit()
+            daemon.stop()
             self.assertEqual(daemon._last_runtime_release.failed, ('database',))
             self.assertEqual(daemon._lifecycle, DaemonLifecycle.LOCKING)
             daemon.stop()
-            daemon.stop()
-            self.assertGreaterEqual(db.call_count, 3)
-            self.assertGreaterEqual(clear.call_count, 3)
-            self.assertGreaterEqual(close.call_count, 3)
+            self.assertGreaterEqual(db.call_count, 2)
+            self.assertGreaterEqual(clear.call_count, 2)
+            self.assertGreaterEqual(close.call_count, 2)
             self.assertFalse(daemon._stop_completed)
             self.assertFalse(daemon._session_access.authenticated_recipients())
         daemon.stop()
         self.assertTrue(daemon._stop_completed)
 
-    def test_tor_release_failure_blocks_prepared_exit_and_retains_runtime(
+    def test_tor_release_failure_blocks_final_stop_and_retains_runtime(
         self,
     ) -> None:
-        """A02: the real release coordinator cannot turn Tor failure into Safe."""
+        """Local exit keeps Tor; final stop cannot hide Tor failure."""
         daemon = self.daemon()
         client = self.client(daemon)
         tor = daemon._tm
         self.assertIsNotNone(tor)
+        self.assertTrue(client.prepare_profile_exit())
+        self.assertEqual(daemon._lifecycle, DaemonLifecycle.UNLOCKED)
         with patch.object(tor, 'stop', side_effect=OSError('Tor stop failed')):
-            with self.assertRaises(MetorRequestRejectedError):
-                client.prepare_profile_exit()
+            daemon.stop()
 
         self.assertEqual(daemon._last_runtime_release.failed, ('tor_exports',))
         self.assertEqual(daemon._lifecycle, DaemonLifecycle.LOCKING)
@@ -781,7 +782,7 @@ class ClosureDaemonTests(unittest.TestCase):
                 coordinator = ProfileRuntimeCoordinator(client, factory)
                 result = coordinator.switch('receiver')
                 self.assertEqual(result.current_snapshot.profile, 'receiver')
-                self.assertEqual(source._lifecycle, DaemonLifecycle.LOCKED)
+                self.assertEqual(source._lifecycle, DaemonLifecycle.UNLOCKED)
                 source.stop()
                 result = coordinator.switch('sender')
                 self.assertEqual(result.current_snapshot.profile, 'sender')

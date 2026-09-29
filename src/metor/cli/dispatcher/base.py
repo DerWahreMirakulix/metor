@@ -152,13 +152,10 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                         'non_interactive',
                         False,
                     ),
-                    chat_owner=(
-                        int(self._args.chat_owner_pid),
-                        float(self._args.chat_owner_created),
-                    )
-                    if getattr(self._args, 'chat_owner_pid', None) is not None
-                    and getattr(self._args, 'chat_owner_created', None) is not None
-                    else None,
+                    automatic_lifetime=getattr(self._args, 'frontend_managed', False),
+                    parent_start_lock_held=getattr(
+                        self._args, 'parent_start_lock_held', False
+                    ),
                 )
 
         elif cmd == 'unlock':

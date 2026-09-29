@@ -7,7 +7,7 @@ name = "metor-ui-terminal"
 dynamic = ["version", "dependencies"]
 description = "Interactive Terminal frontend for Metor."
 authors = [{ name = "LuRex" }]
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 license = { text = "GPLv3" }
 
 [project.entry-points."metor.ui_frontends"]

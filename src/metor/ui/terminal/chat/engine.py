@@ -18,6 +18,8 @@ from metor.core.api import (
     IpcEvent,
     InitCommand,
     InitEvent,
+    FrontendLeaseCommand,
+    FrontendLeaseEvent,
     IpcCommand,
     JsonValue,
     Delivery,
@@ -89,6 +91,8 @@ class Chat:
         self._disconnect_event: threading.Event = threading.Event()
         self._startup_state: Optional[ChatStartupStateEvent] = None
         self._startup_session_auth_provider = startup_session_auth_provider
+        self._frontend_id = secrets.token_hex(Constants.FRONTEND_LIFETIME_ID_BYTES)
+        self._lease_joined = False
 
         self._handler: Optional[EventHandler] = None
         self._dispatcher: Optional[CommandDispatcher] = None
@@ -449,6 +453,18 @@ class Chat:
         self._renderer.restore_cursor()
 
         if self._ipc:
+            if self._lease_joined:
+                try:
+                    self._ipc.send_command(
+                        FrontendLeaseCommand(
+                            frontend_id=self._frontend_id,
+                            token=self._pm.lifetime_token,
+                            release=True,
+                        )
+                    )
+                except (OSError, ValueError):
+                    pass
+                self._lease_joined = False
             if self._session.focused_alias:
                 self._ipc.send_command(SwitchCommand(target=None))
             self._ipc.stop()
@@ -578,6 +594,18 @@ class Chat:
         """
         if self._ipc is None:
             return False
+
+        if not self._pm.remote and self._pm.lifetime_token is not None:
+            lease = self._request_prechat_event(
+                FrontendLeaseCommand(
+                    frontend_id=self._frontend_id,
+                    token=self._pm.lifetime_token,
+                ),
+                FrontendLeaseEvent,
+            )
+            if lease is None or lease.state not in ('joined', 'independent'):
+                return False
+            self._lease_joined = lease.state == 'joined'
 
         self._init_event.clear()
         init_event: Optional[InitEvent] = self._request_prechat_event(

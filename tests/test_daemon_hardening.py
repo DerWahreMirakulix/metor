@@ -11,7 +11,7 @@ import sys
 import threading
 import unittest
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Iterable, Optional, cast
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
@@ -33,6 +33,7 @@ from metor.core.api import (
     GetChatStartupStateCommand,
     GetRuntimeSnapshotCommand,
     InitCommand,
+    PrepareProfileExitCommand,
     IpcEvent,
     RuntimeErrorCode,
     Delivery,
@@ -57,6 +58,7 @@ from metor.core.daemon.managed.local_auth import create_session_auth_context
 from metor.core.daemon.managed.status import DaemonStatus
 from metor.core.daemon.managed.crypto import Crypto
 from metor.core.daemon.managed.ipc import IpcServer
+from metor.core.daemon.managed.writer import BoundedSocketWriter
 from metor.core.daemon.managed.network.controller.retunnel import (
     ConnectionControllerRetunnelMixin,
 )
@@ -213,6 +215,10 @@ class _DummyProfileManager:
 
         self.config: _DummyConfig = _DummyConfig()
         self.initialized: bool = False
+        self.profile_name = 'test'
+        self.paths = Mock()
+        self.paths.get_config_dir.return_value = Path('.')
+        self.paths.get_quick_unlock_file.return_value = Path('quick-unlock-test')
 
     def initialize(self) -> None:
         """
@@ -2917,6 +2923,159 @@ class DaemonHardeningTests(unittest.TestCase):
         finally:
             conn.close()
             peer.close()
+
+    def test_purge_initiation_covers_other_clients_without_operation_details(
+        self,
+    ) -> None:
+        """An accepted global purge reaches another GUI without its operation ID."""
+        daemon = self._build_daemon()
+        daemon._ipc = Mock()
+        initiating, initiating_peer = socket.socketpair()
+        other, other_peer = socket.socketpair()
+        try:
+            daemon._session_access.mark_authenticated(initiating)
+            with patch('metor.core.daemon.managed.engine.daemon.threading.Thread'):
+                daemon._process_ui_command(
+                    SelfDestructCommand(operation_id='a' * 32), initiating
+                )
+            direct = daemon._ipc.send_to.call_args.args[1]
+            self.assertIs(direct.event_type, EventType.SELF_DESTRUCT_INITIATED)
+            self.assertEqual(direct.operation_id, 'a' * 32)
+            redacted = daemon._ipc.broadcast_to.call_args.args[0]
+            self.assertIs(redacted.event_type, EventType.SELF_DESTRUCT_INITIATED)
+            self.assertIsNone(redacted.operation_id)
+            self.assertIsNone(redacted.profile)
+            self.assertEqual(
+                daemon._ipc.broadcast_to.call_args.kwargs,
+                {'exclude': {initiating}},
+            )
+        finally:
+            initiating.close()
+            initiating_peer.close()
+            other.close()
+            other_peer.close()
+
+    def test_profile_exit_respects_client_authorization_before_cleanup(self) -> None:
+        """A restricted socket cannot bypass its device lifecycle policy."""
+        daemon = self._build_daemon()
+        daemon._ipc = Mock()
+        conn, peer = socket.socketpair()
+        try:
+            with (
+                patch.object(daemon._session_access, 'authorize', return_value=False),
+                patch.object(
+                    daemon._command_dispatcher, 'disconnect_voice_producer'
+                ) as release_voice,
+                patch.object(
+                    daemon._command_dispatcher, 'clear_client_focus'
+                ) as clear_focus,
+            ):
+                daemon._process_ui_command(PrepareProfileExitCommand(), conn)
+            release_voice.assert_not_called()
+            clear_focus.assert_not_called()
+            daemon._ipc.send_to.assert_not_called()
+        finally:
+            conn.close()
+            peer.close()
+
+    def test_redacted_purge_event_uses_actual_ipc_recipient_exclusion(self) -> None:
+        """The redacted event reaches the other socket, never the initiator."""
+        server = IpcServer(Mock(), lambda _command, _connection: None)
+        initiating, initiating_peer = socket.socketpair()
+        other, other_peer = socket.socketpair()
+        server._clients.extend((initiating, other))
+        try:
+            server.broadcast_to(
+                create_event(EventType.SELF_DESTRUCT_INITIATED),
+                exclude={initiating},
+            )
+            self.assertTrue(server.flush(Constants.DEFAULT_IPC_TIMEOUT))
+            other_peer.settimeout(Constants.DEFAULT_IPC_TIMEOUT)
+            with other_peer.makefile('rb') as reader:
+                payload = json.loads(reader.readline())
+            self.assertEqual(
+                payload['event_type'], EventType.SELF_DESTRUCT_INITIATED.value
+            )
+            self.assertIsNone(payload.get('operation_id'))
+            initiating_peer.setblocking(False)
+            with self.assertRaises(BlockingIOError):
+                initiating_peer.recv(1)
+        finally:
+            server.stop()
+            initiating_peer.close()
+            other_peer.close()
+
+    def test_fast_purge_flushes_redacted_notice_before_other_socket_closes(
+        self,
+    ) -> None:
+        """Fast destruction drains the other GUI's queued notice before IPC stop."""
+        daemon = self._build_daemon()
+        server = IpcServer(Mock(), lambda _command, _connection: None)
+        daemon._ipc = server
+        initiating, initiating_peer = socket.socketpair()
+        other, other_peer = socket.socketpair()
+        server._clients.extend((initiating, other))
+        daemon._destruction_recipients = {initiating}
+        daemon._purge_operation_id = 'a' * 32
+        release_other = threading.Event()
+        flush_entered = threading.Event()
+        flushed_recipients: list[object] = []
+        original_run = BoundedSocketWriter._run
+        original_flush = server.flush
+
+        def held_other_writer(writer: BoundedSocketWriter) -> None:
+            if writer._conn is other:
+                release_other.wait(Constants.DEFAULT_IPC_TIMEOUT)
+            original_run(writer)
+
+        def observed_flush(
+            timeout: float, recipients: Optional[Iterable[socket.socket]] = None
+        ) -> bool:
+            flushed_recipients.append(recipients)
+            flush_entered.set()
+            return original_flush(timeout, recipients)
+
+        worker = threading.Thread(target=daemon._nuke_data)
+        try:
+            with (
+                patch.object(BoundedSocketWriter, '_run', held_other_writer),
+                patch(
+                    'metor.core.daemon.managed.engine.lifecycle.destroy_profile_storage'
+                ),
+                patch.object(server, 'flush', side_effect=observed_flush),
+                patch.object(daemon, 'stop', side_effect=server.stop),
+            ):
+                server.send_to(
+                    initiating,
+                    create_event(
+                        EventType.SELF_DESTRUCT_INITIATED,
+                        {'operation_id': daemon._purge_operation_id},
+                    ),
+                )
+                server.broadcast_to(
+                    create_event(EventType.SELF_DESTRUCT_INITIATED),
+                    exclude={initiating},
+                )
+                worker.start()
+                self.assertTrue(flush_entered.wait(Constants.DEFAULT_IPC_TIMEOUT))
+                self.assertEqual(flushed_recipients, [None])
+                release_other.set()
+                worker.join(Constants.DEFAULT_IPC_TIMEOUT)
+            self.assertFalse(worker.is_alive())
+            other_peer.settimeout(Constants.DEFAULT_IPC_TIMEOUT)
+            with other_peer.makefile('rb') as reader:
+                payload = json.loads(reader.readline())
+            self.assertEqual(
+                payload['event_type'], EventType.SELF_DESTRUCT_INITIATED.value
+            )
+            self.assertIsNone(payload.get('operation_id'))
+        finally:
+            release_other.set()
+            if worker.ident is not None:
+                worker.join(Constants.DEFAULT_IPC_TIMEOUT)
+            server.stop()
+            initiating_peer.close()
+            other_peer.close()
 
     def test_unauthenticated_init_requires_session_auth(self) -> None:
         """

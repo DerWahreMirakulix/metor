@@ -7,6 +7,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from textwrap import dedent
 from typing import Iterable, Sequence
@@ -24,6 +25,12 @@ CHECKSUM_FILE_NAME: str = 'SHA256SUMS.txt'
 BUNDLE_METADATA_NAME: str = 'BUNDLE.json'
 BUNDLE_VERIFIER_NAME: str = 'verify_bundle.py'
 RELEASE_VARIANTS: tuple[str, ...] = ('base', 'terminal', 'sdk', 'gui')
+LOCAL_WHEEL_SOURCES: tuple[tuple[str, str], ...] = (
+    ('packaging/sdk', 'metor_sdk-'),
+    ('.', 'metor-'),
+    ('packaging/terminal', 'metor_ui_terminal-'),
+    ('packaging/gui', 'metor_ui_gui-'),
+)
 
 
 def clean_packaging_artifacts(repo_root: Path) -> None:
@@ -427,6 +434,7 @@ def build_release_wheelhouse(
     output_dir: Path,
     skip_pip_upgrade: bool = False,
     variant: str = 'base',
+    prebuilt_wheels: dict[str, Path] | None = None,
 ) -> Path:
     """
     Builds the platform-specific runtime wheel bundle in the target directory.
@@ -435,6 +443,7 @@ def build_release_wheelhouse(
         output_dir (Path): The directory that should contain the bundle folder.
         skip_pip_upgrade (bool): Whether to skip upgrading pip first.
         variant (str): The distribution variant ('base', 'terminal', 'gui', or 'sdk').
+        prebuilt_wheels: Exact local wheels built once for an all-variant run.
 
     Returns:
         Path: The generated bundle directory.
@@ -507,17 +516,20 @@ def build_release_wheelhouse(
         repo_root,
     )
     for wheel_src in wheel_sources:
-        run_command(
-            [
-                *pip_prefix,
-                'wheel',
-                '--wheel-dir',
-                str(wheelhouse_dir),
-                '--no-deps',
-                wheel_src,
-            ],
-            repo_root,
-        )
+        if prebuilt_wheels is not None:
+            shutil.copy2(prebuilt_wheels[wheel_src], wheelhouse_dir)
+        else:
+            run_command(
+                [
+                    *pip_prefix,
+                    'wheel',
+                    '--wheel-dir',
+                    str(wheelhouse_dir),
+                    '--no-deps',
+                    wheel_src,
+                ],
+                repo_root,
+            )
 
     write_text_file(
         bundle_dir / INSTALL_GUIDE_NAME,
@@ -592,12 +604,36 @@ def main() -> None:
     """
     args = parse_args()
     if args.variant == 'all':
-        for variant in RELEASE_VARIANTS:
-            build_release_wheelhouse(
-                args.output_dir,
-                skip_pip_upgrade=args.skip_pip_upgrade,
-                variant=variant,
-            )
+        with tempfile.TemporaryDirectory(prefix='metor-local-wheels-') as directory:
+            wheel_dir = Path(directory)
+            clean_packaging_artifacts(PROJECT_ROOT)
+            for source, _prefix in LOCAL_WHEEL_SOURCES:
+                run_command(
+                    [
+                        sys.executable,
+                        '-m',
+                        'pip',
+                        'wheel',
+                        '--wheel-dir',
+                        str(wheel_dir),
+                        '--no-deps',
+                        source,
+                    ],
+                    PROJECT_ROOT,
+                )
+            prebuilt: dict[str, Path] = {}
+            for source, prefix in LOCAL_WHEEL_SOURCES:
+                matches = tuple(wheel_dir.glob(f'{prefix}*.whl'))
+                if len(matches) != 1:
+                    raise RuntimeError(f'Expected one built wheel for {source}.')
+                prebuilt[source] = matches[0]
+            for variant in RELEASE_VARIANTS:
+                build_release_wheelhouse(
+                    args.output_dir,
+                    skip_pip_upgrade=args.skip_pip_upgrade,
+                    variant=variant,
+                    prebuilt_wheels=prebuilt,
+                )
     else:
         build_release_wheelhouse(
             args.output_dir,

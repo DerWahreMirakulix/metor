@@ -113,7 +113,6 @@ jobs:
           ruff-check-paths: "src/metor/ scripts/ tests/"
           ruff-format-paths: "src/metor/ scripts/ tests/"
           mypy-paths: "src/metor/ scripts/"
-          run-tests: "false"
 
       - name: Generate and validate release documentation
         shell: bash
@@ -140,29 +139,25 @@ jobs:
           fi
           python scripts/check_release_compatibility.py "${args[@]}"
 
-      - name: Provision native Tor for installed daemon acceptance
-        uses: ./.github/actions/native-tor
-
-      - name: Build all package variants
-        shell: bash
-        run: |
-          mkdir -p dist/wheels
-          python -m pip wheel --no-deps --no-build-isolation . -w dist/wheels
-          python -m pip wheel --no-deps --no-build-isolation packaging/sdk -w dist/wheels
-          python -m pip wheel --no-deps --no-build-isolation packaging/terminal -w dist/wheels
-          python -m pip wheel --no-deps --no-build-isolation packaging/gui -w dist/wheels
-          python scripts/validate_wheel_versions.py dist/wheels/*.whl
-
       - name: Build platform release bundles
         shell: bash
         run: python scripts/build_release_wheelhouse.py --output-dir dist/release --skip-pip-upgrade --variant all
+
+      - name: Validate coordinated wheels in the release bundles
+        shell: bash
+        run: |
+          python scripts/validate_wheel_versions.py \
+            dist/release/metor-wheelhouse-*/wheelhouse/metor-*.whl \
+            dist/release/metor-sdk-wheelhouse-*/wheelhouse/metor_sdk-*.whl \
+            dist/release/metor-ui-terminal-wheelhouse-*/wheelhouse/metor_ui_terminal-*.whl \
+            dist/release/metor-ui-gui-wheelhouse-*/wheelhouse/metor_ui_gui-*.whl
 
       - name: Provision a generic Linux GUI display
         if: runner.os == 'Linux'
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends xvfb libegl1 libegl-mesa0 libgl1-mesa-dri
+          sudo apt-get install --no-install-recommends xvfb xauth libegl1 libegl-mesa0 libgl1-mesa-dri
           python -c "import ctypes; ctypes.CDLL('libEGL.so.1')"
 
       - name: Validate installed consumers and native GUI on Linux
@@ -178,7 +173,7 @@ jobs:
       - name: Validate installed consumers on Windows
         if: runner.os == 'Windows'
         shell: bash
-        run: python scripts/validate_installed_artifacts.py dist/release
+        run: python scripts/validate_installed_artifacts.py dist/release --gui-smoke --windows-launch
 
       - name: Validate every native installer
         shell: bash

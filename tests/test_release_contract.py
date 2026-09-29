@@ -1000,6 +1000,37 @@ class ReleaseContractTests(unittest.TestCase):
             )
         )
 
+    def test_bundle_copies_exact_prebuilt_local_wheels(self) -> None:
+        """A platform bundle must carry the staged Metor wheel bytes."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            sdk = root / 'metor_sdk-staged.whl'
+            base = root / 'metor-staged.whl'
+            sdk.write_bytes(b'synthetic-sdk-wheel')
+            base.write_bytes(b'synthetic-base-wheel')
+            output = root / 'bundles'
+            with (
+                patch('scripts.release.bundle.run_command') as command,
+                patch('scripts.release.bundle.clean_packaging_artifacts'),
+                patch(
+                    'scripts.release.bundle.archive_bundle',
+                    return_value=output / 'bundle.zip',
+                ),
+            ):
+                bundle = build_release_wheelhouse(
+                    output,
+                    skip_pip_upgrade=True,
+                    variant='base',
+                    prebuilt_wheels={'packaging/sdk': sdk, '.': base},
+                )
+            self.assertEqual(
+                (bundle / 'wheelhouse' / sdk.name).read_bytes(), sdk.read_bytes()
+            )
+            self.assertEqual(
+                (bundle / 'wheelhouse' / base.name).read_bytes(), base.read_bytes()
+            )
+            self.assertEqual(command.call_count, 2)
+
     def test_project_wheel_uses_terminal_frontend_package(self) -> None:
         """
         Verifies that the wheel contains only the canonical terminal CLI path.

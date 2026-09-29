@@ -5,6 +5,7 @@ Use ``--case callback`` to run only the isolated callback-failure worker.
 
 import argparse
 import builtins
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,7 @@ _APP_READY_SECONDS = 30.0
 _WORKER_SECONDS = 60.0
 _POLL_SECONDS = 0.1
 _CALLBACK_SECRET = 'synthetic-callback-secret'
+_AUTOSTART_PASSWORD = 'synthetic-gui-acceptance-password'
 _OBSERVATION_MARKER = 'INSTALLED_GUI_CALLBACK_OBSERVATION '
 _OBSERVATION_LIMIT = 4
 _OBSERVATION_MAX_CHARS = 2048
@@ -31,6 +33,35 @@ _FATAL_STAGES = frozenset(
 _SOURCE_NAME = re.compile(
     r'(?:kivy|metor)/[A-Za-z0-9_./-]+\.py|tests/gui_installed_launcher\.py'
 )
+
+
+def _windows_console_handles() -> set[int]:
+    """Read native console handles without collecting titles or command lines."""
+    if os.name != 'nt':
+        return set()
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
+    user32.EnumWindows.restype = wintypes.BOOL
+    user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetClassNameW.restype = ctypes.c_int
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.IsWindowVisible.restype = wintypes.BOOL
+    handles: set[int] = set()
+
+    @callback_type
+    def visit(hwnd: int, _extra: int) -> bool:
+        name = ctypes.create_unicode_buffer(64)
+        user32.GetClassNameW(hwnd, name, len(name))
+        if name.value == 'ConsoleWindowClass' and user32.IsWindowVisible(hwnd):
+            handles.add(hwnd)
+        return True
+
+    if not user32.EnumWindows(visit, 0):
+        raise OSError('Could not enumerate native console windows.')
+    return handles
 
 
 def _safe_category(value: object) -> bool:
@@ -236,7 +267,7 @@ def _worker(case: str) -> None:
         )
     from metor.application import initialize_runtime_environment
     from metor.cli.entry import run_cli
-    from metor.data import ProfileManager
+    from metor.data import ProfileManager, ProfileSecurityMode
     from metor.ui.gui.platform import lifecycle as native_lifecycle
 
     installed_root = Path(sys.prefix).resolve()
@@ -245,11 +276,21 @@ def _worker(case: str) -> None:
     if case == 'picker':
         initialize_runtime_environment()
         ProfileManager('available').initialize()
+    if case == 'autostart':
+        initialize_runtime_environment()
+        created = ProfileManager.add_profile_folder(
+            'autostart',
+            security_mode=ProfileSecurityMode.ENCRYPTED,
+            master_password=_AUTOSTART_PASSWORD,
+        )
+        assert created.success
 
     observed: list[str] = []
     observed_app: object | None = None
     diagnostics: list[dict[str, object]] = []
     started = time.monotonic()
+    opened_profile = False
+    cancelled_profile = False
 
     from metor.ui.gui.launcher import GuiEntry
 
@@ -335,7 +376,7 @@ def _worker(case: str) -> None:
         Returns:
             None
         """
-        nonlocal observed_app
+        nonlocal observed_app, opened_profile, cancelled_profile
         from kivy.app import App
         from kivy.clock import Clock
         from kivy.metrics import dp
@@ -350,6 +391,59 @@ def _worker(case: str) -> None:
             if time.monotonic() - started >= _APP_READY_SECONDS:
                 raise AssertionError('Installed GUI did not build a window')
             Clock.schedule_once(observe, _POLL_SECONDS)
+            return
+        if case == 'autostart':
+            if app.shell.get_root_window() is None:
+                Clock.schedule_once(observe, _POLL_SECONDS)
+                return
+            if not opened_profile:
+                assert app.controller.open_profile()
+                opened_profile = True
+                Clock.schedule_once(observe, _POLL_SECONDS)
+                return
+            if not cancelled_profile:
+                prompt = app.controller.interactions.prompt
+                password_visible = (
+                    prompt is not None
+                    and prompt.kind == 'password'
+                    and any(
+                        isinstance(widget, SecretInput) for widget in app.shell.walk()
+                    )
+                    and any(
+                        isinstance(widget, Action)
+                        and widget.accessible_name == 'Open profile'
+                        for widget in app.shell.walk()
+                    )
+                )
+                cancel = [
+                    widget
+                    for widget in app.shell.walk()
+                    if isinstance(widget, Action) and widget.accessible_name == 'Cancel'
+                ]
+                if (
+                    not password_visible
+                    or len(cancel) != 1
+                    or not ProfileManager('autostart').is_daemon_running()
+                ):
+                    if time.monotonic() - started >= _APP_READY_SECONDS:
+                        raise AssertionError(
+                            'Installed GUI locked autostart did not settle'
+                        )
+                    Clock.schedule_once(observe, _POLL_SECONDS)
+                    return
+                cancel[0].dispatch('on_release')
+                cancelled_profile = True
+                Clock.schedule_once(observe, _POLL_SECONDS)
+                return
+            if app.controller.state.busy:
+                if time.monotonic() - started >= _APP_READY_SECONDS:
+                    raise AssertionError('Installed GUI cancellation did not settle')
+                Clock.schedule_once(observe, _POLL_SECONDS)
+                return
+            assert app.controller.client is None
+            observed.append(case)
+            observed_app = app
+            assert app._close()
             return
         expected_size = tuple(dp(value) for value in app.configuration.logical_size)
         ready = (
@@ -431,6 +525,8 @@ def _worker(case: str) -> None:
     arguments = ['chat', '--ui', 'gui']
     if case == 'picker':
         arguments.extend(('-p', 'missing'))
+    if case == 'autostart':
+        arguments = ['-p', 'autostart', 'chat', '--ui', 'gui', '--start-daemon']
     try:
         # The host OS lifecycle bus is outside this display and Close software gate.
         with (
@@ -458,6 +554,18 @@ def _worker(case: str) -> None:
     if worker is not None:
         worker.join(2)
         assert not worker.is_alive()
+    if case == 'autostart':
+        from metor.utils import Constants
+
+        deadline = (
+            time.monotonic()
+            + Constants.FRONTEND_FINAL_RELEASE_GRACE_SEC
+            + Constants.OWNED_DAEMON_SHUTDOWN_TIMEOUT_SEC
+        )
+        profile = ProfileManager('autostart')
+        while profile.is_daemon_running() and time.monotonic() < deadline:
+            time.sleep(_POLL_SECONDS)
+        assert not profile.is_daemon_running(), 'Frontend-managed daemon survived Close'
     if case == 'callback':
         print(
             _OBSERVATION_MARKER
@@ -485,6 +593,74 @@ def _worker(case: str) -> None:
         print('INSTALLED_GUI_CLOSE_OK', case)
 
 
+def _cleanup_autostart_daemon(data_parent: Path, started_at: float) -> int:
+    """Reap this fixture's verified daemon, including one before PID publication."""
+    marker = data_parent / '.gui-smoke-owner'
+    if (
+        data_parent.name != 'autostart'
+        or marker.read_text(encoding='utf-8') != 'isolated\n'
+    ):
+        raise RuntimeError('Autostart cleanup root is not the owned fixture.')
+
+    import psutil
+
+    from metor.utils import Constants, ProcessManager
+
+    data_root = data_parent / Constants.DATA_DIR
+    pid_file = data_root / 'autostart' / Constants.DAEMON_PID_FILE
+    with patch.object(Constants, 'DATA', data_root):
+        cleaned = ProcessManager.cleanup_processes()
+        for process in psutil.process_iter():
+            try:
+                # A killed worker can leave its detached child before daemon.pid
+                # exists. Match the fresh cwd, generation, owner, executable and
+                # exact locked-autostart command before touching that child.
+                if (
+                    process.create_time() < started_at - 2
+                    or ProcessManager._same_os_owner(process) is not True
+                    or Path(process.cwd()).resolve() != data_parent.resolve()
+                    or not Path(process.exe()).samefile(sys.executable)
+                    or process.cmdline()[1:]
+                    != [
+                        '-I',
+                        '-m',
+                        'metor',
+                        '-p',
+                        'autostart',
+                        'daemon',
+                        '--non-interactive',
+                        '--parent-start-lock-held',
+                        '--frontend-managed',
+                        '--locked',
+                    ]
+                ):
+                    continue
+                if not ProcessManager._terminate_process(process):
+                    raise RuntimeError(
+                        'Verified temporary daemon survived bounded cleanup.'
+                    )
+                cleaned += 1
+            except (
+                OSError,
+                psutil.NoSuchProcess,
+                psutil.AccessDenied,
+                psutil.ZombieProcess,
+            ):
+                continue
+        remaining = (
+            ProcessManager.is_managed_process_running(pid_file, 'autostart')
+            if pid_file.exists()
+            else False
+        )
+    if remaining is True:
+        raise RuntimeError('Verified temporary daemon survived bounded cleanup.')
+    if remaining is None:
+        raise RuntimeError(
+            'Temporary daemon identity could not be verified for cleanup.'
+        )
+    return cleaned
+
+
 def main() -> None:
     """Create fresh data roots before any child imports Metor or the toolkit.
 
@@ -494,10 +670,12 @@ def main() -> None:
         None
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--worker', choices=('empty', 'picker', 'callback'))
+    parser.add_argument(
+        '--worker', choices=('empty', 'picker', 'callback', 'autostart')
+    )
     parser.add_argument(
         '--case',
-        choices=('empty', 'picker', 'callback'),
+        choices=('empty', 'picker', 'callback', 'autostart'),
         help='Run one isolated installed GUI case; default runs all cases.',
     )
     arguments = parser.parse_args()
@@ -521,6 +699,7 @@ def main() -> None:
                 'empty',
                 'picker',
                 'callback',
+                'autostart',
             )
         )
         for case in cases:
@@ -543,15 +722,66 @@ def main() -> None:
                     'MESA_SHADER_CACHE_DISABLE': 'true',
                 }
             )
-            result = subprocess.run(
-                [sys.executable, '-I', str(Path(__file__).resolve()), '--worker', case],
-                cwd=data_parent,
-                env=environment,
-                capture_output=True,
-                text=True,
-                timeout=_WORKER_SECONDS,
-                check=False,
+            consoles_before = _windows_console_handles()
+            new_consoles: set[int] = set()
+            console_stop = threading.Event()
+            console_observation_failed = threading.Event()
+
+            def watch_consoles() -> None:
+                """Record transient additional consoles during GUI and daemon work."""
+                while not console_stop.wait(0.05):
+                    try:
+                        new_consoles.update(
+                            _windows_console_handles() - consoles_before
+                        )
+                    except OSError:
+                        console_observation_failed.set()
+                        return
+
+            console_thread = (
+                threading.Thread(target=watch_consoles, daemon=True)
+                if os.name == 'nt'
+                else None
             )
+            if console_thread is not None:
+                console_thread.start()
+            cleaned_autostart_daemons = 0
+            worker_started_at = time.time()
+            try:
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        '-I',
+                        str(Path(__file__).resolve()),
+                        '--worker',
+                        case,
+                    ],
+                    cwd=data_parent,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=_WORKER_SECONDS,
+                    check=False,
+                )
+            finally:
+                if console_thread is not None:
+                    console_stop.set()
+                    console_thread.join(timeout=2)
+                if case == 'autostart':
+                    cleaned_autostart_daemons = _cleanup_autostart_daemon(
+                        data_parent, worker_started_at
+                    )
+            if cleaned_autostart_daemons:
+                raise RuntimeError(
+                    'Installed GUI autostart left a managed daemon; '
+                    'bounded cleanup reaped it.'
+                )
+            if console_observation_failed.is_set():
+                raise RuntimeError('Native console observation failed.')
+            if new_consoles or _windows_console_handles() - consoles_before:
+                raise RuntimeError(
+                    f'Installed GUI {case} opened an additional Windows console.'
+                )
             marker = (
                 'INSTALLED_GUI_CALLBACK_FAILURE_OK'
                 if case == 'callback'

@@ -51,7 +51,7 @@ class SelfDestructCommand(IpcCommand):
 @register_command(CommandType.PREPARE_PROFILE_EXIT)
 @dataclass
 class PrepareProfileExitCommand(IpcCommand):
-    """Durably prepares normal profile exit without awaiting remote delivery."""
+    """Releases only the requesting frontend's active profile resources."""
 
     command_type: CommandType = field(
         default=CommandType.PREPARE_PROFILE_EXIT,

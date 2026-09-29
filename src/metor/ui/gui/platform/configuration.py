@@ -4,16 +4,23 @@ from dataclasses import dataclass
 import math
 import os
 from pathlib import Path
+import re
 import stat
 import tomllib
+from typing import cast
 
-from metor.client.platform import PlatformBindings
+from metor.client.platform import AdapterParameter, PlatformBindings
 from metor.ui.gui.constants import Geometry, GuiLimits
 from metor.ui.gui.platform.configuration_security import open_windows_configuration
 
 
 class DeviceConfigurationError(ValueError):
     """Reports a safe field/configuration error without rendering file content."""
+
+
+_ADAPTER_ID = re.compile(r'[a-z][a-z0-9_.-]{0,63}')
+_PARAMETER_ID = re.compile(r'[a-z][a-z0-9_]{0,63}')
+_MAX_ADAPTER_PARAMETERS = 32
 
 
 def _is_windows() -> bool:
@@ -122,6 +129,8 @@ class DeviceConfiguration:
     indicator: bool = False
     haptics: bool = False
     power: bool = False
+    adapter_id: str | None = None
+    adapter_parameters: tuple[tuple[str, AdapterParameter], ...] = ()
     source: str | None = None
 
     @property
@@ -149,7 +158,20 @@ class DeviceConfiguration:
             PlatformBindings | None: Configuration-filtered ports for the GUI.
         """
         if self.mode != 'device' or platform is None:
+            if self.mode == 'device':
+                raise DeviceConfigurationError('Selected device adapter is unavailable')
             return None
+        if platform.adapter_id != self.adapter_id:
+            raise DeviceConfigurationError('Selected device adapter identity changed')
+        for requested, available, name in (
+            (self.indicator, platform.indicator, 'indicator'),
+            (self.haptics, platform.haptics, 'haptics'),
+            (self.power, platform.shutdown, 'power'),
+        ):
+            if requested and available is None:
+                raise DeviceConfigurationError(
+                    f'{name}: selected capability unavailable'
+                )
         return PlatformBindings(
             platform.adapter_id,
             platform.inputs,
@@ -157,6 +179,7 @@ class DeviceConfiguration:
             status=platform.status,
             indicator=platform.indicator if self.indicator else None,
             haptics=platform.haptics if self.haptics else None,
+            settings=platform.settings,
         )
 
 
@@ -191,6 +214,44 @@ def _integer(value: object, minimum: int, maximum: int, name: str) -> int:
     return value
 
 
+def _adapter(value: object, name: str) -> str:
+    """Validate a stable installed adapter ID, never an import path."""
+    if type(value) is not str or _ADAPTER_ID.fullmatch(value) is None:
+        raise DeviceConfigurationError(f'{name}: invalid adapter identifier')
+    return value
+
+
+def _parameters(value: object) -> tuple[tuple[str, AdapterParameter], ...]:
+    """Bound scalar deployment data before a selected provider receives it."""
+    raw = _table(
+        value, set(value) if isinstance(value, dict) else set(), 'platform.config'
+    )
+    if len(raw) > _MAX_ADAPTER_PARAMETERS:
+        raise DeviceConfigurationError('platform.config: too many parameters')
+    parsed: list[tuple[str, AdapterParameter]] = []
+    for key, item in raw.items():
+        if (
+            type(key) is not str
+            or _PARAMETER_ID.fullmatch(key) is None
+            or type(item) not in (bool, int, float, str)
+            or (type(item) is str and len(item) > GuiLimits.DEVICE_STRING)
+        ):
+            raise DeviceConfigurationError('platform.config: invalid parameter')
+        if (
+            isinstance(item, (int, float))
+            and not isinstance(item, bool)
+            and (
+                abs(item) > GuiLimits.DEVICE_PARAMETER_ABSOLUTE_NUMBER
+                or not math.isfinite(item)
+            )
+        ):
+            raise DeviceConfigurationError(
+                'platform.config: number exceeds supported range'
+            )
+        parsed.append((key, cast(AdapterParameter, item)))
+    return tuple(sorted(parsed))
+
+
 def read_configuration(
     path: str | None,
     simulator: bool,
@@ -223,7 +284,7 @@ def read_configuration(
         parsed = tomllib.loads(data.decode('utf-8'))
     except DeviceConfigurationError:
         raise
-    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError, ValueError) as exc:
         raise DeviceConfigurationError(
             f'Device configuration could not be read: {location}. '
             'Device mode was requested; desktop fallback is disabled.'
@@ -241,6 +302,7 @@ def read_configuration(
             'power',
             'clipboard',
             'drivers',
+            'platform',
         },
         'device',
     )
@@ -267,10 +329,31 @@ def read_configuration(
         },
         'input',
     )
+    if simulator and 'platform' in tables:
+        raise DeviceConfigurationError('Simulator cannot select a platform adapter')
+    platform_table = (
+        _table(tables['platform'], {'adapter', 'config'}, 'platform')
+        if 'platform' in tables
+        else None
+    )
     expected_adapter = (
         'simulator'
         if simulator
-        else (platform.adapter_id if platform is not None else None)
+        else _adapter(
+            platform_table.get('adapter')
+            if platform_table is not None
+            else display.get('adapter'),
+            'platform.adapter',
+        )
+    )
+    if not simulator and expected_adapter in {'none', 'simulator'}:
+        raise DeviceConfigurationError('Unsupported device adapter')
+    if platform is not None and platform.adapter_id != expected_adapter:
+        raise DeviceConfigurationError('Unsupported device adapter')
+    parameters = (
+        _parameters(platform_table['config'])
+        if platform_table is not None and 'config' in platform_table
+        else ()
     )
     for table in (display, inputs):
         if table.get('adapter') != expected_adapter:
@@ -304,14 +387,15 @@ def read_configuration(
         enabled_ports[key] = False
         if key in tables:
             optional = _table(tables[key], {'adapter'}, key)
-            supported = (
-                expected_adapter
-                if key in optional_ports and optional_ports[key] is not None
-                else 'none'
-            )
-            if optional.get('adapter') != supported:
+            selected = optional.get('adapter')
+            if selected != 'none' and (
+                simulator
+                or key not in optional_ports
+                or selected != expected_adapter
+                or (platform is not None and optional_ports[key] is None)
+            ):
                 raise DeviceConfigurationError(f'{key}: unsupported adapter')
-            enabled_ports[key] = optional.get('adapter') == expected_adapter
+            enabled_ports[key] = selected == expected_adapter
     if 'clipboard' in tables:
         clipboard = _table(tables['clipboard'], {'policy'}, 'clipboard')
         if clipboard.get('policy') != 'disabled':
@@ -332,15 +416,13 @@ def read_configuration(
         indicator=enabled_ports['indicator'],
         haptics=enabled_ports['haptics'],
         power=enabled_ports['power'],
+        adapter_id=expected_adapter if not simulator else None,
+        adapter_parameters=parameters,
         source=str(location),
     )
     width, height = config.logical_size
     if width < Geometry.MIN_WIDTH or height < Geometry.MIN_HEIGHT:
         raise DeviceConfigurationError(
             'Display requires at least 360 × 640 logical units'
-        )
-    if not simulator and platform is None:
-        raise DeviceConfigurationError(
-            'Physical device adapter is not installed. Simulator requires --simulator.'
         )
     return config

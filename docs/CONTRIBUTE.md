@@ -17,11 +17,11 @@ tests remain necessary: editable source imports do not prove wheel ownership.
 
 ## Running tests
 
-From the repository root, use the selected development Python after the checkout
-installation above (do not install dependencies again for each suite):
+Install the checkout once as described above. All jobs use `unittest` and the
+same test modules. New `tests/test_*.py` files join the complete suite through
+filename discovery; no module inventory or CI path planner needs an update.
 
 ```sh
-python scripts/run_tests.py --list
 python scripts/run_tests.py --suite fast
 python scripts/run_tests.py --suite integration
 python scripts/run_tests.py --suite all
@@ -30,89 +30,96 @@ python scripts/run_tests.py --suite integration --module test_startup_selection 
 python scripts/run_tests.py --suite all --durations 20
 ```
 
-The runner loads `tests/test_*.py` through the single declarative per-module
-manifest in `scripts/test_inventory.py`. The checkout-only CI planner reads the
-same inventory without importing test execution or project dependencies.
-Classify each new module as fast or integration; missing,
-unclassified or multiply classified files fail _before any test module imports_.
-Fast imports only fast modules (and their own dependencies); keep fast test
-imports independent of integration fixtures. `all` includes every classified
-module and is the CI/release gate. `--list` prints **every full unittest ID** in
-the selected suite, without executing cases; `--match` filters full IDs by
-substring. `--module` selects exact manifest modules before importing tests and
-may be repeated; direct `python -m unittest` remains available for one-case
-diagnosis. Empty selections, import failures, duplicate IDs and unexpected
-case modules fail closed. For failures, the console and ignored
-`build/test-report.txt` contain bounded IDs, phase, known-safe error category
-and source-verified relative locations. A known SDK rejection includes only its
-verified `EventType` outcome; unknown exception names remain generic. Failure
-and skip diagnostics have separate budgets, with omitted counts shown. Exception
-values, subtest parameters, locals and captured output are never printed. The
-report lists each executed case's status and setup-to-cleanup runtime; fixture
-skips count as skipped coverage, while failed fixtures and interrupted runs leave
-untested cases incomplete. XFAIL and XPASS appear separately, and XPASS fails the run. The
-script supervises its test worker with a one-hour whole-worker guard, bounded
-stdout and stderr pipes, and a fresh completion record tied to the bounded
-report. On Linux, the serialized runner owns a subreaper scope and refuses to
-start beside an existing child; on Windows, it assigns the suspended worker to
-a Job Object before resuming it. Live test children or unconfirmed cleanup fail
-the run, as do timeout, excess output, unexpected stderr, report failure and
-abrupt exit. The runner process must not start unrelated children concurrently
-with its supervised worker. A verified running test ID is retained for an
-aborted worker when available. Raw stderr is withheld; test and child-process
-output during test execution is discarded.
-The console shows only the requested number of slow cases. Class/module fixture
-costs remain in overall elapsed time, not attributed to an individual case.
+`all` is the required gate. `fast` is a small, explicitly selected, fixture-free
+subset for local feedback; `integration` contains the remaining discovered
+modules. `--module` selects an exact file stem, `--match` filters full unittest
+IDs, and `--list` prints the selected IDs without running them. An empty suite,
+failed import, duplicate ID, interrupted worker, incomplete test, unexpected
+success, or unconfirmed child cleanup fails the run. Direct
+`python -m unittest` remains available for one-case diagnosis. The supervised
+runner writes `build/test-report.txt` with case status and setup-to-cleanup
+runtime, bounded failure locations and categories, and skip counts. It never
+prints captured output or unreviewed exception values. Optional
+`--coverage` requires `coverage.py` installed separately; CI sets no coverage
+threshold.
 
-Optional coverage requires `coverage.py` already installed in the same Python
-environment; the pinned development manifest does not install it. Run
-`python scripts/run_tests.py --suite all --coverage` to emit a terminal summary
-for `metor` and save detailed data in ignored `build/.coverage`. CI does
-not install coverage or claim a coverage threshold. PR merge refs, `main`
-pushes, and manually dispatched CI runs execute the full Linux/Windows ×
-Python 3.11/3.13 software matrix. A push to `embeddedui` uses `scripts/ci_impact.py`
-to run Fast and explicitly selected integration modules on Linux 3.11 only for
-known isolated edits. Fast selection requires a verified two-commit diff with
-only regular-file content modifications on recognized paths. Renames, additions,
-deletions, type changes, missing refs, shared, security-sensitive, packaging,
-workflow, unknown or unresolvable diffs fall back to the full matrix. The
-glossary is treated as text-only; README installation examples, profile
-lifecycle views, executable examples and packaged resources use the full path.
-The final `acceptance` job requires all planned matrix jobs to pass.
-Run the CI workflow manually on the desired branch/ref for full branch
-acceptance without a PR; a Fast branch push is not a full release gate. The
-release quality gate still runs all tests. CI cancels superseded runs per
-branch/PR; branch commits and PR merge refs are separate candidates. Explicit
-native GUI and stream fixtures remain separate from unittest discovery; the
-runner does not replace installed-consumer, Tor, or physical-device acceptance.
+Tests use temporary profile roots and controlled dependencies. A missing local
+capability is a visible skip in the narrow fixture; a required CI GUI or security
+capability must fail its job. Unit/contract tests avoid a display, hardware, and
+public Tor. Integration tests exercise real IPC, temporary persistence,
+authorization, and process lifetimes. GUI acceptance runs the installed packages
+with a real Kivy event loop on a virtual Linux display or native Windows
+desktop. Physical device acceptance is a separate, explicit run on named
+hardware; the simulator does not establish physical support.
 
-### Portable local test environments
+### Python and platform policy
 
-The full unittest suite runs natively on Windows and Linux, including Linux
-under WSL 2. The Linux Docker image installs the same canonical
-`requirements/dev.txt` checkout dependency closure as native CI and runs the
-same full test runner on any host with a Linux-container engine:
+All four distributions require CPython 3.11 through 3.13. The PR runtime matrix
+checks 3.11 and 3.13 on Linux x86-64 and Windows x86-64; 3.12 is allowed by
+metadata but is not a CI-tested combination. The offline delivery bundles are
+built and accepted on CPython 3.11 for each of those platforms and declare an
+exact OS, architecture, interpreter minor, and ABI. Linux under WSL counts as
+Linux, not Windows. Other operating systems, CPU architectures, and physical
+devices require separate evidence. The 3.13 bound follows the pinned
+[Kivy 2.3.1 wheels](https://pypi.org/project/Kivy/2.3.1/); the pinned
+[Linux SQLCipher wheel](https://pypi.org/project/sqlcipher3-binary/0.6.0/),
+[Windows SQLCipher wheel](https://pypi.org/project/sqlcipher3/0.6.2/), and
+[Windows pywin32 wheel](https://pypi.org/project/pywin32/312/) have matching
+3.11 and 3.13 x86-64 artifacts. Wheel presence establishes installability,
+while the native CI jobs establish the checked behavior.
+
+CI has four fixed jobs: `static` checks formatting, architecture, types on
+Linux 3.11 and Windows 3.13 branches, generated references, and versioning once;
+`runtime` runs the complete unittest suite on Linux and Windows with CPython
+3.11 and 3.13; `installed` builds and checks the 3.11 native offline bundles,
+SDK/Base/Frontend installation and removal, entry points, native GUI, and
+installers on each OS; `acceptance` requires every job to succeed. Pull requests
+from every feature branch, pushes to `main`, and manual dispatch use this same
+topology. The generated-document checker is nonmutating; run
+`npm run generate:docs` before committing an intentional API or settings change.
+
+### Portable local environments
+
+The optional Docker image gives Linux and WSL users a clean, unprivileged
+headless environment for the **same** full unittest command. CI does not run a
+duplicate Linux 3.11 unittest job in a container:
 
 ```sh
 docker build -f Dockerfile.tests --build-arg PYTHON_VERSION=3.11 -t metor-tests:py311 .
 docker run --rm metor-tests:py311
 ```
 
-Build the image again after changing the checkout. Full CI also builds this
-image and runs its complete suite as a separate, parallel Linux gate, so the
-local container path is checked on the candidate revision. The native Linux
-and Windows jobs remain separate requirements: installed consumers, Tor, GUI,
-and platform-specific behavior cannot be inferred from the container suite.
-On Windows, also run the native suite with the checkout's development Python.
-WSL and a Linux container satisfy the Linux side, not the Windows side. The
-container runs as an unprivileged user and excludes local `.env`, profile data,
-build outputs, and virtual environments from its context.
+For Linux GUI acceptance, install Xvfb, `xauth`, `libegl1`,
+`libegl-mesa0`, and `libgl1-mesa-dri`, plus the pinned checkout. No private
+desktop display, WSLg, or public Tor connection is needed:
 
-Tests must isolate configuration and writable data from the developer's home
-and repository `.env`. Host capabilities are checked at the narrow fixture that
-needs them: an unsupported native capability produces an explicit skip locally,
-while CI must fail if a capability required for its security coverage disappears.
-Do not turn a genuine cleanup or authorization failure into a capability skip.
+```sh
+python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir closure-bundles
+xvfb-run -a --server-args='-screen 0 1280x1024x24' python scripts/validate_installed_artifacts.py closure-bundles --gui-smoke
+```
+
+On a native Windows desktop, use the same bundle build command followed by
+`python scripts/validate_installed_artifacts.py closure-bundles --gui-smoke
+--windows-launch`. The latter exercises both installed `metor.exe` and
+`metor-gui.exe` windows and checks for an extra console. It also starts the
+installed graphical entry point without standard streams, checks the bounded
+native startup-error dialog, and exercises `--start-daemon` with a disposable
+encrypted profile through native UI Automation. The resulting daemon remains
+locked; the fixture cancels the password prompt and verifies orderly daemon
+exit while the original terminal stays visible. `--gui-smoke` separately checks
+the locked profile path on the actual Kivy loop. A fixed console-executable
+fixture checks the installed Windows Tor child-creation path from a process
+without a console and without a public Tor connection. The locked GUI startup
+does not start Tor. WSL and Linux cannot verify this native Windows
+behavior. The native rendering and synthetic stream fixtures are explicit CI
+commands outside unittest discovery; they require a working graphical display
+and are not silently skipped.
+
+The optional native Tor acceptance additionally requires an installed Tor
+binary and a network on which it can complete bootstrap. It is not a
+deterministic PR gate. After building the platform bundles, run
+`python scripts/validate_installed_artifacts.py closure-bundles
+--with-public-tor` on the named native host and record the result separately.
 
 ## 1. Language & Naming
 
@@ -130,7 +137,7 @@ Do not turn a genuine cleanup or authorization failure into a capability skip.
 - **Module Headers:** Every Python file MUST start with a top-level module docstring (triple double quotes `"""`) explaining the purpose of the file.
 - **Google Style:** Use Google-style docstrings for every class and method.
 - **Meaningful Descriptions:** Explain _what_ the function does and _why_.
-- **Input/Output (STRICT):** Every method docstring MUST have an `Args:` and `Returns:` block. If a function takes no arguments, write `Args:\n    None`. If it returns nothing, write `Returns:\n    None`.
+- **Contracts:** Document public inputs, returned results, side effects, failure modes, concurrency, and security assumptions where relevant. Do not add empty `Args:` or `Returns:` blocks merely to satisfy a format rule.
 - **Comments:** Keep comments strictly objective. No conversational filler, no changelog notes. Write comments for a production codebase. Don't remove comments which fulfill a purpose (e.g. guiding auto completion models or agents).
 
 ## 4. Architecture & Design Principles

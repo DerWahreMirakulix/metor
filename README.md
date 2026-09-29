@@ -133,7 +133,9 @@ This self-contained installer is intentionally local to the extracted bundle fol
 
 ### 3. Install From A Source Checkout
 
-Python 3.11 or higher is required.
+Metor requires CPython 3.11 through 3.13. CI checks Linux and Windows x86-64
+on 3.11 and 3.13; offline bundles use 3.11. Other platforms and architectures
+need separate validation. See [the support and test policy](docs/CONTRIBUTE.md#python-and-platform-policy).
 
 This is the normal path for developers, contributors, and advanced users who want to choose their own Python environment instead of using the release bundle installer.
 
@@ -250,8 +252,9 @@ selection, authentication and later switching stay graphical, including when
 started from a shell. Terminal chat requires a usable profile before its chat
 loop and directs a fresh installation to `metor profiles add NAME`. The first
 successfully created profile becomes the default; a sole survivor is selected
-automatically. A chat invocation stops only the local daemon it started.
-Separately started daemons remain running when chat closes. Use
+automatically. Automatically started daemons are shared by long-lived local
+frontends and stop after the last one exits. Separately started daemons remain
+running when chat closes. Use
 `--start-daemon` to start a missing local daemon upon activation,
 `--no-start-daemon` to prevent that start, and `--debug` for safe extra fatal
 startup locations. Native display and Tor prerequisites must be installed

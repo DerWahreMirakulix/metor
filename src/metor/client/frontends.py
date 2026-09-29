@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from importlib import metadata
 import threading
-from typing import Optional, Protocol, cast
+from typing import ContextManager, Optional, Protocol, cast
 
 from metor.shared.constants import Constants
 
@@ -164,6 +164,7 @@ class FrontendBootstrapResult:
     config: FrontendSettings
     encrypted: bool
     unlock_timeout: float = Constants.MAX_UNLOCK_INITIALIZATION_WAIT_SEC
+    lifetime_token: str | None = field(default=None, repr=False)
 
     def get_daemon_port(self) -> int:
         """Returns the endpoint resolved by base bootstrap.
@@ -311,6 +312,14 @@ class FrontendHost(Protocol):
     """Base-distribution service boundary exposed to installed frontends."""
 
     contract_version: int
+
+    def device_resource_lock(self, resource_id: str) -> ContextManager[object]:
+        """Return a bounded host-owned lock for one local device resource.
+
+        The caller holds the context for the adapter session and releases it
+        after closing that session. This lock is independent of a chat profile.
+        """
+        ...
 
     def close(self) -> None:
         """Release exact chat-created runtime resources after frontend detach.

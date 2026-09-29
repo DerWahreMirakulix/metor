@@ -1,13 +1,11 @@
 """Base-owned deferred bootstrap services for independently installed frontends."""
 
-from typing import Optional
+from typing import ContextManager, Optional
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
+from pathlib import Path
+import re
 import threading
-import os
-import subprocess
-
-import psutil
 
 from metor.client import (
     FRONTEND_LAUNCH_CONTRACT_VERSION,
@@ -35,7 +33,8 @@ from metor.data import (
     ProfileSecurityMode,
     SettingKey,
 )
-from metor.utils import Constants, FileLock, TypeCaster, ProcessManager
+from metor.utils import Constants, FileLock, TypeCaster, create_private_directory_tree
+from metor.core.daemon.managed import read_frontend_lifetime_token
 from metor.data.profile.catalog import (
     get_unavailable_profile_names,
     resolve_initial_profile,
@@ -96,6 +95,22 @@ class LocalFrontendHost:
 
     contract_version = FRONTEND_LAUNCH_CONTRACT_VERSION
 
+    _DEVICE_RESOURCE_ID = re.compile(r'[a-z][a-z0-9_.-]{0,63}')
+
+    def device_resource_lock(self, resource_id: str) -> ContextManager[object]:
+        """Provide an owner-only cross-process lock outside profile storage."""
+        self._require_open()
+        if (
+            type(resource_id) is not str
+            or self._DEVICE_RESOURCE_ID.fullmatch(resource_id) is None
+        ):
+            raise ValueError('Invalid device resource identifier')
+        root = Path.home() / '.metor-device-locks'
+        create_private_directory_tree(root, ())
+        return FileLock(
+            root / resource_id, timeout=Constants.DEVICE_RESOURCE_LOCK_SECONDS
+        )
+
     def __init__(
         self,
         profile: ProfileManager | None,
@@ -119,43 +134,9 @@ class LocalFrontendHost:
         self._start_daemon_override = start_daemon_override
         self._attempt_lock = threading.Lock()
         self._closed = threading.Event()
-        self._started_processes: dict[str, int | None] = {}
-        self._owned_processes: dict[str, subprocess.Popen[bytes]] = {}
-
-    def _close_owned_profile(self, profile: str) -> None:
-        """Stop only the child process spawned by this invocation for a profile.
-
-        Args:
-            profile: Exact owned profile identity.
-        Returns:
-            None
-        """
-        process = self._owned_processes.get(profile)
-        if process is None:
-            return
-        if process.poll() is None:
-            if process.stdin is not None:
-                try:
-                    process.stdin.close()
-                except OSError:
-                    if process.poll() is None:
-                        raise
-                try:
-                    process.wait(timeout=Constants.OWNED_DAEMON_SHUTDOWN_TIMEOUT_SEC)
-                except subprocess.TimeoutExpired:
-                    pass
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
-        self._owned_processes.pop(profile, None)
-        self._started_processes.pop(profile, None)
 
     def close(self) -> None:
-        """Release every exact daemon child created by this chat invocation.
+        """Stop new bootstrap attempts after local frontend teardown.
 
         Args:
             None
@@ -164,14 +145,7 @@ class LocalFrontendHost:
         """
         self._closed.set()
         with self._attempt_lock:
-            failures: list[Exception] = []
-            for profile in tuple(self._owned_processes):
-                try:
-                    self._close_owned_profile(profile)
-                except (OSError, subprocess.SubprocessError) as exc:
-                    failures.append(exc)
-            if failures:
-                raise OSError('Owned daemon cleanup could not be confirmed.')
+            pass
 
     def initial_selection(self) -> FrontendSelection:
         """Classify the selected profile against current safe catalog facts.
@@ -311,8 +285,6 @@ class LocalFrontendHost:
             )
         try:
             self._require_open()
-            if self._profile is not None and self._profile.profile_name != profile:
-                self._close_owned_profile(self._profile.profile_name)
             selected = self._catalog_state(profile)
             if not selected.exists or selected.issue:
                 raise FrontendBootstrapError(
@@ -621,21 +593,8 @@ class LocalFrontendHost:
 
         startup_secret: Optional[str] = None
         daemon_started = False
-        started_process: subprocess.Popen[bytes] | None = None
-        confirmed_start = profile.profile_name in self._started_processes
-        started_pid = self._started_processes.get(profile.profile_name)
-        if (
-            confirmed_start
-            and started_pid is not None
-            and ProcessManager.is_pid_running(started_pid) is False
-        ):
-            self._started_processes.pop(profile.profile_name, None)
-            confirmed_start = False
-        if (
-            not profile.is_remote()
-            and not profile.is_daemon_running()
-            and not confirmed_start
-        ):
+        diagnostics = DaemonStartDiagnostics()
+        if not profile.is_remote() and not profile.is_daemon_running():
             policy = _resolve_autostart_policy(profile, self._start_daemon_override)
             if policy is ChatDaemonAutostartPolicy.NEVER:
                 raise FrontendBootstrapError(_offline_hint())
@@ -659,15 +618,13 @@ class LocalFrontendHost:
             self._require_open()
             interactions.show_status('Starting local daemon...')
             self._require_open()
-            diagnostics = DaemonStartDiagnostics()
-            owner = psutil.Process(os.getpid())
             try:
                 daemon_started = start_managed_daemon_process(
                     profile,
                     start_locked=profile.uses_encrypted_storage(),
                     session_auth_password=startup_secret,
                     diagnostics=diagnostics,
-                    chat_owner=(owner.pid, owner.create_time()),
+                    automatic_lifetime=True,
                 )
             except PlaintextLockedDaemonError as exc:
                 startup_secret = None
@@ -697,13 +654,8 @@ class LocalFrontendHost:
                     f'Could not start the local daemon [{diagnostics.phase}{status}]. '
                     "Run 'metor daemon' to inspect foreground startup errors."
                 )
-            if diagnostics.process is not None:
-                started_process = diagnostics.process
-                self._owned_processes[profile.profile_name] = started_process
-                self._started_processes[profile.profile_name] = started_process.pid
-            else:
+            if diagnostics.process is None:
                 # The serialized start observed an already-running daemon.
-                # It is borrowed, even if it disappears before the next check.
                 daemon_started = False
                 startup_secret = None
             self._require_open()
@@ -714,10 +666,10 @@ class LocalFrontendHost:
                 'No active daemon endpoint is available.',
                 reason=FrontendBootstrapReason.UNREACHABLE,
             )
-        if daemon_started and started_process is not None:
+        if daemon_started and diagnostics.process is not None:
             daemon_started = (
-                started_process.poll() is None
-                and profile.get_daemon_pid() == started_process.pid
+                diagnostics.process.poll() is None
+                and profile.get_daemon_pid() == diagnostics.process.pid
             )
             if not daemon_started:
                 startup_secret = None
@@ -747,6 +699,11 @@ class LocalFrontendHost:
             config=LocalFrontendSettings(profile.config),
             encrypted=profile.uses_encrypted_storage(),
             unlock_timeout=unlock_timeout,
+            lifetime_token=(
+                read_frontend_lifetime_token(profile.paths.get_config_dir())
+                if not profile.is_remote()
+                else None
+            ),
         )
 
 

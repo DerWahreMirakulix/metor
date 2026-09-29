@@ -1,12 +1,14 @@
 """Installed-wheel proof for the real managed encrypted-daemon spawn path."""
 
 import argparse
+import ctypes
 import json
 import os
 from pathlib import Path
 import socket
 import subprocess
 import sys
+import threading
 import time
 import venv
 
@@ -22,6 +24,35 @@ _PUBLIC_STARTUP_SENTINEL = 'public-installed-startup-sentinel'
 _MISSING_INSTALLATION_TIMEOUT_SEC: float = 45.0
 _CONFIGURED_IPC_TIMEOUT_SEC: float = 45.0
 _MANAGED_DIAGNOSTIC_MAX_BYTES: int = 4096
+
+
+def _windows_console_handles() -> set[int]:
+    """Return visible console handles without reading private window titles."""
+    if os.name != 'nt':
+        return set()
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
+    user32.EnumWindows.restype = wintypes.BOOL
+    user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetClassNameW.restype = ctypes.c_int
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.IsWindowVisible.restype = wintypes.BOOL
+    handles: set[int] = set()
+
+    @callback_type
+    def visit(hwnd: int, _extra: int) -> bool:
+        name = ctypes.create_unicode_buffer(64)
+        user32.GetClassNameW(hwnd, name, len(name))
+        if name.value == 'ConsoleWindowClass' and user32.IsWindowVisible(hwnd):
+            handles.add(hwnd)
+        return True
+
+    if not user32.EnumWindows(visit, 0):
+        raise OSError('Could not enumerate native console windows.')
+    return handles
 
 
 def _same_filesystem_object(left: Path, right: Path) -> bool:
@@ -210,6 +241,27 @@ def _run_installed_start(
     diagnostic_path = working_directory / 'managed-child-diagnostic.log'
     diagnostics = DaemonStartDiagnostics()
     started_at: float = time.monotonic()
+    consoles_before = _windows_console_handles()
+    new_consoles: set[int] = set()
+    console_stop = threading.Event()
+    console_observation_failed = threading.Event()
+
+    def watch_consoles() -> None:
+        """Observe short-lived Windows console windows during blocking startup."""
+        while not console_stop.wait(0.05):
+            try:
+                new_consoles.update(_windows_console_handles() - consoles_before)
+            except OSError:
+                console_observation_failed.set()
+                return
+
+    console_thread = (
+        threading.Thread(target=watch_consoles, daemon=True)
+        if os.name == 'nt'
+        else None
+    )
+    if console_thread is not None:
+        console_thread.start()
     try:
         diagnostic_stream = diagnostic_path.open('w+b')
         profile.config.set(SettingKey.IPC_TIMEOUT, _CONFIGURED_IPC_TIMEOUT_SEC)
@@ -284,6 +336,10 @@ def _run_installed_start(
         pid = profile.get_daemon_pid()
         if port is None or pid is None:
             raise AssertionError((port, pid))
+        if console_observation_failed.is_set():
+            raise AssertionError('Native console observation failed.')
+        if new_consoles or _windows_console_handles() - consoles_before:
+            raise AssertionError('Managed daemon or Tor opened another console.')
 
         with socket.create_connection((Constants.LOCALHOST, port), timeout=2):
             pass
@@ -301,6 +357,18 @@ def _run_installed_start(
             raise AssertionError(expected_installation)
 
         child = psutil.Process(pid)
+        if os.name == 'nt' and not start_locked:
+            tor_children = [
+                process
+                for process in child.children(recursive=True)
+                if process.name().lower() == 'tor.exe'
+            ]
+            if not tor_children:
+                raise AssertionError('Native Tor child was not observed.')
+            if console_observation_failed.is_set():
+                raise AssertionError('Native console observation failed.')
+            if new_consoles or _windows_console_handles() - consoles_before:
+                raise AssertionError('Tor left another console window open.')
         command = child.cmdline()
         expected_interpreters = _expected_interpreter_files(executable)
         if not command or not any(
@@ -343,6 +411,9 @@ def _run_installed_start(
             flush=True,
         )
     finally:
+        if console_thread is not None:
+            console_stop.set()
+            console_thread.join(timeout=2)
         os.chdir(previous_directory)
         if pid is not None:
             try:
@@ -360,12 +431,13 @@ def _run_installed_start(
         diagnostic_path.unlink(missing_ok=True)
 
 
-def run(data_parent: Path, checkout: Path) -> None:
-    """Proves installed locked and session-auth starts ignore import shadows.
+def run(data_parent: Path, checkout: Path, *, with_public_tor: bool = False) -> None:
+    """Prove installed locked startup; optionally accept native Tor startup.
 
     Args:
         data_parent (Path): Isolated parent for Metor runtime data and fixtures.
         checkout (Path): Source checkout that must not supply installed modules.
+        with_public_tor: Run the network-dependent unlocked native Tor scenario.
 
     Returns:
         None
@@ -428,20 +500,21 @@ def run(data_parent: Path, checkout: Path) -> None:
         shadow_marker=shadow_marker,
     )
 
-    plaintext_profile = _create_profile(
-        'installed-managed-session-auth',
-        ProfileSecurityMode.PLAINTEXT,
-    )
-    _run_installed_start(
-        plaintext_profile,
-        checkout=checkout,
-        environment_root=environment_root,
-        executable=executable,
-        working_directory=shadow_directory,
-        start_locked=False,
-        session_auth_password=_PUBLIC_STARTUP_SENTINEL,
-        shadow_marker=shadow_marker,
-    )
+    if with_public_tor:
+        plaintext_profile = _create_profile(
+            'installed-managed-session-auth',
+            ProfileSecurityMode.PLAINTEXT,
+        )
+        _run_installed_start(
+            plaintext_profile,
+            checkout=checkout,
+            environment_root=environment_root,
+            executable=executable,
+            working_directory=shadow_directory,
+            start_locked=False,
+            session_auth_password=_PUBLIC_STARTUP_SENTINEL,
+            shadow_marker=shadow_marker,
+        )
 
 
 def main() -> None:
@@ -449,8 +522,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--data-parent', required=True, type=Path)
     parser.add_argument('--checkout', required=True, type=Path)
+    parser.add_argument('--with-public-tor', action='store_true')
     args = parser.parse_args()
-    run(args.data_parent, args.checkout)
+    run(args.data_parent, args.checkout, with_public_tor=args.with_public_tor)
 
 
 if __name__ == '__main__':

@@ -6,7 +6,7 @@ import socket
 import json
 import sys
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Iterator, Optional, cast
@@ -106,13 +106,13 @@ def _run_deferred_frontend(
     return 0
 
 
-def _owned_start_mock(
+def _shared_start_mock(
     _profile: ProfileManager,
     *,
     diagnostics: DaemonStartDiagnostics,
     **_options: object,
 ) -> bool:
-    """Mark a mocked successful start as owned by the invoking host.
+    """Mark a mocked successful automatic start as the active endpoint.
 
     Args:
         _profile: Test profile.
@@ -464,9 +464,16 @@ class _AuthPromptProfileManager:
 
 
 class UiIpcContractTests(unittest.TestCase):
-    """
-    Covers UI IPC contract regression scenarios.
-    """
+    """Covers UI IPC contract regression scenarios."""
+
+    def setUp(self) -> None:
+        """Keep mocked profiles away from real daemon token files."""
+        token_patch = patch(
+            'metor.application.frontend.host.read_frontend_lifetime_token',
+            return_value=None,
+        )
+        token_patch.start()
+        self.addCleanup(token_patch.stop)
 
     def test_optional_collections_round_trip_without_accepting_wrong_shapes(
         self,
@@ -1108,7 +1115,7 @@ class UiIpcContractTests(unittest.TestCase):
             None
         """
 
-        pm = Mock(spec=ProfileManager)
+        pm = Mock(spec=ProfileManager, paths=Mock())
         pm.profile_name = 'default'
         pm.config = Mock()
         pm.config.get_float.side_effect = lambda key: {
@@ -1129,6 +1136,10 @@ class UiIpcContractTests(unittest.TestCase):
 
         with (
             patch('metor.application.runtime.daemon.Settings.validate_integrity'),
+            patch(
+                'metor.application.runtime.daemon.FileLock',
+                return_value=nullcontext(),
+            ),
             patch(
                 'metor.application.runtime.daemon.subprocess.Popen',
                 return_value=process,
@@ -1153,7 +1164,7 @@ class UiIpcContractTests(unittest.TestCase):
 
     def test_host_resolves_absent_and_explicit_daemon_start_policies(self) -> None:
         """The real host resolver retains configured policy unless overridden."""
-        pm = Mock(spec=ProfileManager)
+        pm = Mock(spec=ProfileManager, paths=Mock())
         pm.config = Mock()
         for configured, expected in (
             ('ask', ChatDaemonAutostartPolicy.ASK),
@@ -1187,7 +1198,7 @@ class UiIpcContractTests(unittest.TestCase):
         Returns:
             None
         """
-        pm = Mock(spec=ProfileManager)
+        pm = Mock(spec=ProfileManager, paths=Mock())
         pm.profile_name = 'default'
         pm.exists.return_value = True
         pm.is_remote.return_value = False
@@ -1212,7 +1223,7 @@ class UiIpcContractTests(unittest.TestCase):
         self.assertEqual(interactions.statuses, [])
 
     def test_host_does_not_claim_daemon_won_by_another_launcher(self) -> None:
-        """A process found after the start lock is borrowed, not invocation-owned.
+        """A process found after the start lock is borrowed without takeover.
 
         Args:
             None
@@ -1220,7 +1231,7 @@ class UiIpcContractTests(unittest.TestCase):
         Returns:
             None
         """
-        pm = Mock(spec=ProfileManager)
+        pm = Mock(spec=ProfileManager, paths=Mock())
         pm.profile_name = 'default'
         pm.exists.return_value = True
         pm.is_remote.return_value = False
@@ -1238,7 +1249,6 @@ class UiIpcContractTests(unittest.TestCase):
             return_value=True,
         ) as start:
             result = host.bootstrap(_DeferredInteractions())
-            self.assertNotIn('default', host._started_processes)
             host.close()
 
         start.assert_called_once()
@@ -1246,8 +1256,8 @@ class UiIpcContractTests(unittest.TestCase):
         self.assertEqual(result.port, 37123)
 
     def test_borrowed_daemon_disappearing_before_attach_can_retry(self) -> None:
-        """A borrowed start never leaves a stale invocation-owned retry marker."""
-        pm = Mock(spec=ProfileManager)
+        """An unavailable endpoint leaves the host retryable after a later start."""
+        pm = Mock(spec=ProfileManager, paths=Mock())
         pm.profile_name = 'default'
         pm.exists.return_value = True
         pm.is_remote.return_value = False
@@ -1269,7 +1279,6 @@ class UiIpcContractTests(unittest.TestCase):
             self.assertEqual(
                 missing.exception.reason, FrontendBootstrapReason.UNREACHABLE
             )
-            self.assertNotIn('default', host._started_processes)
             attached = host.bootstrap(_DeferredInteractions())
             host.close()
 
@@ -1278,10 +1287,10 @@ class UiIpcContractTests(unittest.TestCase):
         self.assertEqual(attached.port, 37123)
 
     def test_spawned_child_is_only_attributed_when_it_owns_endpoint(self) -> None:
-        """A competing daemon never inherits child ownership or startup secrets."""
+        """A competing endpoint never inherits the child's startup secret."""
         for published_pid in (37124, 37125, None):
             with self.subTest(published_pid=published_pid):
-                pm = Mock(spec=ProfileManager)
+                pm = Mock(spec=ProfileManager, paths=Mock())
                 pm.profile_name = 'default'
                 pm.exists.return_value = True
                 pm.is_remote.return_value = False
@@ -1314,7 +1323,6 @@ class UiIpcContractTests(unittest.TestCase):
                     result = host.bootstrap(
                         _DeferredInteractions(secret='startup-secret')
                     )
-                    self.assertEqual(host._started_processes['default'], process.pid)
                     host.close()
 
                 self.assertEqual(
@@ -1324,8 +1332,7 @@ class UiIpcContractTests(unittest.TestCase):
                     result.session_auth.take(),
                     'startup-secret' if published_pid == process.pid else None,
                 )
-                process.terminate.assert_called_once()
-                self.assertEqual(host._started_processes, {})
+                process.terminate.assert_not_called()
 
     def test_handle_chat_never_policy_keeps_daemon_explicit(self) -> None:
         """
@@ -1338,7 +1345,7 @@ class UiIpcContractTests(unittest.TestCase):
             None
         """
 
-        pm = Mock(spec=ProfileManager)
+        pm = Mock(spec=ProfileManager, paths=Mock())
         pm.profile_name = 'default'
         pm.exists.return_value = True
         pm.is_daemon_running.return_value = False
@@ -1384,7 +1391,7 @@ class UiIpcContractTests(unittest.TestCase):
             None
         """
 
-        pm = Mock(spec=ProfileManager)
+        pm = Mock(spec=ProfileManager, paths=Mock())
         pm.get_daemon_port.return_value = 37123
         pm.profile_name = 'default'
         pm.exists.return_value = True
@@ -1409,7 +1416,7 @@ class UiIpcContractTests(unittest.TestCase):
             patch('metor.cli.handlers.prompt_text') as prompt_mock,
             patch(
                 'metor.application.frontend.host.start_managed_daemon_process',
-                side_effect=_owned_start_mock,
+                side_effect=_shared_start_mock,
             ) as start_mock,
         ):
             CommandHandlers.handle_chat(cast(ProfileManager, pm))
@@ -1420,7 +1427,7 @@ class UiIpcContractTests(unittest.TestCase):
             start_locked=True,
             session_auth_password=None,
             diagnostics=ANY,
-            chat_owner=ANY,
+            automatic_lifetime=True,
         )
         self.assertEqual(interactions.statuses, ['Starting local daemon...'])
         self.assertTrue(interactions.started)
@@ -1439,7 +1446,7 @@ class UiIpcContractTests(unittest.TestCase):
             None
         """
 
-        pm = Mock(spec=ProfileManager)
+        pm = Mock(spec=ProfileManager, paths=Mock())
         pm.profile_name = 'default'
         pm.exists.return_value = True
         pm.is_daemon_running.return_value = False
@@ -1476,7 +1483,7 @@ class UiIpcContractTests(unittest.TestCase):
             start_locked=True,
             session_auth_password=None,
             diagnostics=ANY,
-            chat_owner=ANY,
+            automatic_lifetime=True,
         )
 
     def test_handle_chat_no_start_override_beats_always_policy(self) -> None:
@@ -1490,7 +1497,7 @@ class UiIpcContractTests(unittest.TestCase):
             None
         """
 
-        pm = Mock(spec=ProfileManager)
+        pm = Mock(spec=ProfileManager, paths=Mock())
         pm.profile_name = 'default'
         pm.exists.return_value = True
         pm.is_daemon_running.return_value = False
@@ -1537,7 +1544,7 @@ class UiIpcContractTests(unittest.TestCase):
             None
         """
 
-        pm = Mock(spec=ProfileManager)
+        pm = Mock(spec=ProfileManager, paths=Mock())
         pm.get_daemon_port.return_value = 37123
         pm.profile_name = 'default'
         pm.exists.return_value = True
@@ -1568,7 +1575,7 @@ class UiIpcContractTests(unittest.TestCase):
             ),
             patch(
                 'metor.application.frontend.host.start_managed_daemon_process',
-                side_effect=_owned_start_mock,
+                side_effect=_shared_start_mock,
             ) as start_mock,
         ):
             CommandHandlers.handle_chat(cast(ProfileManager, pm))
@@ -1578,7 +1585,7 @@ class UiIpcContractTests(unittest.TestCase):
             start_locked=False,
             session_auth_password='session-secret',
             diagnostics=ANY,
-            chat_owner=ANY,
+            automatic_lifetime=True,
         )
         self.assertTrue(interactions.started)
         assert interactions.result is not None

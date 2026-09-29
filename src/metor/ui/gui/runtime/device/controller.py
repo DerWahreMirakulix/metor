@@ -30,6 +30,7 @@ from .model import DevicePhase
 from .feedback import HardwareFeedback
 from .power import PowerFlow
 from .status import HardwareStatusProjection
+from .settings import DeviceSettings
 
 if TYPE_CHECKING:
     from ..controller import GuiController
@@ -62,6 +63,9 @@ class DeviceLifecycle:
         self.feedback = HardwareFeedback(
             bindings.indicator if bindings is not None else None,
             bindings.haptics if bindings is not None else None,
+        )
+        self.settings = DeviceSettings(
+            bindings.settings if bindings is not None else None
         )
         self._samples: deque[ButtonSample] = deque()
         self._input_lock = threading.Lock()
@@ -166,7 +170,7 @@ class DeviceLifecycle:
         Returns:
             bool: Whether visible state may have changed.
         """
-        changed = False
+        changed = self.settings.poll()
         changed = self.status.poll(time.monotonic()) or changed
         with self._input_lock:
             samples = tuple(self._samples)
@@ -463,6 +467,7 @@ class DeviceLifecycle:
         Returns:
             None
         """
+        self.settings.close()
         subscription, self._subscription = self._subscription, None
         if subscription is not None:
             try:

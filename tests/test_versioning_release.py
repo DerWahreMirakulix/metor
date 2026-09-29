@@ -214,6 +214,14 @@ class VersionRegistryTests(unittest.TestCase):
 class ProtocolNegotiationTests(unittest.TestCase):
     """Covers inclusive IPC and peer protocol-range intersection."""
 
+    def test_old_profile_exit_semantics_cannot_negotiate(self) -> None:
+        """Generation 2 must never use the local-only profile-exit command."""
+        self.assertIsNone(
+            negotiate_protocol_generation(
+                IPC_PROTOCOL_VERSION, IPC_PROTOCOL_MIN_SUPPORTED, 2, 2
+            )
+        )
+
     def test_range_matrix_selects_highest_overlap_or_rejects(self) -> None:
         """Verifies current/minimum semantics in both negotiation directions.
 
@@ -1072,30 +1080,6 @@ class DocumentationReleaseArchitectureTests(unittest.TestCase):
         self.assertTrue((workflows_dir / 'release.yml').is_file())
         self.assertFalse((workflows_dir / 'release_wheel_bundles.yml').exists())
 
-    def test_generated_docs_workflow_uses_canonical_allowlist(self) -> None:
-        """Verifies generated-document automation cannot stage authored docs.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-        root: Path = Path(__file__).resolve().parents[1]
-        workflow: str = (
-            root / '.github' / 'workflows' / 'generate_api_docs.yml'
-        ).read_text(encoding='utf-8')
-        generator = workflow.index('npm run generate:docs')
-        validator = workflow.index('python scripts/validate_generated_docs.py')
-        self.assertLess(generator, validator)
-        self.assertIn('"scripts/validate_generated_docs.py"', workflow)
-        self.assertIn(
-            'git add docs/generated/API.md docs/generated/SETTINGS.md '
-            'docs/generated/api.schema.json docs/generated/compatibility.json',
-            workflow,
-        )
-        self.assertIn('if ! git diff --cached --quiet; then', workflow)
-
     def test_release_candidate_generates_before_tests_and_freshness_check(
         self,
     ) -> None:
@@ -1115,7 +1099,6 @@ class DocumentationReleaseArchitectureTests(unittest.TestCase):
             '\n  publish:', maxsplit=1
         )[0]
 
-        self.assertIn('run-tests: "false"', quality)
         generator = quality.index('npm run generate:docs')
         validator = quality.index('python scripts/validate_generated_docs.py')
         tests = quality.index('python scripts/run_tests.py --suite all')

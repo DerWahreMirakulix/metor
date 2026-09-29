@@ -11,7 +11,13 @@ from pathlib import Path
 from typing import TextIO
 
 from metor.client import FRONTEND_LAUNCH_CONTRACT_VERSION, FrontendLaunchContext
-from metor.ui.gui.platform import DeviceConfigurationError, read_configuration
+from metor.ui.gui.platform import (
+    ActivePlatform,
+    DeviceConfigurationError,
+    open_platform,
+    prepare_platform,
+    read_configuration,
+)
 from metor.versioning import APP_VERSION
 
 
@@ -32,6 +38,7 @@ class GuiEntry:
             configuration = read_configuration(
                 context.device_config, context.simulator, context.platform
             )
+            plan = prepare_platform(configuration, context.platform)
         except DeviceConfigurationError as exc:
             sys.stderr.write(f'{exc}\n')
             return 2
@@ -60,13 +67,21 @@ class GuiEntry:
         started = time.monotonic()
         stage = 'toolkit-import'
         app = None
+        active: ActivePlatform | None = None
         status = 1
         try:
             from metor.ui.gui.app import MetorApp
 
             stage = 'platform-activation'
+            if plan is not None:
+                active = open_platform(configuration, plan, context.host)
             active_context = replace(
-                context, platform=configuration.activate_platform(context.platform)
+                context,
+                platform=(
+                    active.bindings
+                    if active is not None
+                    else configuration.activate_platform(context.platform)
+                ),
             )
             stage = 'app-build'
             app = MetorApp(active_context, configuration)
@@ -82,6 +97,9 @@ class GuiEntry:
                 )
             else:
                 status = app.exit_status
+        except DeviceConfigurationError as exc:
+            original_stderr.write(f'{exc}\n')
+            status = 2
         except BaseException as exc:
             reason = self._safe_reason(exc)
             self._report_fatal(
@@ -100,6 +118,19 @@ class GuiEntry:
                     self._report_fatal(
                         original_stderr,
                         'app-cleanup',
+                        self._safe_reason(exc),
+                        context.debug,
+                        exc,
+                        elapsed=time.monotonic() - started,
+                    )
+                    status = 1
+            if active is not None:
+                try:
+                    active.close()
+                except BaseException as exc:
+                    self._report_fatal(
+                        original_stderr,
+                        'platform-cleanup',
                         self._safe_reason(exc),
                         context.debug,
                         exc,

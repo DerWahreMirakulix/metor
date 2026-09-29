@@ -293,6 +293,8 @@ class IpcServer:
         self,
         event: IpcEvent,
         recipients: Optional[Iterable[socket.socket]] = None,
+        *,
+        exclude: Optional[Iterable[socket.socket]] = None,
     ) -> None:
         """
         Sends one event payload to a subset of currently connected UI clients.
@@ -300,6 +302,8 @@ class IpcServer:
         Args:
             event (IpcEvent): The DTO event to broadcast.
             recipients (Optional[Iterable[socket.socket]]): Optional recipient subset.
+            exclude (Optional[Iterable[socket.socket]]): Clients omitted atomically
+                from the publication snapshot.
 
         Returns:
             None
@@ -318,6 +322,11 @@ class IpcServer:
             if recipients is not None:
                 allowed_clients: set[socket.socket] = set(recipients)
                 clients = [client for client in clients if client in allowed_clients]
+            if exclude is not None:
+                excluded_clients = set(exclude)
+                clients = [
+                    client for client in clients if client not in excluded_clients
+                ]
 
             for client in clients:
                 try:

@@ -260,12 +260,20 @@ def audit_wheel_records(wheels: tuple[Path, ...]) -> None:
         )
 
 
-def run_acceptance(bundle_root: Path, *, gui_smoke: bool = False) -> None:
+def run_acceptance(
+    bundle_root: Path,
+    *,
+    gui_smoke: bool = False,
+    windows_launch: bool = False,
+    with_public_tor: bool = False,
+) -> None:
     """Run installed consumer and optional native display gates.
 
     Args:
         bundle_root: Completed platform wheelhouse bundle directory.
         gui_smoke: Exercise the installed GUI on a supplied native display.
+        windows_launch: Inspect both installed Windows GUI entry points and windows.
+        with_public_tor: Also run optional native network Tor startup acceptance.
     Returns:
         None
     """
@@ -429,16 +437,19 @@ def run_acceptance(bundle_root: Path, *, gui_smoke: bool = False) -> None:
         )
         managed_data = root / 'managed-spawn-data'
         managed_data.mkdir()
+        managed_command = [
+            str(executable),
+            '-I',
+            str(managed_spawn),
+            '--data-parent',
+            str(managed_data),
+            '--checkout',
+            str(Path(__file__).resolve().parents[1]),
+        ]
+        if with_public_tor:
+            managed_command.append('--with-public-tor')
         run(
-            [
-                str(executable),
-                '-I',
-                str(managed_spawn),
-                '--data-parent',
-                str(managed_data),
-                '--checkout',
-                str(Path(__file__).resolve().parents[1]),
-            ],
+            managed_command,
             extra_environment={'METOR_DATA_DIR_PARENT': str(managed_data)},
             timeout_seconds=_MANAGED_SPAWN_COMMAND_TIMEOUT_SEC,
         )
@@ -515,6 +526,17 @@ py-modules = ["closure_fake"]
                 raise RuntimeError(
                     'Installed GUI did not finish its native close gate.'
                 )
+        if windows_launch:
+            if os.name != 'nt':
+                raise RuntimeError('Windows entry-point acceptance needs Windows.')
+            entrypoint_probe = (
+                Path(__file__).resolve().parents[1]
+                / 'tests'
+                / 'gui_windows_process_chain.py'
+            )
+            output = run([str(executable), '-I', str(entrypoint_probe)])
+            if 'WINDOWS_INSTALLED_GUI_ENTRYPOINTS_OK' not in output:
+                raise RuntimeError('Windows GUI entry-point acceptance failed.')
         install('metor-ui-terminal')
         terminal_output = run([str(executable), '-I', '-c', TERMINAL_HARNESS])
         if (
@@ -575,8 +597,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('bundle_root', type=Path)
     parser.add_argument('--gui-smoke', action='store_true')
+    parser.add_argument('--windows-launch', action='store_true')
+    parser.add_argument('--with-public-tor', action='store_true')
     arguments = parser.parse_args()
-    run_acceptance(arguments.bundle_root, gui_smoke=arguments.gui_smoke)
+    run_acceptance(
+        arguments.bundle_root,
+        gui_smoke=arguments.gui_smoke,
+        windows_launch=arguments.windows_launch,
+        with_public_tor=arguments.with_public_tor,
+    )
 
 
 if __name__ == '__main__':

@@ -1,0 +1,38 @@
+# Harmless installed reference adapter; no physical controls are activated.
+schema_version = 1
+
+[platform]
+adapter = 'reference-board'
+
+[platform.config]
+initial_brightness = 50
+
+[display]
+adapter = 'reference-board'
+width_px = 480
+height_px = 800
+scale = 1
+
+[input]
+adapter = 'reference-board'
+ptt_binding = 'ptt'
+power_binding = 'power'
+touch = true
+
+[audio]
+adapter = 'none'
+
+[camera]
+adapter = 'none'
+
+[indicator]
+adapter = 'none'
+
+[haptics]
+adapter = 'none'
+
+[power]
+adapter = 'none'
+
+[clipboard]
+policy = 'disabled'

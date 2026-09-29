@@ -4,123 +4,115 @@ permissions: {}
 
 on:
   push:
-    # Keep main and the active embeddedui branch covered without running all feature pushes.
     branches:
       - main
-      - embeddedui
   pull_request:
   workflow_dispatch:
 
-# Superseded revisions on the same branch/PR do not need another full matrix.
 concurrency:
   group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  plan:
+  static:
+    name: Static checks and generated references
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
-    outputs:
-      mode: ${{ steps.impact.outputs.mode }}
-      matrix: ${{ steps.impact.outputs.matrix }}
-      modules: ${{ steps.impact.outputs.modules }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Check formatting, boundaries, and Linux/Python 3.11 types
+        uses: ./.github/actions/python-quality
         with:
-          fetch-depth: 0
-      - name: Classify exact candidate diff
-        id: impact
-        shell: bash
+          python-version: '3.11'
+          ruff-check-paths: 'src/metor/ scripts/ tests/'
+          ruff-format-paths: 'src/metor/ scripts/ tests/'
+          mypy-paths: 'src/metor/ scripts/'
+      - name: Check Windows/Python 3.13 type branches
+        run: mypy --python-version 3.13 --platform win32 src/metor/ scripts/
+      - name: Check generated references and central version
         run: |
-          if [[ '${{ github.event_name }}' == 'push' && '${{ github.ref }}' == 'refs/heads/embeddedui' ]]; then
-            python -S -m scripts.ci_impact --base '${{ github.event.before }}' --head '${{ github.sha }}' --github-output "$GITHUB_OUTPUT"
-          else
-            python -S -m scripts.ci_impact --full --github-output "$GITHUB_OUTPUT"
-          fi
+          python scripts/validate_generated_docs.py
+          python scripts/versioning.py validate
 
-  python-quality:
-    needs: plan
-    name: Python Quality (${{ matrix.os }}, Python ${{ matrix.python-version }})
-    # PR merge refs and branch commits are distinct acceptance candidates.
+  runtime:
+    name: Unittest (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
     permissions:
       contents: read
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
-
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.11', '3.13']
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-
-      - name: Run Shared Python Quality Checks
-        uses: ./.github/actions/python-quality
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
-          ruff-check-paths: "src/metor/ scripts/ tests/"
-          ruff-format-paths: "src/metor/ scripts/ tests/"
-          mypy-paths: "src/metor/ scripts/"
-          run-tests: "true"
-          test-command: ${{ needs.plan.outputs.mode == 'full' && 'python scripts/run_tests.py --suite all' || 'python scripts/run_tests.py --suite fast' }}
-
-      - name: Run selected integration modules
-        if: needs.plan.outputs.mode == 'fast' && needs.plan.outputs.modules != ''
+          cache: pip
+      - name: Install the checkout
         shell: bash
         run: |
-          cp build/test-report.txt build/test-report-fast.txt
-          module_args=()
-          for module in ${{ needs.plan.outputs.modules }}; do
-            module_args+=(--module "$module")
-          done
-          python scripts/run_tests.py --suite integration "${module_args[@]}"
-
+          python -m pip install --upgrade pip==26.0.1
+          python -m pip install -r requirements/dev.txt
+          python -m pip check
+      - name: Run complete unittest suite
+        run: python scripts/run_tests.py --suite all
       - name: Upload bounded unittest report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: unittest-report-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: build/test-report*.txt
+          path: build/test-report.txt
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Build and validate all wheels
-        if: needs.plan.outputs.mode == 'full'
+  installed:
+    name: Installed packages and GUI (${{ matrix.os }}, Python 3.11)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install build and acceptance dependencies
         shell: bash
         run: |
-          python -m pip wheel --no-deps --no-build-isolation . -w dist
-          python -m pip wheel --no-deps --no-build-isolation packaging/sdk -w dist
-          python -m pip wheel --no-deps --no-build-isolation packaging/terminal -w dist
-          python -m pip wheel --no-deps --no-build-isolation packaging/gui -w dist
-          python scripts/validate_wheel_versions.py dist/*.whl
-
-      - name: Validate Central Version Registry
-        if: needs.plan.outputs.mode == 'full'
-        run: python scripts/versioning.py validate
-
-      - name: Validate generated references against checked-in copies
-        if: needs.plan.outputs.mode == 'full'
-        run: python scripts/validate_generated_docs.py
-
-      - name: Provision native Tor for installed daemon acceptance
-        if: needs.plan.outputs.mode == 'full' && matrix.python-version == '3.11'
-        uses: ./.github/actions/native-tor
-
-      - name: Build native offline bundles
-        if: needs.plan.outputs.mode == 'full' && matrix.python-version == '3.11'
+          python -m pip install --upgrade pip==26.0.1
+          python -m pip install -r requirements/dev.txt
+          python -m pip check
+      - name: Build native offline packages
         shell: bash
         run: python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir closure-bundles
-
-      - name: Provision a generic Linux GUI display
-        if: needs.plan.outputs.mode == 'full' && runner.os == 'Linux' && matrix.python-version == '3.11'
+      - name: Validate coordinated package versions and installers
+        shell: bash
+        run: |
+          python scripts/validate_wheel_versions.py \
+            closure-bundles/metor-wheelhouse-*/wheelhouse/metor-*.whl \
+            closure-bundles/metor-sdk-wheelhouse-*/wheelhouse/metor_sdk-*.whl \
+            closure-bundles/metor-ui-terminal-wheelhouse-*/wheelhouse/metor_ui_terminal-*.whl \
+            closure-bundles/metor-ui-gui-wheelhouse-*/wheelhouse/metor_ui_gui-*.whl
+          python scripts/validate_release_installers.py closure-bundles
+      - name: Provision a virtual Linux display
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends xvfb libegl1 libegl-mesa0 libgl1-mesa-dri
+          sudo apt-get install --no-install-recommends xvfb xauth libegl1 libegl-mesa0 libgl1-mesa-dri
           python -c "import ctypes; ctypes.CDLL('libEGL.so.1')"
-
       - name: Validate installed consumers and native GUI on Linux
-        if: needs.plan.outputs.mode == 'full' && runner.os == 'Linux' && matrix.python-version == '3.11'
+        if: runner.os == 'Linux'
         shell: bash
         env:
           KIVY_WINDOW: sdl2
@@ -128,38 +120,27 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: '1'
           SDL_VIDEODRIVER: x11
         run: xvfb-run -a --server-args='-screen 0 1280x1024x24' python scripts/validate_installed_artifacts.py closure-bundles --gui-smoke
-
-      - name: Validate installed consumers on Windows
-        if: needs.plan.outputs.mode == 'full' && runner.os == 'Windows' && matrix.python-version == '3.11'
-        run: python scripts/validate_installed_artifacts.py closure-bundles
-
-      - name: Validate native offline installers
-        if: needs.plan.outputs.mode == 'full' && matrix.python-version == '3.11'
-        run: python scripts/validate_release_installers.py closure-bundles
-
-      - name: Run native GUI fixtures outside unittest discovery
-        if: needs.plan.outputs.mode == 'full' && runner.os == 'Linux' && matrix.python-version == '3.11'
+      - name: Validate installed consumers and native GUI on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: python scripts/validate_installed_artifacts.py closure-bundles --gui-smoke --windows-launch
+      - name: Run Linux GUI rendering and bounded stream fixtures
+        if: runner.os == 'Linux'
         shell: bash
         env:
-          SDL_VIDEODRIVER: offscreen
           KIVY_WINDOW: sdl2
           KIVY_CLIPBOARD: dummy
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          SDL_VIDEODRIVER: x11
         run: |
-          set -o pipefail
-          python tests/gui_native_capture.py --view root_refresh --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/root-refresh.png" 2>&1 | tee "${RUNNER_TEMP}/root-refresh.log"
-          python tests/gui_native_capture.py --view setting_keyboard --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/setting-keyboard.png" 2>&1 | tee "${RUNNER_TEMP}/setting-keyboard.log"
-          python tests/gui_native_capture.py --view qr --width 1180 --height 760 --font-scale 1.5 --output "${RUNNER_TEMP}/qr-wide.png" 2>&1 | tee "${RUNNER_TEMP}/qr-wide.log"
-          python tests/gui_native_dpi.py --output "${RUNNER_TEMP}/dpi-reflow.png" 2>&1 | tee "${RUNNER_TEMP}/dpi-reflow.log"
-
-      - name: Run bounded synthetic stream fixture outside unittest discovery
-        if: needs.plan.outputs.mode == 'full' && runner.os == 'Linux' && matrix.python-version == '3.11'
-        shell: bash
-        run: |
-          set -o pipefail
-          python tests/gui_stream_pressure.py --result "${RUNNER_TEMP}/stream-pressure.json" 2>&1 | tee "${RUNNER_TEMP}/stream-pressure.log"
-
-      - name: Upload native GUI and stream evidence
-        if: always() && needs.plan.outputs.mode == 'full' && runner.os == 'Linux' && matrix.python-version == '3.11'
+          set -euo pipefail
+          xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view root_refresh --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/root-refresh.png" > "${RUNNER_TEMP}/root-refresh.log" 2>&1
+          xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view setting_keyboard --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/setting-keyboard.png" > "${RUNNER_TEMP}/setting-keyboard.log" 2>&1
+          xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view qr --width 1180 --height 760 --font-scale 1.5 --output "${RUNNER_TEMP}/qr-wide.png" > "${RUNNER_TEMP}/qr-wide.log" 2>&1
+          xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_dpi.py --output "${RUNNER_TEMP}/dpi-reflow.png" > "${RUNNER_TEMP}/dpi-reflow.log" 2>&1
+          python tests/gui_stream_pressure.py --result "${RUNNER_TEMP}/stream-pressure.json" > "${RUNNER_TEMP}/stream-pressure.log" 2>&1
+      - name: Upload bounded GUI and stream evidence
+        if: always() && runner.os == 'Linux'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: gui-native-evidence-linux-py311
@@ -177,100 +158,25 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  linux-container-tests:
-    needs: plan
-    if: needs.plan.outputs.mode == 'full'
-    name: Linux Container Unittest (Python 3.11)
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-
-      - name: Build documented Linux test image
-        run: docker build --file Dockerfile.tests --build-arg PYTHON_VERSION=3.11 --tag metor-tests:ci .
-
-      - name: Run full Linux suite in documented test image
-        shell: bash
-        run: |
-          set -euo pipefail
-          container_id="$(docker create --env CI=true --env GITHUB_ACTIONS=true metor-tests:ci)"
-          trap 'docker rm --force "$container_id" >/dev/null 2>&1 || true' EXIT
-          start_status=0
-          docker start --attach "$container_id" || start_status=$?
-          mkdir -p build
-          docker cp "$container_id:/workspace/build/test-report.txt" build/test-report-container.txt
-          state="$(docker inspect --format '{{.State.Status}}' "$container_id")"
-          test_status="$(docker inspect --format '{{.State.ExitCode}}' "$container_id")"
-          if [[ "$start_status" != 0 || "$state" != exited || "$test_status" != 0 ]]; then
-            echo '::error title=Linux container tests failed::See the bounded unittest report artifact.'
-            exit 1
-          fi
-
-      - name: Upload bounded container unittest report
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: unittest-report-linux-container-py311
-          path: build/test-report-container.txt
-          if-no-files-found: warn
-          retention-days: 14
-
   acceptance:
+    name: Required CI result
     if: always()
-    needs: [plan, python-quality, linux-container-tests]
+    needs: [static, runtime, installed]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
     steps:
-      - name: Require every planned quality and acceptance job
+      - name: Require every static, runtime, and installed job
         shell: bash
         env:
-          PLAN: ${{ needs.plan.result }}
-          QUALITY: ${{ needs['python-quality'].result }}
-          CONTAINER: ${{ needs['linux-container-tests'].result }}
-          MODE: ${{ needs.plan.outputs.mode }}
-          MATRIX: ${{ needs.plan.outputs.matrix }}
+          STATIC: ${{ needs.static.result }}
+          RUNTIME: ${{ needs.runtime.result }}
+          INSTALLED: ${{ needs.installed.result }}
         run: |
           set -euo pipefail
-          if [[ "$MODE" != fast && "$MODE" != full ]]; then
-            echo 'CI plan has no recognized acceptance mode.' >&2
-            exit 1
-          fi
-          python - <<'PY'
-          import json
-          import os
-
-          expected = (
-              {('ubuntu-latest', '3.11'), ('ubuntu-latest', '3.13'),
-               ('windows-latest', '3.11'), ('windows-latest', '3.13')}
-              if os.environ['MODE'] == 'full'
-              else {('ubuntu-latest', '3.11')}
-          )
-          try:
-              matrix = json.loads(os.environ['MATRIX'])
-              rows = matrix['include']
-              actual = [(row['os'], row['python-version']) for row in rows]
-              valid = (
-                  set(matrix) == {'include'}
-                  and all(set(row) == {'os', 'python-version'} for row in rows)
-                  and len(actual) == len(expected)
-                  and set(actual) == expected
-              )
-          except (KeyError, TypeError, ValueError):
-              valid = False
-          if not valid:
-              raise SystemExit('CI plan has an incomplete or invalid required matrix.')
-          PY
-          if [[ "$PLAN" != success || "$QUALITY" != success ]]; then
-            echo "Required $MODE candidate checks are incomplete or failed." >&2
-            exit 1
-          fi
-          if [[ "$MODE" == full && "$CONTAINER" != success ]]; then
-            echo 'Required full Linux container check is incomplete or failed.' >&2
-            exit 1
-          fi
-          if [[ "$MODE" == fast && "$CONTAINER" != skipped ]]; then
-            echo 'Fast candidate unexpectedly ran the full Linux container check.' >&2
-            exit 1
-          fi
-          echo "$MODE candidate checks passed."
+          for result in "$STATIC" "$RUNTIME" "$INSTALLED"; do
+            if [[ "$result" != success ]]; then
+              echo "Required CI job incomplete or failed: $result" >&2
+              exit 1
+            fi
+          done

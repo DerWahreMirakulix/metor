@@ -72,6 +72,7 @@ class CommandType(str, Enum):
     COMMIT_VOICE = 'commit_voice'
     CANCEL_VOICE = 'cancel_voice'
     PREPARE_PROFILE_EXIT = 'prepare_profile_exit'
+    FRONTEND_LEASE = 'frontend_lease'
 
 
 class EventType(str, Enum):
@@ -119,6 +120,7 @@ class EventType(str, Enum):
     DB_CORRUPTED = 'db_corrupted'
     ALREADY_UNLOCKED = 'already_unlocked'
     SESSION_AUTHENTICATED = 'session_authenticated'
+    FRONTEND_LEASE = 'frontend_lease'
     SELF_DESTRUCT_INITIATED = 'self_destruct_initiated'
     PASSWORD_CHANGED = 'password_changed'
     PASSWORD_CHANGE_UNSUPPORTED = 'password_change_unsupported'

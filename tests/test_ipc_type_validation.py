@@ -18,6 +18,8 @@ from metor.core.api import (
     Delivery,
     EVENT_MAP,
     EventType,
+    FrontendLeaseCommand,
+    FrontendLeaseEvent,
     GetSettingsListCommand,
     IpcCommand,
     IpcEvent,
@@ -91,13 +93,18 @@ def _sample_value(field_type: object) -> object:
 def _sample_payload(dto_type: type[object]) -> dict[str, object]:
     """Builds required constructor fields for one dataclass as a wire mapping."""
     hints = get_type_hints(dto_type)
-    return {
+    payload = {
         field.name: _sample_value(hints[field.name])
         for field in dataclasses.fields(dto_type)
         if field.init
         and field.default is dataclasses.MISSING
         and field.default_factory is dataclasses.MISSING
     }
+    if dto_type is FrontendLeaseCommand:
+        payload['frontend_id'] = '0' * (2 * SharedConstants.FRONTEND_LIFETIME_ID_BYTES)
+    elif dto_type is FrontendLeaseEvent:
+        payload['state'] = 'joined'
+    return payload
 
 
 class IpcTypeValidationTests(unittest.TestCase):

@@ -17,6 +17,7 @@ from ..audio import audio_routes_body
 from ..actions import clear_drops
 from .preferences import live_preferences
 from .descriptors import core_settings_group
+from .device import device_settings_group
 from .timeout import TimeoutEditor
 from .privacy import notification_preference, profile_name_preference
 from ..profiles import request_exit
@@ -43,6 +44,7 @@ def settings_body(controller: GuiController, refresh: Callable[[], None]) -> Box
                 tone='textSecondary',
             )
         )
+        device_settings_group(controller, body, refresh)
         return body
     preferences = current.preferences
     if controller.preferences.last_error:
@@ -99,6 +101,7 @@ def settings_body(controller: GuiController, refresh: Callable[[], None]) -> Box
             )
         )
     core_settings_group(controller, body, 'Device')
+    device_settings_group(controller, body, refresh)
     body.add_widget(audio_routes_body(controller, refresh))
     body.add_widget(
         Label('Metor application lock', role='support', tone='textSecondary')

@@ -6,6 +6,7 @@ class GuiLimits:
 
     DEVICE_BYTES: int = 64 * 1024
     DEVICE_STRING: int = 256
+    DEVICE_PARAMETER_ABSOLUTE_NUMBER: int = 1_000_000_000_000
     MAX_PIXELS: int = 16384
     MIN_SCALE: float = 0.25
     MAX_SCALE: float = 8.0

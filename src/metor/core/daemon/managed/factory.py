@@ -58,6 +58,7 @@ def create_managed_daemon(
     password: Optional[str] = None,
     session_auth_password: Optional[str] = None,
     start_locked: bool = False,
+    automatic_lifetime: bool = False,
     status_callback: Optional[RuntimeStatusCallback] = None,
     sql_log_callback: Optional[RuntimeLogCallback] = None,
     tor_log_callback: Optional[RuntimeLogCallback] = None,
@@ -100,6 +101,7 @@ def create_managed_daemon(
             status_callback=status_callback,
             require_session_auth=require_local_auth,
             start_locked=True,
+            automatic_lifetime=automatic_lifetime,
         )
 
     try:
@@ -136,6 +138,7 @@ def create_managed_daemon(
             session_auth=runtime.session_auth,
             require_session_auth=require_local_auth,
             status_callback=status_callback,
+            automatic_lifetime=automatic_lifetime,
         )
     except Exception as exc:
         try:

@@ -18,6 +18,7 @@ from metor.core.daemon.managed.notify import (
     register_sink_type,
 )
 from metor.core.daemon.managed.status import DaemonStatus
+from metor.core.daemon.managed.frontend_lifetime import read_frontend_lifetime_token
 
 
 __all__ = [
@@ -35,4 +36,5 @@ __all__ = [
     'create_managed_daemon',
     'get_sink_type',
     'register_sink_type',
+    'read_frontend_lifetime_token',
 ]

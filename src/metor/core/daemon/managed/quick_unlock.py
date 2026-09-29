@@ -321,7 +321,9 @@ class QuickUnlockStore:
     def _run_acl_helper(
         path: Path, script: str, phase: str
     ) -> subprocess.CompletedProcess[str]:
-        """Runs constant PowerShell code with path data on standard input.
+        """Runs constant PowerShell code without a console window.
+
+        Path data is delivered on standard input, never inside executable code.
 
         Args:
             path (Path): Target path, never interpolated into executable code.
@@ -356,6 +358,7 @@ class QuickUnlockStore:
                 errors='replace',
                 check=False,
                 timeout=Constants.QUICK_UNLOCK_HELPER_TIMEOUT_SEC,
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
             )
         except (OSError, subprocess.SubprocessError):
             raise QuickUnlockStorageError(
