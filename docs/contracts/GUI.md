@@ -112,14 +112,14 @@ boundary accepts finite numbers with absolute value at most 10¹²; this keeps
 deployment data small before provider validation. Each provider then applies
 its own narrower field ranges.
 
-| Table                                 | Current contract                                                                                                                                                                  |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `[platform]`                          | Optional `adapter` and bounded `[platform.config]` for a physical adapter. Simulation has no platform provider.                                                                   |
-| `[display]`                           | `adapter`, positive bounded native `width_px` and `height_px`; optional `rotation_deg` in 0/90/180/270 and finite `scale` from 0.25 through 8. `output` is currently unsupported. |
-| `[input]`                             | `adapter`, exact `ptt_binding = "ptt"` and `power_binding = "power"`; optional boolean `touch`. PTT and Power have separate meanings.                                             |
-| `[audio]`, `[camera]`                 | Optional `adapter = "none"` only in the current implementation; absence means unavailable.                                                                                        |
-| `[indicator]`, `[haptics]`, `[power]` | Optional `adapter = "none"`, or the matching selected physical adapter ID when that port exists. Undeclared ports remain disabled.                                                |
-| `[clipboard]`                         | Optional `policy = "disabled"` only.                                                                                                                                              |
+| Table                                 | Current contract                                                                                                                                                                                                                            |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `[platform]`                          | Optional `adapter` and bounded `[platform.config]` for a physical adapter. Simulation has no platform provider.                                                                                                                             |
+| `[display]`                           | `adapter`, positive bounded native `width_px` and `height_px`; optional `rotation_deg` in 0/90/180/270 and finite `scale` from 0.25 through 8. `output` is currently unsupported.                                                           |
+| `[input]`                             | `adapter`, exact `ptt_binding = "ptt"` and `power_binding = "power"`; optional boolean `touch`. PTT and Power have separate meanings.                                                                                                       |
+| `[audio]`, `[camera]`                 | Optional `adapter = "none"` only in the current implementation; absence means unavailable.                                                                                                                                                  |
+| `[indicator]`, `[haptics]`, `[power]` | Optional `adapter = "none"`, or the matching selected physical adapter ID when that port exists. Undeclared ports remain disabled.                                                                                                          |
+| `[clipboard]`                         | Optional `policy = "disabled"` or `policy = "own_address"`. An explicit device file defaults to disabled when this table is absent. `own_address` permits only the deliberate copy action for the current profile's public contact address. |
 
 `adapter` is a registered identity, never a Python import path. In simulator
 mode, required display and input adapters are `simulator`, and physical bindings
@@ -324,7 +324,12 @@ Simulation cannot invoke production destruction or shutdown.
 
 Peer text, aliases, and errors render as bounded plain content. The GUI makes
 no automatic URL requests, rich previews, telemetry, or cloud font fetches.
-Clipboard export is disabled by the current device configuration parser.
+Desktop and simulator defaults permit an explicit Copy address action for the
+current profile's public contact address. An explicit device file must set
+`[clipboard] policy = "own_address"` to permit it; `disabled` (or an absent
+clipboard table in that file) prohibits the action. Generic text fields,
+messages, and credentials cannot be copied through the GUI. After an allowed
+copy, the host clipboard may retain the address beyond GUI lock or exit.
 Volatile application state is not a promise against host swap, screenshots,
 crash dumps, or physical media recovery.
 

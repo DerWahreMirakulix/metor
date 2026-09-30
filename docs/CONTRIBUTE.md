@@ -78,6 +78,27 @@ from every feature branch, pushes to `main`, and manual dispatch use this same
 topology. The generated-document checker is nonmutating; run
 `npm run generate:docs` before committing an intentional API or settings change.
 
+`npm run check:gui-diagnostics` is the focused zero-baseline editor gate for the
+own-contact GUI path and native capture fixture. It checks those files with
+Basedpyright 1.40.1 in standard mode for Linux and Windows on Python 3.11 and
+3.13, plus additional Ruff import, broad-exception, duplicate-branch, and
+unused-suppression rules. Run `npm ci` first; the CI
+`static` job runs this gate after the project-wide Ruff and Mypy checks. The
+repository-wide Ruff rule selection is explicit in `pyproject.toml`, so a newer
+editor Ruff does not silently change the project's lint policy. Locally, the
+gate prefers a GUI-ready `.venv` over an unrelated `python` on `PATH`.
+
+### Editor formatting
+
+Run `npm ci` and install `requirements/dev.txt`, then select this checkout's
+`.venv` Python toolchain in both VS Code and Zed. Their project settings enable
+format-on-save with Ruff for Python and the locally pinned Prettier for Markdown,
+JSON, JSONC, and YAML. Ruff's lint and format options live in `pyproject.toml`;
+save-time formatting does not run `fix:py` or replace the static checks. VS
+Code's Pylance and Zed's Basedpyright are different type checkers, so identical
+type diagnostics are not implied by identical formatting. The focused
+Basedpyright CLI gate above is the reproducible check for its covered files.
+
 ### Portable local environments
 
 The optional Docker image gives Linux and WSL users a clean, unprivileged

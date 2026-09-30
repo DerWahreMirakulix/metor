@@ -4,20 +4,19 @@ Run explicitly with the installed GUI interpreter outside the source tree.
 This is native renderer evidence, not physical input/audio or Core acceptance.
 """
 
-# ruff: noqa: E402
-
 import argparse
-from collections.abc import Callable
-from dataclasses import replace
 import json
 import os
-from pathlib import Path
 import platform
-import psutil
 import string
 import time
+from collections.abc import Callable
+from dataclasses import replace
+from pathlib import Path
 from typing import cast
 from unittest.mock import patch
+
+import psutil
 
 os.environ['KIVY_NO_ARGS'] = '1'
 if os.name == 'nt':
@@ -36,68 +35,70 @@ initial_geometry, _remaining_arguments = geometry_parser.parse_known_args()
 Config.set('graphics', 'width', str(initial_geometry.width))
 Config.set('graphics', 'height', str(initial_geometry.height + 24))
 
+from gui_native_contacts import configure_contact_pages, exercise_contact_pages
+from gui_native_history import configure_history, exercise_history
+from gui_native_live_controls import exercise_live_controls
+from gui_native_load import exercise_native_load
+from gui_native_profiles import (
+    configure_profiles,
+    exercise_profile_address,
+    exercise_profile_editor,
+)
+from gui_native_purge import configure_purge
+from gui_native_render import capture_viewport
+from gui_native_responsive import exercise_responsive
+from gui_native_root import exercise_root_navigation, exercise_root_refresh
+from gui_native_settings import exercise_setting_editor, exercise_setting_keyboard
+from gui_native_timeout import exercise_timeout
 from kivy.clock import Clock
+from kivy.core.clipboard import Clipboard
+from kivy.core.clipboard.clipboard_dummy import ClipboardDummy
 from kivy.core.window import Window
 from kivy.graphics import Rectangle
-from kivy.metrics import dp, Metrics
 from kivy.input.providers.mouse import MouseMotionEvent
+from kivy.metrics import Metrics, dp
 from kivy.uix.scrollview import ScrollView
 
 from metor.client import FrontendHost, FrontendLaunchContext
 from metor.core.api import (
-    ContactEntry,
-    IncomingConnectionEvent,
-    NotificationPrivacy,
-    PendingConnectionEntry,
-    ConnectionOrigin,
-    PendingConnectionReasonCode,
     ClientRestrictedEvent,
     ClientUnlockMethod,
-    GuiPreferencesEvent,
+    ConnectionOrigin,
+    ContactEntry,
     Delivery,
     DropConversationSummaryEntry,
+    GuiPreferencesEvent,
+    IncomingConnectionEvent,
     LiveContextEntry,
     MessageDirectionCode,
     MessageEntry,
     MessagesDataEvent,
     MessageStatusCode,
+    NotificationPrivacy,
+    PendingConnectionEntry,
+    PendingConnectionReasonCode,
     RuntimeSnapshotEvent,
     TextContent,
 )
 from metor.ui.gui.app import MetorApp
 from metor.ui.gui.constants import Geometry
 from metor.ui.gui.platform import DeviceConfiguration
+from metor.ui.gui.platform.audio import PcmVoice
 from metor.ui.gui.runtime.device import DevicePhase
-from metor.ui.gui.state import Route
-from metor.ui.gui.widgets import Action, SecretInput, TextField
-from metor.ui.gui.widgets.keyboard import KeyboardKey
-from metor.ui.gui.widgets.sheet import ActionSheet, confirm
-from metor.ui.gui.views.contacts.panel import contact_sheet
-from metor.ui.gui.widgets.qr import ContactQr
-from metor.ui.gui.views.peer import PeerView
 from metor.ui.gui.runtime.transcript import TranscriptItem
 from metor.ui.gui.runtime.voice.controller import VoiceReview
 from metor.ui.gui.runtime.voice.press import CaptureBinding
-from metor.ui.gui.platform.audio import PcmVoice
-from gui_native_render import capture_viewport
-from gui_native_live_controls import exercise_live_controls
-from gui_native_settings import exercise_setting_editor, exercise_setting_keyboard
-from gui_native_history import configure_history, exercise_history
-from gui_native_timeout import exercise_timeout
-from gui_native_profiles import (
-    configure_profiles,
-    exercise_profile_editor,
-    exercise_profile_address,
-)
-from gui_native_contacts import configure_contact_pages, exercise_contact_pages
-from gui_native_responsive import exercise_responsive
-from gui_native_purge import configure_purge
-from gui_native_root import exercise_root_navigation, exercise_root_refresh
-from gui_native_load import exercise_native_load
+from metor.ui.gui.state import Route
+from metor.ui.gui.views.contacts.panel import contact_sheet
+from metor.ui.gui.views.peer import PeerView
+from metor.ui.gui.widgets import Action, Label, SecretInput, TextField
+from metor.ui.gui.widgets.keyboard import KeyboardKey
+from metor.ui.gui.widgets.qr import ContactQr
+from metor.ui.gui.widgets.sheet import ActionSheet, confirm
 
 
 def assert_qr_visible(app: MetorApp) -> None:
-    """Keeps the complete module matrix and quiet zone inside the real viewport.
+    """Checks the QR, centered address, copy action, and native viewport fit.
 
     Args:
         app: Running isolated native fixture application.
@@ -108,7 +109,9 @@ def assert_qr_visible(app: MetorApp) -> None:
     qr = next(widget for widget in app.shell.walk() if isinstance(widget, ContactQr))
     scroll = qr.parent.parent
     assert isinstance(scroll, ScrollView)
-    rectangles = [item for item in qr.canvas.children if isinstance(item, Rectangle)]
+    canvas = qr.canvas
+    assert canvas is not None
+    rectangles = [item for item in canvas.children if isinstance(item, Rectangle)]
     square = max(rectangles, key=lambda item: item.size[0] * item.size[1])
     count = len(qr.modules)
     assert square.size[0] == square.size[1] and square.size[0] >= count
@@ -127,6 +130,71 @@ def assert_qr_visible(app: MetorApp) -> None:
         f'viewport={(viewport_left, viewport_bottom, viewport_right, viewport_top)}, '
         f'widget={qr.pos + qr.size}'
     )
+    snapshot = app.controller.state.snapshot
+    assert snapshot is not None
+    address = next(
+        widget
+        for widget in qr.parent.children
+        if isinstance(widget, Label) and widget.text == snapshot.onion
+    )
+    assert address.halign == 'center'
+    assert abs(address.center_x - (square.pos[0] + square.size[0] / 2)) <= dp(1)
+    assert square.pos[1] - address.top >= dp(20), (
+        f'Contact address too close to QR: square_bottom={square.pos[1]}, '
+        f'address_top={address.top}'
+    )
+    copy_action = next(
+        widget
+        for widget in app.shell.walk()
+        if isinstance(widget, Action)
+        and widget.accessible_name in {'Copy address', 'Copy unavailable'}
+    )
+    assert copy_action.disabled == isinstance(Clipboard, ClipboardDummy)
+    assert copy_action.accessible_name == (
+        'Copy unavailable' if copy_action.disabled else 'Copy address'
+    )
+    assert copy_action.opacity > 0
+    assert copy_action.get_root_window() is not None
+    assert copy_action.height >= dp(48)
+
+
+def assert_qr_copy_action(app: MetorApp) -> None:
+    """Exercises the explicit copy and refuses a stale native action after departure."""
+    assert app.shell is not None
+    snapshot = app.controller.state.snapshot
+    assert snapshot is not None
+    action = next(
+        widget
+        for widget in app.shell.walk()
+        if isinstance(widget, Action)
+        and widget.accessible_name in {'Copy address', 'Copy unavailable'}
+    )
+    if action.disabled:
+        return
+    with patch('metor.ui.gui.views.contacts.panel.Clipboard') as clipboard:
+        clipboard.paste.return_value = snapshot.onion
+        action.dispatch('on_release')
+        clipboard.copy.assert_called_once_with(snapshot.onion)
+        clipboard.paste.assert_called_once_with()
+        assert action.accessible_name == 'Address copied'
+        clipboard.copy.reset_mock()
+        clipboard.copy.side_effect = RuntimeError('provider failure')
+        action.dispatch('on_release')
+        assert action.accessible_name == 'Copy unavailable'
+        clipboard.copy.reset_mock(side_effect=True)
+        clipboard.paste.return_value = ''
+        action.dispatch('on_release')
+        assert action.accessible_name == 'Copy unavailable'
+        clipboard.copy.reset_mock()
+        app.controller.state.covered = True
+        action.dispatch('on_release')
+        app.controller.state.covered = False
+        app.controller.state.route = Route('V12')
+        action.dispatch('on_release')
+        app.controller.state.route = Route('V15')
+        app.controller.state.generation += 1
+        action.dispatch('on_release')
+        clipboard.copy.assert_not_called()
 
 
 def assert_qr_resize(onion: str) -> None:
@@ -140,8 +208,10 @@ def assert_qr_resize(onion: str) -> None:
     qr = ContactQr(onion)
     qr.pos = (dp(17), dp(23))
     qr.width = dp(500)
+    canvas = qr.canvas
+    assert canvas is not None
     square = max(
-        (item for item in qr.canvas.children if isinstance(item, Rectangle)),
+        (item for item in canvas.children if isinstance(item, Rectangle)),
         key=lambda item: item.size[0] * item.size[1],
     )
     assert square.pos[0] == round(qr.x + (qr.width - square.size[0]) / 2)
@@ -225,6 +295,7 @@ def exercise_local_keyboard(app: MetorApp, complete: Callable[[], None]) -> None
         secret.text = ''
         dock.hide()
         assert dock.target is None and dock.keyboard is None
+        assert app.shell is not None
         app.shell.remove_widget(secret)
         assert original is not None
         dock.show(original)
@@ -398,9 +469,11 @@ def exercise_root_pages(app: MetorApp) -> None:
 
     assert app.shell is not None
     controller = app.controller
+    snapshot = controller.state.snapshot
     if (
         controller.state.route.view != 'V06'
-        or len(controller.state.snapshot.conversations) != 130
+        or snapshot is None
+        or len(snapshot.conversations) != 130
     ):
         return
     selector = next(
@@ -522,6 +595,7 @@ def main() -> None:
         width_px=args.width,
         height_px=args.height,
         touch=args.view == 'setting_keyboard',
+        clipboard_own_address=True,
     )
     host = cast(FrontendHost, object())
     app = MetorApp(FrontendLaunchContext('Simulator', host), config)
@@ -640,10 +714,10 @@ def main() -> None:
         controller.state.route = Route('V12' if args.view != 'qr' else 'V15')
         if args.view == 'contact_form':
             controller.contacts.begin('live')
-            controller.contacts.form.raw = (
-                'gqncaw2sjprzovtdquir4etnswg2eyvomid4bsbdld2p5roay5vmvtyd.onion'
-            )
-            controller.contacts.form.alias = 'Rhea'
+            form = controller.contacts.form
+            assert form is not None
+            form.raw = 'gqncaw2sjprzovtdquir4etnswg2eyvomid4bsbdld2p5roay5vmvtyd.onion'
+            form.alias = 'Rhea'
         if args.view == 'qr':
             controller.state.snapshot.onion = (
                 'gqncaw2sjprzovtdquir4etnswg2eyvomid4bsbdld2p5roay5vmvtyd.onion'
@@ -804,10 +878,19 @@ def main() -> None:
 
                 assert app.shell is not None
                 field = next(
-                    widget
-                    for widget in app.shell.walk()
-                    if isinstance(widget, SecretInput)
+                    (
+                        widget
+                        for widget in app.shell.walk()
+                        if isinstance(widget, SecretInput)
+                    ),
+                    None,
                 )
+                if field is None:
+                    assert time.monotonic() - started < 30, (
+                        'Locked PIN field did not become ready'
+                    )
+                    Clock.schedule_once(receive_notice, 0.1)
+                    return
                 field.focus = True
                 call_focus.append(field)
                 controller.notifications.observe(
@@ -1135,10 +1218,12 @@ def main() -> None:
             return
         if args.view in {'continued', 'continued_recording', 'continued_pin'}:
             overlay = app.continued_overlay
-            assert overlay is not None and overlay.panel is not None
-            assert overlay.panel.y >= dp(24)
-            assert overlay.ptt.height >= dp(48)
-            assert overlay.panel.right <= Window.width - dp(24)
+            assert overlay is not None
+            panel, ptt, label = overlay.panel, overlay.ptt, overlay.label
+            assert panel is not None and ptt is not None and label is not None
+            assert panel.y >= dp(24)
+            assert ptt.height >= dp(48)
+            assert panel.right <= Window.width - dp(24)
             if args.view == 'continued_pin' and not continued_pin_checked:
                 scroll = next(
                     widget
@@ -1156,6 +1241,7 @@ def main() -> None:
                         None
                     """
                     nonlocal continued_pin_checked
+                    assert app.shell is not None
                     actions = [
                         widget
                         for widget in app.shell.walk()
@@ -1164,7 +1250,7 @@ def main() -> None:
                     ]
                     assert len(actions) == 2
                     for action in actions:
-                        assert action.to_window(*action.pos)[1] >= overlay.panel.top
+                        assert action.to_window(*action.pos)[1] >= panel.top
                         assert action.height >= dp(48)
                     continued_pin_checked = True
                     scroll.scroll_y = 1
@@ -1178,8 +1264,8 @@ def main() -> None:
                 for identity in ('rhea', 'simulator', 'synthetic-instance')
             )
             if args.view == 'continued_recording':
-                assert overlay.label.text == 'Recording · 1:05'
-                assert overlay.ptt.label.text == 'Release to finish'
+                assert label.text == 'Recording · 1:05'
+                assert ptt.label.text == 'Release to finish'
             capture_viewport(app.viewport.parent, args.output)
         elif args.view == 'locked_notice':
             from metor.ui.gui.views.security import LockedActivity
@@ -1189,7 +1275,9 @@ def main() -> None:
                 for widget in app.shell.walk()
                 if isinstance(widget, LockedActivity)
             )
-            assert cue.opacity == 1 and cue.height >= dp(48)
+            cue_height = cue.height
+            assert isinstance(cue_height, (int, float))
+            assert cue.opacity == 1 and cue_height >= dp(48)
             assert cue.label.text == 'New Drop · Unlock to view'
             assert call_focus and all(field.focus for field in call_focus)
             capture_viewport(app.viewport.parent, args.output)
@@ -1225,7 +1313,7 @@ def main() -> None:
                             list(getattr(item, 'pos', ())),
                             list(getattr(item, 'size', ())),
                         )
-                        for item in widget.canvas.children
+                        for item in canvas.children
                     ],
                     'bounds': list(widget.pos) + list(widget.size),
                     'window': list(widget.to_window(*widget.pos)),
@@ -1234,6 +1322,7 @@ def main() -> None:
                 if args.view in {'continued_pin', 'locked_notice'}
                 and getattr(widget, 'text', '')
                 in {'Metor', 'Locked', 'PIN', 'Forgot PIN?'}
+                and (canvas := widget.canvas) is not None
             ],
             'lock_scroll_geometry': [
                 {
@@ -1244,12 +1333,14 @@ def main() -> None:
                             list(getattr(item, 'pos', ())),
                             list(getattr(item, 'size', ())),
                         )
-                        for item in widget.canvas.before.children
+                        for item in before_canvas.children
                     ],
                 }
                 for widget in app.shell.walk()
                 if args.view == 'continued_pin'
                 and type(widget).__name__ == 'ScrollView'
+                and (canvas := widget.canvas) is not None
+                and (before_canvas := canvas.before) is not None
             ],
             'notification_summary_geometry': [
                 {
@@ -1303,18 +1394,22 @@ def main() -> None:
                     ),
                     'square': [
                         list(item.pos) + list(item.size)
-                        for item in widget.canvas.children
-                        if type(item).__name__ == 'Rectangle'
+                        for item in canvas.children
+                        if isinstance(item, Rectangle)
                         and item.size[0] > dp(Geometry.TARGET)
                     ],
                 }
                 for widget in app.shell.walk()
-                if args.view == 'qr' and isinstance(widget, ContactQr)
+                if args.view == 'qr'
+                and isinstance(widget, ContactQr)
+                and (canvas := widget.canvas) is not None
             ],
         }
         args.output.with_suffix('.json').write_text(
             json.dumps(evidence, indent=2) + '\n'
         )
+        if args.view == 'qr':
+            assert_qr_copy_action(app)
         app.stop()
 
     if args.view == 'keyboard':

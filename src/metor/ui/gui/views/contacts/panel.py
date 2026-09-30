@@ -3,7 +3,11 @@
 from collections.abc import Callable
 from functools import partial
 
+from kivy.core.clipboard import Clipboard
+from kivy.core.clipboard.clipboard_dummy import ClipboardDummy
+from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.widget import Widget
 
 from metor.core.api import Delivery
 from metor.ui.gui.runtime import GuiController
@@ -142,11 +146,47 @@ def contacts_body(
         return
     if route.view == 'V15':
         if snapshot and snapshot.onion:
+            own_address = snapshot.onion
+            generation = controller.state.generation
+            qr_available = False
             try:
-                body.add_widget(ContactQr(snapshot.onion))
+                body.add_widget(ContactQr(own_address))
+                qr_available = True
             except ValueError:
                 body.add_widget(Label('Contact QR unavailable', tone='textSecondary'))
-            body.add_widget(Label(snapshot.onion, role='support'))
+            body.add_widget(Widget(size_hint_y=None, height=dp(8)))
+            address = Label(own_address, role='support')
+            address.halign = 'center'
+            body.add_widget(address)
+            if controller.clipboard_own_address and qr_available:
+
+                def copy_address() -> None:
+                    """Exports only the still-visible current public identity on request."""
+                    current = controller.state
+                    if (
+                        current.covered
+                        or current.generation != generation
+                        or current.route.view != 'V15'
+                        or current.snapshot is None
+                        or current.snapshot.onion != own_address
+                    ):
+                        return
+                    try:
+                        Clipboard.copy(own_address)
+                        copied = Clipboard.paste() == own_address
+                    except Exception:  # noqa: BLE001 - isolate optional clipboard providers
+                        copied = False
+                    status = 'Address copied' if copied else 'Copy unavailable'
+                    copy_action.label.text = status
+                    copy_action.accessible_name = status
+
+                clipboard_unavailable = isinstance(Clipboard, ClipboardDummy)
+                copy_action = Action(
+                    'Copy unavailable' if clipboard_unavailable else 'Copy address',
+                    copy_address,
+                    disabled=clipboard_unavailable,
+                )
+                body.add_widget(copy_action)
         else:
             body.add_widget(Label('Contact identity unavailable', tone='textSecondary'))
             body.add_widget(Action('Retry', controller.refresh_state))

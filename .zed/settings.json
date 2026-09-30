@@ -1,0 +1,41 @@
+{
+  "languages": {
+    "Python": {
+      "format_on_save": "on",
+      "formatter": {
+        "language_server": {
+          "name": "ruff"
+        }
+      },
+      "code_actions_on_format": {
+        "source.organizeImports.ruff": false,
+        "source.fixAll.ruff": false
+      }
+    },
+    "Markdown": {
+      "format_on_save": "on",
+      "formatter": "auto"
+    },
+    "JSON": {
+      "format_on_save": "on",
+      "formatter": "auto"
+    },
+    "JSONC": {
+      "format_on_save": "on",
+      "formatter": "auto"
+    },
+    "YAML": {
+      "format_on_save": "on",
+      "formatter": "auto"
+    }
+  },
+  "lsp": {
+    "ruff": {
+      "initialization_options": {
+        "settings": {
+          "configurationPreference": "filesystemFirst"
+        }
+      }
+    }
+  }
+}

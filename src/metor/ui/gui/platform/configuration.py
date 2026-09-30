@@ -1,12 +1,12 @@
 """Bounded, strict device configuration validation before any driver activation."""
 
-from dataclasses import dataclass
 import math
 import os
-from pathlib import Path
 import re
 import stat
 import tomllib
+from dataclasses import dataclass
+from pathlib import Path
 from typing import cast
 
 from metor.client.platform import AdapterParameter, PlatformBindings
@@ -95,7 +95,8 @@ def _read_trusted_configuration(location: Path) -> bytes:
         if metadata.st_nlink != 1:
             raise DeviceConfigurationError('Device configuration must not be linked')
         if not _is_windows():
-            if not hasattr(os, 'getuid') or metadata.st_uid != os.getuid():
+            getuid = getattr(os, 'getuid', None)
+            if not callable(getuid) or metadata.st_uid != getuid():
                 raise DeviceConfigurationError(
                     'Device configuration must be owned by the current user'
                 )
@@ -126,6 +127,7 @@ class DeviceConfiguration:
     scale: float = 1.0
     rotation_deg: int = 0
     touch: bool = False
+    clipboard_own_address: bool = False
     indicator: bool = False
     haptics: bool = False
     power: bool = False
@@ -271,7 +273,10 @@ def read_configuration(
             raise DeviceConfigurationError(
                 'Physical platform bindings require an explicit device configuration.'
             )
-        return DeviceConfiguration(mode='simulator' if simulator else 'desktop')
+        return DeviceConfiguration(
+            mode='simulator' if simulator else 'desktop',
+            clipboard_own_address=True,
+        )
     if simulator and platform is not None:
         raise DeviceConfigurationError(
             'Simulator cannot activate physical platform bindings.'
@@ -396,10 +401,13 @@ def read_configuration(
             ):
                 raise DeviceConfigurationError(f'{key}: unsupported adapter')
             enabled_ports[key] = selected == expected_adapter
+    clipboard_own_address = False
     if 'clipboard' in tables:
         clipboard = _table(tables['clipboard'], {'policy'}, 'clipboard')
-        if clipboard.get('policy') != 'disabled':
+        clipboard_policy = clipboard.get('policy')
+        if clipboard_policy not in ('disabled', 'own_address'):
             raise DeviceConfigurationError('clipboard: unsupported policy')
+        clipboard_own_address = clipboard_policy == 'own_address'
     if 'drivers' in tables:
         _table(tables['drivers'], set(), 'drivers')
     config = DeviceConfiguration(
@@ -413,6 +421,7 @@ def read_configuration(
         rotation_deg=rotation,
         scale=float(scale),
         touch=touch,
+        clipboard_own_address=clipboard_own_address,
         indicator=enabled_ports['indicator'],
         haptics=enabled_ports['haptics'],
         power=enabled_ports['power'],

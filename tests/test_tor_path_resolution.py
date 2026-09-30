@@ -339,33 +339,48 @@ class TorLifecycleTests(unittest.TestCase):
         Returns:
             None
         """
-        manager = self._manager(None)
-        manager._pm.config.get_int.return_value = 1
-        manager._pm.config.get_bool.return_value = True
-        messages: list[str] = []
         private_detail = 'private-profile-path-and-secret'
+        for windows in (False, True):
+            with self.subTest(windows=windows):
+                manager = self._manager(None)
+                manager._pm.config.get_int.return_value = 1
+                manager._pm.config.get_bool.return_value = True
+                messages: list[str] = []
 
-        with (
-            patch.object(manager, '_reserve_ports'),
-            patch.object(TorManager, '_resolve_tor_command', return_value='tor'),
-            patch.object(TorManager, '_log_callback', messages.append),
-            patch(
-                'metor.core.tor.stem.process.launch_tor_with_config',
-                side_effect=OSError(private_detail),
-            ),
-        ):
-            result = manager._launch_process()
+                with (
+                    patch.object(manager, '_reserve_ports'),
+                    patch.object(
+                        TorManager, '_resolve_tor_command', return_value='tor'
+                    ),
+                    patch.object(TorManager, '_log_callback', messages.append),
+                    patch('metor.core.tor._is_windows', return_value=windows),
+                    patch(
+                        'metor.core.tor.stem.process.launch_tor_with_config',
+                        side_effect=OSError(private_detail),
+                    ) as unix_launch,
+                    patch(
+                        'metor.core.tor.launch_tor_without_console',
+                        side_effect=OSError(private_detail),
+                    ) as windows_launch,
+                ):
+                    result = manager._launch_process()
 
-        self.assertEqual(
-            result,
-            (
-                False,
-                EventType.TOR_START_FAILED,
-                {'error_code': RuntimeErrorCode.TOR_LAUNCH_FAILED},
-            ),
-        )
-        self.assertEqual(messages, ['Tor launch failed.'])
-        self.assertNotIn(private_detail, repr(result) + repr(messages))
+                if windows:
+                    windows_launch.assert_called_once()
+                    unix_launch.assert_not_called()
+                else:
+                    unix_launch.assert_called_once()
+                    windows_launch.assert_not_called()
+                self.assertEqual(
+                    result,
+                    (
+                        False,
+                        EventType.TOR_START_FAILED,
+                        {'error_code': RuntimeErrorCode.TOR_LAUNCH_FAILED},
+                    ),
+                )
+                self.assertEqual(messages, ['Tor launch failed.'])
+                self.assertNotIn(private_detail, repr(result) + repr(messages))
 
     def test_failed_launch_cleanup_retains_unconfirmed_process(self) -> None:
         """A failed PID write must not retry over an unconfirmed Tor process.
@@ -376,42 +391,56 @@ class TorLifecycleTests(unittest.TestCase):
         Returns:
             None
         """
-        process = Mock(pid=12345)
-        process.poll.return_value = None
-        process.terminate.side_effect = OSError('private-termination-path')
-        process.kill.side_effect = OSError('private-kill-path')
-        manager = self._manager(None)
-        manager._pm.config.get_int.return_value = 2
+        for windows in (False, True):
+            with self.subTest(windows=windows):
+                process = Mock(pid=12345)
+                process.poll.return_value = None
+                process.terminate.side_effect = OSError('private-termination-path')
+                process.kill.side_effect = OSError('private-kill-path')
+                manager = self._manager(None)
+                manager._pm.config.get_int.return_value = 2
 
-        with (
-            patch.object(manager, '_reserve_ports'),
-            patch.object(TorManager, '_resolve_tor_command', return_value='tor'),
-            patch(
-                'metor.core.tor.stem.process.launch_tor_with_config',
-                return_value=process,
-            ) as launch,
-            patch(
-                'metor.core.tor.ProcessManager.process_identity_payload',
-                return_value='owned-process',
-            ),
-            patch(
-                'metor.core.tor.open_private_binary_file',
-                side_effect=OSError('private-pid-path'),
-            ),
-        ):
-            result = manager._launch_process()
+                with (
+                    patch.object(manager, '_reserve_ports'),
+                    patch.object(
+                        TorManager, '_resolve_tor_command', return_value='tor'
+                    ),
+                    patch('metor.core.tor._is_windows', return_value=windows),
+                    patch(
+                        'metor.core.tor.stem.process.launch_tor_with_config',
+                        return_value=process,
+                    ) as unix_launch,
+                    patch(
+                        'metor.core.tor.launch_tor_without_console',
+                        return_value=process,
+                    ) as windows_launch,
+                    patch(
+                        'metor.core.tor.ProcessManager.process_identity_payload',
+                        return_value='owned-process',
+                    ),
+                    patch(
+                        'metor.core.tor.open_private_binary_file',
+                        side_effect=OSError('private-pid-path'),
+                    ),
+                ):
+                    result = manager._launch_process()
 
-        self.assertEqual(
-            result,
-            (
-                False,
-                EventType.TOR_START_FAILED,
-                {'error_code': RuntimeErrorCode.TOR_LAUNCH_FAILED},
-            ),
-        )
-        launch.assert_called_once()
-        self.assertIs(manager._tm_proc, process)
-        self.assertNotIn('private-', repr(result))
+                if windows:
+                    windows_launch.assert_called_once()
+                    unix_launch.assert_not_called()
+                else:
+                    unix_launch.assert_called_once()
+                    windows_launch.assert_not_called()
+                self.assertEqual(
+                    result,
+                    (
+                        False,
+                        EventType.TOR_START_FAILED,
+                        {'error_code': RuntimeErrorCode.TOR_LAUNCH_FAILED},
+                    ),
+                )
+                self.assertIs(manager._tm_proc, process)
+                self.assertNotIn('private-', repr(result))
 
     def test_control_failure_never_publishes_exception_detail(self) -> None:
         """A failed Tor control request returns a fixed diagnostic after recovery.

@@ -26,13 +26,12 @@ from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.runtime.voice import PressSource
 from metor.ui.gui.theme import color
 from metor.ui.gui.views import Shell
-from metor.ui.gui.widgets import Label, PointerTooltip
-from metor.ui.gui.widgets import TextField
-from metor.ui.gui.widgets.sheet import ActionSheet
-from metor.ui.gui.views.input import InputDock
 from metor.ui.gui.views.calls import CallOverlay
 from metor.ui.gui.views.continued import ContinuedOverlay
+from metor.ui.gui.views.input import InputDock
 from metor.ui.gui.views.profiles import request_exit
+from metor.ui.gui.widgets import Label, PointerTooltip, TextField
+from metor.ui.gui.widgets.sheet import ActionSheet
 
 
 class MetorApp(App):
@@ -55,7 +54,11 @@ class MetorApp(App):
         """
         super().__init__(**kwargs)
         self.configuration = configuration
-        self.controller = GuiController(context, configuration.mode == 'simulator')
+        self.controller = GuiController(
+            context,
+            configuration.mode == 'simulator',
+            clipboard_own_address=configuration.clipboard_own_address,
+        )
         self.title = 'Metor · Simulator' if self.controller.simulator else 'Metor'
         self.exit_status: int = 0
         self._stopped = False

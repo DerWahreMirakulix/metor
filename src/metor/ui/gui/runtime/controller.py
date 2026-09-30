@@ -1,8 +1,8 @@
 """Serial bounded SDK operations and generation-safe UI result installation."""
 
+import threading
 from collections.abc import Callable
 from dataclasses import replace
-import threading
 
 from metor.client import (
     FrontendBootstrapError,
@@ -16,22 +16,22 @@ from metor.client import (
     MetorRequestRejectedError,
 )
 from metor.core.api import (
+    DaemonLockedEvent,
     Delivery,
     EventType,
-    DaemonLockedEvent,
-    SelfDestructInitiatedEvent,
     GuiPreferencesEvent,
     GuiPreferencesRejectedEvent,
+    InitEvent,
     IpcCommand,
     IpcEvent,
-    InitEvent,
     MessagesDataEvent,
-    VoiceOwnerRegisteredEvent,
-    VoiceIncomingStartedEvent,
-    VoiceChunkReceivedEvent,
-    VoiceFinalizedEvent,
     RuntimeSnapshotEvent,
     RuntimeStateChangedEvent,
+    SelfDestructInitiatedEvent,
+    VoiceChunkReceivedEvent,
+    VoiceFinalizedEvent,
+    VoiceIncomingStartedEvent,
+    VoiceOwnerRegisteredEvent,
 )
 from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.launcher import report_worker_failure
@@ -39,44 +39,52 @@ from metor.ui.gui.state import GuiState, Route
 from metor.ui.gui.state.mailbox import Mailbox, Update
 
 # Local Package Imports
-from .interaction import Interactions
 from .activation import ProfileActivation
-from .preferences import PreferenceBridge
-from .settings import CoreSettings
-from .history import ActivityHistory
-from .security import SecurityController
-from .text import TextController
-from .drop import DropActions
-from .live import LiveActions
-from .voice import VoiceOwnerLease, VoiceController, InputBridge
-from .playback import PlaybackController
-from .transcript import Transcript
-from .handoff import TextHandoff
-from .pages import ArchivePages, InventoryPages
-from .contacts import ContactFlow
-from .notifications import Notifications
 from .calls import IncomingCalls
-from .profiles import ProfileCatalog, ProfileTransition, ProfileIdentity
-from .resend import ResendActions
-from .receipts import ReceiptReconciliation
-from .purge import PurgeMonitor
+from .contacts import ContactFlow
 from .device import DeviceLifecycle
+from .drop import DropActions
+from .handoff import TextHandoff
+from .history import ActivityHistory
+from .interaction import Interactions
+from .live import LiveActions
+from .notifications import Notifications
+from .pages import ArchivePages, InventoryPages
+from .playback import PlaybackController
+from .preferences import PreferenceBridge
+from .profiles import ProfileCatalog, ProfileIdentity, ProfileTransition
+from .purge import PurgeMonitor
+from .receipts import ReceiptReconciliation
+from .resend import ResendActions
+from .security import SecurityController
+from .settings import CoreSettings
+from .text import TextController
+from .transcript import Transcript
+from .voice import InputBridge, VoiceController, VoiceOwnerLease
 
 
 class GuiController:
     """Coordinates public clients; workers never manipulate toolkit widgets."""
 
-    def __init__(self, context: FrontendLaunchContext, simulator: bool = False) -> None:
+    def __init__(
+        self,
+        context: FrontendLaunchContext,
+        simulator: bool = False,
+        *,
+        clipboard_own_address: bool = False,
+    ) -> None:
         """Creates an inert controller; no host/transport starts before Open.
 
         Args:
             context: Injected public host and typed launch options.
             simulator: Explicit isolated mode; host/client creation is prohibited.
+            clipboard_own_address: Whether explicit own-address export is permitted.
         Returns:
             None
         """
         self.context = context
         self.simulator = simulator
+        self.clipboard_own_address = clipboard_own_address
         self.state = GuiState()
         self.mailbox = Mailbox()
         self.interactions = Interactions(self.state.generation, self.mailbox)
@@ -292,7 +300,7 @@ class GuiController:
                         operation,
                         status='Connection lost. Retry opening the profile.',
                     )
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - contain worker failures
                     if self.context.debug:
                         report_worker_failure(exc)
                     update = Update(
@@ -701,14 +709,16 @@ class GuiController:
         self.live.poll()
         changed = self.notifications.poll() or changed
         changed = self.calls.poll() or changed
-        if self._messages_needed and not self.state.busy:
-            if (
+        if (
+            self._messages_needed
+            and not self.state.busy
+            and (
                 self.state.route.peer is None
                 or self.state.route.delivery is not Delivery.DROP
-            ):
-                self._messages_needed = False
-            elif self.load_messages():
-                self._messages_needed = False
+                or self.load_messages()
+            )
+        ):
+            self._messages_needed = False
         return changed or initially_covered != self.state.covered
 
     def close(

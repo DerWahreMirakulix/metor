@@ -53,8 +53,20 @@ include = [
 [tool.ruff]
 line-length = 88
 
+[tool.ruff.lint]
+# Keep the repository-wide rule set stable across Ruff editor/CI versions.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Kivy setup must run before the native capture fixture imports its widgets.
+'tests/gui_native_capture.py' = ['E402']
+
 [tool.ruff.format]
 quote-style = "single"
+
+[tool.basedpyright]
+typeCheckingMode = "standard"
+extraPaths = ["src", "tests"]
 
 [tool.mypy]
 strict = true

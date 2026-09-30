@@ -1,16 +1,16 @@
 """Measured plain text, rounded controls and focus feedback without reflow."""
 
 from collections.abc import Callable
-from typing import ClassVar, Protocol
+from typing import ClassVar, Protocol, cast
 
-from kivy.graphics import Color, Line, RoundedRectangle
 from kivy.core.window import Window
+from kivy.graphics import Canvas, Color, Line, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.behaviors import ButtonBehavior, FocusBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label as KivyLabel
-from kivy.uix.textinput import TextInput
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.textinput import TextInput
 
 from metor.ui.gui.theme import TYPE, color, font_path
 
@@ -29,7 +29,7 @@ class Panel(BoxLayout):
         """
         super().__init__(**kwargs)
         self.surface: str = surface
-        with self.canvas.before:
+        with cast(Canvas, self.canvas).before:
             self._fill = Color(*color(surface))
             self._rectangle = RoundedRectangle(
                 pos=self.pos, size=self.size, radius=[dp(16)]
@@ -140,7 +140,8 @@ class Label(KivyLabel):
         self.text_size = self.size
 
 
-class Action(FocusBehavior, ButtonBehavior, Panel):
+# Kivy's cooperative touch mixins infer incompatible return types for the same methods.
+class Action(FocusBehavior, ButtonBehavior, Panel):  # pyright: ignore[reportIncompatibleMethodOverride]
     """Focus-scoped, keyboard-operable labelled action with fixed hit geometry."""
 
     def __init__(
@@ -182,7 +183,7 @@ class Action(FocusBehavior, ButtonBehavior, Panel):
         self.label = Label(text, role='button', tone=tone, wrap=False)
         self.label.halign = 'center'
         self.add_widget(self.label)
-        with self.canvas.after:
+        with cast(Canvas, self.canvas).after:
             self._focus_color = Color(*color('focus'), group='focus')
             self._ring = Line(
                 rounded_rectangle=(*self.pos, *self.size, dp(12)), width=dp(2)
@@ -369,7 +370,7 @@ class KeyboardOwner(Protocol):
 
 
 class TextField(TextInput):
-    """Native text editing with clipboard export disabled by the platform default."""
+    """Native text editing with clipboard export disabled for selected text."""
 
     keyboard_owner: ClassVar[KeyboardOwner | None] = None
 

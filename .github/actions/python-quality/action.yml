@@ -68,3 +68,7 @@ runs:
       shell: bash
       run: |
         mypy ${{ inputs.mypy-paths }}
+
+    - name: Check GUI editor diagnostics
+      shell: bash
+      run: python scripts/check_gui_diagnostics.py

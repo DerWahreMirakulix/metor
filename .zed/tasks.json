@@ -1,0 +1,22 @@
+[
+  {
+    "label": "Install Dev",
+    "command": "./.venv/python.exe",
+    "args": ["-m", "pip", "install", "-r", "requirements/dev.txt"]
+  },
+  {
+    "label": "Start GUI",
+    "command": "./.venv/Scripts/metor.exe",
+    "args": ["chat", "--ui", "gui", "--start-daemon"]
+  },
+  {
+    "label": "Start Terminal-UI",
+    "command": "./.venv/Scripts/metor.exe",
+    "args": ["chat", "--ui", "terminal", "--start-daemon"]
+  },
+  {
+    "label": "Start Daemon",
+    "command": "./.venv/Scripts/metor.exe",
+    "args": ["daemon"]
+  },
+]

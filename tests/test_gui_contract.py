@@ -27,7 +27,11 @@ from metor.core.api import (
 )
 from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.launcher import launch
-from metor.ui.gui.platform import DeviceConfigurationError, read_configuration
+from metor.ui.gui.platform import (
+    DeviceConfiguration,
+    DeviceConfigurationError,
+    read_configuration,
+)
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.runtime.interaction import Interactions
 from metor.ui.gui.state import GuiState, Route
@@ -71,6 +75,24 @@ class ConfigurationTests(unittest.TestCase):
         """No config means desktop; simulation needs its explicit flag."""
         self.assertEqual(read_configuration(None, False).mode, 'desktop')
         self.assertEqual(read_configuration(None, True).mode, 'simulator')
+        self.assertTrue(read_configuration(None, False).clipboard_own_address)
+        self.assertTrue(read_configuration(None, True).clipboard_own_address)
+        self.assertFalse(DeviceConfiguration(mode='device').clipboard_own_address)
+
+    def test_clipboard_policy_limits_explicit_device_file_to_own_address(self) -> None:
+        """An explicit file defaults off and grants only the named public address copy."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'device.toml'
+            _write_private_configuration(path, DEVICE)
+            self.assertFalse(read_configuration(str(path), True).clipboard_own_address)
+            _write_private_configuration(
+                path, DEVICE + '\n[clipboard]\npolicy="disabled"'
+            )
+            self.assertFalse(read_configuration(str(path), True).clipboard_own_address)
+            _write_private_configuration(
+                path, DEVICE + '\n[clipboard]\npolicy="own_address"'
+            )
+            self.assertTrue(read_configuration(str(path), True).clipboard_own_address)
 
     def test_density_rotation_and_required_physical_failure(self) -> None:
         """A simulator description never becomes a real physical driver."""
@@ -103,6 +125,7 @@ class ConfigurationTests(unittest.TestCase):
             DEVICE.replace('adapter = "simulator"', 'adapter = "os.system"'),
             DEVICE + '\n[drivers.evil]\ncommand="shutdown now"',
             DEVICE + '\n[clipboard]\npolicy="system"',
+            DEVICE + '\n[clipboard]\npolicy=["own_address"]',
             DEVICE + '\n[profile]\npassword="secret"',
             DEVICE + '\n[audio]\nadapter="fake"',
             DEVICE + '\n[input]\n',
